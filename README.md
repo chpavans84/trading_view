@@ -127,12 +127,56 @@ ALPACA_BASE_URL=https://paper-api.alpaca.markets
 
 ### 3. Get API keys
 
-| Service | Where to get it | Cost |
-|---|---|---|
-| Telegram Bot Token | @BotFather on Telegram | Free |
-| Anthropic API Key | console.anthropic.com | ~$0.001/message |
-| Alpaca API Key | alpaca.markets | Free (paper), $0 commission (live) |
-| Moomoo OpenD | Moomoo app → Me → Settings → Open API | Free |
+#### Telegram (free — 5 minutes)
+
+**Step 1 — Create your bot and get the token:**
+1. Open Telegram and search for **@BotFather**
+2. Send `/newbot`
+3. Choose a name (e.g. `My Trading Bot`)
+4. Choose a username ending in `bot` (e.g. `mytradingbot`)
+5. BotFather replies with your token — looks like:
+   ```
+   8782535341:AAGDfhpl7FBXfLEHmmoECCvBHeHncUIYfCk
+   ```
+6. Copy this into `TELEGRAM_BOT_TOKEN` in your `.env`
+
+**Step 2 — Get your Chat ID:**
+1. Search for **@userinfobot** on Telegram
+2. Send `/start`
+3. It replies with your user ID — looks like `8341283742`
+4. Copy this into `TELEGRAM_CHAT_ID` in your `.env`
+
+> The Chat ID tells the bot which account to send alerts to. Only messages from this ID will be accepted.
+
+---
+
+#### Anthropic / Claude AI (~$0.001 per message)
+1. Go to [console.anthropic.com](https://console.anthropic.com)
+2. Sign up and add $5 credit (enough for thousands of messages)
+3. Go to **API Keys** → **Create Key**
+4. Copy the key (starts with `sk-ant-`) into `ANTHROPIC_API_KEY`
+
+---
+
+#### Alpaca — Paper Trading (free, no real money)
+1. Go to [alpaca.markets](https://alpaca.markets) and create a free account
+2. In the dashboard, go to **Paper Trading** (top-left toggle)
+3. Click **API Keys** → **Generate New Key**
+4. Copy the API Key (`PK...`) into `ALPACA_API_KEY`
+5. Copy the Secret Key into `ALPACA_SECRET_KEY`
+6. Leave `ALPACA_BASE_URL=https://paper-api.alpaca.markets` as-is for paper trading
+
+> To switch to live trading later, generate Live API keys and change the URL to `https://api.alpaca.markets`
+
+---
+
+| Service | Cost |
+|---|---|
+| Telegram Bot | Free |
+| Anthropic API | ~$0.001/message (Claude Haiku) |
+| Alpaca Paper Trading | Free, $100K virtual account |
+| Alpaca Live Trading | Free account, $0 commission |
+| All market data (SEC, Nasdaq, Yahoo) | Free, no API key needed |
 
 ### 4. Start the AI bot
 ```bash
