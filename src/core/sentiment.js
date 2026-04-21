@@ -121,7 +121,7 @@ export async function getMarketSentiment() {
     vixVal < 30 ? 'Elevated volatility — bigger swings, wider stops. High reward/risk.' :
                   'Extreme volatility — large gaps and fast reversals. Reduce position size.';
 
-  return {
+  const result = {
     success: true,
     market_status: marketStatus,
     timestamp: new Date().toISOString(),
