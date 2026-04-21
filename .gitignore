@@ -10,6 +10,7 @@ discovery-log.json
 .env.*
 .env.local
 .env.production
+!.env.example
 
 # Bot runtime data
 .bot-stats.json
