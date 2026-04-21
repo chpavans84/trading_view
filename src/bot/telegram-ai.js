@@ -604,14 +604,18 @@ cron.schedule('0 14-19 * * 1-5', async () => {
   if (!CHAT_ID) return;
   console.log('Running auto-scan for trade opportunities...');
   try {
-    const prompt = `Run an automated trade scan:
-1. Check market status — if closed, stop here
-2. Check portfolio — if already 3 open positions, stop here
-3. Check market sentiment (VIX + sector rotation)
-4. Scan watchlist for any stocks with strong setups: recent earnings beat, positive sentiment, leading sector
-5. If you find a high-conviction setup, execute a trade automatically ($200, -3% stop, +7% target)
-6. If nothing meets the criteria, stay quiet — do NOT send a message
-Only execute if you have real conviction backed by data.`;
+    const prompt = `AUTOMATED TRADE SCAN — take these steps in order:
+
+1. Call get_market_status → if market is closed, STOP (send nothing)
+2. Call get_portfolio → if already 3+ open positions, STOP (send nothing)
+3. Call get_market_sentiment → note VIX. If VIX > 30, STOP (too volatile)
+4. Call get_sector_performance → identify leading sectors
+5. Call scan_watchlist for the default watchlist (30-day window)
+6. Pick the SINGLE best setup from the scan results — earnings beat, leading sector, positive sentiment all help
+7. If a valid setup exists: CALL propose_trade immediately with that symbol. Do NOT describe the trade in text first — just execute it.
+8. If no setup meets the bar, send nothing at all.
+
+IMPORTANT: Your job in this scan is to EXECUTE, not to recommend. If you find a good setup, call propose_trade. If you write a recommendation without calling propose_trade, you have failed the task.`;
     _currentChatId = CHAT_ID;
     await handleAIMessage(CHAT_ID, prompt);
   } catch (err) {
