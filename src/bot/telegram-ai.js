@@ -356,6 +356,12 @@ const DEFAULT_STOP_LOSS_PCT   = 3;   // -3%
 const DEFAULT_TAKE_PROFIT_PCT = 7;   // +7%
 const DEFAULT_TRADE_DOLLARS   = 200; // $200 per trade
 
+function nowBothTimezones() {
+  const et  = new Date().toLocaleString('en-US', { timeZone: 'America/New_York',    hour: '2-digit', minute: '2-digit', hour12: true });
+  const sgt = new Date().toLocaleString('en-SG', { timeZone: 'Asia/Singapore',      hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${et} ET (${sgt} SGT)`;
+}
+
 async function handleProposeTrade(input, chatId) {
   const stopPct   = input.stop_loss_pct   || DEFAULT_STOP_LOSS_PCT;
   const targetPct = input.take_profit_pct || DEFAULT_TAKE_PROFIT_PCT;
@@ -372,7 +378,8 @@ async function handleProposeTrade(input, chatId) {
     });
 
     await send(chatId,
-      `✅ *Trade Executed Automatically*\n\n` +
+      `✅ *Trade Executed Automatically*\n` +
+      `🕐 ${nowBothTimezones()}\n\n` +
       `${input.side === 'buy' ? '📈 BOUGHT' : '📉 SOLD'} *${result.symbol}* — ${result.qty} shares\n` +
       `💵 $${result.dollars_invested} @ ~$${result.estimated_price}\n` +
       `⛔ Stop loss: $${result.stop_loss} (-${stopPct}%)\n` +
@@ -590,16 +597,16 @@ Keep it brief and actionable.`;
   try {
     await sendTyping(CHAT_ID);
     const briefing = await handleAIMessage(CHAT_ID, prompt);
-    await send(CHAT_ID, `☀️ *Morning Briefing — ${today}*\n\n${briefing}`);
+    await send(CHAT_ID, `☀️ *Morning Briefing — ${today}*\n🕐 9:00 AM ET (9:00 PM SGT)\n\n${briefing}`);
   } catch (err) {
     await send(CHAT_ID, `⚠️ Morning briefing failed: ${err.message}`);
   }
 }
 
-// 9:00 AM ET = 13:00 UTC — morning briefing
+// 9:00 AM ET (9:00 PM SGT) = 13:00 UTC — morning briefing
 cron.schedule('0 13 * * 1-5', sendMorningBriefing);
 
-// Auto-scanner: every hour 10 AM–3 PM ET (14:00–19:00 UTC) Mon–Fri
+// Auto-scanner: every hour 10 AM–3 PM ET (10 PM–3 AM SGT) = 14:00–19:00 UTC Mon–Fri
 cron.schedule('0 14-19 * * 1-5', async () => {
   if (!CHAT_ID) return;
   console.log('Running auto-scan for trade opportunities...');
@@ -630,3 +637,6 @@ bot.on('polling_error', (err) => console.error('Polling error:', err.message));
 console.log('🤖 AI Trading Analyst Bot started');
 console.log('💬 Chat naturally — ask anything about markets, geopolitics, earnings');
 console.log('📋 Watchlist:', DEFAULT_WATCHLIST.join(', '));
+console.log('🕐 Schedule (ET → SGT):');
+console.log('   Morning briefing : 9:00 AM ET  → 9:00 PM SGT');
+console.log('   Auto-scan hourly : 10 AM–3 PM ET  → 10 PM–3 AM SGT');
