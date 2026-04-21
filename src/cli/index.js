@@ -25,6 +25,8 @@ import './commands/ui.js';
 import './commands/pane.js';
 import './commands/tab.js';
 import './commands/stream.js';
+import './commands/moomoo.js';
+import './commands/news.js';
 
 // Run
 import { run } from './router.js';
