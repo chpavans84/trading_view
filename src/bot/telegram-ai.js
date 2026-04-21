@@ -552,9 +552,11 @@ bot.onText(/\/close_(\S+)/, async (msg, match) => {
   }
 });
 
-// All other messages → AI
+// All other messages → AI (including unrecognised slash commands)
 bot.on('message', async (msg) => {
-  if (!msg.text || msg.text.startsWith('/')) return;
+  if (!msg.text) return;
+  const knownCmds = ['/start', '/clear', '/watchlist', '/stats', '/close_'];
+  if (knownCmds.some(cmd => msg.text.startsWith(cmd))) return;
 
   const chatId = msg.chat.id;
   _currentChatId = chatId;
