@@ -1,8 +1,19 @@
 # TradingView MCP — Claude Instructions
 
-68 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+79 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222), plus Moomoo portfolio integration.
 
 ## Decision Tree — Which Tool When
+
+### "Analyze my chart" / "Do I have a position in X?" / "What's my chart + portfolio?"
+Use **`portfolio_chart_snapshot`** — it's one call that fetches everything in parallel:
+- Current chart symbol, timeframe, indicators
+- Real-time price (OHLC, volume)
+- All indicator values (RSI, MACD, EMAs, etc.)
+- Key price levels from custom Pine indicators
+- Your Moomoo positions (highlights any position in the current symbol)
+- Account balance and buying power
+
+This is the primary analysis tool. Use it first for any question combining chart + account data.
 
 ### "What's on my chart right now?"
 1. `chart_get_state` → symbol, timeframe, chart type, list of all indicators with entity IDs

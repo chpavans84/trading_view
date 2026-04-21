@@ -4,3 +4,23 @@ scripts/current.pine
 temp_*
 *.log
 discovery-log.json
+
+# Sensitive — never commit
+.env
+.env.*
+.env.local
+.env.production
+
+# Bot runtime data
+.bot-stats.json
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

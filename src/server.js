@@ -14,6 +14,9 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import { registerMoomooTools } from './tools/moomoo.js';
+import { registerAnalysisTools } from './tools/analysis.js';
+import { registerNewsTools } from './tools/news.js';
 
 const server = new McpServer(
   {
@@ -22,7 +25,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 78 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 79 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -65,7 +68,10 @@ CONTEXT MANAGEMENT:
 - ALWAYS use study_filter on pine tools when you know which indicator you want
 - NEVER use verbose=true unless user specifically asks for raw data
 - Prefer capture_screenshot for visual context over pulling large datasets
-- Call chart_get_state ONCE at start, reuse entity IDs`,
+- Call chart_get_state ONCE at start, reuse entity IDs
+
+Portfolio + Chart combined:
+- portfolio_chart_snapshot → ONE tool: reads current chart + price + indicators + pine levels + Moomoo positions + account balance all at once. Use whenever user asks about chart AND account, "do I have a position in X", or "analyze my chart".`,
   }
 );
 
@@ -84,6 +90,9 @@ registerWatchlistTools(server);
 registerUiTools(server);
 registerPaneTools(server);
 registerTabTools(server);
+registerMoomooTools(server);
+registerAnalysisTools(server);
+registerNewsTools(server);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');
