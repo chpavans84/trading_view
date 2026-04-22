@@ -8,9 +8,11 @@ An autonomous trading system that monitors market news, earnings results, and se
 
 - **Reads earnings data** from SEC EDGAR and Nasdaq — no paid data feed needed
 - **Analyses market sentiment** using VIX, sector ETF rotation, and trending stocks
-- **Monitors news** from Yahoo Finance for geopolitical and macro events
+- **Monitors news** from Alpaca (real-time) and Yahoo Finance — merged, most recent first
+- **Scores every trade** using a multi-factor conviction engine before executing
+- **Sizes stops dynamically** using ATR-14 — adapts to each stock's volatility
 - **Connects to your Moomoo portfolio** to read positions and P&L
-- **Executes trades automatically** via Alpaca with stop loss and take profit built in
+- **Executes trades automatically** via Alpaca with ATR-based stop loss and take profit
 - **Sends alerts and analysis** to your Telegram — interactive AI analyst available 24/7
 
 ---
@@ -19,6 +21,9 @@ An autonomous trading system that monitors market news, earnings results, and se
 
 ```
 Telegram (you) ←→ Claude AI Brain ←→ Live Market Data
+                        ↓
+              Conviction Scoring Engine
+              (earnings + drift + RS + insider)
                         ↓
               Alpaca Trading Engine
                 (paper / live)
@@ -33,24 +38,54 @@ Telegram (you) ←→ Claude AI Brain ←→ Live Market Data
 
 ### Telegram Bot
 - Interactive AI analyst — ask anything in plain English
-- Automatic morning briefing at 9 AM ET (Mon–Fri)
-- Hourly auto-scan during market hours (10 AM–3 PM ET)
-- Trade notifications: entry price, stop loss, take profit
+- Automatic morning briefing at 9 AM ET / 9 PM SGT (Mon–Fri)
+- Hourly auto-scan during market hours (10 AM–3 PM ET / 10 PM–3 AM SGT)
+- Trade notifications with entry price, ATR-sized stop loss, take profit, and SGT timestamp
 - Commands: `/calendar`, `/watchlist`, `/scan`, `/earnings`, `/news`, `/financials`, `/stats`
 
 ### Claude AI (Anthropic)
 - Brain of the system — reasons about news, earnings, and sentiment
 - Connects geopolitical events to specific stocks and sectors
-- Proposes and executes trades when high-conviction setups are found
+- Runs conviction scoring before every trade — only executes grade B or higher
 - Remembers conversation context across messages
 - Model: Claude Haiku (fast, cheap — ~$0.001 per message)
 
-### Alpaca (Trade Execution)
+### Conviction Scoring Engine (`src/core/scoring.js`)
+Every trade candidate is scored 0–100 before execution:
+
+| Factor | Points |
+|---|---|
+| 3+ consecutive quarters of EPS growth | +25 |
+| EPS AND revenue both grew YoY (strong quality) | +20 |
+| "Raises guidance" in recent news | +15 |
+| Stock drifting up in last 5 days | +15 |
+| Outperforming its sector ETF (5-day RS) | +15 |
+| 2+ insider Form 4 filings in 60 days | +10 |
+| VIX > 25 | −20 |
+| "Lowers guidance" in recent news | −15 |
+| Opening volatility / lunch chop window | −10 |
+| Stock lagging sector ETF | −10 |
+| Stock drifting down | −10 |
+
+- **Score < 60** → skip, explain why
+- **Score 60–79 (grade B/C)** → trade $200
+- **Score ≥ 80 (grade A)** → trade $400
+
+### Alpaca (Trade Execution + News)
 - Paper trading by default — $100,000 virtual account for testing
 - Bracket orders: entry + stop loss + take profit placed simultaneously
-- Default parameters: **-3% stop loss, +7% take profit, $200 per trade**
+- **ATR-14 dynamic sizing**: stop = 1.5× ATR%, target = 3× ATR% (adapts to volatility)
 - Max 3 open positions at once
+- **News API**: ~1-2 minute latency via Benzinga feed (much faster than Yahoo)
 - Switch to live trading by changing one URL in `.env`
+
+### News Sources (merged, most recent first)
+| Source | Latency | Used for |
+|---|---|---|
+| Alpaca / Benzinga | ~1-2 min | Primary — real-time headlines |
+| Yahoo Finance | 15-30 min | Fallback + fills gaps |
+
+Both sources are fetched in parallel. Results are deduplicated and sorted newest first.
 
 ### Moomoo (Portfolio Reading)
 - Connects via Futu OpenD TCP API (local port 11111)
@@ -60,19 +95,22 @@ Telegram (you) ←→ Claude AI Brain ←→ Live Market Data
 
 ### SEC EDGAR (Earnings & Financials)
 - Free, authoritative financial data — same source as Bloomberg
-- EPS history (last 4 quarters), revenue, net income, profit margins
-- YoY revenue growth calculation
+- EPS history (last 8 quarters), revenue, net income, profit margins
+- YoY earnings quality scoring (strong / moderate / weak) per quarter
+- Insider activity via Form 4 filing count (60-day window)
 - No API key required
 
 ### Nasdaq Earnings Calendar
 - Daily earnings calendar — all companies reporting on any given date
 - EPS estimates, last year's EPS, call time (BMO/AMC)
+- Used for upcoming earnings date + forward EPS estimate in surprise scoring
 - No API key required
 
 ### Yahoo Finance
-- Real-time news headlines per ticker
 - VIX, S&P 500, Nasdaq, Dow Jones, ES/NQ futures
-- Sector ETF performance (XLK, XLF, XLE, etc.)
+- Sector ETF performance (XLK, XLF, XLE, etc.) with rotation signal
+- 5-day relative strength vs sector ETF per stock
+- Pre-earnings price drift (5-day momentum)
 - Trending stocks
 - No API key required
 
@@ -86,25 +124,26 @@ Telegram (you) ←→ Claude AI Brain ←→ Live Market Data
 
 ## Trade Logic
 
-### Entry Signal (all must be true)
+### Entry Signal
 1. Market is open
 2. Fewer than 3 open positions
 3. VIX < 30 (not extreme fear)
-4. One of:
-   - Earnings beat: actual EPS > estimate by >3%
-   - Strong sector rotation into the stock's sector
-   - Positive news catalyst with revenue growth trend
+4. Not in opening volatility (9:30–10:00 AM ET) or lunch chop (12–2 PM ET)
+5. **Conviction score ≥ 60** across: earnings quality, pre-earnings drift, relative strength, insider activity, news sentiment
 
-### Exit (automatic, set at order time)
-- **Stop loss: -3%** below entry price
-- **Take profit: +7%** above entry price
-- Early exit: `/close_SYMBOL` command in Telegram
+### Stop Loss & Take Profit (ATR-based, automatic)
+- Calculated from 14-day Average True Range of the stock
+- Stop loss = 1.5 × ATR% (min 1.5%, max 8%)
+- Take profit = 3.0 × ATR% (min 3%, max 20%)
+- Low-volatility stock example: ATR 1.5% → stop −2.25%, target +4.5%
+- High-volatility stock example: ATR 4% → stop −6%, target +12%
+
+### Early exit
+- `/close_SYMBOL` command in Telegram closes position immediately
 
 ### Risk per trade
-- $200 per trade (paper trading default)
-- Max loss per trade: $6 (3% of $200)
-- Max gain per trade: $14 (7% of $200)
-- Risk/reward ratio: 1:2.3
+- $200 per trade (conviction B) or $400 (conviction A)
+- Risk/reward ratio always ~1:2 (enforced by ATR sizing)
 
 ---
 
@@ -176,7 +215,8 @@ ALPACA_BASE_URL=https://paper-api.alpaca.markets
 | Anthropic API | ~$0.001/message (Claude Haiku) |
 | Alpaca Paper Trading | Free, $100K virtual account |
 | Alpaca Live Trading | Free account, $0 commission |
-| All market data (SEC, Nasdaq, Yahoo) | Free, no API key needed |
+| Alpaca News API | Free with Alpaca account |
+| All other market data (SEC, Nasdaq, Yahoo) | Free, no API key needed |
 
 ### 4. Start the AI bot
 ```bash
@@ -194,8 +234,8 @@ npm start
 
 ### Automated (no input needed)
 The bot runs on its own schedule:
-- **9:00 AM ET** — Morning briefing: today's earnings + watchlist scan
-- **10 AM–3 PM ET (hourly)** — Auto-scan for trade setups, executes if conviction is high
+- **9:00 AM ET (9:00 PM SGT)** — Morning briefing: today's earnings + watchlist scan
+- **10 AM–3 PM ET (10 PM–3 AM SGT), hourly** — Auto-scan: scores candidates, executes if conviction ≥ 60
 
 ### Interactive (Telegram chat)
 Just type naturally:
@@ -207,16 +247,17 @@ Just type naturally:
 "Scan my watchlist for this week"
 "What's the market sentiment today?"
 "Show my portfolio"
+"What's the conviction score for NVDA?"
 ```
 
 ### Commands
 ```
 /calendar            — today's full earnings calendar
 /calendar 2026-05-01 — earnings on a specific date
-/watchlist           — scan all 20 watchlist stocks (30-day window)
+/watchlist           — scan all 20 watchlist stocks
 /scan AAPL NVDA      — scan specific tickers
-/earnings MRVL       — last 4 quarters EPS + revenue
-/news TSLA           — latest headlines
+/earnings MRVL       — last 4 quarters EPS + revenue + quality score
+/news TSLA           — latest headlines (Alpaca + Yahoo merged)
 /financials NVDA     — income statement
 /stats               — API usage and cost dashboard
 /close_SYMBOL        — exit a position early
@@ -241,16 +282,17 @@ src/
 │   ├── telegram-ai.js     # AI analyst bot (Claude + Telegram + Alpaca)
 │   └── telegram.js        # Basic data bot (no AI)
 ├── core/
-│   ├── news.js            # SEC EDGAR, Nasdaq, Yahoo Finance data
-│   ├── sentiment.js       # VIX, sectors, trending stocks
-│   ├── trader.js          # Alpaca trade execution engine
+│   ├── news.js            # SEC EDGAR, Nasdaq, Alpaca + Yahoo news
+│   ├── sentiment.js       # VIX, sectors, relative strength, trending stocks
+│   ├── trader.js          # Alpaca trade execution + ATR sizing + time filter
+│   ├── scoring.js         # Multi-factor conviction scoring engine
 │   ├── moomoo-tcp.js      # Moomoo OpenD TCP client
 │   └── moomoo.js          # Moomoo high-level API
 ├── tools/                 # MCP tool registrations (for Claude Code)
 │   ├── news.js
 │   ├── moomoo.js
 │   └── analysis.js
-├── cli/                   # CLI commands (tv news earnings --symbol MRVL)
+├── cli/                   # CLI commands
 │   └── commands/
 │       ├── news.js
 │       └── moomoo.js
@@ -285,8 +327,10 @@ src/
 
 ## Roadmap
 
-- [ ] Post-earnings 8-K auto-detection (buy signal within minutes of filing)
-- [ ] EPS surprise scoring (actual vs estimate comparison)
-- [ ] Moomoo live trade execution (once OpenD API access enabled)
+- [ ] Moomoo OpenD API access for Margin Account (enable in app or call 1-888-782-1299)
+- [ ] Moomoo live trade execution once OpenD enabled
+- [ ] Moomoo real-time news via OpenD quote API
+- [ ] Post-earnings 8-K auto-detection (buy signal within minutes of SEC filing)
 - [ ] Backtesting engine for strategy validation
+- [ ] Cloud deployment (DigitalOcean) — remove dependency on Mac staying on
 - [ ] Web dashboard for trade history and performance metrics
