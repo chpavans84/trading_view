@@ -7,8 +7,9 @@
  *   SEC EDGAR full-text search     — 8-K, 10-Q, 10-K filings
  */
 
-const YF_SEARCH = 'https://query2.finance.yahoo.com';
-const EDGAR_DATA = 'https://data.sec.gov';
+const YF_SEARCH    = 'https://query2.finance.yahoo.com';
+const ALPACA_NEWS  = 'https://data.alpaca.markets/v1beta1/news';
+const EDGAR_DATA   = 'https://data.sec.gov';
 const EDGAR_SEARCH = 'https://efts.sec.gov';
 
 const YF_HEADERS = {
@@ -20,6 +21,14 @@ const EDGAR_HEADERS = {
   'User-Agent': 'tradingview-mcp research-tool contact@example.com',
   'Accept': 'application/json',
 };
+
+function alpacaHeaders() {
+  return {
+    'APCA-API-KEY-ID':     process.env.ALPACA_API_KEY    || '',
+    'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY || '',
+    'Accept': 'application/json',
+  };
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -50,33 +59,81 @@ async function getCIK(ticker) {
   return cik;
 }
 
-// ─── News ────────────────────────────────────────────────────────────────────
+// ─── News (Yahoo Finance + Alpaca merged, most recent first) ─────────────────
+
+async function fetchYahooNews(ticker, limit) {
+  try {
+    const data = await fetchJSON(
+      `${YF_SEARCH}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=${limit}&quotesCount=0&enableFuzzyQuery=false`,
+      YF_HEADERS
+    );
+    return (data.news || []).slice(0, limit).map(a => ({
+      title:           a.title,
+      publisher:       a.publisher,
+      published:       new Date(a.providerPublishTime * 1000).toISOString(),
+      summary:         a.summary || null,
+      url:             a.link,
+      source:          'yahoo',
+      related_tickers: a.relatedTickers || [],
+    }));
+  } catch (_) { return []; }
+}
+
+async function fetchAlpacaNews(ticker, limit) {
+  try {
+    const data = await fetchJSON(
+      `${ALPACA_NEWS}?symbols=${encodeURIComponent(ticker)}&limit=${limit}&sort=desc`,
+      alpacaHeaders()
+    );
+    return (data.news || []).map(a => ({
+      title:           a.headline,
+      publisher:       a.source,
+      published:       a.created_at,
+      summary:         a.summary || null,
+      url:             a.url,
+      source:          'alpaca',
+      related_tickers: a.symbols || [],
+    }));
+  } catch (_) { return []; }
+}
 
 export async function getSymbolNews({ symbol, limit = 10 } = {}) {
   const ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
 
-  const data = await fetchJSON(
-    `${YF_SEARCH}/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=${limit}&quotesCount=0&enableFuzzyQuery=false`,
-    YF_HEADERS
-  );
+  // Fetch both sources in parallel
+  const [yahoo, alpaca] = await Promise.all([
+    fetchYahooNews(ticker, limit),
+    fetchAlpacaNews(ticker, limit),
+  ]);
 
-  const articles = (data.news || []).slice(0, limit).map(a => ({
-    title: a.title,
-    publisher: a.publisher,
-    published: new Date(a.providerPublishTime * 1000).toISOString(),
-    summary: a.summary || null,
-    url: a.link,
-    related_tickers: a.relatedTickers || [],
-  }));
+  // Merge — deduplicate by URL, then sort most recent first
+  const seen = new Set();
+  const merged = [...alpaca, ...yahoo]
+    .filter(a => {
+      if (!a.url || seen.has(a.url)) return false;
+      seen.add(a.url);
+      return true;
+    })
+    .sort((a, b) => new Date(b.published) - new Date(a.published))
+    .slice(0, limit);
 
-  const headlineText = articles.map(a => a.title.toLowerCase()).join(' ');
+  const headlineText = merged.map(a => a.title.toLowerCase()).join(' ');
   const raisedKw  = ['raises guidance', 'raises outlook', 'raises forecast', 'raises full-year', 'raised guidance', 'raised outlook', 'raises its'];
   const loweredKw = ['lowers guidance', 'cuts outlook', 'reduces forecast', 'below expectations', 'disappoints', 'lowered guidance', 'cuts forecast', 'misses estimates'];
   const guidance_signal =
     raisedKw.some(k => headlineText.includes(k))  ? 'raised'  :
     loweredKw.some(k => headlineText.includes(k)) ? 'lowered' : 'neutral';
 
-  return { success: true, symbol: ticker, article_count: articles.length, articles, guidance_signal };
+  const sources_used = [...new Set(merged.map(a => a.source))];
+
+  return {
+    success: true,
+    symbol: ticker,
+    article_count: merged.length,
+    sources_used,
+    articles: merged,
+    guidance_signal,
+  };
 }
 
 // ─── Earnings (SEC EDGAR XBRL) ───────────────────────────────────────────────
