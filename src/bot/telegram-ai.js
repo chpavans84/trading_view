@@ -28,6 +28,12 @@ import {
 } from '../core/news.js';
 import { getConvictionScore } from '../core/scoring.js';
 import {
+  isTradingViewAvailable,
+  getChartTechnicals,
+  getPriceLevels,
+  getOHLCVSummary,
+} from '../core/tradingview-bridge.js';
+import {
   getMarketSentiment,
   getSectorPerformance,
   getTrendingStocks,
@@ -262,6 +268,37 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_chart_technicals',
+    description: 'Read live technical indicator values from TradingView Desktop (RSI, MACD, EMA20, EMA50, Bollinger Bands). Returns { available: false } if TradingView is not running. Use this before trading to confirm technical setup.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Expected ticker — used to detect if chart symbol matches' },
+      },
+    },
+  },
+  {
+    name: 'get_price_levels',
+    description: 'Read support and resistance levels drawn by Pine Script indicators on the TradingView chart. Returns nearest support and resistance with % distance from current price.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol:       { type: 'string', description: 'Expected ticker' },
+        study_filter: { type: 'string', description: 'Filter by indicator name substring (optional)' },
+      },
+    },
+  },
+  {
+    name: 'get_ohlcv_summary',
+    description: 'Get a compact OHLCV summary from TradingView chart (high, low, range, change%, avg volume, last 5 bars). Returns { available: false } if TradingView is not running.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Expected ticker' },
+      },
+    },
+  },
+  {
     name: 'get_conviction_score',
     description: 'Get a multi-factor conviction score (0-100) for a trade setup. Checks earnings quality, pre-earnings drift, relative strength vs sector ETF, insider activity, and market conditions. Always call this before propose_trade.',
     input_schema: {
@@ -323,6 +360,12 @@ async function executeTool(name, input) {
         return await closePosition(input.symbol);
       case 'get_market_status':
         return await getMarketStatus();
+      case 'get_chart_technicals':
+        return await getChartTechnicals({ symbol: input.symbol });
+      case 'get_price_levels':
+        return await getPriceLevels({ symbol: input.symbol, study_filter: input.study_filter });
+      case 'get_ohlcv_summary':
+        return await getOHLCVSummary({ symbol: input.symbol });
       case 'get_conviction_score':
         return await getConvictionScore({ symbol: input.symbol });
       case 'get_earnings_surprise':
@@ -374,6 +417,14 @@ TRADING ENGINE (Alpaca paper trading — fake money for now):
 - Only trade when you have real data backing the setup: earnings beat, sentiment, sector rotation
 - Never trade on speculation alone
 - After executing, notify user with full details including stop/target prices
+
+TRADINGVIEW INTEGRATION (optional but valuable):
+- Call get_chart_technicals before trading to read live RSI, MACD, EMA, Bollinger Bands
+- Call get_price_levels to find nearest support/resistance on the chart
+- Call get_ohlcv_summary for recent price action summary
+- If TradingView is not running, these return { available: false } — skip gracefully, do not abort
+- If TradingView IS available: use RSI < 70 (not overbought) and price above EMA20 as extra confirmation
+- If chart symbol doesn't match trade symbol, note the mismatch but still use the data if helpful
 
 CONVICTION REQUIREMENT: Before calling propose_trade, ALWAYS call get_conviction_score first.
 - Score >= 60 (grade B or higher): proceed with trade at $200
