@@ -973,8 +973,12 @@ Keep it brief and actionable.`;
 // 9:00 AM ET (9:00 PM SGT) = 13:00 UTC — morning briefing
 cron.schedule('0 13 * * 1-5', sendMorningBriefing);
 
-// Auto-scanner: every hour 10 AM–3 PM ET (10 PM–3 AM SGT) = 14:00–19:00 UTC Mon–Fri
-cron.schedule('0 14-19 * * 1-5', async () => {
+// Auto-scanner: every 10 min, 9:45 AM–3:30 PM ET (9:45 PM–3:30 AM SGT) = 13:45–19:30 UTC Mon–Fri
+cron.schedule('*/10 * * * 1-5', async () => {
+  // Only run during ET market hours: 9:45 AM – 3:30 PM = 13:45 – 19:30 UTC
+  const utcH = new Date().getUTCHours(), utcM = new Date().getUTCMinutes();
+  const utcT = utcH * 60 + utcM;
+  if (utcT < 13 * 60 + 45 || utcT >= 19 * 60 + 30) return;
   if (!CHAT_ID) return;
   console.log('Running auto-scan for trade opportunities...');
   try {
@@ -1023,4 +1027,4 @@ console.log('💬 Chat naturally — ask anything about markets, geopolitics, ea
 console.log('📋 Watchlist:', DEFAULT_WATCHLIST.join(', '));
 console.log('🕐 Schedule (ET → SGT):');
 console.log('   Morning briefing : 9:00 AM ET  → 9:00 PM SGT');
-console.log('   Auto-scan hourly : 10 AM–3 PM ET  → 10 PM–3 AM SGT');
+console.log('   Auto-scan every 10min : 9:45 AM–3:30 PM ET  → 9:45 PM–3:30 AM SGT');
