@@ -262,20 +262,34 @@ export async function getTrendingStocks({ limit = 15 } = {}) {
 
 // ─── Relative Strength vs Sector ETF ─────────────────────────────────────────
 
+async function fetch5dReturn(symbol) {
+  const r = await fetch(
+    `${YF_BASE}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`,
+    { headers: HEADERS }
+  );
+  if (!r.ok) return null;
+  const d = await r.json();
+  const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v => v != null);
+  if (!closes || closes.length < 6) return null;
+  // 5-day return: most recent close vs close 5 bars ago
+  return +((closes[closes.length - 1] / closes[closes.length - 6] - 1) * 100).toFixed(2);
+}
+
 export async function getRelativeStrength({ symbol, sector_etf } = {}) {
   const ticker = symbol.toUpperCase();
   const etf    = (sector_etf || SECTOR_MAP[ticker] || 'SPY').toUpperCase();
 
-  const [symQ, etfQ] = await Promise.all([fetchQuote(ticker), fetchQuote(etf)]);
+  const [symbol_5d_pct, etf_5d_pct] = await Promise.all([
+    fetch5dReturn(ticker),
+    fetch5dReturn(etf),
+  ]);
 
-  if (!symQ || !etfQ) {
+  if (symbol_5d_pct == null || etf_5d_pct == null) {
     return { success: false, symbol: ticker, sector_etf: etf, error: 'Failed to fetch price data' };
   }
 
-  const symbol_5d_pct = symQ.chg_pct ?? 0;
-  const etf_5d_pct    = etfQ.chg_pct ?? 0;
-  const rs_score      = +(symbol_5d_pct - etf_5d_pct).toFixed(2);
-  const signal        = rs_score > 2 ? 'strong' : rs_score < -2 ? 'weak' : 'neutral';
+  const rs_score = +(symbol_5d_pct - etf_5d_pct).toFixed(2);
+  const signal   = rs_score > 2 ? 'strong' : rs_score < -2 ? 'weak' : 'neutral';
 
   return {
     success: true,
