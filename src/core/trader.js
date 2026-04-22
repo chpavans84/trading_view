@@ -71,6 +71,47 @@ export async function cancelAllOrders() {
   return { cancelled: 'all' };
 }
 
+// ─── Time-of-Day Filter ───────────────────────────────────────────────────────
+
+export function isBadTradingTime() {
+  const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const et = new Date(etStr);
+  const t  = et.getHours() * 60 + et.getMinutes();
+
+  if (t >= 9 * 60 + 30 && t < 10 * 60)
+    return { bad: true,  reason: 'Opening volatility window (9:30–10:00 AM ET) — wide spreads and reversals' };
+  if (t >= 12 * 60 && t < 14 * 60)
+    return { bad: true,  reason: 'Lunch chop (12:00–2:00 PM ET) — low volume, choppy price action' };
+  return { bad: false, reason: null };
+}
+
+// ─── ATR-based Stop/Target Sizing ─────────────────────────────────────────────
+
+async function fetchATR(symbol) {
+  const r = await fetch(
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=30d`,
+    { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
+  );
+  if (!r.ok) return null;
+  const d = await r.json();
+  const q = d?.chart?.result?.[0]?.indicators?.quote?.[0];
+  if (!q) return null;
+
+  const highs  = q.high?.filter(v => v != null)  || [];
+  const lows   = q.low?.filter(v => v != null)   || [];
+  const closes = q.close?.filter(v => v != null)  || [];
+  if (highs.length < 14) return null;
+
+  const bars = Math.min(14, highs.length);
+  const trValues = [];
+  for (let i = highs.length - bars; i < highs.length; i++) {
+    trValues.push(highs[i] - lows[i]);
+  }
+  const atr = trValues.reduce((a, b) => a + b, 0) / trValues.length;
+  const price = closes[closes.length - 1];
+  return price > 0 ? +((atr / price) * 100).toFixed(2) : null;
+}
+
 // ─── Quote ────────────────────────────────────────────────────────────────────
 
 export async function getLatestPrice(symbol) {
@@ -90,15 +131,28 @@ export async function getLatestPrice(symbol) {
 export async function placeTrade({
   symbol,
   side = 'buy',
-  dollars,           // dollar amount to invest (we calculate qty)
-  stop_loss_pct  = 7,   // % below entry
-  take_profit_pct = 12,  // % above entry
+  dollars,
+  stop_loss_pct   = 3,
+  take_profit_pct = 7,
+  use_atr = true,
   note = '',
 }) {
   // Get current price
   const quote = await getLatestPrice(symbol);
   const price = side === 'buy' ? quote.ask : quote.bid;
   if (!price || price <= 0) throw new Error(`Invalid price for ${symbol}: ${price}`);
+
+  // ATR-based dynamic stop/target sizing
+  let atr_pct = null;
+  if (use_atr) {
+    try {
+      atr_pct = await fetchATR(symbol);
+      if (atr_pct) {
+        stop_loss_pct   = Math.min(8,  Math.max(1.5, +(1.5 * atr_pct).toFixed(1)));
+        take_profit_pct = Math.min(20, Math.max(3,   +(3.0 * atr_pct).toFixed(1)));
+      }
+    } catch (_) {}
+  }
 
   // Calculate quantity (whole shares only for simplicity)
   const qty = Math.floor(dollars / price);
@@ -126,16 +180,17 @@ export async function placeTrade({
   });
 
   return {
-    order_id:     order.id,
+    order_id:        order.id,
     symbol,
     side,
     qty,
-    estimated_price: price,
+    estimated_price:  price,
     dollars_invested: +(qty * price).toFixed(2),
-    stop_loss:    stopPrice,
-    take_profit:  targetPrice,
+    stop_loss:        stopPrice,
+    take_profit:      targetPrice,
     stop_loss_pct,
     take_profit_pct,
+    atr_pct,
     note,
     status: order.status,
   };

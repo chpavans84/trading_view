@@ -22,7 +22,11 @@ import {
   getEarnings,
   getSymbolNews,
   getFinancials,
+  getEarningsSurprise,
+  getPreEarningsDrift,
+  getInsiderBuying,
 } from '../core/news.js';
+import { getConvictionScore } from '../core/scoring.js';
 import {
   getMarketSentiment,
   getSectorPerformance,
@@ -257,6 +261,28 @@ const TOOLS = [
     description: 'Check if the US stock market is currently open or closed, and when it next opens/closes.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'get_conviction_score',
+    description: 'Get a multi-factor conviction score (0-100) for a trade setup. Checks earnings quality, pre-earnings drift, relative strength vs sector ETF, insider activity, and market conditions. Always call this before propose_trade.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Ticker symbol e.g. "NVDA"' },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'get_earnings_surprise',
+    description: 'Get upcoming earnings date, EPS estimate from Nasdaq, and historical YoY beat streak from SEC EDGAR. Use to assess consistency of earnings beats before a trade.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Ticker symbol e.g. "MRVL"' },
+      },
+      required: ['symbol'],
+    },
+  },
 ];
 
 // ─── Tool Executor ────────────────────────────────────────────────────────────
@@ -297,6 +323,10 @@ async function executeTool(name, input) {
         return await closePosition(input.symbol);
       case 'get_market_status':
         return await getMarketStatus();
+      case 'get_conviction_score':
+        return await getConvictionScore({ symbol: input.symbol });
+      case 'get_earnings_surprise':
+        return await getEarningsSurprise({ symbol: input.symbol });
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -340,10 +370,15 @@ TRADING ENGINE (Alpaca paper trading — fake money for now):
 - Use propose_trade to execute trades IMMEDIATELY and automatically — no approval needed
 - ALWAYS check get_market_status first — only trade during open market hours
 - ALWAYS check get_portfolio first — max 3 open positions at once
-- Default: $200 per trade, stop loss -3%, take profit +7%
+- Stop loss and take profit are automatically sized by ATR — no need to set them manually
 - Only trade when you have real data backing the setup: earnings beat, sentiment, sector rotation
 - Never trade on speculation alone
 - After executing, notify user with full details including stop/target prices
+
+CONVICTION REQUIREMENT: Before calling propose_trade, ALWAYS call get_conviction_score first.
+- Score >= 60 (grade B or higher): proceed with trade at $200
+- Score >= 80 (grade A): increase position size to $400
+- Score < 60: skip the trade and explain which factors were missing
 
 Keep responses concise but actionable. This is Telegram — not a report. Get to the point.`;
 
@@ -618,13 +653,16 @@ cron.schedule('0 14-19 * * 1-5', async () => {
 1. Call get_market_status → if market is closed, STOP (send nothing)
 2. Call get_portfolio → if already 3+ open positions, STOP (send nothing)
 3. Call get_market_sentiment → note VIX. If VIX > 30, STOP (too volatile)
-4. Call get_sector_performance → identify leading sectors
-5. Call scan_watchlist for the default watchlist (30-day window)
-6. Pick the SINGLE best setup from the scan results — earnings beat, leading sector, positive sentiment all help
-7. If a valid setup exists: CALL propose_trade immediately with that symbol. Do NOT describe the trade in text first — just execute it.
-8. If no setup meets the bar, send nothing at all.
+4. Call get_sector_performance → identify 1-2 leading sectors
+5. Call scan_watchlist for the default watchlist (14-day window)
+6. Pick the top 2-3 candidates from scan results (earnings soon, strong sector)
+7. For EACH candidate: call get_conviction_score — skip if score < 60
+8. Take the candidate with the highest score >= 60
+9. CALL propose_trade for that symbol. Do NOT write a recommendation in text first — just execute.
+   Use $400 if score >= 80, otherwise $200.
+10. If no candidate scores >= 60, send nothing at all.
 
-IMPORTANT: Your job in this scan is to EXECUTE, not to recommend. If you find a good setup, call propose_trade. If you write a recommendation without calling propose_trade, you have failed the task.`;
+IMPORTANT: Your job is to EXECUTE, not recommend. If you write a trade idea without calling propose_trade, you have failed.`;
     _currentChatId = CHAT_ID;
     await handleAIMessage(CHAT_ID, prompt);
   } catch (err) {
