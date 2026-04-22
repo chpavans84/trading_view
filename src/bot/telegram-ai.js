@@ -79,6 +79,7 @@ const chatHistory = new Map();
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import net from 'net';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATS_FILE = join(__dirname, '../../.bot-stats.json');
@@ -582,6 +583,7 @@ I fetch real live data (news, earnings, financials) and give you specific trade 
 
 _Powered by Claude AI + SEC EDGAR + Nasdaq_
 
+/status — service health dashboard (all APIs)
 /stats — API usage & cost dashboard
 /tvstatus — TradingView Desktop connection + live chart data
 /clear — reset conversation
@@ -591,6 +593,123 @@ _Powered by Claude AI + SEC EDGAR + Nasdaq_
 bot.onText(/\/clear/, async (msg) => {
   chatHistory.delete(msg.chat.id);
   await send(msg.chat.id, '🧹 Conversation cleared. Fresh start!');
+});
+
+// ─── /status — full service health dashboard ──────────────────────────────────
+
+async function checkService(name, fn) {
+  const start = Date.now();
+  try {
+    const detail = await Promise.race([
+      fn(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+    ]);
+    return { name, ok: true, ms: Date.now() - start, detail };
+  } catch (err) {
+    return { name, ok: false, ms: Date.now() - start, detail: err.message };
+  }
+}
+
+bot.onText(/\/status/, async (msg) => {
+  await sendTyping(msg.chat.id);
+  await send(msg.chat.id, '🔍 Checking all services...');
+
+  const checks = await Promise.all([
+
+    checkService('Telegram Bot', async () => 'Polling active'),
+
+    checkService('Claude AI (Anthropic)', async () => {
+      const key = process.env.ANTHROPIC_API_KEY || '';
+      if (!key.startsWith('sk-ant-')) throw new Error('API key missing or invalid');
+      return `Key configured · Model: claude-haiku-4-5`;
+    }),
+
+    checkService('Alpaca Trading', async () => {
+      const acc = await getAccount();
+      return `$${acc.portfolio_value?.toLocaleString()} portfolio · ${acc.paper ? 'Paper' : 'Live'}`;
+    }),
+
+    checkService('Alpaca News API', async () => {
+      const r = await fetch(
+        'https://data.alpaca.markets/v1beta1/news?symbols=AAPL&limit=1&sort=desc',
+        { headers: { 'APCA-API-KEY-ID': process.env.ALPACA_API_KEY, 'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY } }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const age = d.news?.[0]?.created_at
+        ? Math.round((Date.now() - new Date(d.news[0].created_at)) / 60000) + ' min ago'
+        : 'no articles';
+      return `Latest: ${age}`;
+    }),
+
+    checkService('Yahoo Finance', async () => {
+      const r = await fetch(
+        'https://query2.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d',
+        { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const vix = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
+      return vix ? `VIX: ${vix}` : 'Connected';
+    }),
+
+    checkService('SEC EDGAR', async () => {
+      const r = await fetch('https://data.sec.gov/api/xbrl/frames/us-gaap/EarningsPerShareDiluted/USD%2Fshares/CY2024Q3I.json',
+        { headers: { 'User-Agent': 'tradingview-mcp research-tool contact@example.com' } }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return 'XBRL API reachable';
+    }),
+
+    checkService('Nasdaq Earnings Calendar', async () => {
+      const today = new Date().toISOString().split('T')[0];
+      const r = await fetch(`https://api.nasdaq.com/api/calendar/earnings?date=${today}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Origin': 'https://www.nasdaq.com', 'Referer': 'https://www.nasdaq.com/' }
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const count = d?.data?.rows?.length ?? 0;
+      return `${count} companies reporting today`;
+    }),
+
+    checkService('TradingView Desktop', async () => {
+      const avail = await isTradingViewAvailable();
+      if (!avail) throw new Error('CDP port 9222 not reachable — launch TradingView with --remote-debugging-port=9222');
+      const t = await getChartTechnicals({});
+      return t.available ? `${t.symbol} · ${t.timeframe} · $${t.current_price}` : 'Connected (no chart data)';
+    }),
+
+    checkService('Moomoo OpenD', async () => {
+      await new Promise((resolve, reject) => {
+        const sock = new net.Socket();
+        const timer = setTimeout(() => { sock.destroy(); reject(new Error('Port 11111 not open — start Moomoo OpenD')); }, 2000);
+        sock.connect(11111, '127.0.0.1', () => { clearTimeout(timer); sock.destroy(); resolve(); });
+        sock.on('error', (e) => { clearTimeout(timer); reject(new Error(`Port 11111 error: ${e.message}`)); });
+      });
+      return 'OpenD reachable on port 11111';
+    }),
+
+  ]);
+
+  const icon = (ok) => ok ? '✅' : '🔴';
+  const pad  = (ms) => ms < 1000 ? `${ms}ms` : `${(ms/1000).toFixed(1)}s`;
+
+  let text = `🖥️ *Service Status Dashboard*\n`;
+  text += `🕐 ${nowBothTimezones()}\n\n`;
+
+  for (const c of checks) {
+    text += `${icon(c.ok)} *${c.name}*`;
+    text += ` _(${pad(c.ms)})_\n`;
+    text += `   ${c.ok ? c.detail : '⚠️ ' + c.detail}\n\n`;
+  }
+
+  const allOk = checks.every(c => c.ok);
+  const okCount = checks.filter(c => c.ok).length;
+  text += allOk
+    ? `_All ${checks.length} services operational_`
+    : `_${okCount}/${checks.length} services operational_`;
+
+  await send(msg.chat.id, text);
 });
 
 bot.onText(/\/tvstatus/, async (msg) => {
@@ -698,7 +817,7 @@ bot.onText(/\/close_(\S+)/, async (msg, match) => {
 // All other messages → AI (including unrecognised slash commands)
 bot.on('message', async (msg) => {
   if (!msg.text) return;
-  const knownCmds = ['/start', '/clear', '/watchlist', '/stats', '/tvstatus', '/close_'];
+  const knownCmds = ['/start', '/clear', '/watchlist', '/stats', '/tvstatus', '/status', '/close_'];
   if (knownCmds.some(cmd => msg.text.startsWith(cmd))) return;
 
   const chatId = msg.chat.id;
