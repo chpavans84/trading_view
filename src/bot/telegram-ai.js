@@ -583,6 +583,7 @@ I fetch real live data (news, earnings, financials) and give you specific trade 
 _Powered by Claude AI + SEC EDGAR + Nasdaq_
 
 /stats — API usage & cost dashboard
+/tvstatus — TradingView Desktop connection + live chart data
 /clear — reset conversation
 /watchlist — show tracked stocks`);
 });
@@ -590,6 +591,62 @@ _Powered by Claude AI + SEC EDGAR + Nasdaq_
 bot.onText(/\/clear/, async (msg) => {
   chatHistory.delete(msg.chat.id);
   await send(msg.chat.id, '🧹 Conversation cleared. Fresh start!');
+});
+
+bot.onText(/\/tvstatus/, async (msg) => {
+  await sendTyping(msg.chat.id);
+  const available = await isTradingViewAvailable();
+
+  if (!available) {
+    await send(msg.chat.id,
+      `📺 *TradingView Status*\n\n` +
+      `🔴 *Not connected*\n\n` +
+      `TradingView Desktop is not running or CDP port 9222 is not open.\n\n` +
+      `*To connect:*\n` +
+      `\`\`\`\npkill -f TradingView && sleep 2\n/Applications/TradingView.app/Contents/MacOS/TradingView --remote-debugging-port=9222 &\n\`\`\`\n\n` +
+      `_Chart technicals (RSI, MACD, EMA, levels) will not be available until connected._`
+    );
+    return;
+  }
+
+  // TV is available — fetch full chart state
+  const technicals = await getChartTechnicals({});
+  const levels     = await getPriceLevels({});
+  const ohlcv      = await getOHLCVSummary({});
+
+  let msg2 = `📺 *TradingView Status*\n\n🟢 *Connected* — CDP port 9222\n\n`;
+
+  if (technicals.available) {
+    msg2 += `📊 *Chart:* ${technicals.symbol || '?'} · ${technicals.timeframe || '?'}\n`;
+    msg2 += `💰 *Price:* $${technicals.current_price ?? 'n/a'}\n\n`;
+    msg2 += `*Indicators:*\n`;
+    msg2 += technicals.rsi       != null ? `• RSI: ${technicals.rsi}\n`             : '';
+    msg2 += technicals.macd_hist != null ? `• MACD Hist: ${technicals.macd_hist}\n` : '';
+    msg2 += technicals.ema20     != null ? `• EMA 20: ${technicals.ema20}\n`        : '';
+    msg2 += technicals.ema50     != null ? `• EMA 50: ${technicals.ema50}\n`        : '';
+    msg2 += technicals.bb_upper  != null ? `• BB Upper: ${technicals.bb_upper}\n`   : '';
+    msg2 += technicals.bb_lower  != null ? `• BB Lower: ${technicals.bb_lower}\n`   : '';
+    if (!technicals.rsi && !technicals.macd_hist && !technicals.ema20) {
+      msg2 += `_No indicator values found — add RSI/MACD/EMA to chart_\n`;
+    }
+    msg2 += '\n';
+  }
+
+  if (levels.available && levels.level_count > 0) {
+    msg2 += `*Key Levels (${levels.level_count} total):*\n`;
+    if (levels.nearest_resistance) msg2 += `• 🔴 Resistance: $${levels.nearest_resistance.price} (+${levels.distance_to_resistance_pct}%)\n`;
+    if (levels.nearest_support)    msg2 += `• 🟢 Support: $${levels.nearest_support.price} (-${levels.distance_to_support_pct}%)\n`;
+    msg2 += '\n';
+  }
+
+  if (ohlcv.available) {
+    msg2 += `*Recent Price Action (20 bars):*\n`;
+    msg2 += `• Range: $${ohlcv.low} – $${ohlcv.high}\n`;
+    msg2 += `• Change: ${ohlcv.change_pct}\n`;
+    msg2 += `• Avg Volume: ${ohlcv.avg_volume?.toLocaleString()}\n`;
+  }
+
+  await send(msg.chat.id, msg2);
 });
 
 bot.onText(/\/watchlist/, async (msg) => {
@@ -641,7 +698,7 @@ bot.onText(/\/close_(\S+)/, async (msg, match) => {
 // All other messages → AI (including unrecognised slash commands)
 bot.on('message', async (msg) => {
   if (!msg.text) return;
-  const knownCmds = ['/start', '/clear', '/watchlist', '/stats', '/close_'];
+  const knownCmds = ['/start', '/clear', '/watchlist', '/stats', '/tvstatus', '/close_'];
   if (knownCmds.some(cmd => msg.text.startsWith(cmd))) return;
 
   const chatId = msg.chat.id;
