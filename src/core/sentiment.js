@@ -302,6 +302,85 @@ export async function getRelativeStrength({ symbol, sector_etf } = {}) {
   };
 }
 
+// ─── Market Movers (broad universe ranked by today's % move) ─────────────────
+
+// ~100 liquid US stocks across all sectors — updated periodically
+const BROAD_UNIVERSE = [
+  // Mega-cap tech
+  'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AVGO',
+  // Semiconductors
+  'AMD','INTC','QCOM','MU','TSM','MRVL','KLAC','LRCX','AMAT','SMCI','ARM','ON',
+  // Software / Cloud
+  'CRM','NOW','SNOW','PLTR','ORCL','ADBE','INTU','DDOG','MDB','PANW','CRWD','ZS',
+  // Financials
+  'JPM','GS','MS','BAC','V','MA','C','BX','KKR',
+  // Healthcare / Biotech
+  'UNH','LLY','ABBV','MRK','PFE','MRNA','BNTX','AMGN','GILD',
+  // Consumer
+  'COST','WMT','HD','TGT','NKE','SBUX','MCD','NFLX',
+  // Energy
+  'XOM','CVX','COP','SLB','OXY',
+  // Industrials / Defence
+  'RTX','LMT','NOC','GD','CAT','DE','BA',
+  // EV / Growth (high ATR)
+  'RIVN','NIO','LCID','XPEV','LI',
+  // China ADRs (volatile, catalyst-driven)
+  'BABA','JD','PDD','BIDU',
+  // Other high-ATR names
+  'COIN','HOOD','RBLX','UBER','LYFT','DASH','SQ','PYPL','AFRM',
+];
+
+// Fetch all symbols in parallel batches — fast but rate-limit safe
+async function fetchBatchQuotes(symbols, batchSize = 15, batchDelayMs = 250) {
+  const results = [];
+  for (let i = 0; i < symbols.length; i += batchSize) {
+    const batch = symbols.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(sym => fetchQuote(sym)));
+    results.push(...batchResults.filter(Boolean));
+    if (i + batchSize < symbols.length) await delay(batchDelayMs);
+  }
+  return results;
+}
+
+export async function getMarketMovers({ limit = 25 } = {}) {
+  const cached = cacheGet('movers', 10 * 60 * 1000);
+  if (cached) return { ...cached, cached: true };
+
+  const quotes = await fetchBatchQuotes(BROAD_UNIVERSE);
+
+  // Filter: price $5–$1000, need a % change value
+  const valid = quotes.filter(q =>
+    q.price != null && q.price >= 5 && q.price <= 1000 && q.chg_pct != null
+  );
+
+  // Sort by absolute % change — biggest movers today first
+  valid.sort((a, b) => Math.abs(b.chg_pct) - Math.abs(a.chg_pct));
+
+  const movers = valid.slice(0, limit).map(q => ({
+    symbol:    q.symbol,
+    name:      q.name || q.symbol,
+    price:     q.price,
+    chg_pct:   q.chg_pct,
+    direction: q.chg_pct > 0 ? 'up' : 'down',
+  }));
+
+  const gainers   = movers.filter(m => m.chg_pct > 0).slice(0, 10);
+  const decliners = movers.filter(m => m.chg_pct < 0).slice(0, 5);
+
+  const result = {
+    success:       true,
+    timestamp:     new Date().toISOString(),
+    universe_size: BROAD_UNIVERSE.length,
+    count:         movers.length,
+    movers,
+    gainers,
+    decliners,
+    note: `Ranked by % move today across ${BROAD_UNIVERSE.length} liquid US stocks`,
+  };
+  cacheSet('movers', result);
+  return result;
+}
+
 // ─── Full Day Trading Dashboard ───────────────────────────────────────────────
 
 export async function getDayTradingDashboard() {
