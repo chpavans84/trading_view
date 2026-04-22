@@ -654,11 +654,12 @@ bot.onText(/\/status/, async (msg) => {
     }),
 
     checkService('SEC EDGAR', async () => {
-      const r = await fetch('https://data.sec.gov/api/xbrl/frames/us-gaap/EarningsPerShareDiluted/USD%2Fshares/CY2024Q3I.json',
+      const r = await fetch('https://data.sec.gov/submissions/CIK0000320193.json',
         { headers: { 'User-Agent': 'tradingview-mcp research-tool contact@example.com' } }
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return 'XBRL API reachable';
+      const d = await r.json();
+      return `API reachable · ${d.name ?? 'EDGAR'} filings: ${d.filings?.recent?.form?.length ?? '?'} recent`;
     }),
 
     checkService('Nasdaq Earnings Calendar', async () => {
