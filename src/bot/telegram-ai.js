@@ -270,7 +270,7 @@ const TOOLS = [
   },
   {
     name: 'get_chart_technicals',
-    description: 'Read live technical indicator values from TradingView Desktop (RSI, MACD, EMA20, EMA50, Bollinger Bands). Returns { available: false } if TradingView is not running. Use this before trading to confirm technical setup.',
+    description: 'Read live technical indicator values from the TradingView chart: RSI, MACD, EMAs (20/50), Bollinger Bands, and current price. Returns available: false if TradingView Desktop is not running. Use this to confirm entries — never buy when RSI > 70 or price is above upper Bollinger Band.',
     input_schema: {
       type: 'object',
       properties: {
@@ -280,7 +280,7 @@ const TOOLS = [
   },
   {
     name: 'get_price_levels',
-    description: 'Read support and resistance levels drawn by Pine Script indicators on the TradingView chart. Returns nearest support and resistance with % distance from current price.',
+    description: 'Read key price levels drawn by Pine Script indicators on the TradingView chart: support and resistance zones, labeled levels (PDH, PDL, VWAP, etc.). Returns nearest support and resistance with distance %. Use this to assess risk/reward — avoid entries within 2% of major resistance.',
     input_schema: {
       type: 'object',
       properties: {
@@ -419,18 +419,22 @@ TRADING ENGINE (Alpaca paper trading — fake money for now):
 - Never trade on speculation alone
 - After executing, notify user with full details including stop/target prices
 
-TRADINGVIEW INTEGRATION (optional but valuable):
-- Call get_chart_technicals before trading to read live RSI, MACD, EMA, Bollinger Bands
-- Call get_price_levels to find nearest support/resistance on the chart
-- Call get_ohlcv_summary for recent price action summary
-- If TradingView is not running, these return { available: false } — skip gracefully, do not abort
-- If TradingView IS available: use RSI < 70 (not overbought) and price above EMA20 as extra confirmation
-- If chart symbol doesn't match trade symbol, note the mismatch but still use the data if helpful
-
 CONVICTION REQUIREMENT: Before calling propose_trade, ALWAYS call get_conviction_score first.
 - Score >= 60 (grade B or higher): proceed with trade at $200
 - Score >= 80 (grade A): increase position size to $400
 - Score < 60: skip the trade and explain which factors were missing
+
+TECHNICAL CONFIRMATION (when TradingView is running):
+Before propose_trade, call get_chart_technicals:
+- SKIP if RSI > 70 (overbought — wait for pullback)
+- SKIP if price > upper Bollinger Band (extended)
+- SKIP if price < EMA20 AND price < EMA50 (downtrend)
+- PREFER entries where RSI < 50 and price > EMA20
+Also call get_price_levels to check risk/reward:
+- SKIP if price is within 2% of major resistance
+- NOTE the nearest support level — use it to validate the stop loss
+If TradingView is not running, proceed on fundamentals alone but mention 'TradingView offline — technical confirmation skipped' in your response.
+Note: get_conviction_score already calls TradingView internally — the tv_available and technical_summary fields in the score result tell you if chart data was used in scoring.
 
 Keep responses concise but actionable. This is Telegram — not a report. Get to the point.`;
 
