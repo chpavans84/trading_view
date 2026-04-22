@@ -46,6 +46,9 @@ import {
   placeTrade,
   closePosition,
   getMarketStatus,
+  getDailyPnL,
+  DAILY_PROFIT_TARGET,
+  DAILY_LOSS_LIMIT,
 } from '../core/trader.js';
 
 // Pending trade approvals: orderId → { trade, timer, chatId }
@@ -306,6 +309,11 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_daily_pnl',
+    description: `Check today's realized P&L against the daily profit target ($${DAILY_PROFIT_TARGET}) and daily loss limit (-$${DAILY_LOSS_LIMIT}). Call this before any auto-scan. If target_reached is true, stop trading for the day. If loss_limit_reached is true, stop trading immediately.`,
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_chart_technicals',
     description: 'Read live technical indicator values from the TradingView chart: RSI, MACD, EMAs (20/50), Bollinger Bands, and current price. Returns available: false if TradingView Desktop is not running. Use this to confirm entries — never buy when RSI > 70 or price is above upper Bollinger Band.',
     input_schema: {
@@ -403,6 +411,8 @@ async function executeTool(name, input) {
         return await closePosition(input.symbol);
       case 'get_market_status':
         return await getMarketStatus();
+      case 'get_daily_pnl':
+        return await getDailyPnL();
       case 'get_chart_technicals':
         return await getChartTechnicals({ symbol: input.symbol });
       case 'get_price_levels':
@@ -452,21 +462,35 @@ Never make up financial data — always fetch it.
 The user's current watchlist includes: ${DEFAULT_WATCHLIST.join(', ')}
 Today's date: ${new Date().toISOString().split('T')[0]}
 
+DAILY TARGET: Goal is $100–200 profit per day.
+- Call get_daily_pnl before every scan
+- If target_reached (P&L >= $150): stop ALL trading for the day — goal achieved, protect gains
+- If loss_limit_reached (P&L <= -$200): stop ALL trading — protect capital
+- Report remaining_to_target in your response so the user knows progress
+
+POSITION SIZING: Positions are auto-sized by ATR to target $150 profit per winning trade.
+- Do NOT pass a dollars amount to propose_trade — let ATR auto-size it
+- The engine calculates: position = $150 ÷ (3 × ATR%) → typically $1,500–$5,000
+- Each trade risks ~$75 (1:2 R/R), targets ~$150 profit
+- 1–2 winning trades per day hits the $100–200 goal
+- Stocks with ATR < 1% are rejected automatically (don't move enough)
+
 TRADING ENGINE (Alpaca paper trading — fake money for now):
 - Use propose_trade to execute trades IMMEDIATELY and automatically — no approval needed
 - ALWAYS check get_market_status first — only trade during open market hours
-- ALWAYS check get_portfolio first — max 3 open positions at once
+- ALWAYS check get_portfolio first — max 2 open positions at once (reduced from 3)
 - Stop loss and take profit are automatically sized by ATR — no need to set them manually
+- Best trading windows: 9:45–11:30 AM ET (prime momentum) and 2:00–3:30 PM ET (afternoon trend)
 - Only trade when you have real data backing the setup: earnings beat, sentiment, sector rotation
 - Never trade on speculation alone
-- After executing, notify user with full details including stop/target prices
+- After executing, notify user: include estimated_profit, estimated_risk, risk_reward from the result
 
 SECTOR RULE: Never open 2 positions in the same sector (e.g., no NVDA + AMD simultaneously — both are XLK). The conviction score already penalises this (-25 pts) but verify via get_portfolio before executing. Pass the positions array from get_portfolio into get_conviction_score.
 
 CONVICTION REQUIREMENT: Before calling propose_trade, ALWAYS call get_conviction_score first.
-- Score >= 60 (grade B or higher): proceed with trade at $200
-- Score >= 80 (grade A): increase position size to $400
-- Score < 60: skip the trade and explain which factors were missing
+- Score >= 70 (grade B or higher): proceed — position sized automatically
+- Score < 70: skip the trade and explain which factors were missing
+- Quality over quantity: 1 great trade beats 3 mediocre trades
 
 TECHNICAL CONFIRMATION (when TradingView is running):
 Before propose_trade, call get_chart_technicals:
@@ -625,6 +649,7 @@ I fetch real live data (news, earnings, financials) and give you specific trade 
 
 _Powered by Claude AI + SEC EDGAR + Nasdaq_
 
+/pnl — today's P&L vs daily target ($150) and loss limit ($200)
 /status — service health dashboard (all APIs)
 /stats — API usage & cost dashboard
 /tvstatus — TradingView Desktop connection + live chart data
@@ -756,6 +781,27 @@ bot.onText(/\/status/, async (msg) => {
   await send(msg.chat.id, text);
 });
 
+bot.onText(/\/pnl/, async (msg) => {
+  await sendTyping(msg.chat.id);
+  const pnl = await getDailyPnL();
+  if (!pnl.available) {
+    await send(msg.chat.id, '⚠️ P&L data unavailable — market may be closed or Alpaca API issue.');
+    return;
+  }
+  const sign   = pnl.pnl >= 0 ? '+' : '';
+  const status = pnl.target_reached     ? '✅ Daily target REACHED — no more trades today!'
+               : pnl.loss_limit_reached ? '🛑 Daily loss limit hit — protecting capital'
+               : `📈 ${pnl.remaining_to_target > 0 ? `$${pnl.remaining_to_target} to target` : 'Target reached'}`;
+
+  await send(msg.chat.id,
+    `💰 *Today's P&L*\n` +
+    `${sign}$${pnl.pnl} (${sign}${pnl.pnl_pct.toFixed(2)}%)\n\n` +
+    `🎯 Daily target: $${pnl.daily_target}\n` +
+    `🛑 Loss limit: -$${DAILY_LOSS_LIMIT}\n\n` +
+    status
+  );
+});
+
 bot.onText(/\/tvstatus/, async (msg) => {
   await sendTyping(msg.chat.id);
   const available = await isTradingViewAvailable();
@@ -861,7 +907,7 @@ bot.onText(/\/close_(\S+)/, async (msg, match) => {
 // All other messages → AI (including unrecognised slash commands)
 bot.on('message', async (msg) => {
   if (!msg.text) return;
-  const knownCmds = ['/start', '/clear', '/watchlist', '/stats', '/tvstatus', '/status', '/close_'];
+  const knownCmds = ['/start', '/clear', '/watchlist', '/stats', '/tvstatus', '/status', '/pnl', '/close_'];
   if (knownCmds.some(cmd => msg.text.startsWith(cmd))) return;
 
   const chatId = msg.chat.id;
@@ -919,21 +965,22 @@ cron.schedule('0 14-19 * * 1-5', async () => {
   if (!CHAT_ID) return;
   console.log('Running auto-scan for trade opportunities...');
   try {
-    const prompt = `AUTOMATED TRADE SCAN — take these steps in order:
+    const prompt = `AUTOMATED TRADE SCAN — daily target $100–200 profit. Steps in order:
 
-1. Call get_market_status → if market is closed, STOP (send nothing)
-2. Call get_portfolio → if already 3+ open positions, STOP (send nothing)
-3. Call get_market_sentiment → note VIX. If VIX > 30, STOP (too volatile)
-4. Call get_sector_performance → identify 1-2 leading sectors
-5. Call scan_watchlist for the default watchlist (14-day window)
-6. Pick the top 2-3 candidates from scan results (earnings soon, strong sector)
-7. For EACH candidate: call get_conviction_score — skip if score < 60
-8. Take the candidate with the highest score >= 60
-9. CALL propose_trade for that symbol. Do NOT write a recommendation in text first — just execute.
-   Use $400 if score >= 80, otherwise $200.
-10. If no candidate scores >= 60, send nothing at all.
+1. Call get_daily_pnl → if target_reached ($150+) or loss_limit_reached (-$200), STOP and send 1 line: "✅ Daily target reached — no more trades today" or "🛑 Daily loss limit hit — protecting capital"
+2. Call get_market_status → if market is closed, STOP silently
+3. Call get_portfolio → if already 2+ open positions, STOP silently
+4. Call get_market_sentiment → note VIX. If VIX > 30, STOP silently
+5. Call get_sector_performance → identify 1-2 leading sectors
+6. Call scan_watchlist for the default watchlist (14-day window)
+7. Pick the top 2-3 candidates: prioritise earnings catalyst + leading sector + high ATR (volatile stocks make bigger moves)
+8. For EACH candidate: call get_conviction_score (pass current positions for sector check) — skip if score < 70
+9. Take the SINGLE highest-scoring candidate with score >= 70
+10. CALL propose_trade for that symbol. Do NOT pass a dollars amount — let ATR auto-size it.
+11. If the trade executes, send: symbol, estimated_profit, estimated_risk, risk_reward, stop, target, and today's P&L progress
+12. If no candidate scores >= 70, send nothing at all.
 
-IMPORTANT: Your job is to EXECUTE, not recommend. If you write a trade idea without calling propose_trade, you have failed.`;
+IMPORTANT: 1 great trade beats 3 average trades. Quality > quantity. Target $150 profit per trade.`;
     _currentChatId = CHAT_ID;
     await handleAIMessage(CHAT_ID, prompt);
   } catch (err) {
