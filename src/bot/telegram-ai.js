@@ -26,7 +26,7 @@ import {
   getPreEarningsDrift,
   getInsiderBuying,
 } from '../core/news.js';
-import { getConvictionScore } from '../core/scoring.js';
+import { getConvictionScore, checkSectorConcentration } from '../core/scoring.js';
 import {
   isTradingViewAvailable,
   getChartTechnicals,
@@ -71,8 +71,42 @@ const DEFAULT_WATCHLIST = [
 const bot = new TelegramBot(TOKEN, { polling: true });
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
-// Per-chat conversation history (in-memory, resets on bot restart)
+// Per-chat conversation history — persisted to disk, survives restarts
 const chatHistory = new Map();
+
+function loadHistory() {
+  try {
+    if (existsSync(HISTORY_FILE)) {
+      const raw = JSON.parse(readFileSync(HISTORY_FILE, 'utf8'));
+      for (const [chatId, messages] of Object.entries(raw)) {
+        chatHistory.set(Number(chatId), messages);
+      }
+      console.log(`📖 Loaded history for ${chatHistory.size} chat(s)`);
+    }
+  } catch { /* corrupted file — start fresh */ }
+}
+
+let _saveTimer = null;
+function saveHistory() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      const obj = {};
+      for (const [chatId, messages] of chatHistory) obj[chatId] = messages;
+      writeFileSync(HISTORY_FILE, JSON.stringify(obj), 'utf8');
+    } catch (e) { console.error('Failed to save history:', e.message); }
+  }, 2000);
+}
+
+function pushHistory(chatId, message) {
+  if (!chatHistory.has(chatId)) chatHistory.set(chatId, []);
+  const msgs = chatHistory.get(chatId);
+  msgs.push(message);
+  if (msgs.length > MAX_HISTORY_PER_CHAT) msgs.splice(0, msgs.length - MAX_HISTORY_PER_CHAT);
+  saveHistory();
+}
+
+loadHistory();
 
 // ─── Usage Tracker (persisted to disk) ───────────────────────────────────────
 
@@ -82,7 +116,10 @@ import { fileURLToPath } from 'url';
 import net from 'net';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const STATS_FILE = join(__dirname, '../../.bot-stats.json');
+const STATS_FILE   = join(__dirname, '../../.bot-stats.json');
+const HISTORY_FILE = join(__dirname, '../../.bot-history.json');
+
+const MAX_HISTORY_PER_CHAT = 40; // 20 turns
 
 // Claude Haiku pricing (per million tokens)
 const PRICE_INPUT_PER_M  = 0.80;
@@ -301,11 +338,16 @@ const TOOLS = [
   },
   {
     name: 'get_conviction_score',
-    description: 'Get a multi-factor conviction score (0-100) for a trade setup. Checks earnings quality, pre-earnings drift, relative strength vs sector ETF, insider activity, and market conditions. Always call this before propose_trade.',
+    description: 'Get a multi-factor conviction score (0-100) for a trade setup. Checks earnings quality, pre-earnings drift, relative strength, insider activity, TradingView technicals, and sector concentration. Pass current open positions to enable sector concentration check (-25 pts if already in same sector). Always call this before propose_trade.',
     input_schema: {
       type: 'object',
       properties: {
         symbol: { type: 'string', description: 'Ticker symbol e.g. "NVDA"' },
+        positions: {
+          type: 'array',
+          description: 'Current open positions from get_portfolio — used for sector concentration check',
+          items: { type: 'object', properties: { symbol: { type: 'string' } } },
+        },
       },
       required: ['symbol'],
     },
@@ -368,7 +410,7 @@ async function executeTool(name, input) {
       case 'get_ohlcv_summary':
         return await getOHLCVSummary({ symbol: input.symbol });
       case 'get_conviction_score':
-        return await getConvictionScore({ symbol: input.symbol });
+        return await getConvictionScore({ symbol: input.symbol, positions: input.positions || [] });
       case 'get_earnings_surprise':
         return await getEarningsSurprise({ symbol: input.symbol });
       default:
@@ -418,6 +460,8 @@ TRADING ENGINE (Alpaca paper trading — fake money for now):
 - Only trade when you have real data backing the setup: earnings beat, sentiment, sector rotation
 - Never trade on speculation alone
 - After executing, notify user with full details including stop/target prices
+
+SECTOR RULE: Never open 2 positions in the same sector (e.g., no NVDA + AMD simultaneously — both are XLK). The conviction score already penalises this (-25 pts) but verify via get_portfolio before executing. Pass the positions array from get_portfolio into get_conviction_score.
 
 CONVICTION REQUIREMENT: Before calling propose_trade, ALWAYS call get_conviction_score first.
 - Score >= 60 (grade B or higher): proceed with trade at $200
@@ -491,14 +535,8 @@ async function handleProposeTrade(input, chatId) {
 // ─── AI Chat Handler ──────────────────────────────────────────────────────────
 
 async function handleAIMessage(chatId, userMessage) {
-  if (!chatHistory.has(chatId)) chatHistory.set(chatId, []);
+  pushHistory(chatId, { role: 'user', content: userMessage });
   const history = chatHistory.get(chatId);
-
-  // Add user message to history
-  history.push({ role: 'user', content: userMessage });
-
-  // Keep last 20 messages to avoid token overflow
-  if (history.length > 20) history.splice(0, history.length - 20);
 
   let messages = [...history];
 
@@ -538,7 +576,7 @@ async function handleAIMessage(chatId, userMessage) {
     const text = response.content.find(b => b.type === 'text')?.text || 'No response';
 
     // Save final exchange to history
-    history.push({ role: 'assistant', content: text });
+    pushHistory(chatId, { role: 'assistant', content: text });
 
     return text;
   }
@@ -596,6 +634,7 @@ _Powered by Claude AI + SEC EDGAR + Nasdaq_
 
 bot.onText(/\/clear/, async (msg) => {
   chatHistory.delete(msg.chat.id);
+  saveHistory();
   await send(msg.chat.id, '🧹 Conversation cleared. Fresh start!');
 });
 
