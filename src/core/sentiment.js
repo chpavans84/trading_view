@@ -5,6 +5,17 @@
 
 const YF_BASE = 'https://query2.finance.yahoo.com';
 
+export const SECTOR_MAP = {
+  AAPL: 'XLK', MSFT: 'XLK', NVDA: 'XLK', AMD: 'XLK',
+  MU: 'XLK', AVGO: 'XLK', QCOM: 'XLK', INTC: 'XLK',
+  TSM: 'XLK', SMCI: 'XLK', MRVL: 'XLK',
+  GOOGL: 'XLC', META: 'XLC', NFLX: 'XLC',
+  AMZN: 'XLY', TSLA: 'XLY',
+  JPM: 'XLF',
+  XOM: 'XLE',
+  RTX: 'XLI', LMT: 'XLI',
+};
+
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0',
   'Accept': 'application/json',
@@ -246,6 +257,34 @@ export async function getTrendingStocks({ limit = 15 } = {}) {
     count: trending.length,
     trending,
     note: 'Most searched stocks on Yahoo Finance right now',
+  };
+}
+
+// ─── Relative Strength vs Sector ETF ─────────────────────────────────────────
+
+export async function getRelativeStrength({ symbol, sector_etf } = {}) {
+  const ticker = symbol.toUpperCase();
+  const etf    = (sector_etf || SECTOR_MAP[ticker] || 'SPY').toUpperCase();
+
+  const [symQ, etfQ] = await Promise.all([fetchQuote(ticker), fetchQuote(etf)]);
+
+  if (!symQ || !etfQ) {
+    return { success: false, symbol: ticker, sector_etf: etf, error: 'Failed to fetch price data' };
+  }
+
+  const symbol_5d_pct = symQ.chg_pct ?? 0;
+  const etf_5d_pct    = etfQ.chg_pct ?? 0;
+  const rs_score      = +(symbol_5d_pct - etf_5d_pct).toFixed(2);
+  const signal        = rs_score > 2 ? 'strong' : rs_score < -2 ? 'weak' : 'neutral';
+
+  return {
+    success: true,
+    symbol: ticker,
+    sector_etf: etf,
+    symbol_5d_pct,
+    etf_5d_pct,
+    rs_score,
+    signal,
   };
 }
 

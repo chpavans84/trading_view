@@ -69,7 +69,14 @@ export async function getSymbolNews({ symbol, limit = 10 } = {}) {
     related_tickers: a.relatedTickers || [],
   }));
 
-  return { success: true, symbol: ticker, article_count: articles.length, articles };
+  const headlineText = articles.map(a => a.title.toLowerCase()).join(' ');
+  const raisedKw  = ['raises guidance', 'raises outlook', 'raises forecast', 'raises full-year', 'raised guidance', 'raised outlook', 'raises its'];
+  const loweredKw = ['lowers guidance', 'cuts outlook', 'reduces forecast', 'below expectations', 'disappoints', 'lowered guidance', 'cuts forecast', 'misses estimates'];
+  const guidance_signal =
+    raisedKw.some(k => headlineText.includes(k))  ? 'raised'  :
+    loweredKw.some(k => headlineText.includes(k)) ? 'lowered' : 'neutral';
+
+  return { success: true, symbol: ticker, article_count: articles.length, articles, guidance_signal };
 }
 
 // ─── Earnings (SEC EDGAR XBRL) ───────────────────────────────────────────────
@@ -88,35 +95,50 @@ export async function getEarnings({ symbol } = {}) {
     || [];
 
   const seenEps = new Set();
-  const quarters = epsData
+  const allEpsQuarters = epsData
     .filter(e => e.form === '10-Q' || e.form === '10-K')
     .filter(e => e.fp && e.fp !== 'FY')
     .sort((a, b) => new Date(b.end) - new Date(a.end))
     .filter(e => { if (seenEps.has(e.end)) return false; seenEps.add(e.end); return true; })
-    .slice(0, 4)
-    .map(e => ({
-      period: e.fp,
-      end_date: e.end,
-      filed: e.filed,
-      eps_actual: e.val,
-      form: e.form,
-    }));
+    .slice(0, 8)
+    .map(e => ({ period: e.fp, end_date: e.end, filed: e.filed, eps_actual: e.val, form: e.form }));
 
-  // Revenue
-  const revData = (us.Revenues?.units?.USD
+  // Revenue — fetch 8 quarters for YoY quality scoring
+  const allRevData = (us.Revenues?.units?.USD
     || us.RevenueFromContractWithCustomerExcludingAssessedTax?.units?.USD
     || us.SalesRevenueNet?.units?.USD
     || [])
     .filter(e => e.form === '10-Q' || e.form === '10-K')
     .filter(e => e.fp && e.fp !== 'FY')
     .sort((a, b) => new Date(b.end) - new Date(a.end))
-    .slice(0, 4)
+    .slice(0, 8)
     .map(e => ({ period: e.fp, end_date: e.end, revenue: e.val }));
 
-  // Merge EPS + revenue by period/end_date
-  const history = quarters.map(q => {
-    const rev = revData.find(r => r.end_date === q.end_date);
-    return { ...q, revenue: rev?.revenue ?? null };
+  // Merge EPS + revenue, compute earnings_quality vs same quarter last year
+  const history = allEpsQuarters.slice(0, 4).map((q) => {
+    const rev = allRevData.find(r => r.end_date === q.end_date);
+
+    // Find same quarter last year (within 45 days of 1 year prior)
+    const yearAgoTarget = new Date(q.end_date);
+    yearAgoTarget.setFullYear(yearAgoTarget.getFullYear() - 1);
+    const yearAgoEps = allEpsQuarters.slice(4).find(r =>
+      Math.abs(new Date(r.end_date) - yearAgoTarget) < 45 * 86400000
+    );
+    const yearAgoRev = yearAgoEps
+      ? allRevData.find(r => r.end_date === yearAgoEps.end_date)
+      : null;
+
+    const epsGrew = yearAgoEps && q.eps_actual != null && yearAgoEps.eps_actual != null
+      ? q.eps_actual > yearAgoEps.eps_actual : null;
+    const revGrew = rev?.revenue != null && yearAgoRev?.revenue != null
+      ? rev.revenue > yearAgoRev.revenue : null;
+
+    const earnings_quality =
+      epsGrew == null && revGrew == null   ? null :
+      epsGrew === true && revGrew === true  ? 'strong' :
+      epsGrew === true || revGrew === true  ? 'moderate' : 'weak';
+
+    return { ...q, revenue: rev?.revenue ?? null, earnings_quality };
   });
 
   // Next earnings date — try Yahoo Finance news search for "earnings date"
@@ -336,6 +358,151 @@ export async function scanEarnings({ symbols, days_ahead = 14 } = {}) {
     days_ahead,
     results,
     source: 'Nasdaq earnings calendar + SEC EDGAR XBRL history',
+  };
+}
+
+// ─── Earnings Surprise (upcoming estimate vs historical beat streak) ──────────
+
+export async function getEarningsSurprise({ symbol } = {}) {
+  const ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
+
+  // 1. Scan Nasdaq calendar for next 30 days to find upcoming entry
+  const today = new Date();
+  const dates = Array.from({ length: 31 }, (_, d) =>
+    new Date(today.getTime() + d * 86400000).toISOString().split('T')[0]
+  );
+
+  let upcoming = null;
+  for (let i = 0; i < dates.length && !upcoming; i += 5) {
+    const batch = dates.slice(i, i + 5);
+    const results = await Promise.allSettled(
+      batch.map(d => fetchJSON(`https://api.nasdaq.com/api/calendar/earnings?date=${d}`, NASDAQ_HEADERS))
+    );
+    for (let j = 0; j < results.length; j++) {
+      if (results[j].status !== 'fulfilled') continue;
+      const match = (results[j].value?.data?.rows || []).find(r => r.symbol?.toUpperCase() === ticker);
+      if (match) {
+        upcoming = {
+          earnings_date: batch[j],
+          eps_estimate: match.epsForecast ? parseFloat(match.epsForecast.replace(/[$,]/g, '')) || null : null,
+          call_time: match.time === 'time-pre-market' ? 'BMO' : match.time === 'time-after-hours' ? 'AMC' : match.time,
+        };
+        break;
+      }
+    }
+  }
+
+  // 2. Get 8 quarters of actuals from EDGAR for YoY beat streak
+  const cik = await getCIK(ticker);
+  const facts = await fetchJSON(`${EDGAR_DATA}/api/xbrl/companyfacts/CIK${cik}.json`, EDGAR_HEADERS);
+  const epsData = facts.facts?.['us-gaap']?.EarningsPerShareDiluted?.units?.['USD/shares']
+    || facts.facts?.['us-gaap']?.EarningsPerShareBasic?.units?.['USD/shares']
+    || [];
+
+  const seen = new Set();
+  const quarters = epsData
+    .filter(e => (e.form === '10-Q' || e.form === '10-K') && e.fp && e.fp !== 'FY')
+    .sort((a, b) => new Date(b.end) - new Date(a.end))
+    .filter(e => { if (seen.has(e.end)) return false; seen.add(e.end); return true; })
+    .slice(0, 8)
+    .map(e => ({ period: e.fp, end_date: e.end, eps_actual: e.val }));
+
+  // 3. Compute YoY beat streak (actual > same quarter last year)
+  let beat_streak = 0;
+  const surprises = [];
+  for (let i = 0; i < 4 && i < quarters.length; i++) {
+    const q = quarters[i];
+    const yearAgoTarget = new Date(q.end_date);
+    yearAgoTarget.setFullYear(yearAgoTarget.getFullYear() - 1);
+    const yearAgo = quarters.slice(4).find(r =>
+      Math.abs(new Date(r.end_date) - yearAgoTarget) < 45 * 86400000
+    );
+    if (yearAgo && q.eps_actual != null && yearAgo.eps_actual != null && yearAgo.eps_actual !== 0) {
+      const surprise_pct = ((q.eps_actual - yearAgo.eps_actual) / Math.abs(yearAgo.eps_actual)) * 100;
+      surprises.push(surprise_pct);
+      if (q.eps_actual > yearAgo.eps_actual) {
+        if (i === beat_streak) beat_streak++;
+      } else {
+        break;
+      }
+    }
+  }
+
+  const avg_surprise_pct = surprises.length > 0
+    ? +(surprises.reduce((a, b) => a + b, 0) / surprises.length).toFixed(1)
+    : null;
+
+  return {
+    success: true,
+    symbol: ticker,
+    earnings_date: upcoming?.earnings_date ?? null,
+    eps_estimate: upcoming?.eps_estimate ?? null,
+    call_time: upcoming?.call_time ?? null,
+    eps_actual_last: quarters[0]?.eps_actual ?? null,
+    beat_streak,
+    avg_surprise_pct,
+    note: 'beat_streak = consecutive quarters of YoY EPS growth (proxy, uses EDGAR actuals)',
+  };
+}
+
+// ─── Pre-Earnings Drift (10-day price momentum) ───────────────────────────────
+
+export async function getPreEarningsDrift({ symbol } = {}) {
+  const ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
+
+  const data = await fetchJSON(
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=10d`,
+    { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' }
+  );
+
+  const closes = data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v => v != null);
+  if (!closes || closes.length < 6) {
+    return { success: false, symbol: ticker, error: 'Insufficient price history' };
+  }
+
+  // closes[0] = oldest, closes[last] = most recent
+  // 5-day return: compare most recent close to close 5 bars ago
+  const recent = closes[closes.length - 1];
+  const fiveDaysAgo = closes[closes.length - 6] ?? closes[0];
+  const drift_5d_pct = +((recent / fiveDaysAgo - 1) * 100).toFixed(2);
+  const drift_direction = Math.abs(drift_5d_pct) < 1 ? 'flat' : drift_5d_pct > 0 ? 'up' : 'down';
+
+  return {
+    success: true,
+    symbol: ticker,
+    drift_5d_pct,
+    drift_direction,
+    current_price: recent,
+  };
+}
+
+// ─── Insider Buying (Form 4 count as proxy) ───────────────────────────────────
+
+export async function getInsiderBuying({ symbol } = {}) {
+  const ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
+  const cik = await getCIK(ticker);
+
+  const data = await fetchJSON(`${EDGAR_DATA}/submissions/CIK${cik}.json`, EDGAR_HEADERS);
+  const forms = data.filings?.recent?.form || [];
+  const dates = data.filings?.recent?.filingDate || [];
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 60);
+
+  let insider_buys_60d = 0;
+  for (let i = 0; i < forms.length; i++) {
+    if (forms[i] === '4') {
+      if (new Date(dates[i]) >= cutoff) insider_buys_60d++;
+      else if (insider_buys_60d > 0) break; // dates are descending — stop once past 60-day window
+    }
+  }
+
+  return {
+    success: true,
+    symbol: ticker,
+    insider_buys_60d,
+    signal: insider_buys_60d >= 2 ? 'strong' : 'none',
+    note: 'Count of Form 4 (insider transaction) filings in last 60 days — proxy for insider activity',
   };
 }
 
