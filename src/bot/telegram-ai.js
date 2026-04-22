@@ -38,6 +38,7 @@ import {
   getSectorPerformance,
   getTrendingStocks,
   getDayTradingDashboard,
+  getMarketMovers,
 } from '../core/sentiment.js';
 import {
   getAccount,
@@ -272,6 +273,16 @@ const TOOLS = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_market_movers',
+    description: 'Get today\'s top gainers, most-active, and unusual-volume stocks from the entire market (not just watchlist). Returns stocks with highest % moves and 1.5×+ relative volume. Use this as the primary candidate source for auto-scans — follow the market, not a fixed list.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+  {
     name: 'get_portfolio',
     description: 'Get current paper trading portfolio: account balance, buying power, and all open positions with unrealized P&L.',
     input_schema: { type: 'object', properties: {} },
@@ -399,6 +410,8 @@ async function executeTool(name, input) {
         return await getTrendingStocks({ limit: input.limit || 15 });
       case 'get_day_trading_dashboard':
         return await getDayTradingDashboard();
+      case 'get_market_movers':
+        return await getMarketMovers({ limit: input.limit || 20 });
       case 'get_portfolio': {
         const [account, positions, orders] = await Promise.all([
           getAccount(), getPositions(), getOrders()
@@ -459,7 +472,7 @@ Format your responses for Telegram (keep it clear, use emojis for visual hierarc
 Always use the available tools to fetch REAL current data (news, earnings, financials) before making recommendations.
 Never make up financial data — always fetch it.
 
-The user's current watchlist includes: ${DEFAULT_WATCHLIST.join(', ')}
+The user has a reference watchlist: ${DEFAULT_WATCHLIST.join(', ')} — but auto-scans should follow the market (use get_market_movers), not be limited to this list. Any liquid US stock is fair game.
 Today's date: ${new Date().toISOString().split('T')[0]}
 
 DAILY TARGET: Goal is $100–200 profit per day.
@@ -971,16 +984,29 @@ cron.schedule('0 14-19 * * 1-5', async () => {
 2. Call get_market_status → if market is closed, STOP silently
 3. Call get_portfolio → if already 2+ open positions, STOP silently
 4. Call get_market_sentiment → note VIX. If VIX > 30, STOP silently
-5. Call get_sector_performance → identify 1-2 leading sectors
-6. Call scan_watchlist for the default watchlist (14-day window)
-7. Pick the top 2-3 candidates: prioritise earnings catalyst + leading sector + high ATR (volatile stocks make bigger moves)
-8. For EACH candidate: call get_conviction_score (pass current positions for sector check) — skip if score < 70
-9. Take the SINGLE highest-scoring candidate with score >= 70
-10. CALL propose_trade for that symbol. Do NOT pass a dollars amount — let ATR auto-size it.
-11. If the trade executes, send: symbol, estimated_profit, estimated_risk, risk_reward, stop, target, and today's P&L progress
-12. If no candidate scores >= 70, send nothing at all.
 
-IMPORTANT: 1 great trade beats 3 average trades. Quality > quantity. Target $150 profit per trade.`;
+5. BUILD CANDIDATE LIST (do these in parallel):
+   a. Call get_market_movers → top gainers and high-volume stocks from the ENTIRE market today
+   b. Call get_earnings_calendar for today's date → stocks reporting today (pre/post market)
+   c. Call get_sector_performance → identify the 1-2 strongest sectors right now
+
+6. FILTER candidates to 4-6 best:
+   - Prefer stocks in the leading sectors from step 5c
+   - Prefer stocks with a catalyst (earnings today, news, unusual volume rel_volume > 2×)
+   - Prefer price $10–$500 (liquid, not penny stocks)
+   - Skip ETFs, indices, anything with ^ or = in symbol
+
+7. For EACH filtered candidate: call get_conviction_score (pass portfolio positions) — skip if score < 70
+
+8. Take the SINGLE highest-scoring candidate with score >= 70
+
+9. CALL propose_trade for that symbol. Do NOT pass a dollars amount — ATR auto-sizes it.
+
+10. Send result: "📈 TRADE EXECUTED: [SYMBOL] | Est. profit: +$[X] | Risk: -$[Y] | R/R: [Z]:1 | Today's P&L: $[pnl] / $150 target"
+
+11. If no candidate scores >= 70, send nothing.
+
+IMPORTANT: Follow the market — go where volume and momentum are. Do not limit to any fixed list.`;
     _currentChatId = CHAT_ID;
     await handleAIMessage(CHAT_ID, prompt);
   } catch (err) {
