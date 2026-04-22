@@ -9,7 +9,22 @@ import { getRelativeStrength, getMarketSentiment, SECTOR_MAP } from './sentiment
 import { isBadTradingTime } from './trader.js';
 import { getChartTechnicals, getPriceLevels } from './tradingview-bridge.js';
 
-export async function getConvictionScore({ symbol } = {}) {
+export function checkSectorConcentration({ symbol, positions = [] }) {
+  const ticker = symbol.toUpperCase();
+  const targetSector = SECTOR_MAP[ticker];
+  if (!targetSector) return { concentrated: false };
+
+  for (const pos of positions) {
+    const posSym = (pos.symbol || '').toUpperCase();
+    if (posSym === ticker) continue; // same symbol, not a concentration issue
+    if (SECTOR_MAP[posSym] === targetSector) {
+      return { concentrated: true, existing_symbol: posSym, sector: targetSector };
+    }
+  }
+  return { concentrated: false };
+}
+
+export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
   const sectorEtf = SECTOR_MAP[ticker] || 'SPY';
 
@@ -47,6 +62,7 @@ export async function getConvictionScore({ symbol } = {}) {
   const vix               = sentiment?.vix?.value        ?? null;
   const badTime           = isBadTradingTime();
   const tvAvailable       = tech?.available === true;
+  const sectorCheck       = checkSectorConcentration({ symbol: ticker, positions });
 
   // Score each factor
   const breakdown = {
@@ -61,6 +77,7 @@ export async function getConvictionScore({ symbol } = {}) {
     rs_weak:              rs_signal === 'weak'          ? -10 : 0,
     high_vix:             vix != null && vix > 25       ? -20 : 0,
     bad_trading_time:     badTime.bad                   ? -10 : 0,
+    sector_concentrated:  sectorCheck.concentrated      ? -25 : 0,
   };
 
   // TradingView technical factors (only applied when chart data is live)
@@ -131,6 +148,7 @@ export async function getConvictionScore({ symbol } = {}) {
       ema20:           tech?.ema20           ?? null,
       ema50:           tech?.ema50           ?? null,
       current_price:   tech?.current_price   ?? null,
+      sector_concentration: sectorCheck,
     },
   };
 }
