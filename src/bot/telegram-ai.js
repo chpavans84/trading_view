@@ -1008,7 +1008,11 @@ cron.schedule('*/10 * * * 1-5', async () => {
 
 10. Send result: "📈 TRADE EXECUTED: [SYMBOL] | Est. profit: +$[X] | Risk: -$[Y] | R/R: [Z]:1 | Today's P&L: $[pnl] / $150 target"
 
-11. If no candidate scores >= 50, send nothing.
+11. ALWAYS send one message every scan — either a trade alert or a heartbeat:
+    - Trade → "📈 TRADE: [SYMBOL] | +$[profit] target | -$[risk] stop | R/R [x]:1 | P&L today: $[pnl]/$150"
+    - No trade → "🔍 [TIME ET / SGT] | Top mover: [SYMBOL] [+X%] | No trade — [reason: best score [X]/50, or positions full, or VIX [x], or daily target hit]"
+
+Never be silent. The user needs to see the scanner is alive every 10 minutes.
 
 IMPORTANT: Follow the market — go where volume and momentum are. Do not limit to any fixed list.`;
     _currentChatId = CHAT_ID;
