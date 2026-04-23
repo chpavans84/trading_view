@@ -8,6 +8,7 @@ import { getPreEarningsDrift, getEarnings, getSymbolNews, getInsiderBuying, getE
 import { getRelativeStrength, getMarketSentiment, SECTOR_MAP } from './sentiment.js';
 import { isBadTradingTime } from './trader.js';
 import { getChartTechnicals, getPriceLevels } from './tradingview-bridge.js';
+import { recordConvictionScore } from './db.js';
 
 export function checkSectorConcentration({ symbol, positions = [] }) {
   const ticker = symbol.toUpperCase();
@@ -130,6 +131,29 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     score >= 50 ? 'buy' :
     score >= 35 ? 'skip' : 'avoid';
 
+  const signals = {
+    beat_streak,
+    earnings_quality,
+    guidance_signal,
+    drift_5d_pct:    drift?.drift_5d_pct    ?? null,
+    drift_direction,
+    rs_score:        rs?.rs_score           ?? null,
+    rs_signal,
+    insider_buys_60d,
+    vix,
+    bad_trading_time: badTime.bad,
+    bad_time_reason:  badTime.reason,
+    rsi:             tech?.rsi             ?? null,
+    macd_hist:       tech?.macd_hist       ?? null,
+    ema20:           tech?.ema20           ?? null,
+    ema50:           tech?.ema50           ?? null,
+    current_price:   tech?.current_price   ?? null,
+    sector_concentration: sectorCheck,
+  };
+
+  // Persist to DB (non-blocking)
+  recordConvictionScore({ symbol: ticker, score, grade, breakdown, signals, tv_available: tvAvailable, technical_summary });
+
   return {
     success: true,
     symbol: ticker,
@@ -139,24 +163,6 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     tv_available: tvAvailable,
     technical_summary,
     breakdown,
-    signals: {
-      beat_streak,
-      earnings_quality,
-      guidance_signal,
-      drift_5d_pct:    drift?.drift_5d_pct    ?? null,
-      drift_direction,
-      rs_score:        rs?.rs_score           ?? null,
-      rs_signal,
-      insider_buys_60d,
-      vix,
-      bad_trading_time: badTime.bad,
-      bad_time_reason:  badTime.reason,
-      rsi:             tech?.rsi             ?? null,
-      macd_hist:       tech?.macd_hist       ?? null,
-      ema20:           tech?.ema20           ?? null,
-      ema50:           tech?.ema50           ?? null,
-      current_price:   tech?.current_price   ?? null,
-      sector_concentration: sectorCheck,
-    },
+    signals,
   };
 }

@@ -28,6 +28,11 @@ import {
 } from '../core/news.js';
 import { getConvictionScore, checkSectorConcentration } from '../core/scoring.js';
 import {
+  initDb, isDbAvailable,
+  loadConversationHistory, appendConversationMessage, clearConversationHistory,
+  upsertUsageStats, recordTrade, upsertDailyPnl,
+} from '../core/db.js';
+import {
   isTradingViewAvailable,
   getChartTechnicals,
   getPriceLevels,
@@ -75,42 +80,59 @@ const DEFAULT_WATCHLIST = [
 const bot = new TelegramBot(TOKEN, { polling: true });
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 
-// Per-chat conversation history — persisted to disk, survives restarts
+// Per-chat conversation history — DB primary, JSON file fallback
 const chatHistory = new Map();
 
-function loadHistory() {
+function loadHistoryFromFile() {
   try {
     if (existsSync(HISTORY_FILE)) {
       const raw = JSON.parse(readFileSync(HISTORY_FILE, 'utf8'));
       for (const [chatId, messages] of Object.entries(raw)) {
         chatHistory.set(Number(chatId), messages);
       }
-      console.log(`📖 Loaded history for ${chatHistory.size} chat(s)`);
+      console.log(`📖 Loaded history for ${chatHistory.size} chat(s) from file`);
     }
   } catch { /* corrupted file — start fresh */ }
 }
 
 let _saveTimer = null;
-function saveHistory() {
+function saveHistoryToFile() {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     try {
       const obj = {};
       for (const [chatId, messages] of chatHistory) obj[chatId] = messages;
       writeFileSync(HISTORY_FILE, JSON.stringify(obj), 'utf8');
-    } catch (e) { console.error('Failed to save history:', e.message); }
+    } catch (e) { console.error('Failed to save history file:', e.message); }
   }, 2000);
 }
 
 function pushHistory(chatId, message) {
+  // Always update in-memory cache
   if (!chatHistory.has(chatId)) chatHistory.set(chatId, []);
   const msgs = chatHistory.get(chatId);
   msgs.push(message);
   if (msgs.length > MAX_HISTORY_PER_CHAT) msgs.splice(0, msgs.length - MAX_HISTORY_PER_CHAT);
-  saveHistory();
+  // Persist: DB if available, otherwise JSON file
+  if (isDbAvailable()) {
+    appendConversationMessage(chatId, message.role, message.content);
+  } else {
+    saveHistoryToFile();
+  }
 }
 
-loadHistory();
+async function loadHistoryForChat(chatId) {
+  if (isDbAvailable()) {
+    const rows = await loadConversationHistory(chatId);
+    if (rows) {
+      chatHistory.set(chatId, rows);
+      return;
+    }
+  }
+  // Fallback: already loaded from file at startup
+}
+
+loadHistoryFromFile();
 
 // ─── Usage Tracker (persisted to disk) ───────────────────────────────────────
 
@@ -154,12 +176,20 @@ const stats = { startTime: new Date(), ...loadStats() };
 function trackUsage(response) {
   const u = response.usage;
   if (!u) return;
-  stats.inputTokens        += u.input_tokens  || 0;
-  stats.outputTokens       += u.output_tokens || 0;
-  stats.dailyInputTokens   += u.input_tokens  || 0;
-  stats.dailyOutputTokens  += u.output_tokens || 0;
-  stats.totalToolCalls     += (response.content || []).filter(b => b.type === 'tool_use').length;
+  const inputTok  = u.input_tokens  || 0;
+  const outputTok = u.output_tokens || 0;
+  const toolCalls = (response.content || []).filter(b => b.type === 'tool_use').length;
+  const costUsd   = calcCost(inputTok, outputTok);
+
+  stats.inputTokens        += inputTok;
+  stats.outputTokens       += outputTok;
+  stats.dailyInputTokens   += inputTok;
+  stats.dailyOutputTokens  += outputTok;
+  stats.totalToolCalls     += toolCalls;
   saveStats();
+
+  // Mirror to DB (non-blocking)
+  upsertUsageStats({ inputTokens: inputTok, outputTokens: outputTok, toolCalls, costUsd });
 }
 
 function resetDailyIfNeeded() {
@@ -549,13 +579,32 @@ async function handleProposeTrade(input, chatId) {
       note:            input.reasoning,
     });
 
+    // Record trade to DB (non-blocking)
+    recordTrade({
+      order_id:            result.order_id,
+      symbol:              result.symbol,
+      side:                result.side,
+      qty:                 result.qty,
+      entry_price:         result.estimated_price,
+      stop_loss:           result.stop_loss,
+      take_profit:         result.take_profit,
+      dollars_invested:    result.dollars_invested,
+      stop_loss_pct:       result.stop_loss_pct,
+      take_profit_pct:     result.take_profit_pct,
+      atr_pct:             result.atr_pct,
+      conviction_score:    input.conviction_score    ?? null,
+      conviction_grade:    input.conviction_grade    ?? null,
+      conviction_breakdown: input.conviction_breakdown ?? null,
+    });
+
     await send(chatId,
       `✅ *Trade Executed Automatically*\n` +
       `🕐 ${nowBothTimezones()}\n\n` +
       `${input.side === 'buy' ? '📈 BOUGHT' : '📉 SOLD'} *${result.symbol}* — ${result.qty} shares\n` +
       `💵 $${result.dollars_invested} @ ~$${result.estimated_price}\n` +
-      `⛔ Stop loss: $${result.stop_loss} (-${stopPct}%)\n` +
-      `🎯 Take profit: $${result.take_profit} (+${targetPct}%)\n\n` +
+      `⛔ Stop loss: $${result.stop_loss} (-${result.stop_loss_pct}%)\n` +
+      `🎯 Take profit: $${result.take_profit} (+${result.take_profit_pct}%)\n` +
+      `📊 Est. profit: +$${result.estimated_profit} | Risk: -$${result.estimated_risk} | R/R: ${result.risk_reward}:1\n\n` +
       `💡 *Reason:* ${input.reasoning}\n\n` +
       `🆔 Order: \`${result.order_id.slice(0, 8)}...\`\n` +
       `_Paper trading — no real money used_\n\n` +
@@ -572,6 +621,8 @@ async function handleProposeTrade(input, chatId) {
 // ─── AI Chat Handler ──────────────────────────────────────────────────────────
 
 async function handleAIMessage(chatId, userMessage) {
+  // Load from DB on first message if not already in memory
+  if (!chatHistory.has(chatId)) await loadHistoryForChat(chatId);
   pushHistory(chatId, { role: 'user', content: userMessage });
   const history = chatHistory.get(chatId);
 
@@ -672,7 +723,11 @@ _Powered by Claude AI + SEC EDGAR + Nasdaq_
 
 bot.onText(/\/clear/, async (msg) => {
   chatHistory.delete(msg.chat.id);
-  saveHistory();
+  if (isDbAvailable()) {
+    await clearConversationHistory(msg.chat.id);
+  } else {
+    saveHistoryToFile();
+  }
   await send(msg.chat.id, '🧹 Conversation cleared. Fresh start!');
 });
 
@@ -1025,6 +1080,9 @@ IMPORTANT: Follow the market — go where volume and momentum are. Do not limit 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 bot.on('polling_error', (err) => console.error('Polling error:', err.message));
+
+// Initialise DB (non-blocking — bot starts even if DB is down)
+initDb().catch(err => console.warn('DB init error:', err.message));
 
 console.log('🤖 AI Trading Analyst Bot started');
 console.log('💬 Chat naturally — ask anything about markets, geopolitics, earnings');
