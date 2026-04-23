@@ -464,9 +464,9 @@ TRADING ENGINE (Alpaca paper trading — fake money for now):
 SECTOR RULE: Never open 2 positions in the same sector (e.g., no NVDA + AMD simultaneously — both are XLK). The conviction score already penalises this (-25 pts) but verify via get_portfolio before executing. Pass the positions array from get_portfolio into get_conviction_score.
 
 CONVICTION REQUIREMENT: Before calling propose_trade, ALWAYS call get_conviction_score first.
-- Score >= 60 (grade B or higher): proceed with trade at $200
-- Score >= 80 (grade A): increase position size to $400
-- Score < 60: skip the trade and explain which factors were missing
+- Score >= 50 (grade B or higher): proceed with trade at $200
+- Score >= 75 (grade A): increase position size to $400
+- Score < 50: skip the trade and explain which factors were missing
 
 TECHNICAL CONFIRMATION (when TradingView is running):
 Before propose_trade, call get_chart_technicals:
@@ -927,11 +927,11 @@ cron.schedule('0 14-19 * * 1-5', async () => {
 4. Call get_sector_performance → identify 1-2 leading sectors
 5. Call scan_watchlist for the default watchlist (14-day window)
 6. Pick the top 2-3 candidates from scan results (earnings soon, strong sector)
-7. For EACH candidate: call get_conviction_score — skip if score < 60
-8. Take the candidate with the highest score >= 60
+7. For EACH candidate: call get_conviction_score — skip if score < 50
+8. Take the candidate with the highest score >= 50
 9. CALL propose_trade for that symbol. Do NOT write a recommendation in text first — just execute.
-   Use $400 if score >= 80, otherwise $200.
-10. If no candidate scores >= 60, send nothing at all.
+   Use $400 if score >= 75, otherwise $200.
+10. If no candidate scores >= 50, send nothing at all.
 
 IMPORTANT: Your job is to EXECUTE, not recommend. If you write a trade idea without calling propose_trade, you have failed.`;
     _currentChatId = CHAT_ID;

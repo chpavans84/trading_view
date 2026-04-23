@@ -66,18 +66,26 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
 
   // Score each factor
   const breakdown = {
-    beat_streak_3plus:    beat_streak >= 3             ?  25 : 0,
-    earnings_quality:     earnings_quality === 'strong' ?  20 : 0,
+    // Graduated beat streak — partial credit for 1-2 quarters
+    beat_streak:          beat_streak >= 3 ? 25 : beat_streak === 2 ? 15 : beat_streak === 1 ? 8 : 0,
+    // Earnings quality
+    earnings_quality:     earnings_quality === 'strong' ? 20 : earnings_quality === 'moderate' ? 8 : 0,
+    // Guidance
     guidance_raised:      guidance_signal === 'raised'  ?  15 : 0,
-    pre_earnings_drift:   drift_direction === 'up'      ?  15 : 0,
-    relative_strength:    rs_signal === 'strong'        ?  15 : 0,
-    insider_buying:       insider_buys_60d >= 2         ?  10 : 0,
     guidance_lowered:     guidance_signal === 'lowered' ? -15 : 0,
-    drift_down:           drift_direction === 'down'    ? -10 : 0,
-    rs_weak:              rs_signal === 'weak'          ? -10 : 0,
-    high_vix:             vix != null && vix > 25       ? -20 : 0,
-    bad_trading_time:     badTime.bad                   ? -10 : 0,
+    // Momentum signals
+    pre_earnings_drift:   drift_direction === 'up'      ?  15 : drift_direction === 'down' ? -10 : 0,
+    relative_strength:    rs_signal === 'strong'        ?  15 : rs_signal === 'weak'       ? -10 : 0,
+    // Insider activity — 1 buy counts for something
+    insider_buying:       insider_buys_60d >= 2 ? 10 : insider_buys_60d === 1 ? 5 : 0,
+    // VIX — graduated, only extreme fear is a hard penalty
+    high_vix:             vix == null ? 0 : vix > 35 ? -20 : vix > 28 ? -10 : vix > 25 ? -5 : 0,
+    // Time of day — only penalise true lunch chop (12:30–1:30 PM ET)
+    bad_trading_time:     badTime.bad                   ?  -5 : 0,
+    // Sector concentration remains a hard penalty
     sector_concentrated:  sectorCheck.concentrated      ? -25 : 0,
+    // Base score — any stock worth scanning starts with credit
+    base:                 30,
   };
 
   // TradingView technical factors (only applied when chart data is live)
@@ -116,11 +124,11 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
 
   const raw   = Object.values(breakdown).reduce((a, b) => a + b, 0);
   const score = Math.min(100, Math.max(0, raw));
-  const grade = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'F';
+  const grade = score >= 75 ? 'A' : score >= 50 ? 'B' : score >= 35 ? 'C' : 'F';
   const recommendation =
-    score >= 70 ? 'strong_buy' :
+    score >= 75 ? 'strong_buy' :
     score >= 50 ? 'buy' :
-    score >= 30 ? 'skip' : 'avoid';
+    score >= 35 ? 'skip' : 'avoid';
 
   return {
     success: true,
