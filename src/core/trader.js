@@ -71,6 +71,40 @@ export async function cancelAllOrders() {
   return { cancelled: 'all' };
 }
 
+// ─── Daily P&L Targets ───────────────────────────────────────────────────────
+
+export const DAILY_PROFIT_TARGET = 150;  // stop trading when we hit $150 profit
+export const DAILY_LOSS_LIMIT    = 200;  // stop trading when we lose $200
+
+export async function getDailyPnL() {
+  try {
+    const r = await fetch(
+      `${BASE_URL}/v2/account/portfolio/history?period=1D&timeframe=5Min&intraday_reporting=market_hours`,
+      { headers: HEADERS }
+    );
+    if (!r.ok) return { pnl: 0, pnl_pct: 0, available: false };
+    const d = await r.json();
+
+    const pnlArr    = (d.profit_loss     || []).filter(v => v != null);
+    const pnlPctArr = (d.profit_loss_pct || []).filter(v => v != null);
+    const pnl       = pnlArr.length     > 0 ? pnlArr[pnlArr.length - 1]         : 0;
+    const pnl_pct   = pnlPctArr.length  > 0 ? pnlPctArr[pnlPctArr.length - 1] * 100 : 0;
+
+    return {
+      pnl:                  +pnl.toFixed(2),
+      pnl_pct:              +pnl_pct.toFixed(3),
+      available:            true,
+      daily_target:         DAILY_PROFIT_TARGET,
+      daily_loss_limit:     -DAILY_LOSS_LIMIT,
+      target_reached:       pnl >= DAILY_PROFIT_TARGET,
+      loss_limit_reached:   pnl <= -DAILY_LOSS_LIMIT,
+      remaining_to_target:  +Math.max(0, DAILY_PROFIT_TARGET - pnl).toFixed(2),
+    };
+  } catch (e) {
+    return { pnl: 0, pnl_pct: 0, available: false, error: e.message };
+  }
+}
+
 // ─── Time-of-Day Filter ───────────────────────────────────────────────────────
 
 export function isBadTradingTime() {
@@ -78,10 +112,14 @@ export function isBadTradingTime() {
   const et = new Date(etStr);
   const t  = et.getHours() * 60 + et.getMinutes();
 
-  if (t >= 9 * 60 + 30 && t < 10 * 60)
-    return { bad: true,  reason: 'Opening volatility window (9:30–10:00 AM ET) — wide spreads and reversals' };
-  if (t >= 12 * 60 && t < 14 * 60)
-    return { bad: true,  reason: 'Lunch chop (12:00–2:00 PM ET) — low volume, choppy price action' };
+  if (t >= 9 * 60 + 30 && t < 9 * 60 + 45)
+    return { bad: true,  reason: 'Opening gap chaos (9:30–9:45 AM ET) — extreme spreads and reversals' };
+  if (t >= 11 * 60 + 30 && t < 14 * 60)
+    return { bad: true,  reason: 'Midday chop (11:30 AM–2:00 PM ET) — low volume, no clean trends' };
+  if (t >= 15 * 60 + 30)
+    return { bad: true,  reason: 'Closing volatility (3:30 PM ET+) — erratic end-of-day moves' };
+  if (t < 9 * 60 + 30 || t >= 16 * 60)
+    return { bad: true,  reason: 'Market closed' };
   return { bad: false, reason: null };
 }
 
@@ -128,10 +166,15 @@ export async function getLatestPrice(symbol) {
 
 // ─── Place Trade (bracket order: entry + stop loss + take profit) ─────────────
 
+const MIN_ATR_PCT          = 1.0;   // skip stocks that don't move enough intraday
+const TARGET_PROFIT_DOLLARS = 150;  // size position to earn this per winning trade
+const MIN_POSITION_DOLLARS  = 1500;
+const MAX_POSITION_DOLLARS  = 5000;
+
 export async function placeTrade({
   symbol,
   side = 'buy',
-  dollars,
+  dollars = null,           // explicit override — if null, auto-sized from ATR
   stop_loss_pct   = 3,
   take_profit_pct = 7,
   use_atr = true,
@@ -148,11 +191,23 @@ export async function placeTrade({
     try {
       atr_pct = await fetchATR(symbol);
       if (atr_pct) {
+        if (atr_pct < MIN_ATR_PCT)
+          throw new Error(`${symbol} ATR ${atr_pct}% is below minimum ${MIN_ATR_PCT}% — stock doesn't move enough for $${TARGET_PROFIT_DOLLARS} intraday target`);
         stop_loss_pct   = Math.min(8,  Math.max(1.5, +(1.5 * atr_pct).toFixed(1)));
         take_profit_pct = Math.min(20, Math.max(3,   +(3.0 * atr_pct).toFixed(1)));
+        // Auto-size position to target $150 profit if take-profit is hit
+        if (dollars == null) {
+          const auto = Math.round(TARGET_PROFIT_DOLLARS / (take_profit_pct / 100));
+          dollars = Math.min(MAX_POSITION_DOLLARS, Math.max(MIN_POSITION_DOLLARS, auto));
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      if (e.message.includes('ATR') && e.message.includes('minimum')) throw e;
+    }
   }
+
+  // Fallback if ATR unavailable and no override
+  if (dollars == null) dollars = MIN_POSITION_DOLLARS;
 
   // Calculate quantity (whole shares only for simplicity)
   const qty = Math.floor(dollars / price);
@@ -179,18 +234,25 @@ export async function placeTrade({
     client_order_id: `bot_${symbol}_${Date.now()}`,
   });
 
+  const dollars_invested  = +(qty * price).toFixed(2);
+  const estimated_profit  = +(dollars_invested * take_profit_pct / 100).toFixed(2);
+  const estimated_risk    = +(dollars_invested * stop_loss_pct   / 100).toFixed(2);
+
   return {
     order_id:        order.id,
     symbol,
     side,
     qty,
     estimated_price:  price,
-    dollars_invested: +(qty * price).toFixed(2),
+    dollars_invested,
     stop_loss:        stopPrice,
     take_profit:      targetPrice,
     stop_loss_pct,
     take_profit_pct,
     atr_pct,
+    estimated_profit,
+    estimated_risk,
+    risk_reward:      +(estimated_profit / estimated_risk).toFixed(1),
     note,
     status: order.status,
   };
