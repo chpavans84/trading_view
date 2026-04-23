@@ -27,10 +27,17 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "bcrypt": "^6.0.0",
     "chrome-remote-interface": "^0.33.2",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "helmet": "^8.1.0",
     "moomoo-api": "^10.3.6308",
     "node-cron": "^4.2.1",
     "node-telegram-bot-api": "^0.67.0",
+    "pg": "^8.20.0",
     "ws": "^8.20.0"
   }
 }
