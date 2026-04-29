@@ -109,6 +109,8 @@ Default watchlist: ${DEFAULT_WATCHLIST.join(', ')}
 6. Markets are probabilistic — use "likely", "suggests", "could" — never present a trade as certain.
 
 ━━━ PROACTIVE SCAN WORKFLOW ━━━
+The scanner evaluates a dynamic universe of up to 120 stocks every scan — day gainers, most active by volume, trending, and day losers pulled live from Yahoo Finance every 15 minutes. Any liquid US stock that is moving today will appear automatically. There is no fixed preset list — BE, FSLR, HOOD, or any active mover will be found if it qualifies.
+
 When user says "find a trade", "scan", "what's good?", "should I buy anything?", follow this exact sequence:
 1. get_market_status          → stop here if market is CLOSED
 2. get_market_regime          → stop here if regime is "crisis"

@@ -367,10 +367,10 @@ export async function getRelativeStrength({ symbol, sector_etf } = {}) {
   };
 }
 
-// ─── Market Movers (broad universe ranked by today's % move) ─────────────────
+// ─── Market Movers (dynamic universe ranked by today's % move) ───────────────
 
-// ~100 liquid US stocks across all sectors — updated periodically
-const BROAD_UNIVERSE = [
+// Fallback list used only if all Yahoo Finance dynamic sources fail
+const FALLBACK_UNIVERSE = [
   // Mega-cap tech
   'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA','AVGO',
   // Semiconductors
@@ -380,20 +380,103 @@ const BROAD_UNIVERSE = [
   // Financials
   'JPM','GS','MS','BAC','V','MA','C','BX','KKR',
   // Healthcare / Biotech
-  'UNH','LLY','ABBV','MRK','PFE','MRNA','BNTX','AMGN','GILD',
+  'UNH','LLY','ABBV','MRK','PFE','MRNA','BNTX','AMGN','GILD','SRPT','IONS','NVAX',
   // Consumer
   'COST','WMT','HD','TGT','NKE','SBUX','MCD','NFLX',
   // Energy
   'XOM','CVX','COP','SLB','OXY',
   // Industrials / Defence
   'RTX','LMT','NOC','GD','CAT','DE','BA',
+  // Clean Energy (high catalyst potential)
+  'BE','FSLR','ENPH','NEE','PLUG','RUN','SEDG','ARRY',
   // EV / Growth (high ATR)
   'RIVN','NIO','LCID','XPEV','LI',
   // China ADRs (volatile, catalyst-driven)
   'BABA','JD','PDD','BIDU',
   // Other high-ATR names
   'COIN','HOOD','RBLX','UBER','LYFT','DASH','SQ','PYPL','AFRM',
+  // REITs / Macro sensitive
+  'AMT','PLD','EQIX',
+  // Recent high-growth / IPO names
+  'SOFI','UPST','RKLB','ASTS',
 ];
+
+// Core names always included even on quiet days when Yahoo returns few results
+const CORE_ALWAYS_SCAN = [
+  'AAPL','MSFT','NVDA','GOOGL','META','AMZN','TSLA',
+  'AMD','JPM','V','MA','XOM','UNH','NFLX','AVGO',
+  'PLTR','COIN','CRWD','PANW','SOFI',
+];
+
+// 15-minute cache for the dynamic universe — shared across all scans in the window
+let _universeCache = { symbols: [], ts: 0, source: 'fallback' };
+const UNIVERSE_TTL = 15 * 60 * 1000;
+
+export function getUniverseInfo() {
+  return {
+    size:   _universeCache.symbols.length,
+    source: _universeCache.source,
+    age_ms: Date.now() - _universeCache.ts,
+  };
+}
+
+async function fetchDynamicUniverse() {
+  if (_universeCache.symbols.length > 0 && Date.now() - _universeCache.ts < UNIVERSE_TTL) {
+    return _universeCache.symbols;
+  }
+
+  // Valid US stock symbol: 1–5 uppercase letters only
+  const isValidSym = s => typeof s === 'string' && /^[A-Z]{1,5}$/.test(s);
+
+  // Screener results include price/volume — filter both here
+  const extractScreener = data => {
+    try {
+      return (data?.finance?.result?.[0]?.quotes ?? [])
+        .filter(q =>
+          isValidSym(q.symbol) &&
+          (q.regularMarketPrice ?? 0) >= 5 &&
+          (q.regularMarketVolume ?? 0) >= 500_000
+        )
+        .map(q => q.symbol);
+    } catch { return []; }
+  };
+
+  // Trending endpoint returns symbols only, no price/volume
+  const extractTrending = data => {
+    try {
+      return (data?.finance?.result?.[0]?.quotes ?? [])
+        .map(q => q.symbol)
+        .filter(isValidSym);
+    } catch { return []; }
+  };
+
+  try {
+    const [trendRes, gainRes, activeRes, loserRes] = await Promise.allSettled([
+      fetch(`${YF_BASE}/v1/finance/trending/US?count=50`, { headers: HEADERS }).then(r => r.ok ? r.json() : Promise.reject()),
+      fetch(`${YF_BASE}/v1/finance/screener/predefined/saved?scrIds=day_gainers&count=50`, { headers: HEADERS }).then(r => r.ok ? r.json() : Promise.reject()),
+      fetch(`${YF_BASE}/v1/finance/screener/predefined/saved?scrIds=most_actives&count=50`, { headers: HEADERS }).then(r => r.ok ? r.json() : Promise.reject()),
+      fetch(`${YF_BASE}/v1/finance/screener/predefined/saved?scrIds=day_losers&count=25`, { headers: HEADERS }).then(r => r.ok ? r.json() : Promise.reject()),
+    ]);
+
+    const anyOk = [trendRes, gainRes, activeRes, loserRes].some(r => r.status === 'fulfilled');
+    if (!anyOk) throw new Error('all sources returned errors');
+
+    const syms = new Set(CORE_ALWAYS_SCAN);
+    if (trendRes.status  === 'fulfilled') extractTrending(trendRes.value).forEach(s => syms.add(s));
+    if (gainRes.status   === 'fulfilled') extractScreener(gainRes.value).forEach(s => syms.add(s));
+    if (activeRes.status === 'fulfilled') extractScreener(activeRes.value).forEach(s => syms.add(s));
+    if (loserRes.status  === 'fulfilled') extractScreener(loserRes.value).forEach(s => syms.add(s));
+
+    const result = [...syms].slice(0, 120);
+    _universeCache = { symbols: result, ts: Date.now(), source: 'dynamic' };
+    console.log(`[universe] Dynamic: ${result.length} symbols (trending+gainers+actives+losers)`);
+    return result;
+  } catch (err) {
+    console.warn(`[universe] Dynamic fetch failed (${err.message}) — using fallback`);
+    // Don't cache the fallback so the next call retries Yahoo Finance
+    return [...FALLBACK_UNIVERSE];
+  }
+}
 
 // Fetch quotes via Moomoo (real-time) with Yahoo Finance fallback
 async function fetchBatchQuotes(symbols, batchSize = 40, batchDelayMs = 100) {
@@ -429,7 +512,8 @@ export async function getMarketMovers({ limit = 25 } = {}) {
   const cached = cacheGet('movers', 10 * 60 * 1000);
   if (cached) return { ...cached, cached: true };
 
-  const quotes = await fetchBatchQuotes(BROAD_UNIVERSE);
+  const universe = await fetchDynamicUniverse();
+  const quotes   = await fetchBatchQuotes(universe);
 
   // Filter: price $5–$1000, need a % change value
   const valid = quotes.filter(q =>
@@ -451,14 +535,15 @@ export async function getMarketMovers({ limit = 25 } = {}) {
   const decliners = movers.filter(m => m.chg_pct < 0).slice(0, 5);
 
   const result = {
-    success:       true,
-    timestamp:     new Date().toISOString(),
-    universe_size: BROAD_UNIVERSE.length,
-    count:         movers.length,
+    success:         true,
+    timestamp:       new Date().toISOString(),
+    universe_size:   universe.length,
+    universe_source: _universeCache.source,
+    count:           movers.length,
     movers,
     gainers,
     decliners,
-    note: `Ranked by % move today across ${BROAD_UNIVERSE.length} liquid US stocks`,
+    note: `Ranked by % move today across ${universe.length} dynamically fetched liquid US stocks`,
   };
   cacheSet('movers', result);
   return result;
