@@ -1985,10 +1985,15 @@ app.post('/api/scanner/auto', requireAdmin, (req, res) => {
 // Analyst-initiated messages pushed to all connected chat clients via SSE.
 
 const _pushClients = new Set(); // active SSE res objects
+const _pushQueue   = [];        // rolling buffer for poll-based fallback (max 500 entries)
 
 function pushToChat(message, type = 'autonomous') {
+  const entry = { role: 'assistant', content: message, timestamp: new Date().toISOString(), type };
+  _pushQueue.push(entry);
+  if (_pushQueue.length > 500) _pushQueue.shift();
+
   if (_pushClients.size === 0) return;
-  const payload = JSON.stringify({ role: 'assistant', content: message, timestamp: new Date().toISOString(), type });
+  const payload = JSON.stringify(entry);
   for (const res of _pushClients) {
     try { res.write(`data: ${payload}\n\n`); }
     catch { _pushClients.delete(res); }
@@ -2005,6 +2010,13 @@ app.get('/api/chat/push', requireAuth, (req, res) => {
     try { res.write(': ka\n\n'); } catch { clearInterval(ka); _pushClients.delete(res); }
   }, 25000);
   req.on('close', () => { clearInterval(ka); _pushClients.delete(res); });
+});
+
+// Poll fallback — returns messages from queue newer than ?since=ISO timestamp
+app.get('/api/chat/poll', requireAuth, (req, res) => {
+  const since = req.query.since ? new Date(req.query.since).getTime() : 0;
+  const messages = _pushQueue.filter(m => new Date(m.timestamp).getTime() > since);
+  res.json({ messages });
 });
 
 // ─── Daily Briefing ───────────────────────────────────────────────────────────
@@ -2072,6 +2084,117 @@ app.get('/api/briefing', requireAuth, async (req, res) => {
     briefing = await getDailyBriefing(yesterday);
   }
   res.json({ briefing: briefing ?? null });
+});
+
+// ─── EOD Summary (4:00 PM ET) ────────────────────────────────────────────────
+
+async function runEODSummary() {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const existing = await getDailyBriefing(today, 'eod');
+  if (existing) return existing;
+
+  const [pnl, allTrades, context] = await Promise.allSettled([
+    getDailyPnL(),
+    getTrades({ limit: 100 }),
+    getMarketContext(),
+  ]).then(r => r.map(p => p.status === 'fulfilled' ? p.value : null));
+
+  const todayTrades = (allTrades ?? []).filter(t => {
+    const d = t.opened_at ?? t.closed_at;
+    return d && new Date(d).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === today;
+  });
+  const winners   = todayTrades.filter(t => (t.pnl_usd ?? 0) > 0).length;
+  const totalPnl  = (pnl?.pnl ?? 0).toFixed(2);
+  const tradeList = todayTrades.map(t =>
+    `${t.symbol}: ${(t.pnl_usd ?? 0) >= 0 ? '+' : ''}$${(t.pnl_usd ?? 0).toFixed(2)}`
+  ).join(', ') || 'none';
+
+  try {
+    const msg = await _anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 400,
+      messages: [{ role: 'user', content:
+        `You are an AI trading analyst delivering an end-of-day summary for ${today}.
+
+Performance today:
+- Net P&L: $${totalPnl}
+- Trades taken: ${todayTrades.length} (${winners} winners)
+- Trade breakdown: ${tradeList}
+- Regime: ${context?.regime ?? 'unknown'} | Direction: ${context?.direction ?? 'unknown'} | VIX: ${context?.vix ?? 'n/a'}
+
+Write a concise EOD summary (under 150 words):
+1. Today's result in one sentence with P&L
+2. What worked and what didn't (be specific to the trades above)
+3. What to watch tomorrow
+4. One lesson or pattern from today
+
+Plain text, no markdown symbols. Be direct.` }],
+    });
+
+    const content = msg.content[0]?.text?.trim() ?? '';
+    await saveDailyBriefing({ date: today, type: 'eod', content, regime: context?.regime, direction: context?.direction, vix: context?.vix });
+    pushToChat(`📊 EOD Summary — ${today}\n\n${content}`, 'eod_summary');
+    console.log(`[eod] Summary generated for ${today}`);
+    return { date: today, type: 'eod', content };
+  } catch (err) {
+    console.error('[eod] Error:', err.message);
+    return null;
+  }
+}
+
+// ─── Regime Change Monitor ────────────────────────────────────────────────────
+
+async function checkRegimeChange() {
+  try {
+    const context     = await getMarketContext();
+    const current     = context?.regime;
+    if (!current) return;
+    const last        = await getScannerState('last_regime');
+    if (last && last !== current) {
+      const dir = context.direction ?? '';
+      pushToChat(
+        `🔄 Regime Change: Market shifted from "${last}" → "${current}" (${dir})\n\n${context.market_narrative ?? ''}`,
+        'regime_change'
+      );
+      console.log(`[regime] Changed: ${last} → ${current}`);
+    }
+    await setScannerState('last_regime', current);
+  } catch (err) {
+    console.error('[regime] checkRegimeChange error:', err.message);
+  }
+}
+
+// ─── Analyst State Endpoint ───────────────────────────────────────────────────
+
+app.get('/api/analyst/state', requireAuth, async (req, res) => {
+  const [posResult, pnlResult, statusResult] = await Promise.allSettled([
+    getPositions(),
+    getDailyPnL(),
+    getMarketStatus(),
+  ]);
+
+  const positions   = posResult.status   === 'fulfilled' ? (posResult.value   ?? []) : [];
+  const pnlData     = pnlResult.status   === 'fulfilled' ? (pnlResult.value   ?? {}) : {};
+  const statusData  = statusResult.status === 'fulfilled' ? (statusResult.value ?? {}) : {};
+
+  const lastScan  = _scannerState.lastScan;
+  const scanTime  = lastScan?.timestamp ?? null;
+  let nextScan    = null;
+  if (scanTime && _scannerState.autoEnabled) {
+    nextScan = new Date(new Date(scanTime).getTime() + 10 * 60 * 1000).toISOString();
+  }
+
+  res.json({
+    last_scan:        scanTime,
+    next_scan:        nextScan,
+    open_positions:   positions.length,
+    today_regime:     lastScan?.context?.regime ?? await getScannerState('last_regime').catch(() => null),
+    today_direction:  lastScan?.context?.direction ?? null,
+    trades_today:     pnlData.count ?? 0,
+    pnl_today:        pnlData.pnl   ?? 0,
+    scanner_running:  _scannerState.autoEnabled,
+    market_open:      statusData.is_open ?? false,
+  });
 });
 
 // ─── Position Monitor ──────────────────────────────────────────────────────────
@@ -2874,6 +2997,34 @@ cron.schedule('*/2 * * * 1-5', async () => {
     await runPositionMonitor();
   } catch (err) {
     console.error('[monitor] cron error:', err.message);
+  }
+});
+
+// ─── EOD Summary Cron ─────────────────────────────────────────────────────────
+// Fires every 5 min Mon–Fri; checks if ET time is exactly 4:00–4:04 PM
+
+cron.schedule('*/5 * * * 1-5', async () => {
+  const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const et    = new Date(etStr);
+  const mins  = et.getHours() * 60 + et.getMinutes();
+  if (mins < 16 * 60 || mins >= 16 * 60 + 5) return;
+  try {
+    await runEODSummary();
+  } catch (err) {
+    console.error('[eod] cron error:', err.message);
+  }
+});
+
+// ─── Regime Change Cron ───────────────────────────────────────────────────────
+// Every 15 min, Mon–Fri, 9:30 AM–4:00 PM ET
+
+cron.schedule('*/15 * * * 1-5', async () => {
+  const utcT = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+  if (utcT < 13 * 60 + 30 || utcT >= 20 * 60) return;
+  try {
+    await checkRegimeChange();
+  } catch (err) {
+    console.error('[regime] cron error:', err.message);
   }
 });
 

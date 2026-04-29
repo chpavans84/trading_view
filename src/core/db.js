@@ -209,13 +209,32 @@ CREATE TABLE IF NOT EXISTS scanner_state (
 
 CREATE TABLE IF NOT EXISTS daily_briefings (
   id         SERIAL PRIMARY KEY,
-  date       DATE NOT NULL UNIQUE,
+  date       DATE NOT NULL,
+  type       VARCHAR(20) NOT NULL DEFAULT 'morning',
   content    TEXT NOT NULL,
   regime     VARCHAR(50),
   direction  VARCHAR(20),
   vix        NUMERIC(6,2),
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (date, type)
 );
+
+-- Add type column + fix unique constraint for daily_briefings (supports morning + eod per day)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='daily_briefings' AND column_name='type') THEN
+    ALTER TABLE daily_briefings ADD COLUMN type VARCHAR(20) DEFAULT 'morning';
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='daily_briefings_date_key' AND table_name='daily_briefings') THEN
+    ALTER TABLE daily_briefings DROP CONSTRAINT daily_briefings_date_key;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='daily_briefings_date_type_key' AND table_name='daily_briefings') THEN
+    ALTER TABLE daily_briefings ADD CONSTRAINT daily_briefings_date_type_key UNIQUE (date, type);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS position_monitoring (
   symbol           VARCHAR(20) PRIMARY KEY,
@@ -1021,25 +1040,25 @@ export async function setScannerState(key, value) {
 
 // ─── Daily Briefings ──────────────────────────────────────────────────────────
 
-export async function saveDailyBriefing({ date, content, regime = null, direction = null, vix = null }) {
+export async function saveDailyBriefing({ date, content, regime = null, direction = null, vix = null, type = 'morning' }) {
   if (!dbAvailable) return;
   try {
     await query(
-      `INSERT INTO daily_briefings (date, content, regime, direction, vix)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (date) DO UPDATE SET content=$2, regime=$3, direction=$4, vix=$5, created_at=NOW()`,
-      [date, content, regime, direction, vix]
+      `INSERT INTO daily_briefings (date, type, content, regime, direction, vix)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (date, type) DO UPDATE SET content=$3, regime=$4, direction=$5, vix=$6, created_at=NOW()`,
+      [date, type, content, regime, direction, vix]
     );
   } catch (err) {
     console.error('saveDailyBriefing error:', err.message);
   }
 }
 
-export async function getDailyBriefing(date) {
+export async function getDailyBriefing(date, type = 'morning') {
   if (!dbAvailable) return null;
   try {
     const { rows } = await query(
-      `SELECT * FROM daily_briefings WHERE date = $1`, [date]
+      `SELECT * FROM daily_briefings WHERE date = $1 AND type = $2`, [date, type]
     );
     return rows[0] ?? null;
   } catch (err) {
