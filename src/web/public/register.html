@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Bot — Create Account</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0d1117; color: #e6edf3;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+  }
+  .card {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 12px; padding: 40px; width: calc(100% - 32px); max-width: 380px;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 6px; }
+  .subtitle { color: #8b949e; font-size: 0.9rem; margin-bottom: 28px; }
+  .free-badge {
+    display: inline-block; background: #1f6feb22; border: 1px solid #388bfd55;
+    color: #58a6ff; font-size: 0.78rem; padding: 2px 8px; border-radius: 20px;
+    margin-bottom: 20px;
+  }
+  label { display: block; font-size: 0.85rem; color: #8b949e; margin-bottom: 6px; margin-top: 14px; }
+  input {
+    width: 100%; padding: 10px 14px; background: #0d1117;
+    border: 1px solid #30363d; border-radius: 8px; color: #e6edf3;
+    font-size: 1rem; outline: none;
+  }
+  input:focus { border-color: #58a6ff; }
+  .hint { color: #6e7681; font-size: 0.78rem; margin-top: 4px; }
+  button {
+    width: 100%; margin-top: 24px; padding: 11px;
+    background: #238636; border: none; border-radius: 8px;
+    color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: #2ea043; }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .msg { font-size: 0.85rem; margin-top: 14px; display: none; }
+  .msg.error { color: #f85149; }
+  .msg.success { color: #3fb950; }
+  .login-link { text-align: center; margin-top: 20px; font-size: 0.85rem; color: #8b949e; }
+  .login-link a { color: #58a6ff; text-decoration: none; }
+  .login-link a:hover { text-decoration: underline; }
+  .perks { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; }
+  .perks p { font-size: 0.82rem; color: #8b949e; margin-bottom: 6px; }
+  .perks ul { list-style: none; padding: 0; }
+  .perks li { font-size: 0.82rem; color: #e6edf3; padding: 2px 0; }
+  .perks li::before { content: '✓ '; color: #3fb950; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📈 Trading Bot</h1>
+  <p class="subtitle">Create your free account</p>
+  <div class="free-badge">🎁 100 free AI credits on signup</div>
+  <div class="perks">
+    <p>Free plan includes:</p>
+    <ul>
+      <li>100 AI chat credits</li>
+      <li>Paper trading dashboard</li>
+      <li>Market data &amp; news</li>
+      <li>Conviction scores &amp; research</li>
+    </ul>
+  </div>
+  <label>Username</label>
+  <input type="text" id="un" placeholder="e.g. john_doe" autocomplete="username" autofocus>
+  <div class="hint">2–32 chars, letters/numbers/underscore</div>
+  <label>Email <span style="color:#6e7681">(optional)</span></label>
+  <input type="email" id="em" placeholder="you@example.com" autocomplete="email">
+  <label>Password</label>
+  <input type="password" id="pw" placeholder="Min 10 characters" autocomplete="new-password">
+  <label>Confirm Password</label>
+  <input type="password" id="pw2" placeholder="Repeat password" autocomplete="new-password">
+  <button id="btn" onclick="register()">Create Account</button>
+  <div class="msg error" id="err"></div>
+  <div class="msg success" id="ok"></div>
+  <div class="login-link">Already have an account? <a href="/login.html">Sign in</a></div>
+</div>
+<script>
+  document.getElementById('pw2').addEventListener('keydown', e => e.key === 'Enter' && register());
+
+  async function register() {
+    const username = document.getElementById('un').value.trim().toLowerCase();
+    const email    = document.getElementById('em').value.trim();
+    const password = document.getElementById('pw').value;
+    const confirm  = document.getElementById('pw2').value;
+    const errEl = document.getElementById('err');
+    const okEl  = document.getElementById('ok');
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+
+    if (!username || !password) { show(errEl, 'Username and password are required.'); return; }
+    if (!/^[a-z0-9_]{2,32}$/.test(username)) { show(errEl, 'Username: 2–32 chars, letters/numbers/underscore only.'); return; }
+    if (password.length < 10) { show(errEl, 'Password must be at least 10 characters.'); return; }
+    if (password !== confirm) { show(errEl, 'Passwords do not match.'); return; }
+
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
+    btn.textContent = 'Creating…';
+
+    try {
+      const body = { username, password };
+      if (email) body.email = email;
+      const r = await fetch('/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        show(okEl, '✓ Account created! Redirecting to login…');
+        btn.textContent = 'Account Created!';
+        setTimeout(() => { window.location.href = '/login.html'; }, 1800);
+      } else {
+        show(errEl, d.error || 'Registration failed. Try again.');
+        btn.disabled = false;
+        btn.textContent = 'Create Account';
+      }
+    } catch {
+      show(errEl, 'Network error. Please try again.');
+      btn.disabled = false;
+      btn.textContent = 'Create Account';
+    }
+  }
+
+  function show(el, msg) {
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+</script>
+</body>
+</html>

@@ -18,7 +18,7 @@ const YF_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
 };
 const EDGAR_HEADERS = {
-  'User-Agent': 'tradingview-mcp research-tool contact@example.com',
+  'User-Agent': `tradingview-mcp research-tool ${process.env.RESEND_FROM || 'chpavans84@gmail.com'}`,
   'Accept': 'application/json',
 };
 
@@ -32,10 +32,10 @@ function alpacaHeaders() {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async function fetchJSON(url, headers, retries = 2) {
+async function fetchJSON(url, headers, retries = 1) {
   for (let i = 0; i <= retries; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, 1000 * i));
-    const res = await fetch(url, { headers });
+    if (i > 0) await new Promise(r => setTimeout(r, 800 * i));
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(4000) });
     if (res.status === 429 && i < retries) continue;
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
     return res.json();
@@ -95,6 +95,138 @@ async function fetchAlpacaNews(ticker, limit) {
       related_tickers: a.symbols || [],
     }));
   } catch (_) { return []; }
+}
+
+// Fetch Google News RSS for a keyword query — covers all major outlets worldwide
+async function fetchGoogleNews(query, limit = 20) {
+  try {
+    const q = encodeURIComponent(query);
+    const r = await fetch(
+      `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/rss+xml, text/xml, */*' }, signal: AbortSignal.timeout(4000) }
+    );
+    if (!r.ok) return [];
+    const xml = await r.text();
+    return parseRSS(xml).slice(0, limit).map(a => ({
+      title: a.title, publisher: 'Google News', published: a.published,
+      summary: a.summary, url: a.url, source: 'google_news', tickers: [],
+    }));
+  } catch { return []; }
+}
+
+// Parse a minimal RSS/XML feed without dependencies
+function parseRSS(xml) {
+  const items = [];
+  const itemMatches = xml.matchAll(/<item>([\s\S]*?)<\/item>/g);
+  for (const m of itemMatches) {
+    const block = m[1];
+    const get = tag => { const r = block.match(new RegExp(`<${tag}[^>]*>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\\/${tag}>`)); return r?.[1]?.trim() ?? null; };
+    const title = get('title'); const link = get('link'); const pub = get('pubDate'); const desc = get('description');
+    if (title) items.push({ title, url: link, published: pub ? new Date(pub).toISOString() : new Date().toISOString(), summary: desc?.replace(/<[^>]+>/g,'').slice(0,200) ?? null });
+  }
+  return items;
+}
+
+// Categorise a headline
+export function categoriseNews(title) {
+  const t = title.toLowerCase();
+  if (/war|militar|sanction|tariff|trade war|trade deal|executive order|iran|china|russia|nato|ceasefire|geopolit|strait|hormuz|troops|strike|attack|bomb|missile|conflict|ukraine|taiwan|israel|hamas|hostage|trump|biden|congress|senate|white house|pentagon|tariff|import duty|export ban|embargo|restrict/.test(t)) return 'geopolitical';
+  if (/earnings|revenue|eps|quarterly|profit|beat|miss|guidance|q[1-4] 20|results|sales|forecast|outlook|estimate/.test(t)) return 'earnings';
+  if (/fed |federal reserve|interest rate|inflation|cpi|ppi|gdp|pmi|recession|jobs|unemployment|powell|rate cut|rate hike|fomc|treasury|yield/.test(t)) return 'macro';
+  if (/oil|crude|opec|energy|gas|lng|pipeline|refin|brent|wti/.test(t)) return 'energy';
+  if (/ai |artificial intelligence|chip|semiconductor|nvidia|amd|intel|tsmc|cloud|software|tech|apple|microsoft|google|meta|amazon/.test(t)) return 'tech';
+  if (/crypto|bitcoin|ethereum|btc|eth|token|blockchain/.test(t)) return 'crypto';
+  return 'markets';
+}
+
+// General market/macro news — no symbol filter, optionally keyword-scoped
+export async function getMarketNews({ limit = 30, keywords = null } = {}) {
+  try {
+    const fetches = [
+      // Alpaca: general market news
+      fetchJSON(
+        `${ALPACA_NEWS}?limit=${limit}&sort=desc`,
+        alpacaHeaders(), 0
+      ).then(d => (d.news || []).map(a => ({
+        title: a.headline, publisher: a.source,
+        published: a.created_at, summary: a.summary || null,
+        url: a.url, source: 'alpaca', tickers: a.symbols || [],
+      }))).catch(() => []),
+      // Yahoo: keyword search
+      fetchJSON(
+        `${YF_SEARCH}/v1/finance/search?q=${encodeURIComponent(keywords || 'stock market tariffs trade war fed rate geopolitics')}&newsCount=${limit}&quotesCount=0`,
+        YF_HEADERS, 0
+      ).then(d => (d.news || []).map(a => ({
+        title: a.title, publisher: a.publisher,
+        published: new Date(a.providerPublishTime * 1000).toISOString(),
+        summary: a.summary || null, url: a.link, source: 'yahoo', tickers: a.relatedTickers || [],
+      }))).catch(() => []),
+      // FinancialJuice: real-time macro/geopolitical headlines
+      fetch('https://www.financialjuice.com/feed.ashx?xy=&count=40', {
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/rss+xml, text/xml, */*' },
+        signal: AbortSignal.timeout(3000),
+      }).then(r => r.text()).then(xml => parseRSS(xml).map(a => ({
+        title: a.title, publisher: 'FinancialJuice',
+        published: a.published, summary: a.summary || null,
+        url: a.url || 'https://www.financialjuice.com', source: 'financialjuice', tickers: [],
+      }))).catch(() => []),
+      // NYT Politics RSS
+      fetch('https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml', {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/rss+xml, text/xml, */*' },
+        signal: AbortSignal.timeout(3000),
+      }).then(r => r.text()).then(xml => parseRSS(xml).slice(0, 15).map(a => ({
+        title: a.title, publisher: 'NYT Politics',
+        published: a.published, summary: a.summary || null,
+        url: a.url, source: 'nyt_politics', tickers: [],
+      }))).catch(() => []),
+      // The Hill
+      fetch('https://thehill.com/rss/syndicator/19110', {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/rss+xml, text/xml, */*' },
+        signal: AbortSignal.timeout(3000),
+      }).then(r => r.text()).then(xml => parseRSS(xml).slice(0, 15).map(a => ({
+        title: a.title, publisher: 'The Hill',
+        published: a.published, summary: a.summary || null,
+        url: a.url, source: 'thehill', tickers: [],
+      }))).catch(() => []),
+    ];
+
+    // When a keyword is given, also search Google News directly — covers all major outlets
+    if (keywords) {
+      fetches.push(fetchGoogleNews(keywords, 20));
+    }
+
+    const results = await Promise.all(fetches);
+    const [alpaca, yahoo, fj, nyt, hill, ...rest] = results;
+    const google = rest[0] ?? [];
+
+    const seen = new Set();
+    // Priority: Google News keyword results first (most relevant), then FinancialJuice (real-time), then political, then market
+    return [...google, ...fj, ...nyt, ...hill, ...alpaca, ...yahoo]
+      .filter(a => { if (!a.title || seen.has(a.title)) return false; seen.add(a.title); return true; })
+      .sort((a, b) => new Date(b.published) - new Date(a.published))
+      .slice(0, limit);
+  } catch { return []; }
+}
+
+// Last 4 quarters: EPS actual, YoY growth direction — from SEC EDGAR (no rate limits)
+export async function getEarningsTrend(symbol) {
+  try {
+    const result = await getEarnings({ symbol });
+    if (!result.success) return [];
+    return (result.history || []).slice(0, 4).reverse().map(q => {
+      // epsGrew is derived inside getEarnings via yearAgoEps comparison
+      const epsGrew = q.earnings_quality === 'strong' || q.earnings_quality === 'moderate'
+        ? true
+        : q.earnings_quality === 'weak' ? false : null;
+      return {
+        period:  q.period || '',          // e.g. "Q1", "Q2"
+        end_date: q.end_date || '',
+        actual:  q.eps_actual ?? null,
+        quality: q.earnings_quality,      // strong | moderate | weak | null
+        beat:    epsGrew,                 // true = EPS grew YoY, false = shrank
+      };
+    });
+  } catch { return []; }
 }
 
 export async function getSymbolNews({ symbol, limit = 10 } = {}) {

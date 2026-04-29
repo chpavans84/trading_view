@@ -1,0 +1,12 @@
+{
+  "broker": "moomoo",
+  "moomoo": {
+    "host": "127.0.0.1",
+    "port": 11111
+  },
+  "alpaca": {
+    "api_key": "",
+    "api_secret": "",
+    "paper": true
+  }
+}

@@ -4,11 +4,161 @@
  * and market conditions into a single 0–100 score.
  */
 
+import YahooFinance from 'yahoo-finance2';
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+
 import { getPreEarningsDrift, getEarnings, getSymbolNews, getInsiderBuying, getEarningsSurprise } from './news.js';
 import { getRelativeStrength, getMarketSentiment, SECTOR_MAP } from './sentiment.js';
 import { isBadTradingTime } from './trader.js';
 import { getChartTechnicals, getPriceLevels } from './tradingview-bridge.js';
-import { recordConvictionScore } from './db.js';
+import { recordConvictionScore, getFactorWeights } from './db.js';
+
+const KNOWN_NAMES = {
+  AAPL:'Apple Inc.', MSFT:'Microsoft Corporation', GOOGL:'Alphabet Inc.', GOOG:'Alphabet Inc.',
+  META:'Meta Platforms Inc.', AMZN:'Amazon.com Inc.', NVDA:'NVIDIA Corporation', TSLA:'Tesla Inc.',
+  AMD:'Advanced Micro Devices Inc.', INTC:'Intel Corporation', QCOM:'Qualcomm Inc.',
+  AVGO:'Broadcom Inc.', MU:'Micron Technology Inc.', TSM:'Taiwan Semiconductor',
+  SMCI:'Super Micro Computer Inc.', MRVL:'Marvell Technology Inc.', ARM:'Arm Holdings plc',
+  NFLX:'Netflix Inc.', JPM:'JPMorgan Chase & Co.', XOM:'Exxon Mobil Corporation',
+  RTX:'RTX Corporation', LMT:'Lockheed Martin Corporation', BA:'Boeing Company',
+  GS:'Goldman Sachs Group', MS:'Morgan Stanley', BAC:'Bank of America Corp.',
+  COIN:'Coinbase Global Inc.', PLTR:'Palantir Technologies Inc.', CRWD:'CrowdStrike Holdings Inc.',
+  SNOW:'Snowflake Inc.', UBER:'Uber Technologies Inc.', LYFT:'Lyft Inc.',
+  RIVN:'Rivian Automotive Inc.', LCID:'Lucid Group Inc.', NIO:'NIO Inc.',
+  BIDU:'Baidu Inc.', SHOP:'Shopify Inc.', SQ:'Block Inc.', PYPL:'PayPal Holdings Inc.',
+  NET:'Cloudflare Inc.', DDOG:'Datadog Inc.', ZS:'Zscaler Inc.', OKTA:'Okta Inc.',
+  PANW:'Palo Alto Networks Inc.', FTNT:'Fortinet Inc.', AMAT:'Applied Materials Inc.',
+  KLAC:'KLA Corporation', LRCX:'Lam Research Corporation', ASML:'ASML Holding N.V.',
+  ORCL:'Oracle Corporation', CRM:'Salesforce Inc.', NOW:'ServiceNow Inc.',
+  ADBE:'Adobe Inc.', INTU:'Intuit Inc.', IBM:'IBM Corporation', HPQ:'HP Inc.',
+  DELL:'Dell Technologies', HPE:'Hewlett Packard Enterprise',
+  SPY:'SPDR S&P 500 ETF', QQQ:'Invesco QQQ Trust', IWM:'iShares Russell 2000 ETF',
+};
+
+async function getRVOL(symbol) {
+  try {
+    const r = await fetch(
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=30d`,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    const vol = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.volume?.filter(v => v != null) ?? [];
+    if (vol.length < 5) return null;
+    const todayVol = vol[vol.length - 1];
+    const avgVol   = vol.slice(-21, -1).reduce((a, b) => a + b, 0) / Math.min(20, vol.length - 1);
+    if (!avgVol) return null;
+    return +(todayVol / avgVol).toFixed(2);
+  } catch { return null; }
+}
+
+// Analyst consensus + short interest — fetched together via yahoo-finance2 (handles auth)
+let _yfSummaryCache = new Map(); // symbol → { ts, data }
+const YF_CACHE_TTL = 4 * 60 * 60 * 1000; // 4h — analyst data changes infrequently
+
+async function getYFSummary(symbol) {
+  const cached = _yfSummaryCache.get(symbol);
+  if (cached && Date.now() - cached.ts < YF_CACHE_TTL) return cached.data;
+  try {
+    const res = await yf.quoteSummary(symbol, { modules: ['financialData', 'defaultKeyStatistics', 'recommendationTrend'] });
+    _yfSummaryCache.set(symbol, { ts: Date.now(), data: res });
+    return res;
+  } catch { return null; }
+}
+
+async function getAnalystRating(symbol) {
+  try {
+    const res  = await getYFSummary(symbol);
+    if (!res) return null;
+    const fin   = res.financialData;
+    const trend = res.recommendationTrend?.trend?.[0];
+
+    const mean        = fin?.recommendationMean ?? null;
+    const targetPrice = fin?.targetMeanPrice    ?? null;
+    const curPrice    = fin?.currentPrice       ?? null;
+    const upside      = (targetPrice && curPrice) ? +((targetPrice - curPrice) / curPrice * 100).toFixed(1) : null;
+    const total       = (trend?.strongBuy ?? 0) + (trend?.buy ?? 0) + (trend?.hold ?? 0) + (trend?.sell ?? 0) + (trend?.strongSell ?? 0);
+
+    let consensus = 'neutral';
+    if (mean != null) {
+      if      (mean <= 1.5) consensus = 'strong_buy';
+      else if (mean <= 2.5) consensus = 'buy';
+      else if (mean <= 3.5) consensus = 'hold';
+      else if (mean <= 4.5) consensus = 'sell';
+      else                  consensus = 'strong_sell';
+    }
+    return { consensus, mean, target_price: targetPrice, upside_pct: upside, total_analysts: total };
+  } catch { return null; }
+}
+
+async function getShortInterest(symbol) {
+  try {
+    const res   = await getYFSummary(symbol);
+    const stats = res?.defaultKeyStatistics;
+    if (!stats) return null;
+    const short_float_pct = stats.shortPercentOfFloat != null ? +(stats.shortPercentOfFloat * 100).toFixed(2) : null;
+    const short_ratio     = stats.shortRatio ?? null;
+    return { short_float_pct, short_ratio };
+  } catch { return null; }
+}
+
+// Weekly trend: price vs 10-week EMA — confirms or contradicts the daily signal
+async function getWeeklyTrend(symbol) {
+  try {
+    const r = await fetch(
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1wk&range=6mo`,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v => v != null) ?? [];
+    if (closes.length < 10) return null;
+
+    // 10-week EMA
+    const period = 10;
+    const k = 2 / (period + 1);
+    let ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+
+    const price = closes[closes.length - 1];
+    const pct   = +((price - ema) / ema * 100).toFixed(2);
+    return {
+      price,
+      ema10w:    +ema.toFixed(2),
+      pct_vs_ema: pct,
+      trend:     pct > 1 ? 'up' : pct < -1 ? 'down' : 'flat',
+    };
+  } catch { return null; }
+}
+
+// Correlation groups — stocks that move nearly in lockstep
+const CORR_GROUPS = [
+  ['NVDA','AMD','MU','SMCI','INTC','MRVL','LRCX','AMAT','KLAC','ASML','ARM','QCOM','AVGO'],
+  ['AAPL','MSFT'],
+  ['META','GOOGL','GOOG','AMZN'],
+  ['JPM','GS','MS','BAC','WFC','C'],
+  ['XOM','CVX','COP','OXY','DVN'],
+  ['TSLA','RIVN','LCID','NIO','LI','XPEV'],
+  ['CRWD','PANW','ZS','NET','OKTA','FTNT','S'],
+  ['COIN','MSTR','HOOD'],
+  ['SHOP','ETSY','EBAY'],
+  ['UBER','LYFT','DASH'],
+  ['NFLX','DIS','CMCSA','WBD'],
+  ['PLTR','SNOW','DDOG','MDB','GTLB'],
+];
+
+export function checkCorrelation({ symbol, positions = [] }) {
+  const ticker = symbol.toUpperCase();
+  const group  = CORR_GROUPS.find(g => g.includes(ticker));
+  if (!group) return { correlated: false };
+
+  for (const pos of positions) {
+    const sym = (pos.symbol || '').toUpperCase();
+    if (sym === ticker) continue;
+    if (group.includes(sym)) return { correlated: true, existing_symbol: sym, group_members: group };
+  }
+  return { correlated: false };
+}
 
 export function checkSectorConcentration({ symbol, positions = [] }) {
   const ticker = symbol.toUpperCase();
@@ -30,7 +180,7 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const sectorEtf = SECTOR_MAP[ticker] || 'SPY';
 
   // Fetch all signals in parallel — individual failures don't abort scoring
-  const [driftRes, rsRes, newsRes, earningsRes, sentimentRes, insiderRes, surpriseRes, techRes, levelsRes] =
+  const [driftRes, rsRes, newsRes, earningsRes, sentimentRes, insiderRes, surpriseRes, techRes, levelsRes, nameRes, rvolRes, weeklyRes, analystRes, shortRes] =
     await Promise.allSettled([
       getPreEarningsDrift({ symbol: ticker }),
       getRelativeStrength({ symbol: ticker, sector_etf: sectorEtf }),
@@ -41,6 +191,15 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
       getEarningsSurprise({ symbol: ticker }),
       getChartTechnicals({ symbol: ticker }),
       getPriceLevels({ symbol: ticker }),
+      KNOWN_NAMES[ticker]
+        ? Promise.resolve(KNOWN_NAMES[ticker])
+        : fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`, {
+            headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+          }).then(r => r.json()).then(d => d?.chart?.result?.[0]?.meta?.shortName || null).catch(() => null),
+      getRVOL(ticker),
+      getWeeklyTrend(ticker),
+      getAnalystRating(ticker),
+      getShortInterest(ticker),
     ]);
 
   const drift    = driftRes.status    === 'fulfilled' ? driftRes.value    : null;
@@ -52,6 +211,11 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const surprise = surpriseRes.status === 'fulfilled' ? surpriseRes.value : null;
   const tech     = techRes.status     === 'fulfilled' ? techRes.value     : null;
   const levels   = levelsRes.status   === 'fulfilled' ? levelsRes.value   : null;
+  const name     = nameRes.status     === 'fulfilled' ? nameRes.value     : null;
+  const rvol     = rvolRes.status     === 'fulfilled' ? rvolRes.value     : null;
+  const weekly   = weeklyRes.status   === 'fulfilled' ? weeklyRes.value   : null;
+  const analyst  = analystRes.status  === 'fulfilled' ? analystRes.value  : null;
+  const short    = shortRes.status    === 'fulfilled' ? shortRes.value    : null;
 
   // Extract signal values
   const beat_streak       = surprise?.beat_streak        ?? 0;
@@ -64,6 +228,7 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const badTime           = isBadTradingTime();
   const tvAvailable       = tech?.available === true;
   const sectorCheck       = checkSectorConcentration({ symbol: ticker, positions });
+  const corrCheck         = checkCorrelation({ symbol: ticker, positions });
 
   // Score each factor
   const breakdown = {
@@ -79,14 +244,29 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     relative_strength:    rs_signal === 'strong'        ?  15 : rs_signal === 'weak'       ? -10 : 0,
     // Insider activity — 1 buy counts for something
     insider_buying:       insider_buys_60d >= 2 ? 10 : insider_buys_60d === 1 ? 5 : 0,
+    // Analyst consensus (Wall St. coverage)
+    analyst_rating:       analyst == null ? 0
+                          : analyst.consensus === 'strong_buy' ? 15
+                          : analyst.consensus === 'buy'        ? 10
+                          : analyst.consensus === 'sell'       ? -12
+                          : analyst.consensus === 'strong_sell'? -20 : 0,
+    // Short interest — high short + strong RS = squeeze setup
+    short_squeeze:        (short?.short_float_pct ?? 0) >= 15 && rs_signal === 'strong' ? 10
+                          : (short?.short_float_pct ?? 0) >= 25 ? -5 : 0,
+    // Relative Volume — institutional accumulation signal
+    rvol:                 rvol == null ? 0 : rvol >= 2.0 ? 15 : rvol >= 1.5 ? 8 : rvol < 0.5 ? -8 : 0,
+    // Weekly trend confirmation — does the weekly chart agree with the daily signal?
+    weekly_trend:         weekly == null ? 0 : weekly.trend === 'up' ? 12 : weekly.trend === 'down' ? -12 : 0,
     // VIX — graduated, only extreme fear is a hard penalty
     high_vix:             vix == null ? 0 : vix > 35 ? -20 : vix > 28 ? -10 : vix > 25 ? -5 : 0,
     // Time of day — only penalise true lunch chop (12:30–1:30 PM ET)
     bad_trading_time:     badTime.bad                   ?  -5 : 0,
-    // Sector concentration remains a hard penalty
+    // Sector concentration — hard penalty
     sector_concentrated:  sectorCheck.concentrated      ? -25 : 0,
-    // Base score — any stock worth scanning starts with credit
-    base:                 30,
+    // Correlation — extra penalty when portfolio already holds a nearly identical stock
+    correlated_position:  corrCheck.correlated          ? -20 : 0,
+    // Base score — starts at 20; a stock must earn its score through real signals
+    base:                 20,
   };
 
   // TradingView technical factors (only applied when chart data is live)
@@ -123,13 +303,22 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     breakdown.tv_unavailable = 0; // marker — no penalty
   }
 
-  const raw   = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  const score = Math.min(100, Math.max(0, raw));
-  const grade = score >= 75 ? 'A' : score >= 50 ? 'B' : score >= 35 ? 'C' : 'F';
+  const raw        = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  const scoreBase  = Math.min(100, Math.max(0, raw));
+  const gradeBase  = scoreBase >= 80 ? 'A' : scoreBase >= 60 ? 'B' : scoreBase >= 40 ? 'C' : 'F';
+
+  // Backtest-weighted adjustment: grades with higher historical alpha get a small boost
+  const factorWeights = await getFactorWeights();
+  const backtestAdj   = factorWeights?.adjustments?.[gradeBase] ?? 0;
+  if (backtestAdj !== 0) breakdown.backtest_alpha_adj = backtestAdj;
+
+  const raw2  = Object.values(breakdown).reduce((a, b) => a + b, 0);
+  const score = Math.min(100, Math.max(0, raw2));
+  const grade = score >= 80 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'F';
   const recommendation =
-    score >= 75 ? 'strong_buy' :
-    score >= 50 ? 'buy' :
-    score >= 35 ? 'skip' : 'avoid';
+    score >= 80 ? 'strong_buy' :
+    score >= 60 ? 'buy' :
+    score >= 40 ? 'skip' : 'avoid';
 
   const signals = {
     beat_streak,
@@ -140,6 +329,14 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     rs_score:        rs?.rs_score           ?? null,
     rs_signal,
     insider_buys_60d,
+    rvol,
+    weekly_trend:        weekly?.trend        ?? null,
+    weekly_pct_vs_ema:   weekly?.pct_vs_ema   ?? null,
+    analyst_consensus:   analyst?.consensus   ?? null,
+    analyst_target:      analyst?.target_price ?? null,
+    analyst_upside_pct:  analyst?.upside_pct  ?? null,
+    short_float_pct:     short?.short_float_pct ?? null,
+    short_ratio:         short?.short_ratio   ?? null,
     vix,
     bad_trading_time: badTime.bad,
     bad_time_reason:  badTime.reason,
@@ -149,14 +346,16 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     ema50:           tech?.ema50           ?? null,
     current_price:   tech?.current_price   ?? null,
     sector_concentration: sectorCheck,
+    correlation:          corrCheck,
   };
 
   // Persist to DB (non-blocking)
-  recordConvictionScore({ symbol: ticker, score, grade, breakdown, signals, tv_available: tvAvailable, technical_summary });
+  recordConvictionScore({ symbol: ticker, name, score, grade, breakdown, signals, tv_available: tvAvailable, technical_summary });
 
   return {
     success: true,
     symbol: ticker,
+    name,
     score,
     grade,
     recommendation,

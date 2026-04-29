@@ -30,7 +30,7 @@ import { getConvictionScore, checkSectorConcentration } from '../core/scoring.js
 import {
   initDb, isDbAvailable,
   loadConversationHistory, appendConversationMessage, clearConversationHistory,
-  upsertUsageStats, recordTrade, upsertDailyPnl,
+  upsertUsageStats, recordApiCall, recordTrade, upsertDailyPnl,
 } from '../core/db.js';
 import {
   isTradingViewAvailable,
@@ -53,6 +53,7 @@ import {
   closePosition,
   getMarketStatus,
   getDailyPnL,
+  syncClosedTrades,
   DAILY_PROFIT_TARGET,
   DAILY_LOSS_LIMIT,
 } from '../core/trader.js';
@@ -141,6 +142,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import net from 'net';
 
+const PAUSED_FLAG = join(dirname(fileURLToPath(import.meta.url)), '../../.scanner-paused');
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATS_FILE   = join(__dirname, '../../.bot-stats.json');
 const HISTORY_FILE = join(__dirname, '../../.bot-history.json');
@@ -173,7 +176,7 @@ function saveStats() {
 
 const stats = { startTime: new Date(), ...loadStats() };
 
-function trackUsage(response) {
+function trackUsage(response, { source = 'telegram_chat', durationMs = null } = {}) {
   const u = response.usage;
   if (!u) return;
   const inputTok  = u.input_tokens  || 0;
@@ -190,6 +193,7 @@ function trackUsage(response) {
 
   // Mirror to DB (non-blocking)
   upsertUsageStats({ inputTokens: inputTok, outputTokens: outputTok, toolCalls, costUsd });
+  recordApiCall({ source, inputTokens: inputTok, outputTokens: outputTok, toolCalls, costUsd, durationMs, model: response.model }).catch(() => {});
 }
 
 function resetDailyIfNeeded() {
@@ -531,8 +535,9 @@ TRADING ENGINE (Alpaca paper trading — fake money for now):
 SECTOR RULE: Never open 2 positions in the same sector (e.g., no NVDA + AMD simultaneously — both are XLK). The conviction score already penalises this (-25 pts) but verify via get_portfolio before executing. Pass the positions array from get_portfolio into get_conviction_score.
 
 CONVICTION REQUIREMENT: Before calling propose_trade, ALWAYS call get_conviction_score first.
-- Score >= 50 (grade B or higher): proceed — position sized automatically via ATR
-- Score < 50: skip the trade and explain which factors were missing
+- Score >= 70: proceed — position sized automatically via ATR
+- Score 60–69: only proceed if there is a strong confirmed catalyst (breaking news, earnings beat today)
+- Score < 60: skip the trade and explain which factors were missing
 - Quality over quantity: 1 great trade beats 3 mediocre trades
 
 TECHNICAL CONFIRMATION (when TradingView is running):
@@ -620,7 +625,7 @@ async function handleProposeTrade(input, chatId) {
 
 // ─── AI Chat Handler ──────────────────────────────────────────────────────────
 
-async function handleAIMessage(chatId, userMessage) {
+async function handleAIMessage(chatId, userMessage, { source = 'telegram_chat' } = {}) {
   // Load from DB on first message if not already in memory
   if (!chatHistory.has(chatId)) await loadHistoryForChat(chatId);
   pushHistory(chatId, { role: 'user', content: userMessage });
@@ -630,15 +635,16 @@ async function handleAIMessage(chatId, userMessage) {
 
   // Agentic loop — Claude can call multiple tools before responding
   while (true) {
+    const t0 = Date.now();
     const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
       system: SYSTEM_PROMPT,
       tools: TOOLS,
       messages,
     });
 
-    trackUsage(response);
+    trackUsage(response, { source, durationMs: Date.now() - t0 });
 
     // If Claude wants to use tools, execute them and continue
     if (response.stop_reason === 'tool_use') {
@@ -757,7 +763,7 @@ bot.onText(/\/status/, async (msg) => {
     checkService('Claude AI (Anthropic)', async () => {
       const key = process.env.ANTHROPIC_API_KEY || '';
       if (!key.startsWith('sk-ant-')) throw new Error('API key missing or invalid');
-      return `Key configured · Model: claude-haiku-4-5`;
+      return `Key configured · Model: claude-sonnet-4-6`;
     }),
 
     checkService('Alpaca Trading', async () => {
@@ -1018,7 +1024,7 @@ Keep it brief and actionable.`;
 
   try {
     await sendTyping(CHAT_ID);
-    const briefing = await handleAIMessage(CHAT_ID, prompt);
+    const briefing = await handleAIMessage(CHAT_ID, prompt, { source: 'morning_briefing' });
     await send(CHAT_ID, `☀️ *Morning Briefing — ${today}*\n🕐 9:00 AM ET (9:00 PM SGT)\n\n${briefing}`);
   } catch (err) {
     await send(CHAT_ID, `⚠️ Morning briefing failed: ${err.message}`);
@@ -1028,6 +1034,21 @@ Keep it brief and actionable.`;
 // 9:00 AM ET (9:00 PM SGT) = 13:00 UTC — morning briefing
 cron.schedule('0 13 * * 1-5', sendMorningBriefing);
 
+// Trade reconciliation: every 5 min during market hours — sync Alpaca exits → DB
+cron.schedule('*/5 * * * 1-5', async () => {
+  const utcH = new Date().getUTCHours(), utcM = new Date().getUTCMinutes();
+  const utcT = utcH * 60 + utcM;
+  if (utcT < 13 * 60 + 30 || utcT >= 20 * 60) return; // 9:30 AM – 4 PM ET
+  try {
+    const result = await syncClosedTrades();
+    if (result.synced > 0) {
+      console.log(`[sync] Closed ${result.synced} trade(s):`, result.trades.map(t => `${t.symbol} $${t.pnl_usd}`).join(', '));
+    }
+  } catch (err) {
+    console.error('[sync] syncClosedTrades error:', err.message);
+  }
+});
+
 // Auto-scanner: every 10 min, 9:45 AM–3:30 PM ET (9:45 PM–3:30 AM SGT) = 13:45–19:30 UTC Mon–Fri
 cron.schedule('*/10 * * * 1-5', async () => {
   // Only run during ET market hours: 9:45 AM – 3:30 PM = 13:45 – 19:30 UTC
@@ -1035,6 +1056,12 @@ cron.schedule('*/10 * * * 1-5', async () => {
   const utcT = utcH * 60 + utcM;
   if (utcT < 13 * 60 + 45 || utcT >= 19 * 60 + 30) return;
   if (!CHAT_ID) return;
+  if (existsSync(PAUSED_FLAG)) {
+    console.log('Auto-scanner paused by admin — skipping scan');
+    return;
+  }
+  // Sync closed trades before scanning so position counts are accurate
+  await syncClosedTrades().catch(e => console.error('[sync] pre-scan sync error:', e.message));
   console.log('Running auto-scan for trade opportunities...');
   try {
     const prompt = `AUTOMATED TRADE SCAN — daily target $100–200 profit. Steps in order:
@@ -1071,7 +1098,7 @@ Never be silent. The user needs to see the scanner is alive every 10 minutes.
 
 IMPORTANT: Follow the market — go where volume and momentum are. Do not limit to any fixed list.`;
     _currentChatId = CHAT_ID;
-    await handleAIMessage(CHAT_ID, prompt);
+    await handleAIMessage(CHAT_ID, prompt, { source: 'auto_scan' });
   } catch (err) {
     console.error('Auto-scan error:', err.message);
   }

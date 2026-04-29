@@ -1,19 +1,71 @@
 /**
- * Market sentiment data from free public sources.
- * Sources: Yahoo Finance (VIX, futures, sectors, trending)
+ * Market sentiment data.
+ * Quotes: Moomoo OpenD (real-time, primary) → Yahoo Finance (fallback)
+ * VIX/futures/sectors: Yahoo Finance (not available via Moomoo)
  */
+
+import { getQuotes as moomooGetQuotes, getKLines } from './moomoo-tcp.js';
 
 const YF_BASE = 'https://query2.finance.yahoo.com';
 
 export const SECTOR_MAP = {
+  // Technology (XLK)
   AAPL: 'XLK', MSFT: 'XLK', NVDA: 'XLK', AMD: 'XLK',
   MU: 'XLK', AVGO: 'XLK', QCOM: 'XLK', INTC: 'XLK',
-  TSM: 'XLK', SMCI: 'XLK', MRVL: 'XLK',
-  GOOGL: 'XLC', META: 'XLC', NFLX: 'XLC',
-  AMZN: 'XLY', TSLA: 'XLY',
-  JPM: 'XLF',
-  XOM: 'XLE',
-  RTX: 'XLI', LMT: 'XLI',
+  TSM: 'XLK', SMCI: 'XLK', MRVL: 'XLK', ARM: 'XLK',
+  AMAT: 'XLK', KLAC: 'XLK', LRCX: 'XLK', ASML: 'XLK',
+  PLTR: 'XLK', SOXL: 'XLK', SOXS: 'XLK', SMH: 'XLK',
+  QBTS: 'XLK', IONQ: 'XLK', RGTI: 'XLK',       // quantum computing
+  // Communication Services (XLC)
+  GOOGL: 'XLC', GOOG: 'XLC', META: 'XLC', NFLX: 'XLC',
+  DIS: 'XLC', CMCSA: 'XLC', T: 'XLC', VZ: 'XLC',
+  // Consumer Discretionary (XLY)
+  AMZN: 'XLY', TSLA: 'XLY', HD: 'XLY', MCD: 'XLY',
+  NKE: 'XLY', SBUX: 'XLY', TGT: 'XLY', BKNG: 'XLY',
+  QS: 'XLY',                                      // QuantumScape — EV batteries
+  // Consumer Staples (XLP)
+  PG: 'XLP', KO: 'XLP', PEP: 'XLP', WMT: 'XLP', COST: 'XLP',
+  // Financials (XLF)
+  JPM: 'XLF', GS: 'XLF', MS: 'XLF', BAC: 'XLF',
+  WFC: 'XLF', C: 'XLF', AXP: 'XLF', V: 'XLF', MA: 'XLF',
+  // Industrials / Defense (XLI)
+  RTX: 'XLI', LMT: 'XLI', NOC: 'XLI', GD: 'XLI',
+  BA: 'XLI', CAT: 'XLI', DE: 'XLI', HON: 'XLI', UPS: 'XLI',
+  AVAV: 'XLI', AXON: 'XLI',                       // defense drones / tech
+  USAR: 'XLI',                                     // US defense ETF
+  // Energy (XLE)
+  XOM: 'XLE', CVX: 'XLE', COP: 'XLE', OXY: 'XLE',
+  SLB: 'XLE', DVN: 'XLE', HAL: 'XLE',
+  LEU: 'XLE',                                      // uranium enrichment
+  CCJ: 'XLE', UEC: 'XLE', NXE: 'XLE',             // uranium miners
+  // Clean Energy / Utilities (XLU)
+  NEE: 'XLU', DUK: 'XLU', SO: 'XLU', AEP: 'XLU',
+  BE: 'XLU',                                       // Bloom Energy — fuel cells
+  FSLR: 'XLU', ENPH: 'XLU', SEDG: 'XLU',         // solar
+  // Materials (XLB)
+  LIN: 'XLB', APD: 'XLB', FCX: 'XLB', NEM: 'XLB', NUE: 'XLB',
+  SGML: 'XLB',                                     // Sigma Lithium — lithium mining
+  ALB: 'XLB', SQM: 'XLB', LAC: 'XLB',            // lithium producers
+  // Healthcare (XLV)
+  JNJ: 'XLV', PFE: 'XLV', MRK: 'XLV', ABBV: 'XLV',
+  UNH: 'XLV', LLY: 'XLV', AMGN: 'XLV', BMY: 'XLV',
+  // Real Estate (XLRE)
+  AMT: 'XLRE', PLD: 'XLRE', EQIX: 'XLRE',
+};
+
+export const SECTOR_NAMES = {
+  XLK:  'Technology',
+  XLC:  'Comm. Services',
+  XLY:  'Consumer Disc.',
+  XLP:  'Consumer Staples',
+  XLF:  'Financials',
+  XLI:  'Industrials/Defense',
+  XLE:  'Energy',
+  XLU:  'Clean Energy/Utilities',
+  XLB:  'Materials',
+  XLV:  'Healthcare',
+  XLRE: 'Real Estate',
+  '?':  'Other',
 };
 
 const HEADERS = {
@@ -263,16 +315,29 @@ export async function getTrendingStocks({ limit = 15 } = {}) {
 // ─── Relative Strength vs Sector ETF ─────────────────────────────────────────
 
 async function fetch5dReturn(symbol) {
-  const r = await fetch(
-    `${YF_BASE}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`,
-    { headers: HEADERS }
-  );
-  if (!r.ok) return null;
-  const d = await r.json();
-  const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v => v != null);
-  if (!closes || closes.length < 6) return null;
-  // 5-day return: most recent close vs close 5 bars ago
-  return +((closes[closes.length - 1] / closes[closes.length - 6] - 1) * 100).toFixed(2);
+  // Try Moomoo daily candles first (real-time, no rate limits)
+  try {
+    const kl = await getKLines({ symbol, klType: 'day', count: 10 });
+    if (kl.success && kl.candles.length >= 6) {
+      const closes = kl.candles.map(c => c.close).filter(v => v != null);
+      if (closes.length >= 6) {
+        return +((closes[closes.length - 1] / closes[closes.length - 6] - 1) * 100).toFixed(2);
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Yahoo Finance fallback
+  try {
+    const r = await fetch(
+      `${YF_BASE}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`,
+      { headers: HEADERS }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    const closes = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.filter(v => v != null);
+    if (!closes || closes.length < 6) return null;
+    return +((closes[closes.length - 1] / closes[closes.length - 6] - 1) * 100).toFixed(2);
+  } catch { return null; }
 }
 
 export async function getRelativeStrength({ symbol, sector_etf } = {}) {
@@ -330,8 +395,26 @@ const BROAD_UNIVERSE = [
   'COIN','HOOD','RBLX','UBER','LYFT','DASH','SQ','PYPL','AFRM',
 ];
 
-// Fetch all symbols in parallel batches — fast but rate-limit safe
-async function fetchBatchQuotes(symbols, batchSize = 15, batchDelayMs = 250) {
+// Fetch quotes via Moomoo (real-time) with Yahoo Finance fallback
+async function fetchBatchQuotes(symbols, batchSize = 40, batchDelayMs = 100) {
+  // Try Moomoo in one shot (handles batching internally via subscription)
+  try {
+    const result = await moomooGetQuotes(symbols);
+    if (result.success && result.quotes.length > 0) {
+      // Normalise to same shape fetchQuote() returns
+      return result.quotes.map(q => ({
+        symbol:  q.symbol,
+        name:    q.name,
+        price:   q.price,
+        prev:    q.prev_close,
+        chg_pct: q.change_pct,
+      }));
+    }
+  } catch {
+    // Moomoo unavailable — fall through to Yahoo Finance
+  }
+
+  // Yahoo Finance fallback (rate-limited, batched)
   const results = [];
   for (let i = 0; i < symbols.length; i += batchSize) {
     const batch = symbols.slice(i, i + batchSize);

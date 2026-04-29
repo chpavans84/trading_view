@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Bot — Sign In</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0d1117; color: #e6edf3;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+  }
+  .card {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 12px; padding: 40px; width: calc(100% - 32px); max-width: 360px;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 6px; }
+  .subtitle { color: #8b949e; font-size: 0.9rem; margin-bottom: 28px; }
+  label { display: block; font-size: 0.85rem; color: #8b949e; margin-bottom: 6px; }
+  input {
+    width: 100%; padding: 10px 14px; background: #0d1117;
+    border: 1px solid #30363d; border-radius: 8px; color: #e6edf3;
+    font-size: 1rem; outline: none; transition: border-color .15s;
+  }
+  input:focus { border-color: #58a6ff; }
+  button.primary {
+    width: 100%; margin-top: 20px; padding: 11px;
+    background: #238636; border: none; border-radius: 8px;
+    color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+  }
+  button.primary:hover { background: #2ea043; }
+  button.primary:disabled { opacity: 0.55; cursor: not-allowed; }
+  .msg { font-size: 0.85rem; margin-top: 12px; display: none; }
+  .msg.error   { color: #f85149; }
+  .msg.success { color: #3fb950; }
+  .divider {
+    display: flex; align-items: center; gap: 10px;
+    margin: 24px 0 16px; color: #6e7681; font-size: 0.8rem;
+  }
+  .divider::before, .divider::after {
+    content: ''; flex: 1; height: 1px; background: #21262d;
+  }
+  .admin-toggle {
+    background: none; border: none; color: #6e7681;
+    font-size: 0.8rem; cursor: pointer; width: 100%; text-align: center; padding: 4px;
+  }
+  .admin-toggle:hover { color: #8b949e; }
+  .admin-section { display: none; margin-top: 4px; }
+  .register-link { text-align: center; margin-top: 20px; font-size: 0.85rem; color: #8b949e; }
+  .register-link a { color: #58a6ff; text-decoration: none; }
+  .register-link a:hover { text-decoration: underline; }
+  .step { display: none; }
+  .step.active { display: block; }
+  .code-input {
+    text-align: center; font-size: 1.8rem; font-weight: 700;
+    letter-spacing: 10px; background: #0d1117;
+  }
+  .resend-link {
+    text-align: center; margin-top: 12px; font-size: 0.82rem; color: #8b949e;
+  }
+  .resend-link button {
+    background: none; border: none; color: #58a6ff;
+    font-size: 0.82rem; cursor: pointer; padding: 0;
+  }
+  .resend-link button:hover { text-decoration: underline; }
+  .email-display {
+    font-size: 0.82rem; color: #58a6ff; text-align: center;
+    margin-bottom: 16px; word-break: break-all;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📈 Trading Bot</h1>
+  <p class="subtitle" id="subtitle">Sign in with your email</p>
+
+  <!-- Step 1: Enter email -->
+  <div class="step active" id="step1">
+    <label>Email address</label>
+    <input type="email" id="emailInput" placeholder="you@example.com" autofocus autocomplete="email">
+    <button class="primary" id="sendBtn" onclick="requestOtp()">Send code →</button>
+    <div class="msg error" id="step1Err"></div>
+  </div>
+
+  <!-- Step 2: Enter OTP code -->
+  <div class="step" id="step2">
+    <div class="email-display" id="emailDisplay"></div>
+    <label style="text-align:center;display:block">Enter the 6-digit code</label>
+    <input type="text" class="code-input" id="codeInput" placeholder="······"
+      maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+    <button class="primary" id="verifyBtn" onclick="verifyOtp()">Sign in</button>
+    <div class="msg error"   id="step2Err"></div>
+    <div class="msg success" id="step2Ok"></div>
+    <div class="resend-link">
+      Didn't get it? <button onclick="goBack()">Change email</button>
+      or <button onclick="requestOtp(true)">Resend code</button>
+    </div>
+  </div>
+
+  <!-- Admin fallback -->
+  <div class="divider">or</div>
+  <button class="admin-toggle" onclick="toggleAdmin()">Admin login ▾</button>
+  <div class="admin-section" id="adminSection">
+    <label style="margin-top:12px">Username</label>
+    <input type="text" id="un" placeholder="admin" autocomplete="username">
+    <label style="margin-top:12px">Password</label>
+    <input type="password" id="pw" placeholder="••••••••" autocomplete="current-password">
+    <button class="primary" onclick="adminLogin()">Sign in as admin</button>
+    <div class="msg error" id="adminErr">Invalid credentials.</div>
+  </div>
+
+  <div class="register-link">No account? <a href="/register.html">Create one free →</a></div>
+</div>
+
+<script>
+  let _email = '';
+
+  document.getElementById('emailInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') requestOtp();
+  });
+  document.getElementById('codeInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') verifyOtp();
+  });
+  document.getElementById('pw').addEventListener('keydown', e => {
+    if (e.key === 'Enter') adminLogin();
+  });
+  // Auto-submit when 6 digits entered
+  document.getElementById('codeInput').addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\D/g, '');
+    if (e.target.value.length === 6) verifyOtp();
+  });
+
+  async function requestOtp(isResend = false) {
+    const email = document.getElementById('emailInput')?.value.trim() || _email;
+    const errEl = document.getElementById('step1Err');
+    if (errEl) { errEl.style.display = 'none'; }
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (errEl) showMsg(errEl, 'Enter a valid email address.');
+      return;
+    }
+
+    const btn = document.getElementById('sendBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+    try {
+      const r = await fetch('/auth/otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        _email = email;
+        showStep2();
+        if (isResend) {
+          const ok = document.getElementById('step2Ok');
+          showMsg(ok, '✓ New code sent!');
+          setTimeout(() => { ok.style.display = 'none'; }, 3000);
+        }
+      } else {
+        if (errEl) showMsg(errEl, d.error || 'Failed to send code.');
+      }
+    } catch {
+      if (errEl) showMsg(errEl, 'Network error. Try again.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Send code →'; }
+    }
+  }
+
+  async function verifyOtp() {
+    const code   = document.getElementById('codeInput').value.trim();
+    const errEl  = document.getElementById('step2Err');
+    const btn    = document.getElementById('verifyBtn');
+    errEl.style.display = 'none';
+
+    if (code.length !== 6) { showMsg(errEl, 'Enter the 6-digit code from your email.'); return; }
+
+    btn.disabled = true; btn.textContent = 'Verifying…';
+    try {
+      const r = await fetch('/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: _email, code }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        showMsg(document.getElementById('step2Ok'), '✓ Signed in! Redirecting…');
+        setTimeout(() => { window.location.href = '/'; }, 1000);
+      } else {
+        showMsg(errEl, d.error || 'Invalid code. Try again.');
+        btn.disabled = false; btn.textContent = 'Sign in';
+      }
+    } catch {
+      showMsg(errEl, 'Network error. Try again.');
+      btn.disabled = false; btn.textContent = 'Sign in';
+    }
+  }
+
+  async function adminLogin() {
+    const username = document.getElementById('un').value.trim();
+    const password = document.getElementById('pw').value;
+    const errEl    = document.getElementById('adminErr');
+    errEl.style.display = 'none';
+    if (!username || !password) { showMsg(errEl, 'Enter username and password.'); return; }
+    try {
+      const r = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (r.ok) { window.location.href = '/'; }
+      else { showMsg(errEl, 'Invalid credentials.'); }
+    } catch { showMsg(errEl, 'Network error.'); }
+  }
+
+  function showStep2() {
+    document.getElementById('step1').classList.remove('active');
+    document.getElementById('step2').classList.add('active');
+    document.getElementById('subtitle').textContent = 'Check your inbox';
+    document.getElementById('emailDisplay').textContent = _email;
+    document.getElementById('codeInput').value = '';
+    document.getElementById('step2Err').style.display = 'none';
+    document.getElementById('step2Ok').style.display  = 'none';
+    setTimeout(() => document.getElementById('codeInput').focus(), 100);
+  }
+
+  function goBack() {
+    document.getElementById('step2').classList.remove('active');
+    document.getElementById('step1').classList.add('active');
+    document.getElementById('subtitle').textContent = 'Sign in with your email';
+    setTimeout(() => document.getElementById('emailInput').focus(), 100);
+  }
+
+  function toggleAdmin() {
+    const s = document.getElementById('adminSection');
+    s.style.display = s.style.display === 'block' ? 'none' : 'block';
+    if (s.style.display === 'block') setTimeout(() => document.getElementById('un').focus(), 100);
+  }
+
+  function showMsg(el, msg) {
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+</script>
+</body>
+</html>

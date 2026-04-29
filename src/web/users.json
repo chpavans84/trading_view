@@ -1,0 +1,38 @@
+{
+  "admin": {
+    "hash": "$2b$12$2V2HbKVg6UCYVLcOgr5Vc.l1twzzvojViwsgVTWjAwBDuhc1TmaRe",
+    "role": "admin"
+  },
+  "pavan": {
+    "hash": "$2b$12$2V2HbKVg6UCYVLcOgr5Vc.l1twzzvojViwsgVTWjAwBDuhc1TmaRe",
+    "role": "viewer"
+  },
+  "malli": {
+    "hash": "$2b$12$XfJUsIa2OJyqjMOtN74zFO6vMUM.Tirel7u03PAXDi2X4arQ6vzPm",
+    "role": "viewer",
+    "permissions": {
+      "tabs": ["dashboard","trades","scores","market","news","stats","docs","research"],
+      "widgets": ["force_trade","chat"]
+    }
+  },
+  "gova": {
+    "hash": "$2b$12$LcqDAhLelowXXOeqOxwaJOGJlJgZ8B3uYI0adL/n2jvF2TfppQt6O",
+    "role": "viewer",
+    "permissions": {
+      "tabs": ["dashboard","trades","scores","market","news","stats","docs","research"],
+      "widgets": ["force_trade","chat"]
+    }
+  },
+  "raghu": {
+    "hash": "$2b$12$mLEhsUFsWx2smRrXn5vnROaVVoP2wJILOX/tlprmk3G0GoI8wdTvO",
+    "role": "viewer",
+    "permissions": {
+      "tabs": ["dashboard","trades","scores","market","news","stats","docs","research"],
+      "widgets": ["force_trade","chat"]
+    }
+  },
+  "ravishankar": {
+    "hash": "$2b$12$7VhlN06uqZHdTH7HdupAtemT1z5bywJqvWkukluaEGWu4QK.7htPS",
+    "role": "viewer"
+  }
+}

@@ -1,0 +1,57 @@
+// S&P 500 constituents (as of 2025) — used for backtest universe
+export const SP500 = [
+  'AAPL','MSFT','NVDA','AMZN','GOOGL','META','TSLA','BRK-B','AVGO','JPM',
+  'LLY','UNH','XOM','V','MA','COST','HD','PG','JNJ','ABBV',
+  'MRK','BAC','CRM','NFLX','CVX','ORCL','WMT','KO','PEP','AMD',
+  'TMO','MCD','ABT','ACN','CSCO','ADBE','LIN','DHR','TXN','NEE',
+  'PM','GE','RTX','INTU','AMGN','SPGI','IBM','CAT','MS','GS',
+  'BLK','HON','ISRG','BKNG','AXP','SYK','VRTX','PLD','REGN','MDT',
+  'ADI','NOW','PANW','MU','LRCX','KLAC','AMAT','SNPS','CDNS','MRVL',
+  'INTC','QCOM','TT','PH','ETN','EMR','CMI','DE','UNP','CSX',
+  'WM','ECL','CARR','OTIS','ROK','DOV','IEX','XYL','IDXX','A',
+  'ZTS','SHW','PPG','NEM','FCX','BHP','VALE','FMC','ALB','MOS',
+  'CVS','CI','ELV','HUM','CNC','MOH','UHS','THC','HCA','DVA',
+  'DIS','CMCSA','CHTR','PARA','WBD','NWSA','OMC','IPG','VZ','T',
+  'TMUS','AMT','CCI','EQIX','DLR','PSA','O','SPG','WELL','AVB',
+  'EQR','MAA','UDR','CPT','ESS','NLY','AGNC','TWO','RWT','MFA',
+  'WFC','C','USB','TFC','PNC','CFG','FITB','RF','HBAN','KEY',
+  'MTB','CMA','ZION','SIVB','FRC','WAL','FHN','SNV','UMBF','BOH',
+  'SCHW','AMP','LNC','MET','PRU','AFL','ALL','TRV','PGR','CB',
+  'MMC','AON','AJG','WTW','HIG','CNA','L','HRB','FDS','MCO',
+  'MSCI','ICE','CME','CBOE','NDAQ','MKTX','LPLA','IBKR','HOOD','COIN',
+  'UBER','LYFT','ABNB','DASH','Z','EXPE','BKNG','TRIP','YELP','OPEN',
+  'SHOP','ETSY','EBAY','AMZN','W','CHWY','CVNA','KMX','AN','PAG',
+  'GM','F','STLA','TM','HMC','TSLA','RIVN','LCID','NIO','LI',
+  'XPEV','FSR','GOEV','WKHS','RIDE','NKLA','HYLN','SOLO','CIIC','SPNV',
+  'BA','LMT','RTX','NOC','GD','L3H','HII','TDG','HWM','SPR',
+  'PLTR','SNOW','DDOG','NET','ZS','OKTA','CRWD','S','CYBR','FTNT',
+  'ANET','NTAP','PSTG','WDC','STX','SMCI','HPE','HPQ','DELL','ORCL',
+  'SAP','NOW','WDAY','VEEV','RNG','ZM','DOCN','BOX','DOMO','APPN',
+  'MDB','ESTC','NEWR','DT','SUMO','SPLK','FROG','CFLT','HCP','GTLB',
+  'SOFI','LC','UPST','AFRM','PYPL','SQ','V','MA','AXP','DFS',
+  'COF','SYF','ALLY','CACC','OMF','WRLD','EZCORP','PRAA','ECPG','QCRH',
+  'XOM','CVX','COP','EOG','MPC','VLO','PSX','HES','DVN','PXD',
+  'OXY','FANG','CLR','SM','CDEV','CPE','MTDR','ESTE','REI','ESTE',
+  'NEE','DUK','SO','D','AEP','EXC','SRE','PEG','ED','FE',
+  'ETR','PPL','WEC','CMS','NI','ATO','LNT','OGE','EVRG','NWE',
+  'AMT','CCI','EQIX','DLR','SBA','SBAC','UNIT','LUMN','FYBR','CABO',
+  'JNJ','PFE','MRK','ABBV','BMY','AMGN','GILD','BIIB','REGN','VRTX',
+  'MRNA','BNTX','NVAX','SNY','AZN','GSK','NVO','LLY','TMO','DHR',
+  'ISRG','SYK','MDT','BSX','EW','ZBH','HOLX','ABMD','MASI','NVCR',
+  'SPY','QQQ','IWM','DIA','GLD','SLV','USO','TLT','HYG','LQD',
+].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+
+// NASDAQ-100 constituents (as of 2025)
+export const NASDAQ100 = [
+  'AAPL','MSFT','NVDA','AMZN','META','GOOGL','GOOG','TSLA','AVGO','COST',
+  'NFLX','AMD','ADBE','CSCO','INTC','QCOM','INTU','AMGN','TXN','ISRG',
+  'BKNG','AMAT','ADI','LRCX','MU','KLAC','MRVL','CDNS','SNPS','PANW',
+  'CRWD','FTNT','NET','ZS','DDOG','ABNB','SBUX','PYPL','MELI','ASML',
+  'ARM','ORLY','CEG','MDLZ','CTAS','MAR','ADSK','PCAR','MNST','PAYX',
+  'ROST','FAST','CPRT','VRSK','DXCM','TTWO','LULU','ODFL','KDP','GEHC',
+  'TEAM','ILMN','ON','EA','FSLR','WBA','DLTR','APP','MSTR','RBLX','U',
+  'REGN','VRTX','BIIB','GILD','AZN','HON','PEP','CMCSA',
+];
+
+// Add VIX for market fear gauge
+export const MARKET_SYMBOLS = ['^VIX', 'SPY'];

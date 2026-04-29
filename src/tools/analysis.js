@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as chartCore from '../core/chart.js';
 import * as dataCore from '../core/data.js';
-import * as moomooCore from '../core/moomoo-tcp.js';
+import * as brokerCore from '../brokers/index.js';
 
 export function registerAnalysisTools(server) {
   server.tool(
@@ -22,8 +22,8 @@ export function registerAnalysisTools(server) {
         dataCore.getStudyValues(),
         dataCore.getPineLines({ study_filter }),
         dataCore.getPineLabels({ study_filter }),
-        moomooCore.getPositions(),
-        moomooCore.getFunds(),
+        brokerCore.getPositions(),
+        brokerCore.getFunds(),
       ]);
 
       // Chart state
@@ -84,7 +84,7 @@ export function registerAnalysisTools(server) {
         result.portfolio = {
           success: false,
           error: portfolioData.reason?.message || portfolioData.value?.error || 'Could not read portfolio',
-          hint: 'Make sure moomoo OpenD is running on port 11111',
+          hint: 'Make sure your broker is running and configured in broker.config.json',
         };
       }
 

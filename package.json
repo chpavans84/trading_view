@@ -22,7 +22,12 @@
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
     "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5",
     "bot": "node --env-file=.env src/bot/telegram.js",
-    "bot:ai": "node --env-file=.env src/bot/telegram-ai.js"
+    "bot:ai": "node --env-file=.env src/bot/telegram-ai.js",
+    "dashboard": "pkill -f 'web/server.js' 2>/dev/null; sleep 0.5; node --env-file=.env src/web/server.js",
+    "test:dashboard": "node --test --test-reporter=spec tests/dashboard.test.js",
+    "research:download": "node --env-file=.env src/research/download-prices.js",
+    "research:scores": "node --env-file=.env src/research/compute-scores.js",
+    "research:backtest": "node --env-file=.env src/research/backtest.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -32,12 +37,16 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.4.0",
     "express-session": "^1.19.0",
     "helmet": "^8.1.0",
     "moomoo-api": "^10.3.6308",
     "node-cron": "^4.2.1",
+    "node-pty": "^1.1.0",
     "node-telegram-bot-api": "^0.67.0",
     "pg": "^8.20.0",
-    "ws": "^8.20.0"
+    "resend": "^6.12.2",
+    "ws": "^8.20.0",
+    "yahoo-finance2": "^3.14.0"
   }
 }
