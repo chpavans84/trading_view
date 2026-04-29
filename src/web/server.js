@@ -25,7 +25,7 @@ import { Resend } from 'resend';
 import { NASDAQ100 } from '../research/sp500.js';
 import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades } from '../core/trader.js';
 import cron from 'node-cron';
-import { getMarketSentiment, getSectorPerformance, getMarketMovers, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
+import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
 import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders } from '../core/moomoo-tcp.js';
 import { chat, clearHistory } from '../core/ai-chat.js';
@@ -2267,6 +2267,7 @@ app.get('/api/analyst/state', requireAuth, async (req, res) => {
     nextScan = new Date(new Date(scanTime).getTime() + 10 * 60 * 1000).toISOString();
   }
 
+  const uInfo = getUniverseInfo();
   res.json({
     last_scan:        scanTime,
     next_scan:        nextScan,
@@ -2277,6 +2278,8 @@ app.get('/api/analyst/state', requireAuth, async (req, res) => {
     pnl_today:        pnlData.pnl   ?? 0,
     scanner_running:  _scannerState.autoEnabled,
     market_open:      statusData.is_open ?? false,
+    universe_size:    uInfo.size   || (lastScan?.context?._raw?.movers?.universe_size ?? 0),
+    universe_source:  uInfo.source || (lastScan?.context?._raw?.movers?.universe_source ?? 'unknown'),
   });
 });
 

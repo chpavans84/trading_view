@@ -7962,10 +7962,17 @@ async function updateAnalystState() {
     const bar = document.getElementById('analystStateBar');
     if (!bar) return;
 
-    // Scanner pill
+    // Scanner pill — include universe size/source
+    const uLabel = s.universe_size
+      ? (s.universe_source === 'dynamic'
+          ? `${s.universe_size} live stocks`
+          : `${s.universe_size} stocks (fallback)`)
+      : '';
     const scannerStatus = s.scanner_running
-      ? (s.market_open ? '🟢 Scanning every 10min' : '🟡 Armed (mkt closed)')
-      : '⏸ Scanner off';
+      ? (s.market_open
+          ? `🟢 Scanning every 10min${uLabel ? ' · ' + uLabel : ''}`
+          : `🟡 Armed${uLabel ? ' · ' + uLabel : ''}`)
+      : `⏸ Scanner off${uLabel ? ' · ' + uLabel : ''}`;
 
     // Regime
     const regime = s.today_regime ?? '—';
