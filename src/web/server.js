@@ -22,13 +22,16 @@ import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageSt
 import crypto from 'crypto';
 import { Resend } from 'resend';
 import { NASDAQ100 } from '../research/sp500.js';
-import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, getMarketStatus, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade } from '../core/trader.js';
+import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, getMarketStatus, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades } from '../core/trader.js';
+import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
 import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders } from '../core/moomoo-tcp.js';
 import { chat, clearHistory } from '../core/ai-chat.js';
 import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
+import { getMarketContext } from '../core/market-context.js';
+import { selectBestTrade } from '../core/stock-selector.js';
 
 // Generate a stable numeric chat ID per user so each user has their own
 // conversation history. 12 hex chars → max 2^48 fits safely in JS Number
@@ -1893,6 +1896,80 @@ app.post('/api/admin/chat/clear', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── 2-Layer AI Scanner ───────────────────────────────────────────────────────
+
+const _scannerState = {
+  autoEnabled:  false,
+  running:      false,
+  lastScan:     null,   // { context, selection, executedTrade, timestamp, error }
+  history:      [],     // last 20 scan results
+  lastError:    null,
+};
+
+async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
+  if (_scannerState.running) return { error: 'Scan already in progress' };
+  _scannerState.running = true;
+  const ts = new Date().toISOString();
+  try {
+    const context = await getMarketContext();
+
+    let openPositions = [];
+    try { openPositions = await getPositions(); } catch {}
+
+    const selection = await selectBestTrade({ context, positions: openPositions });
+
+    let executedTrade = null;
+    if (autoExecute && selection.symbol && context.tradeable) {
+      try {
+        const result = await placeTrade({ symbol: selection.symbol, side: 'buy', dollars: 2000 });
+        executedTrade = result;
+        logActivity('scanner', 'auto_trade', selection.symbol, '127.0.0.1');
+      } catch (err) {
+        executedTrade = { error: err.message };
+      }
+    }
+
+    const entry = { context, selection, executedTrade, triggeredBy, timestamp: ts };
+    _scannerState.lastScan = entry;
+    _scannerState.lastError = null;
+    _scannerState.history.unshift(entry);
+    if (_scannerState.history.length > 20) _scannerState.history.length = 20;
+    return entry;
+  } catch (err) {
+    _scannerState.lastError = err.message;
+    throw err;
+  } finally {
+    _scannerState.running = false;
+  }
+}
+
+app.post('/api/scanner/run', requireAdmin, async (req, res) => {
+  try {
+    const { autoExecute = false } = req.body;
+    const result = await runAiScan({ autoExecute, triggeredBy: req.session.username });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/scanner/status', requireAdmin, (req, res) => {
+  res.json({
+    autoEnabled: _scannerState.autoEnabled,
+    running:     _scannerState.running,
+    lastScan:    _scannerState.lastScan,
+    history:     _scannerState.history.slice(0, 10),
+    lastError:   _scannerState.lastError,
+  });
+});
+
+app.post('/api/scanner/auto', requireAdmin, (req, res) => {
+  const { enabled } = req.body;
+  _scannerState.autoEnabled = !!enabled;
+  logActivity(req.session.username, enabled ? 'scanner_auto_on' : 'scanner_auto_off', null, req.ip);
+  res.json({ ok: true, autoEnabled: _scannerState.autoEnabled });
+});
+
 // ─── Bot rules config ─────────────────────────────────────────────────────────
 
 const CONVICTION_FACTORS = [
@@ -2514,6 +2591,41 @@ wss.on('connection', (ws) => {
     } catch { /* ignore malformed messages */ }
   });
   ws.on('close', () => { try { term.kill(); } catch {} });
+});
+
+// ─── Trade Reconciliation Cron ────────────────────────────────────────────────
+// Sync Alpaca bracket exits → DB every 5 min during market hours (9:30–4 PM ET)
+
+cron.schedule('*/5 * * * 1-5', async () => {
+  const utcT = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+  if (utcT < 13 * 60 + 30 || utcT >= 20 * 60) return;
+  try {
+    const result = await syncClosedTrades();
+    if (result.synced > 0)
+      console.log(`[sync] Closed ${result.synced} trade(s):`, result.trades.map(t => `${t.symbol} $${t.pnl_usd}`).join(', '));
+  } catch (err) {
+    console.error('[sync] error:', err.message);
+  }
+});
+
+// ─── AI Scanner Cron ──────────────────────────────────────────────────────────
+// Runs every 10 min, Mon–Fri, 9:45 AM–3:30 PM ET (UTC 13:45–19:30)
+
+cron.schedule('*/10 * * * 1-5', async () => {
+  const utcT = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+  if (utcT < 13 * 60 + 45 || utcT >= 19 * 60 + 30) return;
+  if (!_scannerState.autoEnabled) return;
+  try {
+    console.log('[scanner] Auto-scan running…');
+    const result = await runAiScan({ autoExecute: _scannerState.autoEnabled, triggeredBy: 'cron' });
+    const sel = result.selection;
+    if (sel.symbol)
+      console.log(`[scanner] Selected ${sel.symbol} (conviction ${sel.conviction}) — ${sel.reason?.slice(0, 60)}`);
+    else
+      console.log(`[scanner] No trade: ${sel.no_trade_reason}`);
+  } catch (err) {
+    console.error('[scanner] cron error:', err.message);
+  }
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
