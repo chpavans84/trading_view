@@ -2085,6 +2085,15 @@
       <button onclick="toggleChat()" title="Close">✕</button>
     </div>
   </div>
+  <div id="analystStateBar" style="display:flex;gap:6px;flex-wrap:wrap;padding:6px 10px 4px;border-bottom:1px solid var(--border);font-size:0.72rem;color:var(--text-muted);background:var(--bg-card);min-height:28px">
+    <span id="asbScanner" title="Scanner status">⏸ Idle</span>
+    <span style="color:var(--border)">|</span>
+    <span id="asbRegime"   title="Current regime">Regime: —</span>
+    <span style="color:var(--border)">|</span>
+    <span id="asbPositions" title="Open positions">Pos: —</span>
+    <span style="color:var(--border)">|</span>
+    <span id="asbPnl"      title="Today P&L">P&L: —</span>
+  </div>
   <div class="chat-messages" id="chatMessages">
     <div class="chat-msg assistant">👋 Hi! Ask me anything:
 • <strong>Analyse a stock</strong> — "Should I buy NVDA?"
@@ -6995,8 +7004,9 @@ function toggleChat() {
     // Clear notification badge
     const badge = document.getElementById('chatFabBadge');
     if (badge) badge.remove();
-    // Show today's briefing on first open
+    // Show today's briefing on first open, refresh state bar
     initDailyBriefing();
+    updateAnalystState();
     if (window.innerWidth <= 768) {
       _applyChatMobileSize();
       fab.style.display = 'none';
@@ -7791,16 +7801,19 @@ function connectPushStream() {
 function injectAutonomousMessage(content, type = 'autonomous') {
   const msgs = document.getElementById('chatMessages');
   if (!msgs) return;
-  const icons = { briefing: '📋', circuit_breaker: '🚨', stop_moved: '🔒', trail_stop: '🎯', stop_warning: '⚠️', autonomous: '🤖' };
+  const icons = { briefing: '📋', circuit_breaker: '🚨', stop_moved: '🔒', trail_stop: '🎯', stop_warning: '⚠️', eod_summary: '📊', regime_change: '🔄', autonomous: '🤖' };
   const icon  = icons[type] || '🤖';
-  const borderColors = { briefing: '#58a6ff', circuit_breaker: '#f85149', stop_moved: '#3fb950', trail_stop: '#d29922', stop_warning: '#f0883e', autonomous: '#8b949e' };
+  const borderColors = { briefing: '#58a6ff', circuit_breaker: '#f85149', stop_moved: '#3fb950', trail_stop: '#d29922', stop_warning: '#f0883e', eod_summary: '#8b949e', regime_change: '#a371f7', autonomous: '#8b949e' };
   const border = borderColors[type] || 'var(--accent-l)';
+
+  const labelMap = { briefing: 'Morning Briefing', circuit_breaker: 'Circuit Breaker', stop_moved: 'Stop Moved', trail_stop: 'Trail Stop', stop_warning: 'Stop Warning', eod_summary: 'EOD Summary', regime_change: 'Regime Alert', autonomous: 'Auto' };
+  const label = labelMap[type] || 'Auto';
 
   const html = content.replace(/\n/g, '<br>');
   const el = document.createElement('div');
   el.className = 'chat-msg assistant';
-  el.style.cssText = `border-left:3px solid ${border};padding-left:10px;opacity:0;transition:opacity .4s`;
-  el.innerHTML = html;
+  el.style.cssText = `border-left:3px solid ${border};padding-left:10px;opacity:0;transition:opacity .4s;position:relative`;
+  el.innerHTML = `<span style="display:inline-block;font-size:0.65rem;font-weight:700;color:${border};background:${border}22;border:1px solid ${border}44;border-radius:4px;padding:1px 5px;margin-bottom:4px;letter-spacing:.3px">${icon} ${label.toUpperCase()}</span><br>${html}`;
   msgs.appendChild(el);
   msgs.scrollTop = msgs.scrollHeight;
   requestAnimationFrame(() => { el.style.opacity = '1'; });
@@ -7839,6 +7852,55 @@ async function initDailyBriefing() {
     injectAutonomousMessage(`📋 Morning Briefing — ${briefing.date}\n\n${briefing.content}`, 'briefing');
   } catch {}
 }
+
+// ── Analyst State Bar ───────────────────────────────────────────────────────────
+async function updateAnalystState() {
+  try {
+    const r = await fetch('/api/analyst/state');
+    if (!r.ok) return;
+    const s = await r.json();
+
+    const scanEl = document.getElementById('asbScanner');
+    const regEl  = document.getElementById('asbRegime');
+    const posEl  = document.getElementById('asbPositions');
+    const pnlEl  = document.getElementById('asbPnl');
+    if (!scanEl) return;
+
+    const scannerStatus = s.scanner_running
+      ? (s.market_open ? '🟢 Scanning' : '🟡 Armed')
+      : '⏸ Idle';
+    scanEl.textContent = scannerStatus;
+
+    const regime = s.today_regime ?? '—';
+    const dir    = s.today_direction ?? '';
+    regEl.textContent  = `Regime: ${regime}${dir ? ' · ' + dir : ''}`;
+
+    posEl.textContent  = `Pos: ${s.open_positions ?? 0}`;
+
+    const pnl    = parseFloat(s.pnl_today ?? 0);
+    pnlEl.textContent  = `P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}`;
+    pnlEl.style.color  = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : '';
+  } catch {}
+}
+
+setInterval(updateAnalystState, 30000);
+
+// ── Autonomous Chat Poll (fallback for SSE) ─────────────────────────────────────
+let _lastPollTime = new Date().toISOString();
+
+async function pollAutonomousMessages() {
+  try {
+    const r = await fetch(`/api/chat/poll?since=${encodeURIComponent(_lastPollTime)}`);
+    if (!r.ok) return;
+    const { messages } = await r.json();
+    for (const msg of messages) {
+      injectAutonomousMessage(msg.content, msg.type);
+      _lastPollTime = msg.timestamp;
+    }
+  } catch {}
+}
+
+setInterval(pollAutonomousMessages, 5000);
 
 // ── Theme system ────────────────────────────────────────────────────────────────
 const THEMES = [
