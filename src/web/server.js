@@ -18,7 +18,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import { Resend } from 'resend';
@@ -1909,6 +1909,16 @@ const _scannerState = {
 
 async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
   if (_scannerState.running) return { error: 'Scan already in progress' };
+
+  // Daily spend cap — skip autonomous scans (not manual triggers) when over budget
+  if (triggeredBy === 'cron') {
+    const todaySpend = await getTodaySpend().catch(() => 0);
+    if (todaySpend >= DAILY_API_CAP_USD) {
+      console.warn(`[scanner] Daily API cap $${DAILY_API_CAP_USD} reached ($${todaySpend.toFixed(4)} spent) — skipping scan`);
+      return { skipped: true, reason: `Daily API cap $${DAILY_API_CAP_USD} reached` };
+    }
+  }
+
   _scannerState.running = true;
   const ts = new Date().toISOString();
   try {
@@ -2069,6 +2079,13 @@ app.get('/api/chat/poll', requireAuth, (req, res) => {
 
 const _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Pricing constants for cost tracking (per 1M tokens)
+const SONNET_INPUT_PER_M  = 3.00;
+const SONNET_OUTPUT_PER_M = 15.00;
+
+// Daily API spend cap — scanner stops when today's total exceeds this
+const DAILY_API_CAP_USD = parseFloat(process.env.DAILY_API_CAP_USD ?? '3.00');
+
 async function runMorningBriefing() {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   const existing = await getDailyBriefing(today);
@@ -2108,6 +2125,12 @@ Market data:
 
 Keep it under 200 words. Be specific. Use numbers. Plain text — no markdown symbols like ** or #.` }],
     });
+
+    const inp  = msg.usage?.input_tokens  ?? 0;
+    const out  = msg.usage?.output_tokens ?? 0;
+    const cost = (inp / 1e6) * SONNET_INPUT_PER_M + (out / 1e6) * SONNET_OUTPUT_PER_M;
+    recordApiCall({ source: 'morning_briefing', inputTokens: inp, outputTokens: out, costUsd: cost, model: 'claude-sonnet-4-6' }).catch(() => {});
+    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: 0, costUsd: cost }).catch(() => {});
 
     const content = msg.content[0]?.text?.trim() ?? '';
     await saveDailyBriefing({ date: today, content, regime: ctx.regime, direction: ctx.direction, vix: ctx.vix });
@@ -2176,6 +2199,12 @@ Write a concise EOD summary (under 150 words):
 
 Plain text, no markdown symbols. Be direct.` }],
     });
+
+    const inp  = msg.usage?.input_tokens  ?? 0;
+    const out  = msg.usage?.output_tokens ?? 0;
+    const cost = (inp / 1e6) * SONNET_INPUT_PER_M + (out / 1e6) * SONNET_OUTPUT_PER_M;
+    recordApiCall({ source: 'eod_summary', inputTokens: inp, outputTokens: out, costUsd: cost, model: 'claude-sonnet-4-6' }).catch(() => {});
+    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: 0, costUsd: cost }).catch(() => {});
 
     const content = msg.content[0]?.text?.trim() ?? '';
     await saveDailyBriefing({ date: today, type: 'eod', content, regime: context?.regime, direction: context?.direction, vix: context?.vix });
