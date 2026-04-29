@@ -5,21 +5,98 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trading Bot Dashboard</title>
 <style>
+  /* ── Theme tokens (GitHub Dark is the default) ─────────────────────────── */
+  :root {
+    --bg:        #0d1117;
+    --bg2:       #161b22;
+    --surface:   #21262d;
+    --border:    rgba(48,54,61,0.8);
+    --text:      #e6edf3;
+    --text2:     #c9d1d9;
+    --muted:     #8b949e;
+    --faint:     #6e7681;
+    --accent:    #1f6feb;
+    --accent-l:  #58a6ff;
+    --green:     #3fb950;
+    --red:       #f85149;
+    --yellow:    #d29922;
+    --nav-bg:    rgba(13,17,23,0.78);
+    --card-bg:   linear-gradient(135deg,rgba(22,27,34,.90) 0%,rgba(13,17,23,.85) 100%);
+    --table-bg:  linear-gradient(160deg,rgba(22,27,34,.92) 0%,rgba(13,17,23,.88) 100%);
+    --body-grad: radial-gradient(ellipse 80% 50% at 20% -10%,rgba(31,111,235,.12) 0%,transparent 60%),
+                 radial-gradient(ellipse 60% 40% at 80% 110%,rgba(35,134,54,.08) 0%,transparent 55%);
+    --ticker-bg: #0d1117;
+    --term-bg:   #0d1117; --term-fg: #e6edf3; --term-cur: #58a6ff;
+  }
+  [data-theme="dracula"] {
+    --bg:        #282a36; --bg2: #21222c; --surface: #313446; --border: rgba(68,71,90,.8);
+    --text:      #f8f8f2; --text2: #d7d4e8; --muted: #6272a4; --faint: #4f5a78;
+    --accent:    #bd93f9; --accent-l: #d6b4ff; --green: #50fa7b; --red: #ff5555; --yellow: #f1fa8c;
+    --nav-bg:    rgba(33,34,44,.88);
+    --card-bg:   linear-gradient(135deg,rgba(49,52,70,.92) 0%,rgba(33,34,44,.88) 100%);
+    --table-bg:  linear-gradient(160deg,rgba(49,52,70,.94) 0%,rgba(33,34,44,.90) 100%);
+    --body-grad: radial-gradient(ellipse 80% 50% at 20% -10%,rgba(189,147,249,.13) 0%,transparent 60%),
+                 radial-gradient(ellipse 60% 40% at 80% 110%,rgba(80,250,123,.07) 0%,transparent 55%);
+    --ticker-bg: #282a36; --term-bg: #21222c; --term-fg: #f8f8f2; --term-cur: #bd93f9;
+  }
+  [data-theme="tokyo"] {
+    --bg:        #1a1b2e; --bg2: #24253a; --surface: #2f3148; --border: rgba(59,61,90,.8);
+    --text:      #c0caf5; --text2: #a9b1d6; --muted: #565f89; --faint: #414868;
+    --accent:    #7aa2f7; --accent-l: #9eceff; --green: #9ece6a; --red: #f7768e; --yellow: #e0af68;
+    --nav-bg:    rgba(26,27,46,.88);
+    --card-bg:   linear-gradient(135deg,rgba(36,37,58,.92) 0%,rgba(26,27,46,.88) 100%);
+    --table-bg:  linear-gradient(160deg,rgba(36,37,58,.94) 0%,rgba(26,27,46,.90) 100%);
+    --body-grad: radial-gradient(ellipse 80% 50% at 20% -10%,rgba(122,162,247,.13) 0%,transparent 60%),
+                 radial-gradient(ellipse 60% 40% at 80% 110%,rgba(158,206,106,.07) 0%,transparent 55%);
+    --ticker-bg: #1a1b2e; --term-bg: #1a1b2e; --term-fg: #c0caf5; --term-cur: #7aa2f7;
+  }
+  [data-theme="midnight"] {
+    --bg:        #060b14; --bg2: #0c1525; --surface: #152035; --border: rgba(30,48,80,.8);
+    --text:      #ddeeff; --text2: #b8ccee; --muted: #6088bb; --faint: #3a5580;
+    --accent:    #2563eb; --accent-l: #60a5fa; --green: #22d3a2; --red: #ef4444; --yellow: #f59e0b;
+    --nav-bg:    rgba(6,11,20,.88);
+    --card-bg:   linear-gradient(135deg,rgba(21,32,53,.92) 0%,rgba(6,11,20,.88) 100%);
+    --table-bg:  linear-gradient(160deg,rgba(21,32,53,.94) 0%,rgba(6,11,20,.90) 100%);
+    --body-grad: radial-gradient(ellipse 80% 50% at 20% -10%,rgba(37,99,235,.18) 0%,transparent 60%),
+                 radial-gradient(ellipse 60% 40% at 80% 110%,rgba(34,211,162,.08) 0%,transparent 55%);
+    --ticker-bg: #060b14; --term-bg: #060b14; --term-fg: #ddeeff; --term-cur: #60a5fa;
+  }
+  [data-theme="solarized"] {
+    --bg:        #002b36; --bg2: #073642; --surface: #0d4858; --border: rgba(27,88,106,.8);
+    --text:      #fdf6e3; --text2: #eee8d5; --muted: #839496; --faint: #657b83;
+    --accent:    #268bd2; --accent-l: #4cb8f0; --green: #859900; --red: #dc322f; --yellow: #b58900;
+    --nav-bg:    rgba(0,43,54,.88);
+    --card-bg:   linear-gradient(135deg,rgba(13,72,88,.92) 0%,rgba(0,43,54,.88) 100%);
+    --table-bg:  linear-gradient(160deg,rgba(13,72,88,.94) 0%,rgba(0,43,54,.90) 100%);
+    --body-grad: radial-gradient(ellipse 80% 50% at 20% -10%,rgba(38,139,210,.15) 0%,transparent 60%),
+                 radial-gradient(ellipse 60% 40% at 80% 110%,rgba(133,153,0,.08) 0%,transparent 55%);
+    --ticker-bg: #002b36; --term-bg: #002b36; --term-fg: #fdf6e3; --term-cur: #268bd2;
+  }
+  [data-theme="cyberpunk"] {
+    --bg:        #0a0a0f; --bg2: #111120; --surface: #181830; --border: rgba(37,37,80,.8);
+    --text:      #e0e0ff; --text2: #c0c0e0; --muted: #7070b0; --faint: #505080;
+    --accent:    #f72585; --accent-l: #ff60a8; --green: #06d6a0; --red: #ef233c; --yellow: #ffbe0b;
+    --nav-bg:    rgba(10,10,15,.90);
+    --card-bg:   linear-gradient(135deg,rgba(24,24,48,.92) 0%,rgba(10,10,15,.88) 100%);
+    --table-bg:  linear-gradient(160deg,rgba(24,24,48,.94) 0%,rgba(10,10,15,.90) 100%);
+    --body-grad: radial-gradient(ellipse 80% 50% at 20% -10%,rgba(247,37,133,.15) 0%,transparent 60%),
+                 radial-gradient(ellipse 60% 40% at 80% 110%,rgba(6,214,160,.08) 0%,transparent 55%);
+    --ticker-bg: #0a0a0f; --term-bg: #0a0a0f; --term-fg: #e0e0ff; --term-cur: #f72585;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #0d1117;
-    color: #e6edf3;
-    background-image:
-      radial-gradient(ellipse 80% 50% at 20% -10%, rgba(31,111,235,0.12) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 40% at 80% 110%, rgba(35,134,54,0.08) 0%, transparent 55%);
+    background: var(--bg);
+    color: var(--text);
+    background-image: var(--body-grad);
     background-attachment: fixed;
   }
   nav {
-    background: rgba(13,17,23,0.75);
+    background: var(--nav-bg);
     backdrop-filter: blur(16px) saturate(180%);
     -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border-bottom: 1px solid rgba(48,54,61,0.7);
+    border-bottom: 1px solid var(--border);
     box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 4px 24px rgba(0,0,0,0.3);
     display: flex; align-items: center; justify-content: space-between;
     padding: 0 24px; height: 56px; position: sticky; top: 0; z-index: 100;
@@ -29,7 +106,7 @@
   /* News ticker bar under nav */
   #newsTicker {
     position: sticky; top: 56px; z-index: 99;
-    background: #0d1117; border-bottom: 1px solid #21262d;
+    background: var(--ticker-bg); border-bottom: 1px solid var(--surface);
     display: flex; align-items: center; height: 36px; overflow: hidden;
     padding: 0 16px; gap: 10px;
   }
@@ -102,21 +179,21 @@
     white-space: nowrap;
   }
   .tab:not(.active):hover {
-    background: rgba(88,166,255,0.08);
-    border-color: rgba(88,166,255,0.2);
-    color: #c9d1d9;
+    background: color-mix(in srgb,var(--accent-l) 10%,transparent);
+    border-color: color-mix(in srgb,var(--accent-l) 25%,transparent);
+    color: var(--text2);
     transform: scale(1.2);
-    margin: 0 8px;   /* push neighbours: extra (1.2-1)/2 × ~70px ≈ 7px each side */
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3), 0 0 8px rgba(88,166,255,0.08);
+    margin: 0 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   }
   .tab.active {
-    background: linear-gradient(135deg, rgba(31,111,235,0.22) 0%, rgba(56,139,253,0.14) 100%);
-    border-color: rgba(88,166,255,0.4);
-    color: #58a6ff;
+    background: color-mix(in srgb,var(--accent) 22%,transparent);
+    border-color: color-mix(in srgb,var(--accent-l) 50%,transparent);
+    color: var(--accent-l);
     transform: scale(1.4);
-    margin: 0 16px;  /* push neighbours: extra (1.4-1)/2 × ~70px ≈ 14px each side */
-    box-shadow: 0 4px 20px rgba(31,111,235,0.3), 0 0 0 1px rgba(88,166,255,0.25), inset 0 1px 0 rgba(255,255,255,0.07);
-    text-shadow: 0 0 12px rgba(88,166,255,0.4);
+    margin: 0 16px;
+    box-shadow: 0 4px 20px color-mix(in srgb,var(--accent) 35%,transparent), inset 0 1px 0 rgba(255,255,255,0.07);
+    text-shadow: 0 0 12px color-mix(in srgb,var(--accent-l) 50%,transparent);
   }
   .tab.active:hover { transform: scale(1.4); margin: 0 16px; }
   .nav-right { display: flex; align-items: center; gap: 12px; }
@@ -140,17 +217,17 @@
   .nav-clock-sub {
     font-size: 0.58rem; color: #6e7681; white-space: nowrap;
   }
-  .nav-clock.market-open .nav-clock-label { color: #3fb950; }
-  .nav-clock.market-open .nav-clock-time  { color: #3fb950; }
+  .nav-clock.market-open .nav-clock-label { color: var(--green); }
+  .nav-clock.market-open .nav-clock-time  { color: var(--green); }
   .nav-clock-divider {
     width: 1px; height: 28px; background: rgba(48,54,61,0.7); flex-shrink: 0;
   }
   @keyframes pulse-green { 0%,100%{box-shadow:0 0 0 0 rgba(63,185,80,0.5)} 50%{box-shadow:0 0 0 5px rgba(63,185,80,0)} }
   @keyframes pulse-red   { 0%,100%{box-shadow:0 0 0 0 rgba(248,81,73,0.5)}  50%{box-shadow:0 0 0 5px rgba(248,81,73,0)} }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; animation: pulse-green 2.5s ease-in-out infinite; }
-  .status-dot.offline { background: #f85149; animation: pulse-red 2.5s ease-in-out infinite; }
-  .logout { color: #8b949e; font-size: 0.85rem; cursor: pointer; background: none; border: none; }
-  .logout:hover { color: #e6edf3; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse-green 2.5s ease-in-out infinite; }
+  .status-dot.offline { background: var(--red); animation: pulse-red 2.5s ease-in-out infinite; }
+  .logout { color: var(--muted); font-size: 0.85rem; cursor: pointer; background: none; border: none; }
+  .logout:hover { color: var(--text); }
 
   /* User dropdown */
   .user-menu { position: relative; }
@@ -226,10 +303,10 @@
   /* Cards */
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .card {
-    background: linear-gradient(135deg, rgba(22,27,34,0.9) 0%, rgba(13,17,23,0.85) 100%);
+    background: var(--card-bg);
     backdrop-filter: blur(12px) saturate(160%);
     -webkit-backdrop-filter: blur(12px) saturate(160%);
-    border: 1px solid rgba(48,54,61,0.8);
+    border: 1px solid var(--border);
     border-top: 1px solid rgba(255,255,255,0.06);
     border-radius: 14px;
     padding: 20px;
@@ -239,15 +316,15 @@
   }
   .card:hover {
     transform: translateY(-3px) scale(1.015);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(88,166,255,0.15), inset 0 1px 0 rgba(255,255,255,0.07);
-    border-color: rgba(88,166,255,0.25);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px color-mix(in srgb,var(--accent-l) 30%,transparent), inset 0 1px 0 rgba(255,255,255,0.07);
+    border-color: color-mix(in srgb,var(--accent-l) 40%,transparent);
   }
-  .card-label { font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .card-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
   .card-value { font-size: 1.8rem; font-weight: 700; line-height: 1; }
-  .card-sub { font-size: 0.8rem; color: #8b949e; margin-top: 6px; }
-  .pos { color: #3fb950; }
-  .neg { color: #f85149; }
-  .neu { color: #e6edf3; }
+  .card-sub { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .neu { color: var(--text); }
 
   /* Progress bar */
   .progress { height: 6px; background: #21262d; border-radius: 3px; margin-top: 10px; overflow: hidden; }
@@ -269,10 +346,10 @@
 
   /* Tables */
   .table-wrap {
-    background: linear-gradient(160deg, rgba(22,27,34,0.92) 0%, rgba(13,17,23,0.88) 100%);
+    background: var(--table-bg);
     backdrop-filter: blur(12px) saturate(150%);
     -webkit-backdrop-filter: blur(12px) saturate(150%);
-    border: 1px solid rgba(48,54,61,0.75);
+    border: 1px solid var(--border);
     border-top: 1px solid rgba(255,255,255,0.05);
     border-radius: 14px;
     overflow-x: auto; overflow-y: hidden;
@@ -281,8 +358,8 @@
     transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
   }
   .table-wrap:hover {
-    border-color: rgba(88,166,255,0.2);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 0 0 1px rgba(88,166,255,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+    border-color: color-mix(in srgb,var(--accent-l) 30%,transparent);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 0 0 1px color-mix(in srgb,var(--accent-l) 20%,transparent), inset 0 1px 0 rgba(255,255,255,0.05);
     transform: translateY(-2px);
   }
   .table-head {
@@ -298,7 +375,7 @@
   table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
   th { padding: 10px 20px; text-align: left; font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid rgba(33,38,45,0.8); user-select: none; background: rgba(13,17,23,0.3); }
   th:hover { color: #c9d1d9; }
-  th.sort-active { color: #58a6ff; }
+  th.sort-active { color: var(--accent-l); }
   .sort-arrow { font-size: 0.7rem; margin-left: 3px; opacity: 0.7; }
   td { padding: 12px 20px; border-bottom: 1px solid rgba(33,38,45,0.6); transition: background 0.15s ease; }
   tr:last-child td { border-bottom: none; }
@@ -306,10 +383,10 @@
     transition: transform 0.18s ease, box-shadow 0.18s ease;
   }
   tbody tr:hover td {
-    background: rgba(88,166,255,0.06);
+    background: color-mix(in srgb,var(--accent-l) 8%,transparent);
   }
   tbody tr:hover td:first-child {
-    box-shadow: inset 3px 0 0 rgba(88,166,255,0.5);
+    box-shadow: inset 3px 0 0 color-mix(in srgb,var(--accent-l) 60%,transparent);
   }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
   .badge-A { background: rgba(26,71,32,0.8); color: #3fb950; box-shadow: 0 0 8px rgba(63,185,80,0.2); }
@@ -976,6 +1053,11 @@
         <div class="udrop-item" onclick="openBrokerSettings()">
           <span class="udrop-icon">⚙️</span> Broker Settings
           <span id="brokerSettingsBadge" style="margin-left:auto;font-size:0.7rem;background:#21262d;color:#8b949e;border-radius:4px;padding:1px 6px">—</span>
+        </div>
+        <div class="udrop-divider"></div>
+        <div style="padding:8px 14px 10px">
+          <div style="font-size:0.68rem;color:var(--faint);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Theme</div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap" id="themePalette"></div>
         </div>
         <div class="udrop-divider"></div>
         <div class="udrop-item danger" onclick="logout()">
@@ -7020,8 +7102,9 @@ function termInit() {
     return;
   }
 
+  const _cs = getComputedStyle(document.documentElement);
   _term = new Terminal({
-    theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#58a6ff', selectionBackground: '#264f78' },
+    theme: { background: _cs.getPropertyValue('--term-bg').trim() || '#0d1117', foreground: _cs.getPropertyValue('--term-fg').trim() || '#e6edf3', cursor: _cs.getPropertyValue('--term-cur').trim() || '#58a6ff', selectionBackground: 'rgba(88,166,255,0.25)' },
     fontFamily: '"Cascadia Code", "JetBrains Mono", "Fira Code", monospace',
     fontSize: 13,
     lineHeight: 1.3,
@@ -7673,6 +7756,65 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.addEventListener('mouseup', () => { dragging = false; });
+})();
+
+// ── Theme system ────────────────────────────────────────────────────────────────
+const THEMES = [
+  { id: 'github',    name: 'GitHub Dark',    swatch: '#1f6feb', dark: true  },
+  { id: 'midnight',  name: 'Midnight',        swatch: '#2563eb', dark: true  },
+  { id: 'dracula',   name: 'Dracula',         swatch: '#bd93f9', dark: true  },
+  { id: 'tokyo',     name: 'Tokyo Night',     swatch: '#7aa2f7', dark: true  },
+  { id: 'solarized', name: 'Solarized Dark',  swatch: '#268bd2', dark: true  },
+  { id: 'cyberpunk', name: 'Cyberpunk',       swatch: '#f72585', dark: true  },
+];
+
+let _currentTheme = 'github';
+
+function applyTheme(id, save = true) {
+  _currentTheme = id;
+  const html = document.documentElement;
+  html.setAttribute('data-theme', id === 'github' ? '' : id);
+  if (save) localStorage.setItem('theme', id);
+
+  // Update xterm.js terminal colours if it exists
+  if (typeof _term !== 'undefined' && _term) {
+    const style = getComputedStyle(html);
+    _term.options.theme = {
+      background:        style.getPropertyValue('--term-bg').trim(),
+      foreground:        style.getPropertyValue('--term-fg').trim(),
+      cursor:            style.getPropertyValue('--term-cur').trim(),
+      selectionBackground: 'rgba(88,166,255,0.25)',
+    };
+  }
+
+  // Highlight active swatch
+  document.querySelectorAll('.theme-swatch').forEach(el => {
+    const active = el.dataset.theme === id;
+    el.style.outline      = active ? `2px solid ${el.style.background}` : 'none';
+    el.style.outlineOffset = active ? '2px' : '0';
+    el.style.transform    = active ? 'scale(1.25)' : 'scale(1)';
+  });
+}
+
+function buildThemePalette() {
+  const container = document.getElementById('themePalette');
+  if (!container) return;
+  container.innerHTML = THEMES.map(t => `
+    <div class="theme-swatch" data-theme="${t.id}"
+         title="${t.name}"
+         onclick="applyTheme('${t.id}')"
+         style="width:22px;height:22px;border-radius:50%;background:${t.swatch};cursor:pointer;
+                transition:transform .18s,outline .18s;flex-shrink:0">
+    </div>`).join('');
+  applyTheme(_currentTheme, false);
+}
+
+// Init on load
+(function() {
+  const saved = localStorage.getItem('theme') || 'github';
+  applyTheme(saved, false);
+  // Build palette once DOM is ready (it is, since we're inline at end of body)
+  buildThemePalette();
 })();
 </script>
 </body>
