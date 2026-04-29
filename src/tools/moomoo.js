@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
-import * as core from '../core/moomoo-tcp.js';
+import * as core from '../brokers/index.js';
 
 export function registerMoomooTools(server) {
   server.tool(
@@ -9,7 +9,7 @@ export function registerMoomooTools(server) {
     {},
     async () => {
       try { return jsonResult(await core.getAccounts()); }
-      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure moomoo OpenD is running on port 11111 and you are logged in.' }, true); }
+      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure your broker is running and configured in broker.config.json and you are logged in.' }, true); }
     }
   );
 
@@ -21,7 +21,7 @@ export function registerMoomooTools(server) {
     },
     async ({ acc_id }) => {
       try { return jsonResult(await core.getFunds({ acc_id })); }
-      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure moomoo OpenD is running on port 11111.' }, true); }
+      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure your broker is running and configured in broker.config.json.' }, true); }
     }
   );
 
@@ -33,7 +33,7 @@ export function registerMoomooTools(server) {
     },
     async ({ acc_id }) => {
       try { return jsonResult(await core.getPositions({ acc_id })); }
-      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure moomoo OpenD is running on port 11111.' }, true); }
+      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure your broker is running and configured in broker.config.json.' }, true); }
     }
   );
 
@@ -46,7 +46,7 @@ export function registerMoomooTools(server) {
     },
     async ({ acc_id, status }) => {
       try { return jsonResult(await core.getOrders({ acc_id, status })); }
-      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure moomoo OpenD is running on port 11111.' }, true); }
+      catch (err) { return jsonResult({ success: false, error: err.message, hint: 'Make sure your broker is running and configured in broker.config.json.' }, true); }
     }
   );
 }

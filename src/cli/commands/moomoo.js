@@ -1,5 +1,5 @@
 import { register } from '../router.js';
-import * as core from '../../core/moomoo-tcp.js';
+import * as core from '../../brokers/index.js';
 
 register('moomoo', {
   description: 'Moomoo portfolio tools (accounts, funds, positions, orders)',

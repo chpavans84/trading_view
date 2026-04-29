@@ -1,0 +1,45 @@
+services:
+
+  # ── PostgreSQL database ──────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tradingbot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tradingbot}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Web dashboard ────────────────────────────────────────────────────────────
+  dashboard:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-tradingbot}@db:5432/tradingbot
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── Telegram AI bot ──────────────────────────────────────────────────────────
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-tradingbot}@db:5432/tradingbot
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["node", "--env-file=.env", "src/bot/telegram-ai.js"]
+
+volumes:
+  db_data:
