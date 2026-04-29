@@ -5,9 +5,6 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { existsSync, writeFileSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 
 import {
@@ -16,13 +13,10 @@ import {
   suspendUser, unsuspendUser,
   setUserCredits, addCredits, setUserRole, resetUserPassword,
   deleteDbUser, getActivity, logActivity,
-  recordApiCall,
+  recordApiCall, getScannerState, setScannerState,
 } from './db.js';
 import { getAccount, getPositions, getDailyPnL, closePosition } from './trader.js';
 import { getFunds as getMoomooFunds, getPositions as getMoomooPositions } from './moomoo-tcp.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PAUSED_FLAG = join(__dirname, '../../.scanner-paused');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -351,7 +345,7 @@ async function executeTool(name, input, { adminUsername } = {}) {
 
       case 'get_system_status': {
         const dbOk    = isDbAvailable();
-        const paused  = existsSync(PAUSED_FLAG);
+        const paused  = (await getScannerState('paused')) === 'true';
         const users   = dbOk ? (await listDbUsers() ?? []) : [];
         const suspended = users.filter(u => u.suspended).length;
 
@@ -400,21 +394,23 @@ async function executeTool(name, input, { adminUsername } = {}) {
       }
 
       case 'pause_scanner': {
-        if (existsSync(PAUSED_FLAG)) return { already_paused: true, message: 'Scanner is already paused' };
-        writeFileSync(PAUSED_FLAG, new Date().toISOString());
+        const current = await getScannerState('paused');
+        if (current === 'true') return { already_paused: true, message: 'Scanner is already paused' };
+        await setScannerState('paused', 'true');
         log('admin_pause_scanner', 'Auto-scanner paused via Admin AI');
         return { success: true, message: 'Auto-scanner paused. No new trades will execute.' };
       }
 
       case 'resume_scanner': {
-        if (!existsSync(PAUSED_FLAG)) return { not_paused: true, message: 'Scanner is not paused' };
-        unlinkSync(PAUSED_FLAG);
+        const current = await getScannerState('paused');
+        if (current !== 'true') return { not_paused: true, message: 'Scanner is not paused' };
+        await setScannerState('paused', 'false');
         log('admin_resume_scanner', 'Auto-scanner resumed via Admin AI');
         return { success: true, message: 'Auto-scanner resumed. Trading is active.' };
       }
 
       case 'get_scanner_state': {
-        const paused = existsSync(PAUSED_FLAG);
+        const paused = (await getScannerState('paused')) === 'true';
         return { state: paused ? 'paused' : 'running', paused };
       }
 

@@ -6992,6 +6992,11 @@ function toggleChat() {
     if (!loadChatHistory()) {
       // first open — show welcome message
     }
+    // Clear notification badge
+    const badge = document.getElementById('chatFabBadge');
+    if (badge) badge.remove();
+    // Show today's briefing on first open
+    initDailyBriefing();
     if (window.innerWidth <= 768) {
       _applyChatMobileSize();
       fab.style.display = 'none';
@@ -7757,6 +7762,83 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('mouseup', () => { dragging = false; });
 })();
+
+// Connect autonomous push stream once page is ready
+connectPushStream();
+
+// ── Autonomous Push Notifications (SSE) ────────────────────────────────────────
+let _pushSource = null;
+
+function connectPushStream() {
+  if (_pushSource) return;
+  try {
+    _pushSource = new EventSource('/api/chat/push');
+    _pushSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (!data.content) return;
+        injectAutonomousMessage(data.content, data.type);
+      } catch {}
+    };
+    _pushSource.onerror = () => {
+      _pushSource?.close();
+      _pushSource = null;
+      setTimeout(connectPushStream, 30000); // reconnect after 30s
+    };
+  } catch {}
+}
+
+function injectAutonomousMessage(content, type = 'autonomous') {
+  const msgs = document.getElementById('chatMessages');
+  if (!msgs) return;
+  const icons = { briefing: '📋', circuit_breaker: '🚨', stop_moved: '🔒', trail_stop: '🎯', stop_warning: '⚠️', autonomous: '🤖' };
+  const icon  = icons[type] || '🤖';
+  const borderColors = { briefing: '#58a6ff', circuit_breaker: '#f85149', stop_moved: '#3fb950', trail_stop: '#d29922', stop_warning: '#f0883e', autonomous: '#8b949e' };
+  const border = borderColors[type] || 'var(--accent-l)';
+
+  const html = content.replace(/\n/g, '<br>');
+  const el = document.createElement('div');
+  el.className = 'chat-msg assistant';
+  el.style.cssText = `border-left:3px solid ${border};padding-left:10px;opacity:0;transition:opacity .4s`;
+  el.innerHTML = html;
+  msgs.appendChild(el);
+  msgs.scrollTop = msgs.scrollHeight;
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+
+  saveChatHistory();
+
+  // Badge on chat FAB
+  const fab = document.getElementById('chatFab');
+  const widget = document.getElementById('chatWidget');
+  if (fab && !widget?.classList.contains('open')) {
+    let badge = document.getElementById('chatFabBadge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'chatFabBadge';
+      badge.style.cssText = 'position:absolute;top:-4px;right:-4px;background:#f85149;color:#fff;border-radius:50%;width:14px;height:14px;font-size:0.6rem;display:flex;align-items:center;justify-content:center;font-weight:700';
+      fab.style.position = 'relative';
+      fab.appendChild(badge);
+    }
+    badge.textContent = parseInt(badge.textContent || '0') + 1;
+  }
+}
+
+// ── Daily Morning Briefing ──────────────────────────────────────────────────────
+async function initDailyBriefing() {
+  try {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const key   = `briefing_shown_${today}`;
+    if (localStorage.getItem(key)) return;
+
+    const r = await fetch('/api/briefing');
+    if (!r.ok) return;
+    const { briefing } = await r.json();
+    if (!briefing?.content) return;
+
+    localStorage.setItem(key, '1');
+    injectAutonomousMessage(`📋 Morning Briefing — ${briefing.date}\n\n${briefing.content}`, 'briefing');
+  } catch {}
+}
 
 // ── Theme system ────────────────────────────────────────────────────────────────
 const THEMES = [

@@ -277,7 +277,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         const addAge = items => items.map(a => {
           const pub = a.published ? new Date(a.published) : null;
           const hoursAgo = pub ? Math.round((Date.now() - pub.getTime()) / 3600000) : null;
-          return { ...a, hours_ago: hoursAgo, age_label: hoursAgo == null ? 'unknown date' : hoursAgo < 1 ? 'just now' : hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.floor(hoursAgo/24)}d ago`, stale: hoursAgo != null && hoursAgo > 72 };
+          return { ...a, hours_ago: hoursAgo, age_label: hoursAgo == null ? 'unknown date' : hoursAgo < 1 ? 'just now' : hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.floor(hoursAgo/24)}d ago`, stale: hoursAgo != null && hoursAgo > 48 };
         });
         const todayStr = new Date().toISOString().split('T')[0];
         if (input.keywords && !input.symbol) {
@@ -285,7 +285,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const kws = input.keywords.toLowerCase().split(/[\s,+]+/).filter(k => k.length > 2);
           const fresh = all.filter(a => {
             const hoursAgo = a.published ? (Date.now() - new Date(a.published).getTime()) / 3600000 : 999;
-            return hoursAgo <= 72;
+            return hoursAgo <= 48;
           });
           const pool = fresh.length >= 3 ? fresh : all;
           const matched = pool.filter(a => kws.some(k => a.title?.toLowerCase().includes(k) || a.summary?.toLowerCase().includes(k)));
