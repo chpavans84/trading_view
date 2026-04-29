@@ -1798,6 +1798,7 @@
       <div style="display:flex;gap:8px;align-items:center">
         <div style="display:flex;background:#0d1117;border:1px solid #30363d;border-radius:8px;overflow:hidden">
           <button id="adminViewAI"  onclick="setAdminView('ai')"       style="background:#1f6feb;border:none;color:#fff;padding:6px 14px;font-size:0.8rem;cursor:pointer;font-weight:600">🤖 Assistant</button>
+          <button id="adminViewScan" onclick="setAdminView('scanner')" style="background:none;border:none;color:#8b949e;padding:6px 14px;font-size:0.8rem;cursor:pointer">🔍 Scanner</button>
           <button id="adminViewRpt" onclick="setAdminView('reports')"  style="background:none;border:none;color:#8b949e;padding:6px 14px;font-size:0.8rem;cursor:pointer;position:relative">
             🚩 Reports <span id="adminRptBadge" style="display:none;position:absolute;top:4px;right:4px;background:#f85149;color:#fff;border-radius:50%;width:8px;height:8px;font-size:0;"></span>
           </button>
@@ -1841,6 +1842,63 @@
             <tr><td colspan="9" style="text-align:center;color:#6e7681;padding:32px">Loading reports…</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- AI Scanner panel -->
+    <div id="adminScannerPanel" style="display:none;flex:1;overflow-y:auto;min-height:0;flex-direction:column;gap:12px">
+
+      <!-- Controls row -->
+      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+        <button id="scanRunBtn" onclick="scanRun(false)" style="background:#1f6feb;border:none;color:#fff;padding:7px 18px;border-radius:8px;font-size:0.83rem;cursor:pointer;font-weight:600">▶ Run Scan</button>
+        <button id="scanExecBtn" onclick="scanRun(true)" style="background:#238636;border:none;color:#fff;padding:7px 18px;border-radius:8px;font-size:0.83rem;cursor:pointer;font-weight:600">▶ Run &amp; Trade</button>
+        <div style="flex:1"></div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:#8b949e;font-size:0.82rem">
+          <div id="scanAutoToggle" onclick="scanToggleAuto()" style="width:36px;height:20px;border-radius:10px;background:#21262d;border:1px solid #30363d;cursor:pointer;position:relative;transition:background .2s">
+            <div id="scanAutoKnob" style="width:14px;height:14px;border-radius:50%;background:#8b949e;position:absolute;top:2px;left:2px;transition:left .2s"></div>
+          </div>
+          Auto-trade every 10 min
+        </label>
+        <button onclick="scanRefreshStatus()" style="background:none;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer">↺ Refresh</button>
+      </div>
+
+      <!-- Spinner -->
+      <div id="scanSpinner" style="display:none;text-align:center;color:#58a6ff;font-size:0.83rem;padding:8px">⏳ Scanning market…</div>
+
+      <!-- Market context card -->
+      <div id="scanContextCard" style="display:none;background:rgba(13,17,23,0.7);border:1px solid #21262d;border-radius:10px;padding:14px;flex-shrink:0">
+        <div style="font-size:0.75rem;font-weight:600;color:#58a6ff;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Market Context</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:10px" id="scanContextMeta"></div>
+        <div id="scanNarrative" style="font-size:0.82rem;color:#c9d1d9;line-height:1.5;margin-bottom:6px"></div>
+        <div id="scanHunting" style="font-size:0.8rem;color:#3fb950;line-height:1.5"></div>
+      </div>
+
+      <!-- Selection result card -->
+      <div id="scanResultCard" style="display:none;border-radius:10px;padding:14px;flex-shrink:0">
+        <div style="font-size:0.75rem;font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em" id="scanResultLabel">Last Selection</div>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+          <div id="scanSymbol" style="font-size:1.6rem;font-weight:700;color:#e6edf3"></div>
+          <div id="scanConviction" style="font-size:0.82rem;color:#8b949e"></div>
+          <div id="scanExecuted" style="font-size:0.78rem;color:#3fb950;display:none"></div>
+        </div>
+        <div id="scanReason" style="font-size:0.82rem;color:#c9d1d9;line-height:1.5;margin-bottom:8px"></div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div id="scanEntry" style="font-size:0.78rem;color:#58a6ff"></div>
+          <div id="scanRisk"  style="font-size:0.78rem;color:#f85149"></div>
+        </div>
+        <div id="scanCandidates" style="font-size:0.75rem;color:#6e7681;margin-top:8px"></div>
+      </div>
+
+      <!-- No-trade result -->
+      <div id="scanNoTrade" style="display:none;background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.25);border-radius:10px;padding:14px;flex-shrink:0">
+        <div style="font-size:0.75rem;font-weight:600;color:#f85149;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">No Trade</div>
+        <div id="scanNoTradeReason" style="font-size:0.83rem;color:#c9d1d9"></div>
+      </div>
+
+      <!-- Scan history -->
+      <div style="flex-shrink:0">
+        <div style="font-size:0.75rem;font-weight:600;color:#6e7681;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Scan History</div>
+        <div id="scanHistory" style="display:flex;flex-direction:column;gap:6px"></div>
       </div>
     </div>
 
@@ -5329,11 +5387,13 @@ function setAdminView(view) {
   const isAI   = view === 'ai';
   const isRpt  = view === 'reports';
   const isTerm = view === 'terminal';
+  const isScan = view === 'scanner';
 
   document.getElementById('adminMessages').style.display       = isAI   ? 'flex'  : 'none';
   document.getElementById('adminChips').style.display          = isAI   ? 'flex'  : 'none';
   document.getElementById('adminReportsPanel').style.display   = isRpt  ? 'flex'  : 'none';
   document.getElementById('adminTerminalPanel').style.display  = isTerm ? 'flex'  : 'none';
+  document.getElementById('adminScannerPanel').style.display   = isScan ? 'flex'  : 'none';
   document.getElementById('adminClearBtn').style.display       = isAI   ? ''      : 'none';
   document.getElementById('adminInputRow').style.display       = isAI   ? 'flex'  : 'none';
 
@@ -5344,9 +5404,182 @@ function setAdminView(view) {
   document.getElementById('adminViewRpt').style.color       = isRpt  ? ac : ic;
   document.getElementById('adminViewTerm').style.background = isTerm ? active : inactive;
   document.getElementById('adminViewTerm').style.color      = isTerm ? ac : ic;
+  document.getElementById('adminViewScan').style.background = isScan ? active : inactive;
+  document.getElementById('adminViewScan').style.color      = isScan ? ac : ic;
 
   if (isRpt)  loadAdminReports();
   if (isTerm) termInit();
+  if (isScan) scanRefreshStatus();
+}
+
+// ── AI Scanner ─────────────────────────────────────────
+let _scanAutoEnabled = false;
+
+function scanConvictionColor(n) {
+  if (n >= 8) return '#3fb950';
+  if (n >= 6) return '#d29922';
+  return '#f85149';
+}
+
+function scanRegimeColor(regime) {
+  const m = { trending: '#3fb950', 'news-driven': '#58a6ff', volatile: '#d29922', choppy: '#f85149' };
+  return m[regime] || '#8b949e';
+}
+
+function scanRenderResult(entry) {
+  if (!entry) return;
+  const { context, selection, executedTrade, timestamp } = entry;
+
+  // Market context card
+  const ctx = context || {};
+  const ctxCard = document.getElementById('scanContextCard');
+  ctxCard.style.display = '';
+  const regime = ctx.regime || '—';
+  document.getElementById('scanContextMeta').innerHTML = [
+    ['Regime',    `<span style="color:${scanRegimeColor(regime)};font-weight:600">${regime}</span>`],
+    ['Direction', ctx.direction || '—'],
+    ['VIX',       ctx.vix != null ? ctx.vix.toFixed(1) : '—'],
+    ['VIX Trend', ctx.vix_trend || '—'],
+    ['Tradeable', ctx.tradeable ? '<span style="color:#3fb950">Yes</span>' : '<span style="color:#f85149">No</span>'],
+    ['Confidence',ctx.confidence || '—'],
+  ].map(([k, v]) => `<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:6px 8px">
+    <div style="font-size:0.68rem;color:#6e7681;margin-bottom:2px">${k}</div>
+    <div style="font-size:0.8rem;color:#e6edf3">${v}</div>
+  </div>`).join('');
+
+  if (ctx.leading_sectors?.length)
+    document.getElementById('scanContextMeta').innerHTML += `<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:6px 8px;grid-column:span 2">
+      <div style="font-size:0.68rem;color:#6e7681;margin-bottom:2px">Leading Sectors</div>
+      <div style="font-size:0.78rem;color:#58a6ff">${ctx.leading_sectors.join(' · ')}</div>
+    </div>`;
+
+  document.getElementById('scanNarrative').textContent = ctx.market_narrative || '';
+  document.getElementById('scanHunting').textContent   = ctx.best_hunting_ground ? '🎯 ' + ctx.best_hunting_ground : '';
+
+  // Selection result
+  const sel = selection || {};
+  document.getElementById('scanNoTrade').style.display  = 'none';
+  document.getElementById('scanResultCard').style.display = 'none';
+
+  if (sel.symbol) {
+    const card = document.getElementById('scanResultCard');
+    card.style.display = '';
+    card.style.background = `rgba(${sel.conviction >= 7 ? '35,134,54' : sel.conviction >= 5 ? '210,153,34' : '248,81,73'},0.08)`;
+    card.style.border = `1px solid rgba(${sel.conviction >= 7 ? '35,134,54' : sel.conviction >= 5 ? '210,153,34' : '248,81,73'},0.3)`;
+
+    document.getElementById('scanResultLabel').textContent = `Selection — ${new Date(timestamp).toLocaleTimeString('en-US', { timeZone:'America/New_York', hour:'2-digit', minute:'2-digit' })} ET`;
+    document.getElementById('scanResultLabel').style.color = scanConvictionColor(sel.conviction);
+    document.getElementById('scanSymbol').textContent = sel.symbol;
+    document.getElementById('scanConviction').innerHTML = `Conviction <strong style="color:${scanConvictionColor(sel.conviction)}">${sel.conviction}/10</strong>`;
+    document.getElementById('scanReason').textContent  = sel.reason || '';
+    document.getElementById('scanEntry').textContent   = sel.entry_strategy ? '📈 ' + sel.entry_strategy : '';
+    document.getElementById('scanRisk').textContent    = sel.risk_note ? '🛑 ' + sel.risk_note : '';
+    document.getElementById('scanCandidates').textContent = sel.candidates_considered?.length
+      ? 'Candidates considered: ' + sel.candidates_considered.join(', ')
+      : '';
+
+    const execEl = document.getElementById('scanExecuted');
+    if (executedTrade && !executedTrade.error) {
+      execEl.style.display = '';
+      execEl.textContent = '✅ Trade executed';
+    } else if (executedTrade?.error) {
+      execEl.style.display = '';
+      execEl.style.color = '#f85149';
+      execEl.textContent = '⚠️ Exec failed: ' + executedTrade.error;
+    } else {
+      execEl.style.display = 'none';
+    }
+  } else if (sel.no_trade_reason) {
+    document.getElementById('scanNoTrade').style.display = '';
+    document.getElementById('scanNoTradeReason').textContent = sel.no_trade_reason;
+  }
+}
+
+function scanRenderHistory(history) {
+  const el = document.getElementById('scanHistory');
+  if (!history?.length) { el.innerHTML = '<div style="color:#6e7681;font-size:0.8rem">No scans yet.</div>'; return; }
+  el.innerHTML = history.map(h => {
+    const sel = h.selection || {};
+    const time = new Date(h.timestamp).toLocaleTimeString('en-US', { timeZone:'America/New_York', hour:'2-digit', minute:'2-digit' });
+    const traded = h.executedTrade && !h.executedTrade.error ? ' ✅' : '';
+    if (sel.symbol)
+      return `<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 10px;font-size:0.78rem">
+        <span style="color:#6e7681">${time} ET</span>
+        <span style="color:#e6edf3;font-weight:600;margin:0 8px">${sel.symbol}${traded}</span>
+        <span style="color:${scanConvictionColor(sel.conviction)}">${sel.conviction}/10</span>
+        <span style="color:#6e7681;margin-left:8px">${(h.context?.regime||'')} · ${(h.triggeredBy||'')}</span>
+      </div>`;
+    else
+      return `<div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 10px;font-size:0.78rem">
+        <span style="color:#6e7681">${time} ET</span>
+        <span style="color:#f85149;margin:0 8px">No trade</span>
+        <span style="color:#6e7681">${sel.no_trade_reason || ''}</span>
+      </div>`;
+  }).join('');
+}
+
+function scanUpdateToggle(enabled) {
+  _scanAutoEnabled = enabled;
+  const toggle = document.getElementById('scanAutoToggle');
+  const knob   = document.getElementById('scanAutoKnob');
+  toggle.style.background = enabled ? '#1f6feb' : '#21262d';
+  knob.style.left         = enabled ? '18px'    : '2px';
+  knob.style.background   = enabled ? '#fff'    : '#8b949e';
+}
+
+async function scanRefreshStatus() {
+  try {
+    const r = await fetch('/api/scanner/status');
+    const data = await r.json();
+    scanUpdateToggle(data.autoEnabled);
+    if (data.lastScan) scanRenderResult(data.lastScan);
+    scanRenderHistory(data.history);
+    const spinner = document.getElementById('scanSpinner');
+    spinner.style.display = data.running ? '' : 'none';
+  } catch (e) {
+    console.error('Scanner status error:', e);
+  }
+}
+
+async function scanRun(withExec) {
+  document.getElementById('scanSpinner').style.display = '';
+  document.getElementById('scanRunBtn').disabled  = true;
+  document.getElementById('scanExecBtn').disabled = true;
+  document.getElementById('scanResultCard').style.display = 'none';
+  document.getElementById('scanNoTrade').style.display    = 'none';
+  try {
+    const r = await fetch('/api/scanner/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoExecute: withExec }),
+    });
+    const data = await r.json();
+    if (data.error) { alert('Scan error: ' + data.error); return; }
+    scanRenderResult(data.result);
+    scanRenderHistory([data.result]);
+    await scanRefreshStatus();
+  } catch (e) {
+    alert('Scan failed: ' + e.message);
+  } finally {
+    document.getElementById('scanSpinner').style.display = 'none';
+    document.getElementById('scanRunBtn').disabled  = false;
+    document.getElementById('scanExecBtn').disabled = false;
+  }
+}
+
+async function scanToggleAuto() {
+  const newVal = !_scanAutoEnabled;
+  try {
+    const r = await fetch('/api/scanner/auto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: newVal }),
+    });
+    const data = await r.json();
+    scanUpdateToggle(data.autoEnabled);
+  } catch (e) {
+    alert('Failed to toggle auto: ' + e.message);
+  }
 }
 
 // ── Bug Reports ────────────────────────────────────────
