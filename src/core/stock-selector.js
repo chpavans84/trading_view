@@ -18,15 +18,19 @@ function isValidSymbol(sym) {
   return sym.match(/^[A-Z]{1,5}$/);
 }
 
-function buildCandidates(context) {
+function buildCandidates(context, watchlist = []) {
   const { regime, _raw } = context;
   const movers   = _raw?.movers?.gainers  ?? [];
   const earnings = context.catalysts_today ?? [];
-  const sectors  = _raw?.sectors          ?? [];
 
   const candidates = new Map(); // symbol → source weight
 
   if (regime === 'choppy') return [];
+
+  // User watchlist symbols are always considered — they don't need to be movers
+  watchlist.forEach(sym => {
+    if (isValidSymbol(sym)) candidates.set(sym, (candidates.get(sym) ?? 0) + 1);
+  });
 
   if (regime === 'news-driven' || regime === 'volatile') {
     // Prioritise earnings catalysts
@@ -56,10 +60,10 @@ function buildCandidates(context) {
     if (leadingSymbolBoost.has(sym)) candidates.set(sym, w + 1);
   });
 
-  // Sort by weight, return top 8
+  // Sort by weight, return top 12 (watchlist may add extra candidates)
   return [...candidates.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
+    .slice(0, 12)
     .map(([symbol]) => symbol);
 }
 
@@ -79,14 +83,14 @@ const SECTOR_LEADERS = {
   GLD:  ['GLD','GDX','GOLD','NEM'],
 };
 
-export async function selectBestTrade({ context, positions = [], blocked_symbols = [] }) {
+export async function selectBestTrade({ context, positions = [], blocked_symbols = [], watchlist = [] }) {
   if (context.regime === 'choppy') {
     return { symbol: null, no_trade_reason: 'Choppy market — no clean setups' };
   }
 
   const openSymbols    = new Set((positions ?? []).map(p => p.symbol));
   const blockedSet     = new Set((blocked_symbols ?? []).map(s => s.toUpperCase()));
-  const rawCandidates  = buildCandidates(context)
+  const rawCandidates  = buildCandidates(context, watchlist)
     .filter(s => !openSymbols.has(s) && !blockedSet.has(s));
 
   if (!rawCandidates.length) {

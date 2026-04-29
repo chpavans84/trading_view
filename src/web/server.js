@@ -1927,7 +1927,14 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
         .map(t => t.symbol);
     } catch {}
 
-    const selection = await selectBestTrade({ context, positions: openPositions, blocked_symbols });
+    // Load user watchlist — always included as base candidates
+    let watchlist = [];
+    try {
+      const raw = await getScannerState('watchlist');
+      if (raw) watchlist = JSON.parse(raw);
+    } catch {}
+
+    const selection = await selectBestTrade({ context, positions: openPositions, blocked_symbols, watchlist });
 
     let executedTrade = null;
     if (autoExecute && selection.symbol && context.tradeable) {
@@ -1979,6 +1986,45 @@ app.post('/api/scanner/auto', requireAdmin, (req, res) => {
   _scannerState.autoEnabled = !!enabled;
   logActivity(req.session.username, enabled ? 'scanner_auto_on' : 'scanner_auto_off', null, req.ip);
   res.json({ ok: true, autoEnabled: _scannerState.autoEnabled });
+});
+
+// ─── Scanner Watchlist ────────────────────────────────────────────────────────
+// Symbols in this list are always passed to selectBestTrade as base candidates
+// regardless of whether they appear in live market movers that day.
+
+async function getWatchlist() {
+  try {
+    const raw = await getScannerState('watchlist');
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+async function saveWatchlist(list) {
+  await setScannerState('watchlist', JSON.stringify(list));
+}
+
+app.get('/api/scanner/watchlist', requireAdmin, async (req, res) => {
+  res.json({ watchlist: await getWatchlist() });
+});
+
+app.post('/api/scanner/watchlist/add', requireAdmin, async (req, res) => {
+  const sym = (req.body.symbol ?? '').toUpperCase().trim();
+  if (!sym || !/^[A-Z]{1,5}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol' });
+  const list = await getWatchlist();
+  if (!list.includes(sym)) {
+    list.push(sym);
+    await saveWatchlist(list);
+    logActivity(req.session.username, 'watchlist_add', sym, req.ip);
+  }
+  res.json({ ok: true, watchlist: list });
+});
+
+app.post('/api/scanner/watchlist/remove', requireAdmin, async (req, res) => {
+  const sym = (req.body.symbol ?? '').toUpperCase().trim();
+  const list = (await getWatchlist()).filter(s => s !== sym);
+  await saveWatchlist(list);
+  logActivity(req.session.username, 'watchlist_remove', sym, req.ip);
+  res.json({ ok: true, watchlist: list });
 });
 
 // ─── Autonomous Push Notifications ───────────────────────────────────────────
