@@ -2085,14 +2085,8 @@
       <button onclick="toggleChat()" title="Close">✕</button>
     </div>
   </div>
-  <div id="analystStateBar" style="display:flex;gap:6px;flex-wrap:wrap;padding:6px 10px 4px;border-bottom:1px solid var(--border);font-size:0.72rem;color:var(--text-muted);background:var(--bg-card);min-height:28px">
-    <span id="asbScanner" title="Scanner status">⏸ Idle</span>
-    <span style="color:var(--border)">|</span>
-    <span id="asbRegime"   title="Current regime">Regime: —</span>
-    <span style="color:var(--border)">|</span>
-    <span id="asbPositions" title="Open positions">Pos: —</span>
-    <span style="color:var(--border)">|</span>
-    <span id="asbPnl"      title="Today P&L">P&L: —</span>
+  <div id="analystStateBar" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:6px 10px 4px;border-bottom:1px solid var(--border);font-size:0.72rem;color:var(--text-muted);background:var(--bg-card);min-height:28px">
+    <span>⏸ Loading…</span>
   </div>
   <div class="chat-messages" id="chatMessages">
     <div class="chat-msg assistant">👋 Hi! Ask me anything:
@@ -7860,26 +7854,54 @@ async function updateAnalystState() {
     if (!r.ok) return;
     const s = await r.json();
 
-    const scanEl = document.getElementById('asbScanner');
-    const regEl  = document.getElementById('asbRegime');
-    const posEl  = document.getElementById('asbPositions');
-    const pnlEl  = document.getElementById('asbPnl');
-    if (!scanEl) return;
+    const bar = document.getElementById('analystStateBar');
+    if (!bar) return;
 
+    // Scanner pill
     const scannerStatus = s.scanner_running
-      ? (s.market_open ? '🟢 Scanning' : '🟡 Armed')
-      : '⏸ Idle';
-    scanEl.textContent = scannerStatus;
+      ? (s.market_open ? '🟢 Scanning every 10min' : '🟡 Armed (mkt closed)')
+      : '⏸ Scanner off';
 
+    // Regime
     const regime = s.today_regime ?? '—';
-    const dir    = s.today_direction ?? '';
-    regEl.textContent  = `Regime: ${regime}${dir ? ' · ' + dir : ''}`;
+    const dir    = s.today_direction ? ` · ${s.today_direction}` : '';
+    const regimeStr = `Regime: ${regime}${dir}`;
 
-    posEl.textContent  = `Pos: ${s.open_positions ?? 0}`;
+    // Open positions with progress bars
+    const positions = Array.isArray(s.open_positions) ? s.open_positions : [];
+    let posHtml = '';
+    if (positions.length === 0) {
+      posHtml = '<span style="color:var(--text-muted)">No positions</span>';
+    } else {
+      posHtml = positions.map(p => {
+        const tgtPct = p.pct_to_target;
+        const stpPct = p.pct_to_stop;
+        let pill = `<strong>${p.symbol}</strong>`;
+        if (tgtPct !== null) {
+          const col = tgtPct >= 80 ? 'var(--green)' : tgtPct >= 50 ? '#d29922' : 'var(--accent-l)';
+          pill += ` <span style="color:${col}">${tgtPct}% to target</span>`;
+        }
+        if (stpPct !== null && stpPct > 50) {
+          pill += ` <span style="color:var(--red)">${stpPct}% to stop</span>`;
+        }
+        return pill;
+      }).join(' &nbsp;|&nbsp; ');
+    }
 
+    // P&L
     const pnl    = parseFloat(s.pnl_today ?? 0);
-    pnlEl.textContent  = `P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}`;
-    pnlEl.style.color  = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : '';
+    const pnlCol = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--text-muted)';
+    const pnlStr = `Today: <span style="color:${pnlCol};font-weight:600">${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}</span>`;
+
+    bar.innerHTML = `
+      <span>${scannerStatus}</span>
+      <span style="color:var(--border)">|</span>
+      <span>${posHtml}</span>
+      <span style="color:var(--border)">|</span>
+      <span>${regimeStr}</span>
+      <span style="color:var(--border)">|</span>
+      <span>${pnlStr}</span>
+    `;
   } catch {}
 }
 

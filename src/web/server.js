@@ -2167,15 +2167,52 @@ async function checkRegimeChange() {
 // ─── Analyst State Endpoint ───────────────────────────────────────────────────
 
 app.get('/api/analyst/state', requireAuth, async (req, res) => {
-  const [posResult, pnlResult, statusResult] = await Promise.allSettled([
+  const [posResult, pnlResult, statusResult, monitorResult] = await Promise.allSettled([
     getPositions(),
     getDailyPnL(),
     getMarketStatus(),
+    getAllPositionMonitoring(),
   ]);
 
-  const positions   = posResult.status   === 'fulfilled' ? (posResult.value   ?? []) : [];
-  const pnlData     = pnlResult.status   === 'fulfilled' ? (pnlResult.value   ?? {}) : {};
-  const statusData  = statusResult.status === 'fulfilled' ? (statusResult.value ?? {}) : {};
+  const rawPositions = posResult.status    === 'fulfilled' ? (posResult.value    ?? []) : [];
+  const pnlData      = pnlResult.status    === 'fulfilled' ? (pnlResult.value    ?? {}) : {};
+  const statusData   = statusResult.status === 'fulfilled' ? (statusResult.value ?? {}) : {};
+  const monitoring   = monitorResult.status === 'fulfilled' ? (monitorResult.value ?? []) : [];
+
+  // Build a map of symbol → monitoring row for quick lookups
+  const monMap = {};
+  for (const m of monitoring) monMap[m.symbol] = m;
+
+  // Enrich each open position with pct_to_target and pct_to_stop
+  const openPositions = rawPositions.map(pos => {
+    const mon   = monMap[pos.symbol] ?? {};
+    const entry = parseFloat(pos.avg_entry_price ?? pos.entry_price ?? 0);
+    const curr  = parseFloat(pos.current_price   ?? 0);
+    const stop  = parseFloat(mon.stop_price   ?? 0);
+    const tgt   = parseFloat(mon.target_price  ?? 0);
+
+    let pct_to_target = null;
+    let pct_to_stop   = null;
+
+    if (entry && tgt && tgt !== entry) {
+      pct_to_target = Math.min(100, Math.max(0, ((curr - entry) / (tgt - entry)) * 100));
+    }
+    if (entry && stop && entry !== stop) {
+      // How far price has moved toward the stop (0% = at entry, 100% = at stop)
+      pct_to_stop = Math.min(100, Math.max(0, ((entry - curr) / (entry - stop)) * 100));
+    }
+
+    return {
+      symbol:        pos.symbol,
+      entry_price:   entry,
+      current_price: curr,
+      unrealized_pl: parseFloat(pos.unrealized_pl ?? 0),
+      stop_price:    stop || null,
+      target_price:  tgt  || null,
+      pct_to_target: pct_to_target !== null ? Math.round(pct_to_target) : null,
+      pct_to_stop:   pct_to_stop   !== null ? Math.round(pct_to_stop)   : null,
+    };
+  });
 
   const lastScan  = _scannerState.lastScan;
   const scanTime  = lastScan?.timestamp ?? null;
@@ -2187,7 +2224,7 @@ app.get('/api/analyst/state', requireAuth, async (req, res) => {
   res.json({
     last_scan:        scanTime,
     next_scan:        nextScan,
-    open_positions:   positions.length,
+    open_positions:   openPositions,
     today_regime:     lastScan?.context?.regime ?? await getScannerState('last_regime').catch(() => null),
     today_direction:  lastScan?.context?.direction ?? null,
     trades_today:     pnlData.count ?? 0,
