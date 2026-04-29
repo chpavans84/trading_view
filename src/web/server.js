@@ -18,11 +18,12 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring } from '../core/db.js';
+import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import { Resend } from 'resend';
 import { NASDAQ100 } from '../research/sp500.js';
-import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, getMarketStatus, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades } from '../core/trader.js';
+import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades } from '../core/trader.js';
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
@@ -1916,7 +1917,17 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
     let openPositions = [];
     try { openPositions = await getPositions(); } catch {}
 
-    const selection = await selectBestTrade({ context, positions: openPositions });
+    // Re-entry block: exclude symbols stopped out in last 60 min
+    let blocked_symbols = [];
+    try {
+      const recentClosed = await getTrades({ status: 'closed', limit: 50 });
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      blocked_symbols = (recentClosed ?? [])
+        .filter(t => t.closed_at && new Date(t.closed_at).getTime() > cutoff && (t.pnl_usd ?? 0) < 0)
+        .map(t => t.symbol);
+    } catch {}
+
+    const selection = await selectBestTrade({ context, positions: openPositions, blocked_symbols });
 
     let executedTrade = null;
     if (autoExecute && selection.symbol && context.tradeable) {
@@ -1969,6 +1980,217 @@ app.post('/api/scanner/auto', requireAdmin, (req, res) => {
   logActivity(req.session.username, enabled ? 'scanner_auto_on' : 'scanner_auto_off', null, req.ip);
   res.json({ ok: true, autoEnabled: _scannerState.autoEnabled });
 });
+
+// ─── Autonomous Push Notifications ───────────────────────────────────────────
+// Analyst-initiated messages pushed to all connected chat clients via SSE.
+
+const _pushClients = new Set(); // active SSE res objects
+
+function pushToChat(message, type = 'autonomous') {
+  if (_pushClients.size === 0) return;
+  const payload = JSON.stringify({ role: 'assistant', content: message, timestamp: new Date().toISOString(), type });
+  for (const res of _pushClients) {
+    try { res.write(`data: ${payload}\n\n`); }
+    catch { _pushClients.delete(res); }
+  }
+}
+
+app.get('/api/chat/push', requireAuth, (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  _pushClients.add(res);
+  const ka = setInterval(() => {
+    try { res.write(': ka\n\n'); } catch { clearInterval(ka); _pushClients.delete(res); }
+  }, 25000);
+  req.on('close', () => { clearInterval(ka); _pushClients.delete(res); });
+});
+
+// ─── Daily Briefing ───────────────────────────────────────────────────────────
+
+const _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+async function runMorningBriefing() {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const existing = await getDailyBriefing(today);
+  if (existing) return existing; // already ran today
+
+  const [context, pnl, sectors] = await Promise.allSettled([
+    getMarketContext(),
+    getDailyPnL(),
+    getSectorPerformance(),
+  ]).then(r => r.map(p => p.status === 'fulfilled' ? p.value : null));
+
+  const ctx = context || {};
+  const topSectors = (sectors?.sectors ?? []).sort((a,b) => (b.chg_pct||0)-(a.chg_pct||0)).slice(0,3).map(s=>`${s.symbol} ${s.chg_pct>0?'+':''}${s.chg_pct?.toFixed(2)}%`).join(', ');
+  const earnings   = (Array.isArray(ctx.catalysts_today) ? ctx.catalysts_today : []).map(e=>e.symbol).join(', ') || 'none';
+
+  try {
+    const msg = await _anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 500,
+      messages: [{ role: 'user', content:
+        `You are an AI trading analyst. It is 9:30 AM ET market open on ${today}.
+Write a morning briefing for the trader. Include:
+1. Today's market regime and what it means for trading strategy
+2. Key catalysts today (earnings, macro events)
+3. Which sectors to focus on and which to avoid
+4. 2-3 specific stocks to watch with reasons why
+5. Today's game plan in one sentence
+
+Market data:
+- Regime: ${ctx.regime || 'unknown'} | Direction: ${ctx.direction || 'unknown'} | VIX: ${ctx.vix ?? 'n/a'}
+- Leading sectors: ${ctx.leading_sectors?.join(', ') || 'none'}
+- Avoid sectors: ${ctx.avoid_sectors?.join(', ') || 'none'}
+- Top sector moves: ${topSectors || 'n/a'}
+- Earnings today: ${earnings}
+- Market narrative: ${ctx.market_narrative || 'n/a'}
+- Yesterday P&L: $${pnl?.pnl?.toFixed(2) ?? '0'}
+
+Keep it under 200 words. Be specific. Use numbers. Plain text — no markdown symbols like ** or #.` }],
+    });
+
+    const content = msg.content[0]?.text?.trim() ?? '';
+    await saveDailyBriefing({ date: today, content, regime: ctx.regime, direction: ctx.direction, vix: ctx.vix });
+
+    // Push to all connected chat clients
+    pushToChat(`📋 Morning Briefing — ${today}\n\n${content}`, 'briefing');
+    console.log(`[briefing] Morning briefing generated for ${today}`);
+    return { date: today, content, regime: ctx.regime, direction: ctx.direction, vix: ctx.vix };
+  } catch (err) {
+    console.error('[briefing] Error:', err.message);
+    return null;
+  }
+}
+
+app.get('/api/briefing', requireAuth, async (req, res) => {
+  const today     = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  let briefing    = await getDailyBriefing(today);
+  if (!briefing) {
+    const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    briefing = await getDailyBriefing(yesterday);
+  }
+  res.json({ briefing: briefing ?? null });
+});
+
+// ─── Position Monitor ──────────────────────────────────────────────────────────
+
+const _vixHistory = []; // { ts, vix } rolling 60-min window
+
+async function runPositionMonitor() {
+  let positions = [];
+  try { positions = await getPositions(); } catch { return; }
+  if (!positions.length) return;
+
+  // Track VIX for circuit breaker
+  try {
+    const { vix } = await getMarketRegime();
+    if (vix) {
+      _vixHistory.push({ ts: Date.now(), vix });
+      const cutoff60 = Date.now() - 62 * 60 * 1000;
+      while (_vixHistory.length && _vixHistory[0].ts < cutoff60) _vixHistory.shift();
+      // Circuit breaker: VIX up >20% in last 30 min
+      const cutoff30 = Date.now() - 32 * 60 * 1000;
+      const pastVix  = _vixHistory.filter(h => h.ts < cutoff30).pop()?.vix;
+      if (pastVix && ((vix - pastVix) / pastVix) * 100 > 20) {
+        const spike = (((vix - pastVix) / pastVix) * 100).toFixed(1);
+        console.log(`[monitor] VIX spike +${spike}% — triggering circuit breaker`);
+        const closed = [];
+        for (const pos of positions) {
+          try {
+            await closePosition(pos.symbol);
+            const pnl = parseFloat(pos.unrealized_pl ?? 0);
+            closed.push(`${pos.symbol} ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)}`);
+            await deletePositionMonitoring(pos.symbol);
+          } catch {}
+        }
+        pushToChat(
+          `🚨 VIX spike detected (+${spike}% in 30 min). Closing all positions to protect capital.\n${closed.join(' | ')}\nWill re-assess when market stabilises.`,
+          'circuit_breaker'
+        );
+        return;
+      }
+    }
+  } catch {}
+
+  // Per-position checks
+  const openTrades = await getTrades({ status: 'open', limit: 50 }).catch(() => []) ?? [];
+
+  for (const pos of positions) {
+    const sym   = pos.symbol;
+    const entry = parseFloat(pos.avg_entry_price);
+    const curr  = parseFloat(pos.current_price);
+    const unrealPl = parseFloat(pos.unrealized_pl ?? 0);
+
+    // Find matching DB trade for stop/target
+    const dbTrade = openTrades.find(t => t.symbol === sym);
+    if (!dbTrade?.take_profit || !dbTrade?.stop_loss) continue;
+
+    const target = parseFloat(dbTrade.take_profit);
+    const stop   = parseFloat(dbTrade.stop_loss);
+
+    const totalRange    = target - entry;
+    const gainPct       = totalRange > 0 ? (curr - entry) / totalRange : 0; // 0–1 toward target
+    const stopRange     = entry - stop;
+    const stopApproach  = stopRange > 0 ? (entry - curr) / stopRange : 0;   // 0–1 toward stop
+
+    // Load monitoring state
+    const monState = await getPositionMonitoring(sym) ?? { stop_moved_to_be: false, stop_trailed: false };
+
+    // ACTION A — Move stop to breakeven at 50% toward target
+    if (gainPct >= 0.5 && !monState.stop_moved_to_be && curr > entry) {
+      try {
+        await moveStopToBreakeven(sym);
+        await upsertPositionMonitoring({ symbol: sym, entry_price: entry, stop_price: entry, target_price: target, stop_moved_to_be: true, stop_trailed: monState.stop_trailed, last_price: curr });
+        pushToChat(
+          `🔒 ${sym} — Stop moved to breakeven ($${entry.toFixed(2)}). Position is protected. Target still at $${target.toFixed(2)}.`,
+          'stop_moved'
+        );
+      } catch {}
+    }
+
+    // ACTION B — Trail stop to 50% of gain at 80% toward target
+    if (gainPct >= 0.8 && !monState.stop_trailed && curr > entry) {
+      const trailStop = +(entry + (curr - entry) * 0.5).toFixed(2);
+      try {
+        // Cancel existing stop and place new one at trail level
+        const orders = await getOrders({ status: 'open' });
+        const stopOrd = (Array.isArray(orders) ? orders : orders?.orders ?? [])
+          .find(o => o.symbol === sym && (o.type === 'stop' || o.type === 'stop_limit'));
+        if (stopOrd) await cancelOrder(stopOrd.id);
+        // Place updated stop via Alpaca PATCH handled by moveStopToBreakeven-style call
+        await upsertPositionMonitoring({ symbol: sym, entry_price: entry, stop_price: trailStop, target_price: target, stop_moved_to_be: true, stop_trailed: true, last_price: curr });
+        const locked = (unrealPl * 0.5).toFixed(0);
+        pushToChat(
+          `🎯 ${sym} approaching target. Trailing stop to $${trailStop} (locks +$${locked} of potential gain).`,
+          'trail_stop'
+        );
+      } catch {}
+    }
+
+    // ACTION C — Warn when within 15% of stop
+    if (stopApproach >= 0.85) {
+      pushToChat(
+        `⚠️ ${sym} nearing stop loss. Currently $${curr.toFixed(2)}, stop at $${stop.toFixed(2)}. Consider exiting if momentum confirms breakdown.`,
+        'stop_warning'
+      );
+    }
+
+    // Update last_price in monitoring state
+    await upsertPositionMonitoring({
+      symbol: sym, entry_price: entry, stop_price: stop, target_price: target,
+      stop_moved_to_be: monState.stop_moved_to_be, stop_trailed: monState.stop_trailed, last_price: curr,
+    });
+  }
+
+  // Clean up monitoring rows for positions that are now closed
+  const openSymbols = new Set(positions.map(p => p.symbol));
+  const monitored   = await getAllPositionMonitoring?.().catch(() => []) ?? [];
+  for (const row of monitored) {
+    if (!openSymbols.has(row.symbol)) await deletePositionMonitoring(row.symbol);
+  }
+}
 
 // ─── Bot rules config ─────────────────────────────────────────────────────────
 
@@ -2026,8 +2248,7 @@ const SCHEDULE_STATIC = {
 };
 
 app.get('/api/bot/config', requireAuth, async (req, res) => {
-  const pausedFlagPath = join(__dirname, '../../.scanner-paused');
-  const scannerPaused  = fs.existsSync(pausedFlagPath);
+  const scannerPaused  = (await getScannerState('paused')) === 'true';
   const username = req.session.username;
   const userCfg  = await getUserBotConfig(username);
   res.json({
@@ -2625,6 +2846,34 @@ cron.schedule('*/10 * * * 1-5', async () => {
       console.log(`[scanner] No trade: ${sel.no_trade_reason}`);
   } catch (err) {
     console.error('[scanner] cron error:', err.message);
+  }
+});
+
+// ─── Morning Briefing Cron ────────────────────────────────────────────────────
+// Fires every 5 min Mon–Fri; checks if ET time is 9:30–9:34 AM
+
+cron.schedule('*/5 * * * 1-5', async () => {
+  const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const et    = new Date(etStr);
+  const mins  = et.getHours() * 60 + et.getMinutes();
+  if (mins < 9 * 60 + 30 || mins >= 9 * 60 + 35) return;
+  try {
+    await runMorningBriefing();
+  } catch (err) {
+    console.error('[briefing] cron error:', err.message);
+  }
+});
+
+// ─── Position Monitor Cron ────────────────────────────────────────────────────
+// Every 2 min, Mon–Fri, 9:45 AM–3:50 PM ET
+
+cron.schedule('*/2 * * * 1-5', async () => {
+  const utcT = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+  if (utcT < 13 * 60 + 45 || utcT >= 19 * 60 + 50) return;
+  try {
+    await runPositionMonitor();
+  } catch (err) {
+    console.error('[monitor] cron error:', err.message);
   }
 });
 

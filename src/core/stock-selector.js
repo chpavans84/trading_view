@@ -79,13 +79,15 @@ const SECTOR_LEADERS = {
   GLD:  ['GLD','GDX','GOLD','NEM'],
 };
 
-export async function selectBestTrade({ context, positions = [] }) {
+export async function selectBestTrade({ context, positions = [], blocked_symbols = [] }) {
   if (context.regime === 'choppy') {
     return { symbol: null, no_trade_reason: 'Choppy market — no clean setups' };
   }
 
-  const openSymbols  = new Set((positions ?? []).map(p => p.symbol));
-  const rawCandidates = buildCandidates(context).filter(s => !openSymbols.has(s));
+  const openSymbols    = new Set((positions ?? []).map(p => p.symbol));
+  const blockedSet     = new Set((blocked_symbols ?? []).map(s => s.toUpperCase()));
+  const rawCandidates  = buildCandidates(context)
+    .filter(s => !openSymbols.has(s) && !blockedSet.has(s));
 
   if (!rawCandidates.length) {
     return { symbol: null, no_trade_reason: 'No candidates found matching current regime' };
@@ -148,11 +150,12 @@ Return ONLY valid JSON — no markdown, no explanation:
 {
   "symbol": "AAPL" or null,
   "reason": "2-sentence explanation of why this is the best trade right now",
-  "conviction": 7,
+  "conviction": 72,
   "entry_strategy": "Buy on next 1% pullback or break above $185",
   "risk_note": "Stop below $181 (yesterday's low / recent support)",
   "no_trade_reason": null
-}`
+}
+conviction is 0–100 (not 0–10). Use 70+ for high-conviction trades, 50–69 for moderate, below 50 = no trade.`
       }],
     });
 

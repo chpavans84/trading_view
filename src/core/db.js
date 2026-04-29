@@ -200,6 +200,33 @@ CREATE TABLE IF NOT EXISTS bug_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status);
 CREATE INDEX IF NOT EXISTS idx_bug_reports_user   ON bug_reports(username);
+
+CREATE TABLE IF NOT EXISTS scanner_state (
+  key        VARCHAR(50) PRIMARY KEY,
+  value      TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS daily_briefings (
+  id         SERIAL PRIMARY KEY,
+  date       DATE NOT NULL UNIQUE,
+  content    TEXT NOT NULL,
+  regime     VARCHAR(50),
+  direction  VARCHAR(20),
+  vix        NUMERIC(6,2),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS position_monitoring (
+  symbol           VARCHAR(20) PRIMARY KEY,
+  entry_price      NUMERIC(12,4),
+  stop_price       NUMERIC(12,4),
+  target_price     NUMERIC(12,4),
+  stop_moved_to_be BOOLEAN DEFAULT FALSE,
+  stop_trailed     BOOLEAN DEFAULT FALSE,
+  last_checked_at  TIMESTAMPTZ,
+  last_price       NUMERIC(12,4)
+);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -963,4 +990,108 @@ export async function updateBugReport({ id, status, admin_note }) {
     console.error('updateBugReport error:', err.message);
     return false;
   }
+}
+
+// ─── Scanner State (replaces .scanner-paused flag file) ───────────────────────
+
+export async function getScannerState(key) {
+  if (!dbAvailable) return null;
+  try {
+    const { rows } = await query(`SELECT value FROM scanner_state WHERE key = $1`, [key]);
+    return rows[0]?.value ?? null;
+  } catch (err) {
+    console.error('getScannerState error:', err.message);
+    return null;
+  }
+}
+
+export async function setScannerState(key, value) {
+  if (!dbAvailable) return;
+  try {
+    await query(
+      `INSERT INTO scanner_state (key, value, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [key, value]
+    );
+  } catch (err) {
+    console.error('setScannerState error:', err.message);
+  }
+}
+
+// ─── Daily Briefings ──────────────────────────────────────────────────────────
+
+export async function saveDailyBriefing({ date, content, regime = null, direction = null, vix = null }) {
+  if (!dbAvailable) return;
+  try {
+    await query(
+      `INSERT INTO daily_briefings (date, content, regime, direction, vix)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (date) DO UPDATE SET content=$2, regime=$3, direction=$4, vix=$5, created_at=NOW()`,
+      [date, content, regime, direction, vix]
+    );
+  } catch (err) {
+    console.error('saveDailyBriefing error:', err.message);
+  }
+}
+
+export async function getDailyBriefing(date) {
+  if (!dbAvailable) return null;
+  try {
+    const { rows } = await query(
+      `SELECT * FROM daily_briefings WHERE date = $1`, [date]
+    );
+    return rows[0] ?? null;
+  } catch (err) {
+    console.error('getDailyBriefing error:', err.message);
+    return null;
+  }
+}
+
+// ─── Position Monitoring State ─────────────────────────────────────────────────
+
+export async function upsertPositionMonitoring(row) {
+  if (!dbAvailable) return;
+  try {
+    await query(
+      `INSERT INTO position_monitoring
+         (symbol, entry_price, stop_price, target_price, stop_moved_to_be, stop_trailed, last_checked_at, last_price)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7)
+       ON CONFLICT (symbol) DO UPDATE SET
+         entry_price      = COALESCE($2, position_monitoring.entry_price),
+         stop_price       = COALESCE($3, position_monitoring.stop_price),
+         target_price     = COALESCE($4, position_monitoring.target_price),
+         stop_moved_to_be = $5,
+         stop_trailed     = $6,
+         last_checked_at  = NOW(),
+         last_price       = $7`,
+      [row.symbol, row.entry_price, row.stop_price, row.target_price,
+       row.stop_moved_to_be ?? false, row.stop_trailed ?? false, row.last_price]
+    );
+  } catch (err) {
+    console.error('upsertPositionMonitoring error:', err.message);
+  }
+}
+
+export async function getPositionMonitoring(symbol) {
+  if (!dbAvailable) return null;
+  try {
+    const { rows } = await query(`SELECT * FROM position_monitoring WHERE symbol = $1`, [symbol]);
+    return rows[0] ?? null;
+  } catch (err) { return null; }
+}
+
+export async function getAllPositionMonitoring() {
+  if (!dbAvailable) return [];
+  try {
+    const { rows } = await query(`SELECT * FROM position_monitoring`);
+    return rows;
+  } catch (err) { return []; }
+}
+
+export async function deletePositionMonitoring(symbol) {
+  if (!dbAvailable) return;
+  try {
+    await query(`DELETE FROM position_monitoring WHERE symbol = $1`, [symbol]);
+  } catch (err) { console.error('deletePositionMonitoring error:', err.message); }
 }
