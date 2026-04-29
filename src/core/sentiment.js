@@ -1,7 +1,8 @@
 /**
  * Market sentiment data.
- * Quotes: Moomoo OpenD (real-time, primary) → Yahoo Finance (fallback)
- * VIX/futures/sectors: Yahoo Finance (not available via Moomoo)
+ * Quotes:   Moomoo OpenD (real-time) → Alpaca snapshots (batch) → Yahoo Finance (per-symbol)
+ * Universe: Yahoo Finance screeners → Alpaca screener → static fallback
+ * VIX/futures/sectors: Yahoo Finance only (not available via Moomoo/Alpaca)
  */
 
 import { getQuotes as moomooGetQuotes, getKLines } from './moomoo-tcp.js';
@@ -72,6 +73,19 @@ const HEADERS = {
   'User-Agent': 'Mozilla/5.0',
   'Accept': 'application/json',
 };
+
+const ALPACA_DATA = 'https://data.alpaca.markets';
+
+function alpacaHeaders() {
+  const key    = process.env.ALPACA_API_KEY;
+  const secret = process.env.ALPACA_SECRET_KEY;
+  if (!key || !secret) return null;
+  return {
+    'APCA-API-KEY-ID':     key,
+    'APCA-API-SECRET-KEY': secret,
+    'Accept': 'application/json',
+  };
+}
 
 async function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
@@ -450,6 +464,7 @@ async function fetchDynamicUniverse() {
     } catch { return []; }
   };
 
+  // ── Tier 1: Yahoo Finance screeners ──────────────────────────────────────────
   try {
     const [trendRes, gainRes, activeRes, loserRes] = await Promise.allSettled([
       fetch(`${YF_BASE}/v1/finance/trending/US?count=50`, { headers: HEADERS }).then(r => r.ok ? r.json() : Promise.reject()),
@@ -459,7 +474,7 @@ async function fetchDynamicUniverse() {
     ]);
 
     const anyOk = [trendRes, gainRes, activeRes, loserRes].some(r => r.status === 'fulfilled');
-    if (!anyOk) throw new Error('all sources returned errors');
+    if (!anyOk) throw new Error('all Yahoo sources returned errors');
 
     const syms = new Set(CORE_ALWAYS_SCAN);
     if (trendRes.status  === 'fulfilled') extractTrending(trendRes.value).forEach(s => syms.add(s));
@@ -468,23 +483,60 @@ async function fetchDynamicUniverse() {
     if (loserRes.status  === 'fulfilled') extractScreener(loserRes.value).forEach(s => syms.add(s));
 
     const result = [...syms].slice(0, 120);
-    _universeCache = { symbols: result, ts: Date.now(), source: 'dynamic' };
-    console.log(`[universe] Dynamic: ${result.length} symbols (trending+gainers+actives+losers)`);
+    _universeCache = { symbols: result, ts: Date.now(), source: 'yahoo' };
+    console.log(`[universe] Yahoo: ${result.length} symbols`);
     return result;
-  } catch (err) {
-    console.warn(`[universe] Dynamic fetch failed (${err.message}) — using fallback`);
-    // Don't cache the fallback so the next call retries Yahoo Finance
-    return [...FALLBACK_UNIVERSE];
+  } catch (yahooErr) {
+    console.warn(`[universe] Yahoo failed (${yahooErr.message}) — trying Alpaca screener`);
   }
+
+  // ── Tier 2: Alpaca screener (most-actives + top-movers) ───────────────────────
+  // Requires Alpaca API keys. Screener endpoints need Alpaca Unlimited data plan;
+  // they'll return 403 on basic plans and we fall through gracefully.
+  const aHeaders = alpacaHeaders();
+  if (aHeaders) {
+    try {
+      const [activesRes, moversRes] = await Promise.allSettled([
+        fetch(`${ALPACA_DATA}/v1beta1/screener/stocks/most-actives?by=trades&top=50`, { headers: aHeaders }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+        fetch(`${ALPACA_DATA}/v1beta1/screener/stocks/top-market-movers?market_type=stocks`, { headers: aHeaders }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
+      ]);
+
+      const syms = new Set(CORE_ALWAYS_SCAN);
+      if (activesRes.status === 'fulfilled') {
+        (activesRes.value?.most_actives ?? [])
+          .filter(s => isValidSym(s.symbol))
+          .forEach(s => syms.add(s.symbol));
+      }
+      if (moversRes.status === 'fulfilled') {
+        const d = moversRes.value ?? {};
+        [...(d.gainers ?? []), ...(d.losers ?? [])]
+          .filter(s => isValidSym(s.symbol))
+          .forEach(s => syms.add(s.symbol));
+      }
+
+      const anyAlpacaOk = [activesRes, moversRes].some(r => r.status === 'fulfilled');
+      if (!anyAlpacaOk) throw new Error('both Alpaca screener endpoints failed');
+
+      const result = [...syms].slice(0, 120);
+      _universeCache = { symbols: result, ts: Date.now(), source: 'alpaca' };
+      console.log(`[universe] Alpaca screener: ${result.length} symbols`);
+      return result;
+    } catch (alpacaErr) {
+      console.warn(`[universe] Alpaca screener failed (${alpacaErr.message}) — using static fallback`);
+    }
+  }
+
+  // ── Tier 3: Static fallback — never cached so next call retries live sources ──
+  console.warn('[universe] All live sources failed — using static fallback list');
+  return [...FALLBACK_UNIVERSE];
 }
 
-// Fetch quotes via Moomoo (real-time) with Yahoo Finance fallback
+// Fetch quotes via Moomoo (real-time) → Alpaca snapshots → Yahoo Finance fallback
 async function fetchBatchQuotes(symbols, batchSize = 40, batchDelayMs = 100) {
-  // Try Moomoo in one shot (handles batching internally via subscription)
+  // Tier 1: Moomoo — real-time, one call, no rate limit
   try {
     const result = await moomooGetQuotes(symbols);
     if (result.success && result.quotes.length > 0) {
-      // Normalise to same shape fetchQuote() returns
       return result.quotes.map(q => ({
         symbol:  q.symbol,
         name:    q.name,
@@ -493,11 +545,46 @@ async function fetchBatchQuotes(symbols, batchSize = 40, batchDelayMs = 100) {
         chg_pct: q.change_pct,
       }));
     }
-  } catch {
-    // Moomoo unavailable — fall through to Yahoo Finance
+  } catch { /* fall through */ }
+
+  // Tier 2: Alpaca bulk snapshots — one API call per 100 symbols, near real-time
+  const aHeaders = alpacaHeaders();
+  if (aHeaders && symbols.length > 0) {
+    try {
+      const allResults = [];
+      for (let i = 0; i < symbols.length; i += 100) {
+        const chunk = symbols.slice(i, i + 100);
+        const r = await fetch(
+          `${ALPACA_DATA}/v2/stocks/snapshots?symbols=${chunk.join(',')}`,
+          { headers: aHeaders }
+        );
+        if (r.ok) {
+          const data = await r.json();
+          for (const [sym, snap] of Object.entries(data)) {
+            const price = snap.latestTrade?.p ?? snap.dailyBar?.c;
+            const prev  = snap.prevDailyBar?.c;
+            const vol   = snap.dailyBar?.v ?? 0;
+            if (price && prev) {
+              allResults.push({
+                symbol:  sym,
+                price,
+                prev,
+                chg_pct: +((price - prev) / prev * 100).toFixed(2),
+                volume:  vol,
+              });
+            }
+          }
+        }
+      }
+      if (allResults.length > 0) {
+        console.log(`[quotes] Alpaca snapshots: ${allResults.length} symbols`);
+        return allResults;
+      }
+    } catch { /* fall through */ }
   }
 
-  // Yahoo Finance fallback (rate-limited, batched)
+  // Tier 3: Yahoo Finance — rate-limited, sequential fallback
+  console.warn('[quotes] Moomoo + Alpaca unavailable — falling back to Yahoo per-symbol');
   const results = [];
   for (let i = 0; i < symbols.length; i += batchSize) {
     const batch = symbols.slice(i, i + batchSize);
