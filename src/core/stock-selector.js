@@ -7,8 +7,12 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getSymbolNews, getPreEarningsDrift } from './news.js';
 import { getRelativeStrength } from './sentiment.js';
 import { getChartTechnicals, isTradingViewAvailable } from './tradingview-bridge.js';
+import { recordApiCall, upsertUsageStats } from './db.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const HAIKU_INPUT_PER_M  = 0.80;
+const HAIKU_OUTPUT_PER_M = 4.00;
 
 // Filter out things we should never trade
 function isValidSymbol(sym) {
@@ -162,6 +166,12 @@ Return ONLY valid JSON — no markdown, no explanation:
 conviction is 0–100 (not 0–10). Use 70+ for high-conviction trades, 50–69 for moderate, below 50 = no trade.`
       }],
     });
+
+    const inp  = msg.usage?.input_tokens  ?? 0;
+    const out  = msg.usage?.output_tokens ?? 0;
+    const cost = (inp / 1e6) * HAIKU_INPUT_PER_M + (out / 1e6) * HAIKU_OUTPUT_PER_M;
+    recordApiCall({ source: 'stock_selector', inputTokens: inp, outputTokens: out, costUsd: cost, model: 'claude-haiku-4-5-20251001' }).catch(() => {});
+    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: 0, costUsd: cost }).catch(() => {});
 
     const text = msg.content[0]?.text?.trim() ?? '';
     const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? '{}');

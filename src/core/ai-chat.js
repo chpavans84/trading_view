@@ -26,8 +26,8 @@ import {
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades } from './db.js';
 
-const PRICE_INPUT_PER_M  = 0.80;
-const PRICE_OUTPUT_PER_M = 4.00;
+const PRICE_INPUT_PER_M  = 3.00;
+const PRICE_OUTPUT_PER_M = 15.00;
 function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -42,7 +42,7 @@ export const chatHistory = new Map();
 
 export async function loadHistoryForChat(chatId) {
   if (chatHistory.has(chatId)) return;
-  const rows = await loadConversationHistory(chatId, 40);
+  const rows = await loadConversationHistory(chatId, 20);
   chatHistory.set(chatId, rows ?? []);
 }
 
@@ -50,7 +50,7 @@ export function pushHistory(chatId, message) {
   if (!chatHistory.has(chatId)) chatHistory.set(chatId, []);
   const h = chatHistory.get(chatId);
   h.push(message);
-  if (h.length > 40) h.splice(0, h.length - 40);
+  if (h.length > 20) h.splice(0, h.length - 20);
   if (isDbAvailable()) appendConversationMessage(chatId, message).catch(() => {});
 }
 

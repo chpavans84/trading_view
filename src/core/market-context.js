@@ -6,6 +6,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getMarketSentiment, getSectorPerformance, getTrendingStocks, getMarketMovers } from './sentiment.js';
 import { getEarningsCalendar } from './news.js';
+import { recordApiCall, upsertUsageStats } from './db.js';
+
+const HAIKU_INPUT_PER_M  = 0.80;
+const HAIKU_OUTPUT_PER_M = 4.00;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -122,6 +126,12 @@ ${rawData.notTradeableReason ? `- NOT TRADEABLE: ${rawData.notTradeableReason}` 
 Return ONLY valid JSON: {"market_narrative":"...","best_hunting_ground":"..."}`
       }],
     });
+
+    const inp  = msg.usage?.input_tokens  ?? 0;
+    const out  = msg.usage?.output_tokens ?? 0;
+    const cost = (inp / 1e6) * HAIKU_INPUT_PER_M + (out / 1e6) * HAIKU_OUTPUT_PER_M;
+    recordApiCall({ source: 'market_context', inputTokens: inp, outputTokens: out, costUsd: cost, model: 'claude-haiku-4-5-20251001' }).catch(() => {});
+    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: 0, costUsd: cost }).catch(() => {});
 
     const text = msg.content[0]?.text?.trim() ?? '';
     const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? '{}');

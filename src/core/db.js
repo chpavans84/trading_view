@@ -450,6 +450,18 @@ export async function getUsageStats({ days = 30 } = {}) {
   }
 }
 
+export async function getTodaySpend() {
+  if (!dbAvailable) return 0;
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { rows } = await query(
+      `SELECT COALESCE(estimated_cost_usd, 0) AS spend FROM usage_stats WHERE date = $1`,
+      [today]
+    );
+    return parseFloat(rows[0]?.spend ?? 0);
+  } catch { return 0; }
+}
+
 // ─── Trade recording ──────────────────────────────────────────────────────────
 
 export async function recordTrade({
