@@ -1945,6 +1945,22 @@
         <button onclick="scanRefreshStatus()" style="background:none;border:1px solid #30363d;color:#8b949e;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer">↺ Refresh</button>
       </div>
 
+      <!-- Watchlist -->
+      <div style="background:rgba(13,17,23,0.6);border:1px solid #21262d;border-radius:10px;padding:12px;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:0.75rem;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">📋 Scan Watchlist</span>
+          <span style="font-size:0.72rem;color:#6e7681">— always included in every scan regardless of movers</span>
+        </div>
+        <div id="watchlistTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:22px"></div>
+        <div style="display:flex;gap:8px">
+          <input id="watchlistInput" type="text" placeholder="Add ticker, e.g. BE" maxlength="5"
+            style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:4px 10px;color:#e6edf3;font-size:0.82rem;width:110px;text-transform:uppercase;outline:none"
+            onkeydown="if(event.key==='Enter')watchlistAdd()"
+            oninput="this.value=this.value.toUpperCase()">
+          <button onclick="watchlistAdd()" style="background:#1f6feb;border:none;color:#fff;border-radius:6px;padding:4px 14px;font-size:0.8rem;cursor:pointer;font-weight:600">+ Add</button>
+        </div>
+      </div>
+
       <!-- Spinner -->
       <div id="scanSpinner" style="display:none;text-align:center;color:#58a6ff;font-size:0.83rem;padding:8px">⏳ Scanning market…</div>
 
@@ -5625,6 +5641,63 @@ async function scanRefreshStatus() {
   } catch (e) {
     console.error('Scanner status error:', e);
   }
+  watchlistRefresh();
+}
+
+// ── Scan Watchlist ──────────────────────────────────────────────────────────────
+async function watchlistRefresh() {
+  try {
+    const r = await fetch('/api/scanner/watchlist');
+    if (!r.ok) return;
+    const { watchlist } = await r.json();
+    watchlistRender(watchlist);
+  } catch {}
+}
+
+function watchlistRender(list) {
+  const el = document.getElementById('watchlistTags');
+  if (!el) return;
+  if (!list.length) {
+    el.innerHTML = '<span style="color:#6e7681;font-size:0.78rem;font-style:italic">No symbols yet — add tickers to always include them in every scan</span>';
+    return;
+  }
+  el.innerHTML = list.map(sym =>
+    `<span style="display:inline-flex;align-items:center;gap:5px;background:#21262d;border:1px solid #30363d;border-radius:6px;padding:3px 9px;font-size:0.8rem;color:#e6edf3">
+      ${sym}
+      <button onclick="watchlistRemove('${sym}')" style="background:none;border:none;color:#6e7681;cursor:pointer;font-size:0.75rem;padding:0;line-height:1" title="Remove">✕</button>
+    </span>`
+  ).join('');
+}
+
+async function watchlistAdd() {
+  const input = document.getElementById('watchlistInput');
+  const sym = input.value.trim().toUpperCase();
+  if (!sym) return;
+  try {
+    const r = await fetch('/api/scanner/watchlist/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: sym }),
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.error || 'Failed'); return; }
+    const { watchlist } = await r.json();
+    watchlistRender(watchlist);
+    input.value = '';
+    input.focus();
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function watchlistRemove(sym) {
+  try {
+    const r = await fetch('/api/scanner/watchlist/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: sym }),
+    });
+    if (!r.ok) return;
+    const { watchlist } = await r.json();
+    watchlistRender(watchlist);
+  } catch {}
 }
 
 async function scanRun(withExec) {
