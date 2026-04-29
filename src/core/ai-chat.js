@@ -479,7 +479,7 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
     const u = finalMsg.usage || {};
     const inp = u.input_tokens || 0, out = u.output_tokens || 0;
     const tools = finalMsg.content.filter(b => b.type === 'tool_use').length;
-    recordApiCall({ source: 'dashboard_chat', inputTokens: inp, outputTokens: out, toolCalls: tools, costUsd: calcCost(inp, out), durationMs: Date.now() - t0, model: finalMsg.model }).catch(() => {});
+    recordApiCall({ source: 'dashboard_chat', inputTokens: inp, outputTokens: out, toolCalls: tools, costUsd: calcCost(inp, out), durationMs: Date.now() - t0, model: finalMsg.model, username }).catch(() => {});
     upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: tools, costUsd: calcCost(inp, out) }).catch(() => {});
 
     if (finalMsg.stop_reason === 'tool_use') {
