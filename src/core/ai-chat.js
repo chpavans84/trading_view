@@ -35,8 +35,8 @@ import {
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
 
-const PRICE_INPUT_PER_M  = 3.00;
-const PRICE_OUTPUT_PER_M = 15.00;
+const PRICE_INPUT_PER_M  = 0.80;   // claude-haiku-4-5 input  $0.80/M tokens
+const PRICE_OUTPUT_PER_M = 4.00;   // claude-haiku-4-5 output $4.00/M tokens
 function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
 
 // ─── Lessons cache (5-min TTL) ────────────────────────────────────────────────
