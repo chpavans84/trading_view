@@ -1909,7 +1909,7 @@ const _scannerState = {
   lastError:    null,
 };
 
-async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
+async function runAiScan({ autoExecute = false, triggeredBy = 'manual', username = null } = {}) {
   if (_scannerState.running) return { error: 'Scan already in progress' };
 
   // Daily spend cap — skip autonomous scans (not manual triggers) when over budget
@@ -1948,48 +1948,100 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
 
     const selection = await selectBestTrade({ context, positions: openPositions, blocked_symbols, watchlist });
 
-    let executedTrade = null;
+    // ── Per-user execution ────────────────────────────────────────────────────
+    const userResults = [];
     if (autoExecute && selection.symbol && context.tradeable) {
-      // Fix 4: cross-day losing streak check before auto-executing
-      const losses = await getRecentLosses({ symbol: selection.symbol, days: 5 }).catch(() => ({ loss_count: 0, last_loss_at: null }));
-      const hoursSinceLoss = losses.last_loss_at
-        ? (Date.now() - new Date(losses.last_loss_at)) / 3600000
-        : 999;
-      if (losses.loss_count >= 2 && hoursSinceLoss < 24) {
-        console.log(`[scanner] Skipping ${selection.symbol}: ${losses.loss_count} losses in 5 days, last loss ${Math.floor(hoursSinceLoss)}h ago`);
-        executedTrade = { skipped: true, reason: `Loss streak: ${losses.loss_count} losses in last 5 days` };
-      } else {
+      const isCron = triggeredBy === 'cron';
+
+      // Build list of users to execute for
+      let targetUsers = [];
+      if (isCron) {
+        // Cron: iterate all users who have Alpaca creds and are not suspended
+        const allUsers = await listDbUsers().catch(() => []);
+        targetUsers = allUsers.filter(u =>
+          u.alpaca_api_key && u.alpaca_secret_key && u.alpaca_base_url && !u.suspended
+        );
+      } else if (username) {
+        // Manual: only the triggering user
+        const u = await getDbUser(username).catch(() => null);
+        if (u) targetUsers = [u];
+      }
+
+      for (const u of targetUsers) {
+        const userCfg = await getUserBotConfig(u.username);
+        if (!userCfg.auto_execute) continue;
+
+        // Per-user conviction minimum
+        const score = selection.conviction ?? 0;
+        if (score < (userCfg.min_conviction_score ?? 50)) {
+          userResults.push({ username: u.username, skipped: true,
+            reason: `Conviction ${score} below user minimum ${userCfg.min_conviction_score ?? 50}` });
+          continue;
+        }
+
+        // Per-user VIX limit
+        if (context.vix && context.vix > (userCfg.max_vix_for_scan ?? 30)) {
+          userResults.push({ username: u.username, skipped: true,
+            reason: `VIX ${context.vix} above user limit ${userCfg.max_vix_for_scan ?? 30}` });
+          continue;
+        }
+
+        // Per-user loss streak check
+        const userLosses = await getRecentLosses({ symbol: selection.symbol, days: 5 })
+          .catch(() => ({ loss_count: 0, last_loss_at: null }));
+        const hoursSince = userLosses.last_loss_at
+          ? (Date.now() - new Date(userLosses.last_loss_at)) / 3600000 : 999;
+        if (userLosses.loss_count >= 2 && hoursSince < 24) {
+          userResults.push({ username: u.username, skipped: true,
+            reason: `Loss streak for ${selection.symbol}` });
+          continue;
+        }
+
+        // Per-user position cap
+        const userAlpacaCreds = { apiKey: u.alpaca_api_key, secretKey: u.alpaca_secret_key, baseUrl: u.alpaca_base_url };
+        const userPositions = await getUserPositions(userAlpacaCreds).catch(() => []);
+        if (userPositions.length >= (userCfg.max_open_positions ?? 2)) {
+          userResults.push({ username: u.username, skipped: true,
+            reason: `Max ${userCfg.max_open_positions ?? 2} positions already open` });
+          continue;
+        }
+
         try {
-          const result = await placeTrade({
+          // Calculate qty from user's min_dollars setting and current price
+          const price = await getLatestPrice(selection.symbol).then(q => q.mid ?? q.ask ?? 100).catch(() => 100);
+          const minDol = userCfg.position_sizing?.min_dollars ?? 1500;
+          const qty = Math.max(1, Math.floor(minDol / price));
+
+          const result = await placeQuickTrade({
             symbol: selection.symbol,
-            side: 'buy',
-            dollars: 2000,
-            conviction_score: selection.conviction ?? null,
+            side:   'buy',
+            qty,
+            creds:  userAlpacaCreds,
           });
-          executedTrade = result;
+
           await recordTrade({
-            order_id:         result.order_id,
-            symbol:           result.symbol,
-            side:             result.side,
-            qty:              result.qty,
-            entry_price:      result.estimated_price,
-            stop_loss:        result.stop_loss,
-            take_profit:      result.take_profit,
-            dollars_invested: result.dollars_invested,
-            stop_loss_pct:    result.stop_loss_pct,
-            take_profit_pct:  result.take_profit_pct,
-            atr_pct:          result.atr_pct,
-            conviction_score: selection.conviction ?? null,
-            conviction_grade: (selection.conviction ?? 0) >= 75 ? 'A'
-                              : (selection.conviction ?? 0) >= 60 ? 'B' : 'C',
+            order_id:             result.order_id,
+            symbol:               result.symbol,
+            side:                 result.side,
+            qty:                  result.qty,
+            entry_price:          result.estimated_price,
+            dollars_invested:     result.estimated_cost ?? minDol,
+            conviction_score:     score,
+            conviction_grade:     score >= 75 ? 'A' : score >= 60 ? 'B' : 'C',
             conviction_breakdown: { reason: selection.reason, regime: context.regime },
-          }).catch(e => console.error('[scanner] recordTrade failed:', e.message));
-          logActivity('scanner', 'auto_trade', selection.symbol, '127.0.0.1');
+            username:             u.username,
+          }).catch(e => console.error(`[scanner] recordTrade for ${u.username}:`, e.message));
+
+          logActivity(u.username, 'auto_trade', selection.symbol, '127.0.0.1');
+          userResults.push({ username: u.username, result });
         } catch (err) {
-          executedTrade = { error: err.message };
+          userResults.push({ username: u.username, error: err.message });
+          console.log(`[scanner] Trade failed for ${u.username} (${selection.symbol}): ${err.message}`);
         }
       }
     }
+
+    const executedTrade = userResults.length ? userResults : null;
 
     const entry = { context, selection, executedTrade, triggeredBy, timestamp: ts };
     _scannerState.lastScan = entry;
@@ -2008,7 +2060,7 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
 app.post('/api/scanner/run', requireAdmin, async (req, res) => {
   try {
     const { autoExecute = false } = req.body;
-    const result = await runAiScan({ autoExecute, triggeredBy: req.session.username });
+    const result = await runAiScan({ autoExecute, triggeredBy: req.session.username, username: req.session.username });
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ error: err.message });

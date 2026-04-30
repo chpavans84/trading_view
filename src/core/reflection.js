@@ -1,10 +1,10 @@
 /**
  * Reflection Agent — runs nightly after market close.
- * Analyses closed trades, writes lessons to DB.
+ * Analyses closed trades per user, writes lessons to DB.
  * Uses Ollama (free) with Claude Haiku fallback — never touches ai-chat.js.
  */
 import { getTrades, saveLesson, upsertPerformancePattern,
-         query, isDbAvailable } from './db.js';
+         query, isDbAvailable, listDbUsers } from './db.js';
 import { localAI } from './ollama.js';
 
 function vixBucket(vix) {
@@ -55,7 +55,7 @@ function detectLessonType(trade) {
   return 'entry';
 }
 
-async function recomputePatterns() {
+async function recomputePatterns(username) {
   if (!isDbAvailable()) return;
   try {
     const { rows } = await query(
@@ -65,7 +65,9 @@ async function recomputePatterns() {
        WHERE status = 'closed'
          AND pnl_usd IS NOT NULL
          AND conviction_breakdown IS NOT NULL
-         AND opened_at > NOW() - INTERVAL '90 days'`
+         AND opened_at > NOW() - INTERVAL '90 days'
+         AND username = $1`,
+      [username]
     );
 
     const buckets = {};
@@ -79,21 +81,20 @@ async function recomputePatterns() {
     }
 
     for (const b of Object.values(buckets)) {
-      await upsertPerformancePattern(b);
+      await upsertPerformancePattern({ ...b, username });
     }
-    console.log(`[reflection] Recomputed ${Object.keys(buckets).length} performance pattern(s)`);
+    console.log(`[reflection] ${username}: Recomputed ${Object.keys(buckets).length} performance pattern(s)`);
   } catch (e) {
-    console.error('[reflection] recomputePatterns error:', e.message);
+    console.error(`[reflection] recomputePatterns error for ${username}:`, e.message);
   }
 }
 
-export async function runReflection() {
+async function _reflectForUser(username) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-  console.log('[reflection] Running for', today);
 
   let trades = [];
   try {
-    const all = await getTrades({ status: 'closed', limit: 100 });
+    const all = await getTrades({ status: 'closed', username, limit: 100 });
     trades = (all ?? []).filter(t => {
       if (!t.closed_at) return false;
       const d = new Date(t.closed_at)
@@ -101,13 +102,13 @@ export async function runReflection() {
       return d === today;
     });
   } catch (e) {
-    console.error('[reflection] Failed to load trades:', e.message);
-    return { lessons: [], error: e.message };
+    console.error(`[reflection] Failed to load trades for ${username}:`, e.message);
+    return { username, lessons: [], error: e.message };
   }
 
   if (!trades.length) {
-    console.log('[reflection] No trades closed today');
-    return { lessons: [], trades_analysed: 0 };
+    console.log(`[reflection] No trades closed today for ${username}`);
+    return { username, lessons: [], trades_analysed: 0 };
   }
 
   const lessons = [];
@@ -124,17 +125,47 @@ export async function runReflection() {
         lesson_type: outcome === 'loss' ? detectLessonType(trade) : 'success',
         lesson,
         ai_source,
+        username,
       });
       lessons.push({ symbol: trade.symbol, outcome, pnl_usd: trade.pnl_usd, lesson, ai_source });
-      console.log(`[reflection] ${outcome.toUpperCase()} ${trade.symbol} (${ai_source}): ${lesson}`);
+      console.log(`[reflection] ${username} ${outcome.toUpperCase()} ${trade.symbol} (${ai_source}): ${lesson}`);
     } catch (e) {
-      console.error(`[reflection] Lesson failed for ${trade.symbol}:`, e.message);
+      console.error(`[reflection] Lesson failed for ${username}/${trade.symbol}:`, e.message);
     }
   }
 
-  // Recompute win-rate patterns every Friday
-  const dow = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long' });
-  if (dow === 'Friday') await recomputePatterns();
+  return { username, lessons, trades_analysed: trades.length };
+}
 
-  return { lessons, trades_analysed: trades.length };
+export async function runReflection() {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  console.log('[reflection] Running for', today);
+
+  const dow = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long' });
+  const isFriday = dow === 'Friday';
+
+  let users = [];
+  try {
+    const all = await listDbUsers();
+    users = (all ?? []).filter(u => !u.suspended);
+  } catch (e) {
+    console.error('[reflection] Failed to list users:', e.message);
+    // Fall back to system-level reflection with no username
+    const result = await _reflectForUser('system');
+    return { results: [result] };
+  }
+
+  if (!users.length) {
+    console.log('[reflection] No active users found');
+    return { results: [] };
+  }
+
+  const results = [];
+  for (const u of users) {
+    const result = await _reflectForUser(u.username);
+    results.push(result);
+    if (isFriday) await recomputePatterns(u.username);
+  }
+
+  return { results };
 }
