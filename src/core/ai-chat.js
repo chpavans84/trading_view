@@ -34,6 +34,7 @@ import {
   DAILY_PROFIT_TARGET, DAILY_LOSS_LIMIT,
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
+import { getFunds, getPositions as getMoomooPositions, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
 
 const PRICE_INPUT_PER_M  = 0.80;   // claude-haiku-4-5 input  $0.80/M tokens
 const PRICE_OUTPUT_PER_M = 4.00;   // claude-haiku-4-5 output $4.00/M tokens
@@ -346,6 +347,43 @@ export const TOOLS = [
       },
     },
   },
+
+  // ── Moomoo trading tools ──────────────────────────────────────────────────
+  {
+    name: 'moomoo_portfolio',
+    description: 'Get Moomoo account balance, buying power, and all open positions with unrealized P&L. Call this when the user asks about their Moomoo account or real positions (not Alpaca paper trades).',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'moomoo_place_trade',
+    description: 'Place a market order on Moomoo with optional stop-loss and take-profit. Runs in PAPER (simulate) mode unless MOOMOO_TRADE_ENV=1 is set. Always show the user the simulate/live status before confirming. Require conviction >= min_conviction_score before calling.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol:            { type: 'string',  description: 'Stock ticker, e.g. AAPL' },
+        side:              { type: 'string',  enum: ['buy','sell'], description: 'Trade direction' },
+        qty:               { type: 'number',  description: 'Number of shares' },
+        stop_price:        { type: 'number',  description: 'Stop-loss price (stop-market sell). Omit to skip.' },
+        take_profit_price: { type: 'number',  description: 'Take-profit price (market-if-touched sell). Omit to skip.' },
+        trailing_pct:      { type: 'number',  description: 'Trailing stop percentage (e.g. 3 = 3%). Overrides take_profit_price if both set.' },
+      },
+      required: ['symbol', 'side', 'qty'],
+    },
+  },
+  {
+    name: 'moomoo_close_position',
+    description: 'Close an entire Moomoo position at market price. Looks up the current qty automatically — just pass the symbol.',
+    input_schema: {
+      type: 'object',
+      properties: { symbol: { type: 'string', description: 'Stock ticker to close' } },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'moomoo_cancel_all_orders',
+    description: 'Cancel ALL open/pending Moomoo orders (stop-loss and take-profit bracket legs). Call this before closing a position if it has pending orders that may block the fill.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ];
 
 const _CHAT_PROFILE_PRESETS = {
@@ -504,7 +542,37 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         await setUserBotConfig(username, updated);
         return { ok: true, applied: updated, message: 'Configuration saved. Changes are live immediately.' };
       }
-      default:                       return { error: `Unknown tool: ${name}` };
+      // ── Moomoo tools ──────────────────────────────────────────────────────
+      case 'moomoo_portfolio': {
+        const [fundsRes, posRes] = await Promise.allSettled([getFunds(), getMoomooPositions()]);
+        const funds = fundsRes.status === 'fulfilled' ? fundsRes.value : null;
+        const pos   = posRes.status   === 'fulfilled' ? posRes.value  : null;
+        if (!funds && !pos) return { error: 'Moomoo OpenD not reachable — make sure OpenD is running.' };
+        return {
+          simulate:      MOOMOO_IS_SIMULATE,
+          mode:          MOOMOO_IS_SIMULATE ? 'PAPER' : 'LIVE',
+          cash:          funds?.cash ?? null,
+          buying_power:  funds?.buying_power ?? null,
+          total_assets:  funds?.total_assets ?? null,
+          unrealized_pl: funds?.unrealized_pl ?? null,
+          positions:     pos?.positions ?? [],
+        };
+      }
+      case 'moomoo_place_trade': {
+        const mode = MOOMOO_IS_SIMULATE ? 'PAPER' : 'LIVE';
+        const result = await placeMoomooTrade({
+          symbol:            input.symbol,
+          side:              input.side,
+          qty:               input.qty,
+          stop_price:        input.stop_price        ?? null,
+          take_profit_price: input.take_profit_price ?? null,
+          trailing_pct:      input.trailing_pct      ?? null,
+        });
+        return { ...result, mode, note: MOOMOO_IS_SIMULATE ? 'Paper trade — no real money used.' : 'LIVE TRADE — real money was spent.' };
+      }
+      case 'moomoo_close_position':    return await closeMoomooPosition({ symbol: input.symbol });
+      case 'moomoo_cancel_all_orders': return await cancelAllMoomooOrders();
+      default:                         return { error: `Unknown tool: ${name}` };
     }
   } catch (err) {
     return { error: err.message };

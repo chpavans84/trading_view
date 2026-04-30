@@ -29,7 +29,7 @@ import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, 
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
-import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders } from '../core/moomoo-tcp.js';
+import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
 import { chat, clearHistory } from '../core/ai-chat.js';
 import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
@@ -1711,6 +1711,70 @@ app.get('/api/moomoo/risk', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('Moomoo risk error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Moomoo Trading Endpoints ─────────────────────────────────────────────────
+
+app.get('/api/moomoo/trade-status', requireAuth, (req, res) => {
+  res.json({
+    simulate:    MOOMOO_IS_SIMULATE,
+    env:         MOOMOO_IS_SIMULATE ? 'simulate' : 'real',
+    trade_env:   MOOMOO_TRADE_ENV_VALUE,
+    warning:     MOOMOO_IS_SIMULATE
+      ? null
+      : 'LIVE TRADING ACTIVE — real money at risk. Set MOOMOO_TRADE_ENV=0 to return to paper.',
+  });
+});
+
+app.post('/api/moomoo/trade', requireAuth, async (req, res) => {
+  try {
+    const { symbol, side = 'buy', qty, stop_price, take_profit_price, trailing_pct } = req.body;
+    if (!symbol || !qty || qty <= 0) return res.status(400).json({ error: 'symbol and qty are required' });
+    const result = await placeMoomooTrade({
+      symbol: symbol.toUpperCase(),
+      side, qty: Number(qty),
+      stop_price:          stop_price          != null ? Number(stop_price)          : null,
+      take_profit_price:   take_profit_price   != null ? Number(take_profit_price)   : null,
+      trailing_pct:        trailing_pct        != null ? Number(trailing_pct)        : null,
+    });
+    logActivity(req.session.username, 'moomoo_trade', symbol.toUpperCase(), req.ip);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/moomoo/cancel', requireAuth, async (req, res) => {
+  try {
+    const { order_id } = req.body;
+    if (!order_id) return res.status(400).json({ error: 'order_id is required' });
+    const result = await cancelMoomooOrder({ order_id });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/moomoo/cancel-all', requireAuth, async (req, res) => {
+  try {
+    const result = await cancelAllMoomooOrders();
+    logActivity(req.session.username, 'moomoo_cancel_all', null, req.ip);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/moomoo/close', requireAuth, async (req, res) => {
+  try {
+    const { symbol } = req.body;
+    if (!symbol) return res.status(400).json({ error: 'symbol is required' });
+    const result = await closeMoomooPosition({ symbol: symbol.toUpperCase() });
+    logActivity(req.session.username, 'moomoo_close', symbol.toUpperCase(), req.ip);
+    res.json(result);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
