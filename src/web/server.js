@@ -18,7 +18,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, recordTrade } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import { Resend } from 'resend';
@@ -1929,14 +1929,41 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
 
     const selection = await selectBestTrade({ context, positions: openPositions, blocked_symbols });
 
+    // Enforce minimum conviction score before executing
+    const MIN_CONVICTION = 50;
+
     let executedTrade = null;
     if (autoExecute && selection.symbol && context.tradeable) {
-      try {
-        const result = await placeTrade({ symbol: selection.symbol, side: 'buy', dollars: 2000 });
-        executedTrade = result;
-        logActivity('scanner', 'auto_trade', selection.symbol, '127.0.0.1');
-      } catch (err) {
-        executedTrade = { error: err.message };
+      const convictionScore = selection.conviction ?? 0;
+      if (convictionScore < MIN_CONVICTION) {
+        executedTrade = { skipped: true, reason: `Conviction ${convictionScore} below minimum ${MIN_CONVICTION} — no trade` };
+        console.log(`[scanner] Skipping ${selection.symbol}: conviction ${convictionScore} < ${MIN_CONVICTION}`);
+      } else {
+        try {
+          const result = await placeTrade({ symbol: selection.symbol, side: 'buy', dollars: 2000 });
+          executedTrade = result;
+          // Record trade in DB with conviction score
+          await recordTrade({
+            order_id:        result.order_id,
+            symbol:          result.symbol,
+            side:            result.side,
+            qty:             result.qty,
+            entry_price:     result.estimated_price,
+            stop_loss:       result.stop_loss,
+            take_profit:     result.take_profit,
+            dollars_invested: result.dollars_invested,
+            stop_loss_pct:   result.stop_loss_pct,
+            take_profit_pct: result.take_profit_pct,
+            atr_pct:         result.atr_pct,
+            conviction_score: convictionScore,
+            conviction_grade: convictionScore >= 75 ? 'A' : convictionScore >= 60 ? 'B' : 'C',
+            conviction_breakdown: { reason: selection.reason, regime: context.regime },
+          }).catch(e => console.error('[scanner] recordTrade failed:', e.message));
+          logActivity('scanner', 'auto_trade', selection.symbol, '127.0.0.1');
+        } catch (err) {
+          executedTrade = { error: err.message };
+          console.log(`[scanner] Trade rejected for ${selection.symbol}: ${err.message}`);
+        }
       }
     }
 
