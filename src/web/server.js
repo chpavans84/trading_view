@@ -1627,23 +1627,49 @@ app.get('/api/market', async (req, res) => {
 });
 
 // Top stocks trading today — sourced from Moomoo real-time quotes.
-// S&P 500: top 100 by market cap (list is ordered largest-first).
-// NASDAQ 100: full 79-symbol list.
-// Server-side 3-minute cache so repeated tab switches don't hammer OpenD.
+// Batched into groups of 30 to stay within OpenD's per-connection sub limit.
 const _topStocksCache = { sp500: null, nasdaq: null };
 const TOP_STOCKS_TTL  = 3 * 60 * 1000;
 
+// ETFs and non-US symbols that shouldn't appear in the index screener
+const _topStocksBlocklist = new Set([
+  'SPY','QQQ','IWM','DIA','GLD','SLV','USO','TLT','HYG','LQD',
+  'VXX','UVXY','SQQQ','TQQQ','SPXU','SPXL',
+]);
+
+// Yahoo Finance / Alpaca use BRK-B; Moomoo uses BRK.B
+function toMoomooTicker(sym) {
+  return sym.replace(/-([A-Z])$/, '.$1');
+}
+
 app.get('/api/market/top-stocks', async (req, res) => {
   try {
-    const index   = req.query.index === 'nasdaq' ? 'nasdaq' : 'sp500';
-    const cached  = _topStocksCache[index];
+    const index  = req.query.index === 'nasdaq' ? 'nasdaq' : 'sp500';
+    const cached = _topStocksCache[index];
     if (cached && Date.now() - cached.ts < TOP_STOCKS_TTL) {
       return res.json({ ...cached.data, cached: true });
     }
 
-    const symbols = index === 'nasdaq' ? NASDAQ100 : SP500.slice(0, 100);
-    const result  = await getMoomooQuotes(symbols);
-    const quotes  = result.quotes ?? [];
+    const raw     = index === 'nasdaq' ? NASDAQ100 : SP500.slice(0, 90);
+    const symbols = raw
+      .filter(s => !_topStocksBlocklist.has(s))
+      .map(toMoomooTicker);
+
+    // Batch into groups of 30 — stays well within OpenD subscription limits
+    const BATCH  = 30;
+    const quotes = [];
+    for (let i = 0; i < symbols.length; i += BATCH) {
+      try {
+        const r = await getMoomooQuotes(symbols.slice(i, i + BATCH));
+        if (r.quotes) quotes.push(...r.quotes);
+      } catch (e) {
+        console.warn(`[top-stocks] batch ${i}–${i + BATCH} failed:`, e.message);
+      }
+    }
+
+    if (!quotes.length) {
+      return res.status(503).json({ error: 'No quotes returned — check Moomoo OpenD is running' });
+    }
 
     const stocks = quotes
       .filter(q => q.price && q.change_pct != null && !q.suspended)
@@ -1662,7 +1688,7 @@ app.get('/api/market/top-stocks', async (req, res) => {
     _topStocksCache[index] = { ts: Date.now(), data };
     res.json(data);
   } catch (err) {
-    console.error('[top-stocks] Moomoo error:', err.message);
+    console.error('[top-stocks] error:', err.message);
     res.status(503).json({ error: 'Moomoo not available: ' + err.message });
   }
 });
