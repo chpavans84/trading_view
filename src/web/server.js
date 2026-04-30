@@ -3202,18 +3202,20 @@ cron.schedule('*/15 * * * 1-5', async () => {
 
 cron.schedule('15 20 * * 1-5', async () => {
   try {
-    console.log('[reflection] Running daily reflection agent...');
     const result = await runReflection();
-    if (result.lessons?.length > 0) {
-      const summary = result.lessons.map(l => {
-        const sign = l.outcome === 'win' ? '✅' : '❌';
-        return `${sign} ${l.symbol}: ${l.lesson}`;
-      }).join('\n');
-      pushToChat(
-        `📚 Daily Reflection — ${result.trades_analysed} trade(s) analysed:\n\n${summary}\n\nThese lessons are now active in my memory.`,
-        'autonomous'
-      );
-    }
+    if (!result.lessons?.length) return;
+
+    const lines = result.lessons.map(l => {
+      const icon = l.outcome === 'win' ? '✅' : '❌';
+      const src  = l.ai_source === 'ollama' ? ' [local]' : '';
+      return `${icon} ${l.symbol}: ${l.lesson}${src}`;
+    });
+    pushToChat(
+      `📚 Daily Reflection (${result.trades_analysed} trade${result.trades_analysed !== 1 ? 's' : ''} analysed)\n\n` +
+      lines.join('\n') +
+      '\n\nThese lessons are now in my memory.',
+      'autonomous'
+    );
   } catch (err) {
     console.error('[reflection] cron error:', err.message);
   }
@@ -3228,7 +3230,7 @@ app.post('/api/reflection/run', requireAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/reflection/lessons', requireAdmin, async (req, res) => {
+app.get('/api/reflection/lessons', requireAuth, async (req, res) => {
   try {
     const lessons = await getRecentLessons({ limit: 50 });
     res.json({ ok: true, lessons });

@@ -267,9 +267,16 @@ CREATE TABLE IF NOT EXISTS trade_lessons (
   vix          NUMERIC(6,2),
   lesson_type  VARCHAR(30),
   lesson       TEXT NOT NULL,
+  ai_source    VARCHAR(20),
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_lessons_date ON trade_lessons(date);
+-- Add ai_source to existing tables created before this migration
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trade_lessons' AND column_name='ai_source') THEN
+    ALTER TABLE trade_lessons ADD COLUMN ai_source VARCHAR(20);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS performance_patterns (
   id           SERIAL PRIMARY KEY,
@@ -1220,13 +1227,14 @@ export async function deletePositionMonitoring(symbol) {
 
 // ─── Trade Lessons ────────────────────────────────────────────────────────────
 
-export async function saveLesson({ date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson }) {
+export async function saveLesson({ date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source }) {
   if (!isDbAvailable()) return;
   try {
     await query(
-      `INSERT INTO trade_lessons (date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson]
+      `INSERT INTO trade_lessons
+         (date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source ?? 'unknown']
     );
   } catch (e) { console.error('saveLesson error:', e.message); }
 }
@@ -1235,7 +1243,7 @@ export async function getRecentLessons({ limit = 15 } = {}) {
   if (!isDbAvailable()) return [];
   try {
     const { rows } = await query(
-      `SELECT date, symbol, outcome, pnl_usd, regime, lesson_type, lesson
+      `SELECT date, symbol, outcome, pnl_usd, regime, lesson_type, lesson, ai_source
        FROM trade_lessons ORDER BY created_at DESC LIMIT $1`,
       [limit]
     );
@@ -1264,7 +1272,7 @@ export async function getPerformancePatterns() {
     const { rows } = await query(
       `SELECT regime, vix_bucket, trades, wins, win_rate, avg_pnl
        FROM performance_patterns WHERE trades >= 3
-       ORDER BY regime, vix_bucket`
+       ORDER BY win_rate DESC`
     );
     return rows;
   } catch { return []; }
