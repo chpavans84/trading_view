@@ -1928,11 +1928,11 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
     let openPositions = [];
     try { openPositions = await getPositions(); } catch {}
 
-    // Re-entry block: exclude symbols stopped out in last 60 min
+    // Re-entry block: exclude symbols that lost money in the last 24 hours
     let blocked_symbols = [];
     try {
       const recentClosed = await getTrades({ status: 'closed', limit: 50 });
-      const cutoff = Date.now() - 60 * 60 * 1000;
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       blocked_symbols = (recentClosed ?? [])
         .filter(t => t.closed_at && new Date(t.closed_at).getTime() > cutoff && (t.pnl_usd ?? 0) < 0)
         .map(t => t.symbol);
@@ -2138,7 +2138,7 @@ Market data:
 - Yesterday P&L: $${pnl?.pnl?.toFixed(2) ?? '0'}
 
 Keep it under 200 words.`,
-      fallbackModel: 'claude-sonnet-4-6',
+      fallbackModel: 'claude-haiku-4-5-20251001',
       maxTokens: 500,
     });
 
@@ -2212,7 +2212,7 @@ Write a concise EOD summary (under 150 words):
 2. What worked and what didn't (be specific to the trades above)
 3. What to watch tomorrow
 4. One lesson or pattern from today`,
-      fallbackModel: 'claude-sonnet-4-6',
+      fallbackModel: 'claude-haiku-4-5-20251001',
       maxTokens: 400,
     });
 
