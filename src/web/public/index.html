@@ -991,7 +991,6 @@
   <div class="nav-brand">📈 Trading Bot</div>
   <div class="nav-tabs">
     <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">Dashboard</button>
-    <button class="tab" onclick="showPage('pnl',this)">Daily P&amp;L</button>
     <button class="tab" onclick="showPage('trades',this)">Trades</button>
     <button class="tab" onclick="showPage('scores',this)">Scores</button>
     <button class="tab" onclick="showPage('market',this)">Market</button>
@@ -1086,34 +1085,6 @@
 <main>
 
 <!-- ── DAILY P&L ──────────────────────────────────────── -->
-<div class="page" id="page-pnl">
-
-  <!-- Summary cards -->
-  <div id="pnlCards" class="cards" style="margin-bottom:16px">
-    <div class="loading">Loading…</div>
-  </div>
-
-  <!-- Bar chart -->
-  <div class="table-wrap" style="margin-bottom:16px">
-    <div class="table-head">
-      <h3>Daily P&amp;L — Last <select id="pnlDays" onchange="loadPnl()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:2px 6px;border-radius:4px;font-size:0.82rem;margin-left:4px">
-        <option value="30" selected>30 days</option>
-        <option value="60">60 days</option>
-        <option value="90">90 days</option>
-      </select> <span id="pnlSourceBadge" style="font-size:0.72rem;color:#8b949e;margin-left:8px;font-weight:400"></span> <button class="doc-btn" onclick="openResearchDoc('pnl')" title="How this works">?</button></h3>
-      <button class="refresh-btn" onclick="loadPnl()">↻ Refresh</button>
-    </div>
-    <div id="pnlChart" style="padding:16px 20px 8px;overflow-x:auto"></div>
-  </div>
-
-  <!-- History table -->
-  <div class="table-wrap">
-    <div class="table-head"><h3>History</h3></div>
-    <div id="pnlTable"><div class="loading">Loading…</div></div>
-  </div>
-
-</div>
-
 <!-- ── DASHBOARD ─────────────────────────────────────── -->
 <div class="page" id="page-home"></div>
 
@@ -1171,6 +1142,32 @@
       </div>
     </div>
     <div id="idBody"><div class="loading">Loading…</div></div>
+  </div>
+
+  <!-- ── P&L History (merged from Daily P&L tab) ──────── -->
+  <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--border)">
+    <div class="cards" id="pnlCards" style="margin-bottom:16px"></div>
+
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head">
+        <h3>Daily P&amp;L — Last
+          <select id="pnlDays" onchange="loadPnl()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:2px 6px;border-radius:4px;font-size:0.82rem;margin-left:4px">
+            <option value="30" selected>30 days</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+          </select>
+          <span id="pnlSourceBadge" style="font-size:0.72rem;color:#8b949e;margin-left:8px;font-weight:400"></span>
+          <button class="doc-btn" onclick="openResearchDoc('pnl')" title="How this works">?</button>
+        </h3>
+        <button class="refresh-btn" onclick="loadPnl()">↻ Refresh</button>
+      </div>
+      <div id="pnlChart" style="padding:16px 20px 8px;overflow-x:auto"></div>
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-head"><h3>P&amp;L History</h3></div>
+      <div id="pnlTable"><div class="loading">Loading…</div></div>
+    </div>
   </div>
 </div>
 
@@ -4013,7 +4010,7 @@ function showPage(name, btn) {
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); }, pnl: loadPnl, trades: loadTrades, scores: loadScores, market: loadMarket, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: loadMarket, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules };
   loaders[name]?.();
 }
 
