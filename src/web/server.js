@@ -18,9 +18,10 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
+import { runReflection } from '../core/reflection.js';
 import crypto from 'crypto';
 import { Resend } from 'resend';
 import { NASDAQ100 } from '../research/sp500.js';
@@ -3193,6 +3194,46 @@ cron.schedule('*/15 * * * 1-5', async () => {
     await checkRegimeChange();
   } catch (err) {
     console.error('[regime] cron error:', err.message);
+  }
+});
+
+// ─── Reflection Agent Cron ────────────────────────────────────────────────────
+// Runs at 4:15 PM ET daily — analyses today's closed trades and writes lessons
+
+cron.schedule('15 20 * * 1-5', async () => {
+  try {
+    console.log('[reflection] Running daily reflection agent...');
+    const result = await runReflection();
+    if (result.lessons?.length > 0) {
+      const summary = result.lessons.map(l => {
+        const sign = l.outcome === 'win' ? '✅' : '❌';
+        return `${sign} ${l.symbol}: ${l.lesson}`;
+      }).join('\n');
+      pushToChat(
+        `📚 Daily Reflection — ${result.trades_analysed} trade(s) analysed:\n\n${summary}\n\nThese lessons are now active in my memory.`,
+        'autonomous'
+      );
+    }
+  } catch (err) {
+    console.error('[reflection] cron error:', err.message);
+  }
+});
+
+app.post('/api/reflection/run', requireAdmin, async (req, res) => {
+  try {
+    const result = await runReflection();
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/reflection/lessons', requireAdmin, async (req, res) => {
+  try {
+    const lessons = await getRecentLessons({ limit: 50 });
+    res.json({ ok: true, lessons });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

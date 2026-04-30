@@ -7,6 +7,7 @@
 import { getSymbolNews, getPreEarningsDrift } from './news.js';
 import { getRelativeStrength, SECTOR_MAP } from './sentiment.js';
 import { getChartTechnicals, isTradingViewAvailable } from './tradingview-bridge.js';
+import { getPerformancePatterns } from './db.js';
 
 // Filter out things we should never trade
 function isValidSymbol(sym) {
@@ -14,6 +15,17 @@ function isValidSymbol(sym) {
   if (sym.includes('^') || sym.includes('=') || sym.includes('/')) return false;
   if (['SPY','QQQ','IWM','DIA','VXX','UVXY','SQQQ','TQQQ','SPXU','SPXL'].includes(sym)) return false;
   return sym.match(/^[A-Z]{1,5}$/);
+}
+
+// ─── Performance patterns cache (30-min TTL) ──────────────────────────────────
+let _patterns = [];
+let _patternTs = 0;
+
+async function loadPatterns() {
+  if (Date.now() - _patternTs < 30 * 60 * 1000) return _patterns;
+  _patterns = await getPerformancePatterns().catch(() => []);
+  _patternTs = Date.now();
+  return _patterns;
 }
 
 function buildCandidates(context, watchlist = []) {
@@ -74,7 +86,7 @@ const SECTOR_LEADERS = {
   GLD:  ['GLD','GDX','GOLD','NEM'],
 };
 
-function scoreCandidate({ symbol, data, context }) {
+async function scoreCandidate({ symbol, data, context }) {
   let score = 0;
   const { regime, leading_sectors } = context;
   const { rs, tech, drift, news } = data;
@@ -117,6 +129,17 @@ function scoreCandidate({ symbol, data, context }) {
 
   // Choppy market penalty
   if (regime === 'choppy') score -= 30;
+
+  // Regime performance adjustment — based on actual historical win rates
+  const patterns = await loadPatterns();
+  const match = patterns.find(p => p.regime === regime);
+  if (match && match.trades >= 5) {
+    if (match.win_rate < 40) {
+      score -= 10;
+    } else if (match.win_rate > 65) {
+      score += 8;
+    }
+  }
 
   return Math.max(0, Math.min(100, score + 30));
 }
@@ -174,10 +197,10 @@ export async function selectBestTrade({ context, positions = [], blocked_symbols
   );
 
   // Score all candidates
-  const scored = candidateData.map(data => ({
+  const scored = (await Promise.all(candidateData.map(async data => ({
     ...data,
-    score: scoreCandidate({ symbol: data.symbol, data, context }),
-  })).sort((a, b) => b.score - a.score);
+    score: await scoreCandidate({ symbol: data.symbol, data, context }),
+  })))).sort((a, b) => b.score - a.score);
 
   const best = scored[0];
 
