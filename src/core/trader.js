@@ -3,7 +3,7 @@
  * Paper trading by default (ALPACA_BASE_URL=https://paper-api.alpaca.markets)
  * Live account is read-only — no trades placed against live money automatically.
  */
-import { closeTrade, getTrades } from './db.js';
+import { closeTrade, getTrades, query, isDbAvailable } from './db.js';
 
 // Paper account (bot trades here)
 const BASE_URL   = process.env.ALPACA_BASE_URL   || 'https://paper-api.alpaca.markets';
@@ -424,6 +424,26 @@ const TARGET_PROFIT_DOLLARS = 150;  // size position to earn this per winning tr
 const MIN_POSITION_DOLLARS  = 1500;
 const MAX_POSITION_DOLLARS  = 5000;
 
+// ─── Recent Losses ────────────────────────────────────────────────────────────
+// Check how many times a symbol has lost in the last N days (from DB).
+// Used to enforce a cooldown: if a stock has lost 2+ times in 5 days, skip it.
+
+export async function getRecentLosses(symbol, { days = 5, minLosses = 2 } = {}) {
+  try {
+    if (!isDbAvailable()) return { symbol, loss_count: 0, days, blocked: false };
+    const result = await query(
+      `SELECT COUNT(*) AS loss_count FROM trades
+       WHERE symbol = $1 AND status = 'closed' AND pnl_usd < 0
+         AND closed_at > NOW() - ($2 || ' days')::INTERVAL`,
+      [symbol.toUpperCase(), String(days)]
+    );
+    const loss_count = parseInt(result.rows[0]?.loss_count ?? 0, 10);
+    return { symbol, loss_count, days, blocked: loss_count >= minLosses };
+  } catch {
+    return { symbol, loss_count: 0, days, blocked: false };
+  }
+}
+
 // ─── Market Regime ────────────────────────────────────────────────────────────
 // VIX thresholds: above 25 = defensive (cut size 50%), above 35 = no new longs
 
@@ -458,6 +478,10 @@ export async function placeTrade({
   note = '',
   userCfg = null,           // per-user bot config (from getUserBotConfig)
 }) {
+  // Hard time block — enforced here regardless of the caller
+  const timeCheck = isBadTradingTime();
+  if (timeCheck.bad) throw new Error(`Trade blocked: ${timeCheck.reason}`);
+
   const sizing  = userCfg?.position_sizing  || {};
   const vixT    = userCfg?.vix_thresholds   || {};
   const minAtrPct       = sizing.min_atr_pct             ?? MIN_ATR_PCT;
@@ -472,6 +496,11 @@ export async function placeTrade({
   const alreadyOpen = existingPositions.find(p => p.symbol === symbol.toUpperCase());
   if (alreadyOpen)
     throw new Error(`Duplicate blocked: already holding ${alreadyOpen.qty} shares of ${symbol} (avg $${alreadyOpen.avg_entry_price})`);
+
+  // Multi-day loss block — skip symbols that lost 2+ times in the last 5 trading days
+  const lossCheck = await getRecentLosses(symbol);
+  if (lossCheck.blocked)
+    throw new Error(`Trade blocked: ${symbol} lost ${lossCheck.loss_count}× in last ${lossCheck.days} days — cooldown active`);
 
   // Market regime check — respects user's VIX thresholds
   const regime = await getMarketRegime({ defensive_vix: vixT.defensive ?? 25, crisis_vix: vixT.crisis ?? 35 });

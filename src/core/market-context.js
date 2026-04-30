@@ -1,13 +1,11 @@
 /**
  * Layer 1 — Market Context Engine
  * Answers: "What kind of trading day is today and should we be trading?"
+ * Fully deterministic — no Claude API calls (saves ~$0.002 per scan).
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { getMarketSentiment, getSectorPerformance, getTrendingStocks, getMarketMovers } from './sentiment.js';
 import { getEarningsCalendar } from './news.js';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 function todayET() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -84,52 +82,33 @@ export async function getMarketContext() {
     : positiveSectors.length >= 4 || negativeSectors.length >= 4 ? 'medium'
     : 'low';
 
-  // ── Claude writes the narrative ───────────────────────────────────────────────
-  let market_narrative = '';
-  let best_hunting_ground = '';
+  // ── Deterministic narrative (no API call) ────────────────────────────────────
+  const topGainerStr  = movers?.gainers?.slice(0, 3).map(m => `${m.symbol} +${m.chg_pct?.toFixed(1)}%`).join(', ') || '';
+  const topDeclinerStr= movers?.decliners?.slice(0, 2).map(m => `${m.symbol} ${m.chg_pct?.toFixed(1)}%`).join(', ') || '';
+  const vixStr        = vix != null ? `VIX ${vix.toFixed(1)} (${vixTrend})` : 'VIX unknown';
+  const sectorSummary = `${positiveSectors.length} sectors up, ${negativeSectors.length} down`;
 
-  try {
-    const rawData = {
-      vix, vixChgPct, vixTrend,
-      positiveSectors: positiveSectors.map(s => `${s.symbol} +${s.chg_pct?.toFixed(2)}%`).join(', '),
-      negativeSectors: negativeSectors.map(s => `${s.symbol} ${s.chg_pct?.toFixed(2)}%`).join(', '),
-      topMovers: movers?.gainers?.slice(0, 5).map(m => `${m.symbol} +${m.chg_pct?.toFixed(1)}%`).join(', '),
-      bigDecliners: movers?.decliners?.slice(0, 3).map(m => `${m.symbol} ${m.chg_pct?.toFixed(1)}%`).join(', '),
-      earningsToday: earningsToday.map(e => e.symbol).join(', ') || 'none',
-      regime, direction, tradeable, notTradeableReason,
-      timeET: timeET(),
-    };
+  let market_narrative;
+  if (!tradeable) {
+    market_narrative = `Market is not tradeable: ${notTradeableReason}. ${vixStr}. ${sectorSummary}.`;
+  } else if (direction === 'bullish') {
+    market_narrative = `Bullish ${regime} market — ${sectorSummary}, ${vixStr}. ${topGainerStr ? `Leaders: ${topGainerStr}.` : ''}`;
+  } else if (direction === 'bearish') {
+    market_narrative = `Bearish pressure — ${sectorSummary}, ${vixStr}. ${topDeclinerStr ? `Decliners: ${topDeclinerStr}.` : ''} Defensive posture required.`;
+  } else {
+    market_narrative = `Mixed signals — ${sectorSummary}, ${vixStr}. ${regime} conditions, low directional conviction.`;
+  }
 
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      messages: [{
-        role: 'user',
-        content: `You are a professional day trader. Based on this market data, write:
-1. market_narrative: 2-3 sentences describing what the market is doing RIGHT NOW and why
-2. best_hunting_ground: 1-2 sentences on where the best trades are today (or "Stay flat" if not tradeable)
-
-Market data at ${rawData.timeET} ET:
-- VIX: ${rawData.vix} (${rawData.vixTrend}, ${rawData.vixChgPct?.toFixed(1)}% today)
-- Leading sectors: ${rawData.positiveSectors || 'none'}
-- Lagging sectors: ${rawData.negativeSectors || 'none'}
-- Top movers: ${rawData.topMovers || 'none'}
-- Big decliners: ${rawData.bigDecliners || 'none'}
-- Earnings today: ${rawData.earningsToday}
-- Regime: ${rawData.regime} | Direction: ${rawData.direction}
-${rawData.notTradeableReason ? `- NOT TRADEABLE: ${rawData.notTradeableReason}` : ''}
-
-Return ONLY valid JSON: {"market_narrative":"...","best_hunting_ground":"..."}`
-      }],
-    });
-
-    const text = msg.content[0]?.text?.trim() ?? '';
-    const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? '{}');
-    market_narrative    = json.market_narrative    ?? '';
-    best_hunting_ground = json.best_hunting_ground ?? '';
-  } catch {
-    market_narrative    = `${direction} market with VIX at ${vix ?? 'unknown'}. ${regime} conditions.`;
-    best_hunting_ground = tradeable ? `Focus on ${leadingSectors[0] ?? 'leading'} sector stocks.` : 'Stay flat today.';
+  let best_hunting_ground;
+  if (!tradeable) {
+    best_hunting_ground = `Stay flat — ${notTradeableReason}.`;
+  } else if (earningsToday.length > 0 && (regime === 'news-driven' || regime === 'volatile')) {
+    const syms = earningsToday.slice(0, 3).map(e => e.symbol).join(', ');
+    best_hunting_ground = `Best opportunity in earnings movers: ${syms}. Focus on post-announcement momentum with tight stops.`;
+  } else if (leadingSectors.length > 0) {
+    best_hunting_ground = `Best opportunity in leading sectors: ${leadingSectors.slice(0, 3).join(', ')}. Look for high-RS names pulling back to support.`;
+  } else {
+    best_hunting_ground = `Selective — scan for above-average volume and clear news catalysts. Keep positions small.`;
   }
 
   return {
