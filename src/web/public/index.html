@@ -1215,6 +1215,23 @@
       <div style="padding:16px"><div class="movers" id="moversList"><div class="loading">Loading...</div></div></div>
     </div>
   </div>
+  <!-- Top Trading Today — S&P 500 / NASDAQ 100 tabs -->
+  <div class="table-wrap" style="margin-top:16px">
+    <div class="table-head">
+      <h3>Top Trading Today</h3>
+      <div style="display:flex;gap:6px">
+        <button id="idxTabSP" onclick="switchIndexTab('sp500')"
+          style="background:#238636;border:none;border-radius:6px;color:#fff;padding:4px 14px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .15s">S&amp;P 500</button>
+        <button id="idxTabNQ" onclick="switchIndexTab('nasdaq')"
+          style="background:none;border:1px solid #30363d;border-radius:6px;color:#8b949e;padding:4px 14px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .15s">NASDAQ 100</button>
+        <button class="refresh-btn" onclick="loadTopStocks()" style="margin-left:4px">↻</button>
+      </div>
+    </div>
+    <div id="topStocksBody" style="padding:0 0 4px">
+      <div class="loading" style="padding:20px">Loading…</div>
+    </div>
+  </div>
+
   <div id="page-home"></div>
 </div>
 
@@ -4486,6 +4503,81 @@ async function loadMarket() {
         <div class="mover-pct ${colorClass(m.chg_pct)}">${fmtPct(m.chg_pct)}</div>
         <div class="mover-price">${fmtDollar(m.price)}</div>
       </div>`).join('');
+
+  loadTopStocks();
+}
+
+// ── Top Trading Today (S&P / NASDAQ tabs) ──────────────────────────────────
+let _topStocksIndex = 'sp500';
+
+function switchIndexTab(index) {
+  _topStocksIndex = index;
+  const spBtn = document.getElementById('idxTabSP');
+  const nqBtn = document.getElementById('idxTabNQ');
+  if (spBtn) {
+    spBtn.style.background = index === 'sp500' ? '#238636' : 'none';
+    spBtn.style.border     = index === 'sp500' ? 'none'    : '1px solid #30363d';
+    spBtn.style.color      = index === 'sp500' ? '#fff'    : '#8b949e';
+  }
+  if (nqBtn) {
+    nqBtn.style.background = index === 'nasdaq' ? '#238636' : 'none';
+    nqBtn.style.border     = index === 'nasdaq' ? 'none'    : '1px solid #30363d';
+    nqBtn.style.color      = index === 'nasdaq' ? '#fff'    : '#8b949e';
+  }
+  loadTopStocks(index);
+}
+
+async function loadTopStocks(index) {
+  if (index !== undefined) _topStocksIndex = index;
+  const el = document.getElementById('topStocksBody');
+  if (!el) return;
+  el.innerHTML = '<div class="loading" style="padding:20px">Loading…</div>';
+
+  const d = await api(`/api/market/top-stocks?index=${_topStocksIndex}`);
+  if (!d) { el.innerHTML = '<div style="padding:16px;color:#8b949e">No data available</div>'; return; }
+
+  const stocks = d.stocks || [];
+  if (!stocks.length) {
+    el.innerHTML = '<div style="padding:16px;color:#8b949e">No data — market may be closed or data unavailable</div>';
+    return;
+  }
+
+  const gainers   = stocks.filter(s => s.chg_pct >  0);
+  const decliners = stocks.filter(s => s.chg_pct <= 0).slice().reverse();
+
+  const mkRow = s => `
+    <tr>
+      <td style="padding:8px 12px;font-weight:700;white-space:nowrap">
+        <span class="sym-link" data-symbol="${s.symbol}">${s.symbol}</span>
+      </td>
+      <td style="padding:8px 12px;color:#8b949e;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        ${s.name || ''}
+      </td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap">${fmtDollar(s.price)}</td>
+      <td style="padding:8px 12px;text-align:right;font-weight:700;white-space:nowrap" class="${colorClass(s.chg_pct)}">${fmtPct(s.chg_pct)}</td>
+    </tr>`;
+
+  const mkSection = (rows, label, color) => {
+    if (!rows.length) return '';
+    return `
+      <div style="padding:10px 12px 4px;font-size:0.72rem;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:0.05em">
+        ${label} &nbsp;<span style="font-weight:400;color:#6e7681">${rows.length} stocks</span>
+      </div>
+      <table class="reports-table" style="margin-bottom:4px">
+        <thead><tr>
+          <th style="padding:6px 12px">Symbol</th>
+          <th style="padding:6px 12px">Name</th>
+          <th style="padding:6px 12px;text-align:right">Price</th>
+          <th style="padding:6px 12px;text-align:right">Change</th>
+        </tr></thead>
+        <tbody>${rows.map(mkRow).join('')}</tbody>
+      </table>`;
+  };
+
+  el.innerHTML =
+    mkSection(gainers,   'Gainers',   '#3fb950') +
+    mkSection(decliners, 'Decliners', '#f85149') ||
+    '<div style="padding:16px;color:#8b949e">No index members in today\'s mover universe</div>';
 }
 
 // ── Daily P&L ──────────────────────────────────────────
