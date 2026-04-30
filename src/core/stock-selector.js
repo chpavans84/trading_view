@@ -1,18 +1,12 @@
 /**
  * Layer 2 — Intelligent Stock Selector
  * Takes market context from Layer 1 and finds the single best trade.
+ * Fully deterministic — no LLM calls.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { getSymbolNews, getPreEarningsDrift } from './news.js';
-import { getRelativeStrength } from './sentiment.js';
+import { getRelativeStrength, SECTOR_MAP } from './sentiment.js';
 import { getChartTechnicals, isTradingViewAvailable } from './tradingview-bridge.js';
-import { recordApiCall, upsertUsageStats } from './db.js';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-const HAIKU_INPUT_PER_M  = 0.80;
-const HAIKU_OUTPUT_PER_M = 4.00;
 
 // Filter out things we should never trade
 function isValidSymbol(sym) {
@@ -31,32 +25,27 @@ function buildCandidates(context, watchlist = []) {
 
   if (regime === 'choppy') return [];
 
-  // User watchlist symbols are always considered — they don't need to be movers
   watchlist.forEach(sym => {
     if (isValidSymbol(sym)) candidates.set(sym, (candidates.get(sym) ?? 0) + 1);
   });
 
   if (regime === 'news-driven' || regime === 'volatile') {
-    // Prioritise earnings catalysts
     earnings.forEach(e => { if (isValidSymbol(e.symbol)) candidates.set(e.symbol, (candidates.get(e.symbol) ?? 0) + 3); });
   }
 
   if (regime === 'trending' || regime === 'news-driven') {
-    // Top gainers in leading sectors
     movers
       .filter(m => m.chg_pct > 0 && m.price >= 10 && m.price <= 600)
       .forEach(m => { if (isValidSymbol(m.symbol)) candidates.set(m.symbol, (candidates.get(m.symbol) ?? 0) + 2); });
   }
 
   if (regime === 'volatile') {
-    // Oversold bounces — down 3–10% with potential reversal
     const decliners = _raw?.movers?.decliners ?? [];
     decliners
       .filter(m => m.chg_pct < -3 && m.chg_pct > -12 && m.price >= 10 && m.price <= 600)
       .forEach(m => { if (isValidSymbol(m.symbol)) candidates.set(m.symbol, (candidates.get(m.symbol) ?? 0) + 2); });
   }
 
-  // Boost symbols in leading sectors (rough heuristic by known constituents)
   const leadingSymbolBoost = new Set(
     (context.leading_sectors ?? []).flatMap(etf => SECTOR_LEADERS[etf] ?? [])
   );
@@ -64,14 +53,12 @@ function buildCandidates(context, watchlist = []) {
     if (leadingSymbolBoost.has(sym)) candidates.set(sym, w + 1);
   });
 
-  // Sort by weight, return top 12 (watchlist may add extra candidates)
   return [...candidates.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 12)
     .map(([symbol]) => symbol);
 }
 
-// Representative leaders per sector ETF — used to boost sector-aligned candidates
 const SECTOR_LEADERS = {
   XLK:  ['AAPL','MSFT','NVDA','AVGO','AMD','QCOM','TXN','MU'],
   XLF:  ['JPM','BAC','GS','MS','WFC','BRK.B','C','AXP'],
@@ -87,107 +74,132 @@ const SECTOR_LEADERS = {
   GLD:  ['GLD','GDX','GOLD','NEM'],
 };
 
+function scoreCandidate({ symbol, data, context }) {
+  let score = 0;
+  const { regime, leading_sectors } = context;
+  const { rs, tech, drift, news } = data;
+
+  // Relative strength
+  if (rs?.signal === 'strong') score += 20;
+  if (rs?.signal === 'weak')   score -= 15;
+
+  // RSI
+  const rsi = tech?.rsi;
+  if (rsi != null) {
+    if (rsi >= 40 && rsi <= 65) score += 15;
+    if (rsi > 75)               score -= 20;
+    if (rsi < 30)               score += 10;
+  }
+
+  // MACD histogram
+  if (tech?.macd_hist != null) {
+    if (tech.macd_hist > 0) score += 10;
+    if (tech.macd_hist < 0) score -= 10;
+  }
+
+  // EMA trend
+  if (tech?.current_price != null && tech?.ema20 != null && tech?.ema50 != null) {
+    if (tech.current_price > tech.ema20 && tech.current_price > tech.ema50) score += 15;
+    if (tech.current_price < tech.ema20 && tech.current_price < tech.ema50) score -= 15;
+  }
+
+  // Pre-earnings drift
+  if (drift?.drift_direction === 'up')   score += 10;
+  if (drift?.drift_direction === 'down') score -= 10;
+
+  // Sector alignment
+  const stockSector = SECTOR_MAP[symbol];
+  if (stockSector && leading_sectors.includes(stockSector)) score += 15;
+
+  // Guidance
+  if (news?.guidance_signal === 'raised')  score += 10;
+  if (news?.guidance_signal === 'lowered') score -= 15;
+
+  // Choppy market penalty
+  if (regime === 'choppy') score -= 30;
+
+  return Math.max(0, Math.min(100, score + 30));
+}
+
+function buildReason(symbol, score, data) {
+  const parts = [];
+  if (data.rs?.signal === 'strong')
+    parts.push(`outperforming sector by ${data.rs.rs_score?.toFixed(1) ?? '?'}%`);
+  if (data.tech?.rsi != null && data.tech.rsi >= 40 && data.tech.rsi <= 65)
+    parts.push(`RSI at ${data.tech.rsi.toFixed(0)} — not extended`);
+  if (data.tech?.macd_hist != null && data.tech.macd_hist > 0)
+    parts.push('MACD positive momentum');
+  if (data.drift?.drift_direction === 'up')
+    parts.push('positive pre-earnings drift');
+  if (data.news?.guidance_signal === 'raised')
+    parts.push('guidance raised');
+  return parts.length > 0
+    ? `${symbol}: ${parts.join(', ')}.`
+    : `${symbol} scores ${score}/100 across technical and momentum factors.`;
+}
+
 export async function selectBestTrade({ context, positions = [], blocked_symbols = [], watchlist = [] }) {
   if (context.regime === 'choppy') {
     return { symbol: null, no_trade_reason: 'Choppy market — no clean setups' };
   }
 
-  const openSymbols    = new Set((positions ?? []).map(p => p.symbol));
-  const blockedSet     = new Set((blocked_symbols ?? []).map(s => s.toUpperCase()));
-  const rawCandidates  = buildCandidates(context, watchlist)
+  const openSymbols   = new Set((positions ?? []).map(p => p.symbol));
+  const blockedSet    = new Set((blocked_symbols ?? []).map(s => s.toUpperCase()));
+  const rawCandidates = buildCandidates(context, watchlist)
     .filter(s => !openSymbols.has(s) && !blockedSet.has(s));
 
   if (!rawCandidates.length) {
     return { symbol: null, no_trade_reason: 'No candidates found matching current regime' };
   }
 
-  // Fetch per-candidate data in parallel (max 8)
   const tvAvailable = await isTradingViewAvailable().catch(() => false);
 
+  // Fetch per-candidate data in parallel
   const candidateData = await Promise.all(
     rawCandidates.map(async symbol => {
-      const [news, drift, relStr, technicals] = await Promise.allSettled([
+      const [newsRes, driftRes, rsRes, techRes] = await Promise.allSettled([
         getSymbolNews({ symbol, limit: 3 }),
         getPreEarningsDrift({ symbol }),
         getRelativeStrength({ symbol }),
         tvAvailable ? getChartTechnicals({ symbol }) : Promise.resolve(null),
-      ]).then(r => r.map(p => p.status === 'fulfilled' ? p.value : null));
+      ]);
 
-      const headlines = news?.headlines?.slice(0, 2).map(h => h.title).join(' | ') ?? 'No recent news';
-      const rs        = relStr?.relative_strength?.toFixed(1) ?? 'n/a';
-      const rsi       = technicals?.rsi?.toFixed(0) ?? 'n/a';
-      const macd_sig  = technicals?.macd_signal ?? 'n/a';
-      const ema_trend = technicals?.ema_trend   ?? 'n/a';
-      const drift_pct = drift?.drift_pct?.toFixed(1) ?? 'n/a';
+      const news  = newsRes.status  === 'fulfilled' ? newsRes.value  : null;
+      const drift = driftRes.status === 'fulfilled' ? driftRes.value : null;
+      const rs    = rsRes.status    === 'fulfilled' ? rsRes.value    : null;
+      const tech  = techRes.status  === 'fulfilled' ? techRes.value  : null;
 
-      return { symbol, headlines, rs, rsi, macd_sig, ema_trend, drift_pct };
+      return { symbol, news, drift, rs, tech };
     })
   );
 
-  // Format candidate table for Claude
-  const candidateTable = candidateData.map(c =>
-    `${c.symbol}: RS=${c.rs}% | RSI=${c.rsi} | MACD=${c.macd_sig} | EMA=${c.ema_trend} | Drift=${c.drift_pct}% | News: ${c.headlines}`
-  ).join('\n');
+  // Score all candidates
+  const scored = candidateData.map(data => ({
+    ...data,
+    score: scoreCandidate({ symbol: data.symbol, data, context }),
+  })).sort((a, b) => b.score - a.score);
 
-  // Ask Claude Haiku to pick the best trade
-  let result;
-  try {
-    const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
-      messages: [{
-        role: 'user',
-        content: `You are a professional day trader making a single trade decision.
+  const best = scored[0];
 
-Today's market: ${context.market_narrative}
-Best opportunity: ${context.best_hunting_ground}
-Regime: ${context.regime} | Direction: ${context.direction} | VIX: ${context.vix}
-Leading sectors: ${context.leading_sectors?.join(', ') || 'none'}
-Avoid sectors: ${context.avoid_sectors?.join(', ') || 'none'}
-
-Candidates (sorted by signal strength):
-${candidateTable}
-
-Rules:
-- Only go LONG (buy) today unless direction is bearish
-- Prefer stocks with strong relative strength, RSI 40–65 (not overbought), positive MACD
-- Prefer stocks with a catalyst (earnings, news, sector momentum)
-- If nothing looks good, say NO_TRADE with a reason
-
-Return ONLY valid JSON — no markdown, no explanation:
-{
-  "symbol": "AAPL" or null,
-  "reason": "2-sentence explanation of why this is the best trade right now",
-  "conviction": 72,
-  "entry_strategy": "Buy on next 1% pullback or break above $185",
-  "risk_note": "Stop below $181 (yesterday's low / recent support)",
-  "no_trade_reason": null
-}
-conviction is 0–100 (not 0–10). Use 70+ for high-conviction trades, 50–69 for moderate, below 50 = no trade.`
-      }],
-    });
-
-    const inp  = msg.usage?.input_tokens  ?? 0;
-    const out  = msg.usage?.output_tokens ?? 0;
-    const cost = (inp / 1e6) * HAIKU_INPUT_PER_M + (out / 1e6) * HAIKU_OUTPUT_PER_M;
-    recordApiCall({ source: 'stock_selector', inputTokens: inp, outputTokens: out, costUsd: cost, model: 'claude-haiku-4-5-20251001' }).catch(() => {});
-    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: 0, costUsd: cost }).catch(() => {});
-
-    const text = msg.content[0]?.text?.trim() ?? '';
-    const json = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? '{}');
-
-    result = {
-      symbol:               json.symbol ?? null,
-      reason:               json.reason ?? '',
-      conviction:           json.conviction ?? 5,
-      entry_strategy:       json.entry_strategy ?? '',
-      risk_note:            json.risk_note ?? '',
+  // Require minimum conviction
+  if (!best || best.score < 45) {
+    return {
+      symbol: null,
+      no_trade_reason: `No candidate met minimum conviction threshold (best: ${best?.symbol ?? 'none'} at ${best?.score ?? 0}/100)`,
       candidates_considered: rawCandidates,
-      no_trade_reason:      json.no_trade_reason ?? null,
     };
-  } catch (err) {
-    result = { symbol: null, no_trade_reason: `Selection error: ${err.message}`, candidates_considered: rawCandidates };
   }
 
-  return result;
+  const headline = best.news?.headlines?.[0]?.title ?? null;
+
+  return {
+    symbol:               best.symbol,
+    reason:               buildReason(best.symbol, best.score, best),
+    conviction:           best.score,
+    entry_strategy:       `Buy ${best.symbol} on momentum confirmation`,
+    risk_note:            best.tech?.current_price ? `Stop below recent support (~${(best.tech.current_price * 0.97).toFixed(2)})` : 'Use 2–3% stop below entry',
+    candidates_considered: rawCandidates,
+    no_trade_reason:      null,
+    top_candidates:       scored.slice(0, 3).map(c => ({ symbol: c.symbol, score: c.score })),
+  };
 }

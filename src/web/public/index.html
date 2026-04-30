@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trading Bot Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   /* ── Theme tokens — VexAI deep navy (default) ───────────────────────────── */
   :root {
@@ -85,7 +88,7 @@
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: var(--bg);
     color: var(--text);
     background-image: var(--body-grad);
@@ -217,7 +220,7 @@
   .logout:hover { color: var(--text); }
 
   /* User dropdown */
-  .user-menu { position: relative; }
+  .user-menu { position: relative; cursor: pointer; }
   .user-chip {
     display: flex; align-items: center; gap: 7px;
     background: rgba(255,255,255,0.05); border: 1px solid var(--border);
@@ -238,13 +241,10 @@
   .user-menu:hover .user-chevron { transform: rotate(180deg); }
   .user-dropdown {
     position: absolute; right: 0; top: calc(100% + 8px);
-    background: linear-gradient(160deg, rgba(22,27,34,0.97) 0%, rgba(13,17,23,0.95) 100%);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border: 1px solid rgba(48,54,61,0.75);
-    border-top: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; min-width: 200px;
-    box-shadow: 0 16px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(88,166,255,0.06);
+    background: #0f1c2e;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; min-width: 220px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6);
     opacity: 0; visibility: hidden; transform: translateY(-6px) scale(0.97);
     transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
     z-index: 500;
@@ -254,22 +254,22 @@
   }
   .user-dropdown-header {
     padding: 14px 16px 10px;
-    border-bottom: 1px solid rgba(48,54,61,0.5);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
   }
   .user-greeting { font-size: 0.7rem; color: #8b949e; margin-bottom: 3px; }
   .user-fullname { font-size: 0.92rem; font-weight: 700; color: #e6edf3; }
   .user-role-badge { display:inline-block; font-size: 0.68rem; color: #58a6ff; background: rgba(31,111,235,0.12); border: 1px solid rgba(88,166,255,0.2); border-radius: 4px; padding: 1px 6px; margin-top: 4px; }
   .udrop-item {
     display: flex; align-items: center; gap: 10px;
-    padding: 9px 16px; font-size: 0.85rem; color: #c9d1d9;
+    padding: 9px 16px; font-size: 0.85rem; color: var(--text2);
     cursor: pointer; transition: background 0.15s, color 0.15s;
   }
   .udrop-item:first-of-type { margin-top: 4px; }
-  .udrop-item:last-child { border-radius: 0 0 12px 12px; margin-bottom: 4px; }
-  .udrop-item:hover { background: rgba(88,166,255,0.07); color: #e6edf3; }
-  .udrop-item.danger:hover { background: rgba(248,81,73,0.07); color: #f85149; }
+  .udrop-item:last-child { border-radius: 0 0 10px 10px; margin-bottom: 4px; }
+  .udrop-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+  .udrop-item.danger:hover { background: rgba(244,63,94,0.08); color: var(--red); }
   .udrop-icon { width: 18px; text-align: center; font-size: 0.9rem; opacity: 0.8; }
-  .udrop-divider { height: 1px; background: rgba(48,54,61,0.5); margin: 4px 0; }
+  .udrop-divider { height: 1px; background: rgba(255,255,255,0.07); margin: 4px 0; }
   .source-select-wrap { position: relative; display: flex; align-items: center; }
   .source-select { appearance: none; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; color: #e6edf3; font-size: 0.8rem; font-weight: 600; padding: 5px 28px 5px 10px; cursor: pointer; outline: none; transition: border-color 0.15s; }
   .source-select:hover { border-color: #58a6ff; }
@@ -283,7 +283,8 @@
   .page.active { display: block; }
 
   /* Cards */
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  #dashCards + #pnlCards { margin-top: 12px; }
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -332,6 +333,31 @@
   .table-wrap:hover {
     border-color: rgba(255,255,255,0.14);
   }
+  /* ── Widget inner tabs ─────────────────────────────── */
+  .trading-widget { overflow: visible; }
+  .widget-tab-strip {
+    display: flex; align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px; gap: 0;
+    flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .widget-tab-strip::-webkit-scrollbar { display: none; }
+  .widget-tab {
+    background: none; border: none;
+    border-bottom: 2px solid transparent;
+    padding: 11px 15px; margin-bottom: -1px;
+    color: var(--muted); font-size: 0.78rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    cursor: pointer; white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }
+  .widget-tab:hover { color: var(--text2); }
+  .widget-tab.active { color: var(--accent-l); border-bottom-color: var(--accent-l); }
+  .widget-panel { display: none; }
+  .widget-panel.active { display: block; }
+  .wta { padding-right: 4px; }
   .table-head {
     padding: 12px 16px;
     border-bottom: 1px solid var(--border);
@@ -701,7 +727,7 @@
   .trade-result.error   { background: #2d1318; border: 1px solid #f85149; color: #f85149; }
 
   /* ── Home Page ─────────────────────────────────────────────────────────── */
-  #page-home { padding: 0; background: #080c14; min-height: 100vh; }
+  #page-home { padding: 0; }
 
   /* Status bar */
   .home-statusbar { display: flex; align-items: center; gap: 16px; padding: 10px 32px; border-bottom: 1px solid #21262d; background: #0d1117; font-size: 0.78rem; color: #8b949e; }
@@ -950,8 +976,6 @@
     <button class="tab" onclick="showPage('trades',this)">Trades</button>
     <button class="tab" onclick="showPage('scores',this)">Scores</button>
     <button class="tab" onclick="showPage('market',this)">Market</button>
-    <button class="tab" id="tab-home" onclick="showPage('home',this)">Market News</button>
-    <button class="tab" onclick="showPage('stats',this)">Stats</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
     <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
@@ -998,9 +1022,6 @@
           <div class="user-fullname" id="userDropName">—</div>
           <span class="user-role-badge" id="userDropRole">user</span>
         </div>
-        <div class="udrop-item" onclick="showPage('stats', document.getElementById('tab-stats'))">
-          <span class="udrop-icon">📊</span> Stats &amp; Health
-        </div>
         <div class="udrop-item" onclick="showPage('docs', document.getElementById('tab-docs'))">
           <span class="udrop-icon">📖</span> Documentation
         </div>
@@ -1011,9 +1032,17 @@
           <span id="brokerSettingsBadge" style="margin-left:auto;font-size:0.7rem;background:#21262d;color:#8b949e;border-radius:4px;padding:1px 6px">—</span>
         </div>
         <div class="udrop-divider"></div>
-        <div style="padding:8px 14px 10px">
-          <div style="font-size:0.68rem;color:var(--faint);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Theme</div>
-          <div style="display:flex;gap:7px;flex-wrap:wrap" id="themePalette"></div>
+        <div style="padding:8px 14px 12px">
+          <div style="font-size:0.68rem;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Theme</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap" id="themePalette">
+            <div class="theme-swatch" data-theme="vexai"     title="VexAI"          onclick="applyTheme('vexai')"     style="width:28px;height:28px;border-radius:50%;background:#0ea5e9;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="github"    title="GitHub Dark"    onclick="applyTheme('github')"    style="width:28px;height:28px;border-radius:50%;background:#1f6feb;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="midnight"  title="Midnight"       onclick="applyTheme('midnight')"  style="width:28px;height:28px;border-radius:50%;background:#2563eb;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="dracula"   title="Dracula"        onclick="applyTheme('dracula')"   style="width:28px;height:28px;border-radius:50%;background:#bd93f9;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="tokyo"     title="Tokyo Night"    onclick="applyTheme('tokyo')"     style="width:28px;height:28px;border-radius:50%;background:#7aa2f7;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="solarized" title="Solarized Dark" onclick="applyTheme('solarized')" style="width:28px;height:28px;border-radius:50%;background:#268bd2;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="cyberpunk" title="Cyberpunk"      onclick="applyTheme('cyberpunk')" style="width:28px;height:28px;border-radius:50%;background:#f72585;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+          </div>
         </div>
         <div class="udrop-divider"></div>
         <div class="udrop-item danger" onclick="logout()">
@@ -1042,24 +1071,51 @@
 
 <!-- ── DAILY P&L ──────────────────────────────────────── -->
 <!-- ── DASHBOARD ─────────────────────────────────────── -->
-<div class="page" id="page-home"></div>
-
 <div class="page active" id="page-dashboard">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
     <span style="color:#8b949e;font-size:0.85rem" id="dashSourceLabel">📄 Alpaca Paper Trading</span>
     <button class="force-btn" onclick="openTradeModal()">⚡ Force Trade</button>
   </div>
-  <div class="cards" id="dashCards">
+  <div class="cards" id="dashCards" style="margin-bottom:0">
     <div class="loading">Loading...</div>
   </div>
-  <div class="grid-2">
-    <div class="table-wrap" id="positionsTable">
-      <div class="table-head"><h3>Open Positions <button class="doc-btn" onclick="openResearchDoc('dashboard_positions')" title="How this works">?</button></h3><button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button></div>
-      <div class="loading">Loading...</div>
+  <div class="cards" id="pnlCards" style="margin-top:0;margin-bottom:24px"></div>
+  <!-- ── Trading Tables — tabbed widget ─────────────── -->
+  <div class="table-wrap trading-widget">
+    <div class="widget-tab-strip">
+      <button class="widget-tab active" onclick="switchWidgetTab('positions')">Open Positions</button>
+      <button class="widget-tab" onclick="switchWidgetTab('trades')">Recent Trades</button>
+      <button class="widget-tab" onclick="switchWidgetTab('strong-buys')">Strong Buys Today</button>
+      <button class="widget-tab" onclick="switchWidgetTab('intraday')">Intraday Picks</button>
+      <div style="flex:1;min-width:8px"></div>
+      <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
+        <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
+      </div>
+      <div class="wta" id="wta-trades" style="display:none;align-items:center;gap:10px"></div>
+      <div class="wta" id="wta-strong-buys" style="display:none;align-items:center;gap:10px">
+        <span id="sbScanMeta" style="font-size:0.78rem;color:var(--text2)"></span>
+        <button class="refresh-btn" onclick="loadStrongBuys(true)">↻ Refresh</button>
+        <button class="doc-btn" onclick="openResearchDoc('strong_buys')" title="How this works">?</button>
+      </div>
+      <div class="wta" id="wta-intraday" style="display:none;align-items:center;gap:10px">
+        <span style="font-size:0.76rem;color:var(--muted)">daily $150–200 target</span>
+        <span id="idScanMeta" style="font-size:0.78rem;color:var(--text2)"></span>
+        <button class="refresh-btn" onclick="loadIntradayPicks(true)">↻ Refresh</button>
+        <button class="doc-btn" onclick="openResearchDoc('intraday_picks')" title="How this works">?</button>
+      </div>
     </div>
-    <div class="table-wrap" id="recentTradesTable">
-      <div class="table-head"><h3>Recent Trades <button class="doc-btn" onclick="openResearchDoc('dashboard_trades')" title="How this works">?</button></h3></div>
-      <div class="loading">Loading...</div>
+
+    <div class="widget-panel active" id="widget-panel-positions">
+      <div id="positionsTable"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="widget-panel" id="widget-panel-trades">
+      <div id="recentTradesTable"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="widget-panel" id="widget-panel-strong-buys">
+      <div id="sbBody"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="widget-panel" id="widget-panel-intraday">
+      <div id="idBody"><div class="loading">Loading…</div></div>
     </div>
   </div>
 
@@ -1076,34 +1132,8 @@
     </div>
   </div>
 
-  <!-- Strong Buys Today -->
-  <div class="table-wrap" id="strongBuysWidget" style="margin-top:20px">
-    <div class="table-head">
-      <h3>Strong Buys Today <button class="doc-btn" onclick="openResearchDoc('strong_buys')" title="How this works">?</button></h3>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span id="sbScanMeta" style="font-size:0.78rem;color:#8b949e"></span>
-        <button class="refresh-btn" onclick="loadStrongBuys(true)">↻ Refresh</button>
-      </div>
-    </div>
-    <div id="sbBody"><div class="loading">Loading…</div></div>
-  </div>
-
-  <!-- Intraday Picks -->
-  <div class="table-wrap" id="intradayWidget" style="margin-top:20px">
-    <div class="table-head">
-      <h3>Intraday Picks <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— daily $150–200 target</span> <button class="doc-btn" onclick="openResearchDoc('intraday_picks')" title="How this works">?</button></h3>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span id="idScanMeta" style="font-size:0.78rem;color:#8b949e"></span>
-        <button class="refresh-btn" onclick="loadIntradayPicks(true)">↻ Refresh</button>
-      </div>
-    </div>
-    <div id="idBody"><div class="loading">Loading…</div></div>
-  </div>
-
-  <!-- ── P&L History (merged from Daily P&L tab) ──────── -->
+  <!-- ── P&L History ──────────────────────────────────── -->
   <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--border)">
-    <div class="cards" id="pnlCards" style="margin-bottom:16px"></div>
-
     <div class="table-wrap" style="margin-bottom:16px">
       <div class="table-head">
         <h3>Daily P&amp;L — Last
@@ -1184,6 +1214,7 @@
       <div style="padding:16px"><div class="movers" id="moversList"><div class="loading">Loading...</div></div></div>
     </div>
   </div>
+  <div id="page-home"></div>
 </div>
 
 <!-- ── STATS ──────────────────────────────────────────── -->
@@ -1952,6 +1983,17 @@
         <div style="font-size:0.75rem;font-weight:600;color:#6e7681;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Scan History</div>
         <div id="scanHistory" style="display:flex;flex-direction:column;gap:6px"></div>
       </div>
+
+      <!-- Blocked Trades -->
+      <div style="flex-shrink:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:0.75rem;font-weight:600;color:#6e7681;text-transform:uppercase;letter-spacing:.05em">🚫 Blocked Trades</div>
+          <button onclick="loadRejections()" style="background:none;border:1px solid #30363d;color:#8b949e;border-radius:5px;padding:2px 8px;font-size:0.72rem;cursor:pointer">Refresh</button>
+        </div>
+        <div id="rejectionsList" style="display:flex;flex-direction:column;gap:5px;max-height:200px;overflow-y:auto">
+          <div style="color:#6e7681;font-size:0.8rem">Loading…</div>
+        </div>
+      </div>
     </div>
 
     <!-- Terminal panel -->
@@ -2140,7 +2182,7 @@
 // Map permission key → page name used in showPage()
 const TAB_PAGE_MAP = {
   dashboard: 'dashboard', trades: 'trades', scores: 'scores',
-  market: 'market', news: 'home', stats: 'stats', research: 'research',
+  market: 'market', stats: 'stats', research: 'research',
   bot_rules: 'bot', admin_bot: 'admin',
 };
 
@@ -2416,7 +2458,7 @@ function renderPermissions(data) {
     tbody.innerHTML = '<tr><td colspan="14" style="padding:20px;text-align:center;color:#8b949e">No users found.</td></tr>';
     return;
   }
-  const TABS    = ['dashboard','trades','scores','market','news','stats','docs','research'];
+  const TABS    = ['dashboard','trades','scores','market','docs','research'];
   const WIDGETS = ['moomoo','alpaca_live','force_trade','chat'];
   tbody.innerHTML = data.map(u => {
     const perms   = u.permissions || {};
@@ -3966,8 +4008,21 @@ function showPage(name, btn) {
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: loadMarket, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: () => { loadMarket(); loadHome(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules };
   loaders[name]?.();
+}
+
+// ── Widget inner-tab switcher ─────────────────────────
+function switchWidgetTab(name) {
+  document.querySelectorAll('.widget-tab').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('onclick') === `switchWidgetTab('${name}')`);
+  });
+  document.querySelectorAll('.widget-panel').forEach(p => {
+    p.classList.toggle('active', p.id === `widget-panel-${name}`);
+  });
+  document.querySelectorAll('.wta').forEach(a => {
+    a.style.display = (a.id === `wta-${name}`) ? 'flex' : 'none';
+  });
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -4440,13 +4495,12 @@ async function loadPnl() {
   // When Moomoo or live is selected, portfolio history is unavailable — show clear message
   if (currentSource === 'moomoo' || currentSource === 'alpaca_live') {
     const srcLabel = currentSource === 'moomoo' ? 'Moomoo Real Account' : 'Alpaca Live Account';
-    document.getElementById('pnlCards').innerHTML = `
-      <div class="card" style="grid-column:1/-1;text-align:center;padding:24px">
-        <div style="font-size:1.1rem;color:#8b949e;margin-bottom:8px">📊 Daily P&amp;L history is not available for <strong style="color:#e6edf3">${srcLabel}</strong></div>
-        <div style="font-size:0.85rem;color:#6e7681">Switch to <strong style="color:#e6edf3">Alpaca Paper</strong> in the source selector to view P&amp;L history.<br>
-        Intraday P&amp;L for your real account is shown on the Dashboard tab.</div>
+    document.getElementById('pnlCards').innerHTML = '';
+    document.getElementById('pnlChart').innerHTML = `
+      <div class="empty" style="padding:20px;text-align:center">
+        <div style="color:#8b949e;margin-bottom:6px">📊 Daily P&amp;L history is not available for <strong style="color:#e6edf3">${srcLabel}</strong></div>
+        <div style="font-size:0.82rem;color:#6e7681">Switch to <strong style="color:#e6edf3">Alpaca Paper</strong> to view P&amp;L history.</div>
       </div>`;
-    document.getElementById('pnlChart').innerHTML = '';
     document.getElementById('pnlTable').innerHTML = '';
     return;
   }
@@ -4481,19 +4535,14 @@ async function loadPnl() {
   // ── Summary cards ──────────────────────────────────
   document.getElementById('pnlCards').innerHTML = `
     <div class="card">
-      <div class="card-label">Today P&amp;L</div>
-      <div class="card-value" style="color:${todayColor}">${usd(todayPnl)}</div>
-      <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">${pct(today.pnl_pct ?? 0)}% · ${today.target_reached ? '<span style="color:#3fb950">Target hit!</span>' : today.loss_limit_reached ? '<span style="color:#f85149">Loss limit!</span>' : `$${(today.remaining_to_target ?? 0).toFixed(0)} to target`}</div>
-    </div>
-    <div class="card">
       <div class="card-label">Total P&amp;L (${days}d)</div>
       <div class="card-value" style="color:${totalPnl >= 0 ? '#3fb950' : '#f85149'}">${usd(totalPnl)}</div>
-      <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">avg ${usd(avgDaily)}/trading day</div>
+      <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">avg ${usd(avgDaily)}/day</div>
     </div>
     <div class="card">
       <div class="card-label">Win / Loss Days</div>
       <div class="card-value"><span style="color:#3fb950">${winDays}W</span> <span style="color:#8b949e;font-size:0.9rem">/</span> <span style="color:#f85149">${lossDays}L</span></div>
-      <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">${tradingDays} active trading days</div>
+      <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">${tradingDays} active days</div>
     </div>
     <div class="card">
       <div class="card-label">Trade Win Rate</div>
@@ -6124,7 +6173,7 @@ async function loadHome(force = false) {
   // Auto-refresh every 3 min
   clearTimeout(homeRefreshTimer);
   homeRefreshTimer = setTimeout(() => {
-    if (document.getElementById('page-home')?.classList.contains('active')) loadHome(true);
+    if (document.getElementById('page-market')?.classList.contains('active')) loadHome(true);
   }, 180000);
 }
 
@@ -7923,9 +7972,19 @@ async function updateAnalystState() {
       : '';
     const scannerStatus = s.scanner_running
       ? (s.market_open
-          ? `🟢 Scanning every 10min${uLabel ? ' · ' + uLabel : ''}`
+          ? `🟢 Scanning${uLabel ? ' · ' + uLabel : ''}`
           : `🟡 Armed${uLabel ? ' · ' + uLabel : ''}`)
       : `⏸ Scanner off${uLabel ? ' · ' + uLabel : ''}`;
+
+    // Ollama / AI source pill
+    const aiStatus = s.ollama_available
+      ? `🟢 Local AI`
+      : `☁️ Cloud AI`;
+
+    // API cost display
+    const todayCost = parseFloat(s.estimated_cost_today_usd ?? 0);
+    const monthCost = parseFloat(s.estimated_cost_month_usd ?? 0);
+    const costStr = `API: $${todayCost.toFixed(2)} today | $${monthCost.toFixed(2)} this month`;
 
     // Regime
     const regime = s.today_regime ?? '—';
@@ -7966,11 +8025,40 @@ async function updateAnalystState() {
       <span>${regimeStr}</span>
       <span style="color:var(--border)">|</span>
       <span>${pnlStr}</span>
+      <span style="color:var(--border)">|</span>
+      <span>${aiStatus}</span>
+      <span style="color:var(--border)">|</span>
+      <span style="color:var(--text-muted)">${costStr}</span>
     `;
   } catch {}
 }
 
 setInterval(updateAnalystState, 30000);
+
+async function loadRejections() {
+  const el = document.getElementById('rejectionsList');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/rejections?limit=20');
+    if (!r.ok) { el.innerHTML = '<div style="color:#6e7681;font-size:0.8rem">Unavailable</div>'; return; }
+    const { rejections } = await r.json();
+    if (!rejections.length) {
+      el.innerHTML = '<div style="color:#6e7681;font-size:0.8rem">No blocked trades</div>';
+      return;
+    }
+    el.innerHTML = rejections.map(r => {
+      const when = new Date(r.rejected_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' });
+      const scoreTag = r.conviction_score != null ? ` <span style="color:#6e7681">(score: ${r.conviction_score})</span>` : '';
+      return `<div style="font-size:0.78rem;padding:5px 8px;background:#161b22;border:1px solid #21262d;border-radius:6px;border-left:3px solid #f85149">
+        <span style="color:#f85149;font-weight:600">${r.symbol ?? '—'}</span>${scoreTag}
+        <span style="color:#6e7681;float:right">${when} ET</span>
+        <div style="color:#8b949e;margin-top:2px;font-size:0.75rem;line-height:1.3">${r.reason?.slice(0, 120) ?? ''}${(r.reason?.length ?? 0) > 120 ? '…' : ''}</div>
+      </div>`;
+    }).join('');
+  } catch { el.innerHTML = '<div style="color:#6e7681;font-size:0.8rem">Error loading</div>'; }
+}
+loadRejections();
+setInterval(loadRejections, 60000);
 
 // ── Autonomous Chat Poll (SSE fallback — skipped when SSE is live) ───────────────
 let _lastPollTime = new Date().toISOString();
@@ -7992,63 +8080,40 @@ async function pollAutonomousMessages() {
 setInterval(pollAutonomousMessages, 5000);
 
 // ── Theme system ────────────────────────────────────────────────────────────────
-const THEMES = [
-  { id: 'github',    name: 'GitHub Dark',    swatch: '#1f6feb', dark: true  },
-  { id: 'midnight',  name: 'Midnight',        swatch: '#2563eb', dark: true  },
-  { id: 'dracula',   name: 'Dracula',         swatch: '#bd93f9', dark: true  },
-  { id: 'tokyo',     name: 'Tokyo Night',     swatch: '#7aa2f7', dark: true  },
-  { id: 'solarized', name: 'Solarized Dark',  swatch: '#268bd2', dark: true  },
-  { id: 'cyberpunk', name: 'Cyberpunk',       swatch: '#f72585', dark: true  },
-];
-
-let _currentTheme = 'github';
+// THEME_VARS is inlined inside applyTheme to avoid TDZ errors if earlier code throws.
+var _currentTheme = 'vexai';
 
 function applyTheme(id, save = true) {
+  var THEME_VARS = {
+    vexai:    { '--bg':'#070d18','--bg2':'#0b1424','--surface':'#0f1c2e','--border':'rgba(255,255,255,0.07)','--text':'#e2e8f0','--text2':'#94a3b8','--muted':'#475569','--faint':'#334155','--accent':'#0ea5e9','--accent-l':'#38bdf8','--green':'#10b981','--red':'#f43f5e','--yellow':'#f59e0b','--nav-bg':'rgba(7,13,24,0.98)','--card-bg':'#0b1424','--table-bg':'#0b1424','--body-grad':'none','--ticker-bg':'#070d18','--term-bg':'#070d18','--term-fg':'#e2e8f0','--term-cur':'#38bdf8' },
+    github:   { '--bg':'#0d1117','--bg2':'#161b22','--surface':'#21262d','--border':'rgba(48,54,61,0.8)','--text':'#e6edf3','--text2':'#8b949e','--muted':'#484f58','--faint':'#30363d','--accent':'#58a6ff','--accent-l':'#79c0ff','--green':'#3fb950','--red':'#f85149','--yellow':'#d29922','--nav-bg':'rgba(13,17,23,0.95)','--card-bg':'#161b22','--table-bg':'#161b22','--body-grad':'none','--ticker-bg':'#0d1117','--term-bg':'#0d1117','--term-fg':'#e6edf3','--term-cur':'#58a6ff' },
+    midnight: { '--bg':'#060b14','--bg2':'#0c1525','--surface':'#152035','--border':'rgba(30,48,80,0.8)','--text':'#ddeeff','--text2':'#b8ccee','--muted':'#6088bb','--faint':'#3a5580','--accent':'#2563eb','--accent-l':'#60a5fa','--green':'#22d3a2','--red':'#ef4444','--yellow':'#f59e0b','--nav-bg':'rgba(6,11,20,0.88)','--card-bg':'linear-gradient(135deg,rgba(21,32,53,.92) 0%,rgba(6,11,20,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(21,32,53,.94) 0%,rgba(6,11,20,.90) 100%)','--body-grad':'radial-gradient(ellipse 80% 50% at 20% -10%,rgba(37,99,235,.18) 0%,transparent 60%)','--ticker-bg':'#060b14','--term-bg':'#060b14','--term-fg':'#ddeeff','--term-cur':'#60a5fa' },
+    dracula:  { '--bg':'#282a36','--bg2':'#21222c','--surface':'#313446','--border':'rgba(68,71,90,0.8)','--text':'#f8f8f2','--text2':'#d7d4e8','--muted':'#6272a4','--faint':'#4f5a78','--accent':'#bd93f9','--accent-l':'#d6b4ff','--green':'#50fa7b','--red':'#ff5555','--yellow':'#f1fa8c','--nav-bg':'rgba(33,34,44,0.88)','--card-bg':'linear-gradient(135deg,rgba(49,52,70,.92) 0%,rgba(33,34,44,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(49,52,70,.94) 0%,rgba(33,34,44,.90) 100%)','--body-grad':'radial-gradient(ellipse 80% 50% at 20% -10%,rgba(189,147,249,.13) 0%,transparent 60%)','--ticker-bg':'#282a36','--term-bg':'#21222c','--term-fg':'#f8f8f2','--term-cur':'#bd93f9' },
+    tokyo:    { '--bg':'#1a1b2e','--bg2':'#24253a','--surface':'#2f3148','--border':'rgba(59,61,90,0.8)','--text':'#c0caf5','--text2':'#a9b1d6','--muted':'#565f89','--faint':'#414868','--accent':'#7aa2f7','--accent-l':'#9eceff','--green':'#9ece6a','--red':'#f7768e','--yellow':'#e0af68','--nav-bg':'rgba(26,27,46,0.88)','--card-bg':'linear-gradient(135deg,rgba(36,37,58,.92) 0%,rgba(26,27,46,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(36,37,58,.94) 0%,rgba(26,27,46,.90) 100%)','--body-grad':'radial-gradient(ellipse 80% 50% at 20% -10%,rgba(122,162,247,.13) 0%,transparent 60%)','--ticker-bg':'#1a1b2e','--term-bg':'#1a1b2e','--term-fg':'#c0caf5','--term-cur':'#7aa2f7' },
+    solarized:{ '--bg':'#002b36','--bg2':'#073642','--surface':'#0d4858','--border':'rgba(27,88,106,0.8)','--text':'#fdf6e3','--text2':'#eee8d5','--muted':'#839496','--faint':'#657b83','--accent':'#268bd2','--accent-l':'#4cb8f0','--green':'#859900','--red':'#dc322f','--yellow':'#b58900','--nav-bg':'rgba(0,43,54,0.88)','--card-bg':'linear-gradient(135deg,rgba(13,72,88,.92) 0%,rgba(0,43,54,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(13,72,88,.94) 0%,rgba(0,43,54,.88) 100%)','--body-grad':'none','--ticker-bg':'#002b36','--term-bg':'#002b36','--term-fg':'#fdf6e3','--term-cur':'#268bd2' },
+    cyberpunk:{ '--bg':'#0a0a0f','--bg2':'#111120','--surface':'#181830','--border':'rgba(37,37,80,0.8)','--text':'#e0e0ff','--text2':'#c0c0e0','--muted':'#7070b0','--faint':'#505080','--accent':'#f72585','--accent-l':'#ff60a8','--green':'#06d6a0','--red':'#ef233c','--yellow':'#ffbe0b','--nav-bg':'rgba(10,10,15,0.90)','--card-bg':'linear-gradient(135deg,rgba(24,24,48,.92) 0%,rgba(10,10,15,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(24,24,48,.94) 0%,rgba(10,10,15,.88) 100%)','--body-grad':'radial-gradient(ellipse 80% 50% at 20% -10%,rgba(247,37,133,.15) 0%,transparent 60%)','--ticker-bg':'#0a0a0f','--term-bg':'#0a0a0f','--term-fg':'#e0e0ff','--term-cur':'#f72585' },
+  };
+  var vars = THEME_VARS[id] || THEME_VARS['vexai'];
   _currentTheme = id;
-  const html = document.documentElement;
-  html.setAttribute('data-theme', id === 'github' ? '' : id);
+  const root = document.documentElement;
+  Object.entries(vars).forEach(([k, v]) => root.style.setProperty(k, v));
   if (save) localStorage.setItem('theme', id);
 
-  // Update xterm.js terminal colours if it exists
   if (typeof _term !== 'undefined' && _term) {
-    const style = getComputedStyle(html);
-    _term.options.theme = {
-      background:        style.getPropertyValue('--term-bg').trim(),
-      foreground:        style.getPropertyValue('--term-fg').trim(),
-      cursor:            style.getPropertyValue('--term-cur').trim(),
-      selectionBackground: 'rgba(88,166,255,0.25)',
-    };
+    _term.options.theme = { background: vars['--term-bg'], foreground: vars['--term-fg'], cursor: vars['--term-cur'], selectionBackground: 'rgba(88,166,255,0.25)' };
   }
 
-  // Highlight active swatch
   document.querySelectorAll('.theme-swatch').forEach(el => {
     const active = el.dataset.theme === id;
-    el.style.outline      = active ? `2px solid ${el.style.background}` : 'none';
+    el.style.outline       = active ? `2px solid ${el.style.background}` : 'none';
     el.style.outlineOffset = active ? '2px' : '0';
-    el.style.transform    = active ? 'scale(1.25)' : 'scale(1)';
+    el.style.transform     = active ? 'scale(1.25)' : 'scale(1)';
   });
 }
 
-function buildThemePalette() {
-  const container = document.getElementById('themePalette');
-  if (!container) return;
-  container.innerHTML = THEMES.map(t => `
-    <div class="theme-swatch" data-theme="${t.id}"
-         title="${t.name}"
-         onclick="applyTheme('${t.id}')"
-         style="width:22px;height:22px;border-radius:50%;background:${t.swatch};cursor:pointer;
-                transition:transform .18s,outline .18s;flex-shrink:0">
-    </div>`).join('');
-  applyTheme(_currentTheme, false);
-}
+function buildThemePalette() { applyTheme(_currentTheme, false); }
 
-// Init on load
-(function() {
-  const saved = localStorage.getItem('theme') || 'github';
-  applyTheme(saved, false);
-  // Build palette once DOM is ready (it is, since we're inline at end of body)
-  buildThemePalette();
-})();
+applyTheme(localStorage.getItem('theme') || 'vexai', false);
 </script>
 </body>
 </html>

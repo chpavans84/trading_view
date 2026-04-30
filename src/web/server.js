@@ -18,8 +18,9 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
+import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import crypto from 'crypto';
 import { Resend } from 'resend';
 import { NASDAQ100 } from '../research/sp500.js';
@@ -1948,12 +1949,27 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
 
     let executedTrade = null;
     if (autoExecute && selection.symbol && context.tradeable) {
-      try {
-        const result = await placeTrade({ symbol: selection.symbol, side: 'buy', dollars: 2000 });
-        executedTrade = result;
-        logActivity('scanner', 'auto_trade', selection.symbol, '127.0.0.1');
-      } catch (err) {
-        executedTrade = { error: err.message };
+      // Fix 4: cross-day losing streak check before auto-executing
+      const losses = await getRecentLosses({ symbol: selection.symbol, days: 5 }).catch(() => ({ loss_count: 0, last_loss_at: null }));
+      const hoursSinceLoss = losses.last_loss_at
+        ? (Date.now() - new Date(losses.last_loss_at)) / 3600000
+        : 999;
+      if (losses.loss_count >= 2 && hoursSinceLoss < 24) {
+        console.log(`[scanner] Skipping ${selection.symbol}: ${losses.loss_count} losses in 5 days, last loss ${Math.floor(hoursSinceLoss)}h ago`);
+        executedTrade = { skipped: true, reason: `Loss streak: ${losses.loss_count} losses in last 5 days` };
+      } else {
+        try {
+          const result = await placeTrade({
+            symbol: selection.symbol,
+            side: 'buy',
+            dollars: 2000,
+            conviction_score: selection.conviction ?? null,
+          });
+          executedTrade = result;
+          logActivity('scanner', 'auto_trade', selection.symbol, '127.0.0.1');
+        } catch (err) {
+          executedTrade = { error: err.message };
+        }
       }
     }
 
@@ -2102,11 +2118,9 @@ async function runMorningBriefing() {
   const earnings   = (Array.isArray(ctx.catalysts_today) ? ctx.catalysts_today : []).map(e=>e.symbol).join(', ') || 'none';
 
   try {
-    const msg = await _anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 500,
-      messages: [{ role: 'user', content:
-        `You are an AI trading analyst. It is 9:30 AM ET market open on ${today}.
+    const result = await localAI({
+      system: 'You are an AI trading analyst. Be concise, specific, and use numbers. Plain text only — no markdown symbols like ** or #.',
+      prompt: `It is 9:30 AM ET market open on ${today}.
 Write a morning briefing for the trader. Include:
 1. Today's market regime and what it means for trading strategy
 2. Key catalysts today (earnings, macro events)
@@ -2123,16 +2137,12 @@ Market data:
 - Market narrative: ${ctx.market_narrative || 'n/a'}
 - Yesterday P&L: $${pnl?.pnl?.toFixed(2) ?? '0'}
 
-Keep it under 200 words. Be specific. Use numbers. Plain text — no markdown symbols like ** or #.` }],
+Keep it under 200 words.`,
+      fallbackModel: 'claude-sonnet-4-6',
+      maxTokens: 500,
     });
 
-    const inp  = msg.usage?.input_tokens  ?? 0;
-    const out  = msg.usage?.output_tokens ?? 0;
-    const cost = (inp / 1e6) * SONNET_INPUT_PER_M + (out / 1e6) * SONNET_OUTPUT_PER_M;
-    recordApiCall({ source: 'morning_briefing', inputTokens: inp, outputTokens: out, costUsd: cost, model: 'claude-sonnet-4-6' }).catch(() => {});
-    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: 0, costUsd: cost }).catch(() => {});
-
-    const content = msg.content[0]?.text?.trim() ?? '';
+    const content = result.text ?? '';
     await saveDailyBriefing({ date: today, content, regime: ctx.regime, direction: ctx.direction, vix: ctx.vix });
 
     // Push to all connected chat clients
@@ -2153,6 +2163,14 @@ app.get('/api/briefing', requireAuth, async (req, res) => {
     briefing = await getDailyBriefing(yesterday);
   }
   res.json({ briefing: briefing ?? null });
+});
+
+// ─── Trade Rejections Log ─────────────────────────────────────────────────────
+
+app.get('/api/rejections', requireAuth, async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '50'), 200);
+  const rows  = await getRejections({ limit }).catch(() => []);
+  res.json({ rejections: rows, count: rows.length });
 });
 
 // ─── EOD Summary (4:00 PM ET) ────────────────────────────────────────────────
@@ -2179,11 +2197,9 @@ async function runEODSummary() {
   ).join(', ') || 'none';
 
   try {
-    const msg = await _anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 400,
-      messages: [{ role: 'user', content:
-        `You are an AI trading analyst delivering an end-of-day summary for ${today}.
+    const result = await localAI({
+      system: 'You are an AI trading analyst. Plain text only — no markdown symbols. Be direct and concise.',
+      prompt: `End-of-day summary for ${today}.
 
 Performance today:
 - Net P&L: $${totalPnl}
@@ -2195,18 +2211,12 @@ Write a concise EOD summary (under 150 words):
 1. Today's result in one sentence with P&L
 2. What worked and what didn't (be specific to the trades above)
 3. What to watch tomorrow
-4. One lesson or pattern from today
-
-Plain text, no markdown symbols. Be direct.` }],
+4. One lesson or pattern from today`,
+      fallbackModel: 'claude-sonnet-4-6',
+      maxTokens: 400,
     });
 
-    const inp  = msg.usage?.input_tokens  ?? 0;
-    const out  = msg.usage?.output_tokens ?? 0;
-    const cost = (inp / 1e6) * SONNET_INPUT_PER_M + (out / 1e6) * SONNET_OUTPUT_PER_M;
-    recordApiCall({ source: 'eod_summary', inputTokens: inp, outputTokens: out, costUsd: cost, model: 'claude-sonnet-4-6' }).catch(() => {});
-    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: 0, costUsd: cost }).catch(() => {});
-
-    const content = msg.content[0]?.text?.trim() ?? '';
+    const content = result.text ?? '';
     await saveDailyBriefing({ date: today, type: 'eod', content, regime: context?.regime, direction: context?.direction, vix: context?.vix });
     pushToChat(`📊 EOD Summary — ${today}\n\n${content}`, 'eod_summary');
     console.log(`[eod] Summary generated for ${today}`);
@@ -2242,17 +2252,24 @@ async function checkRegimeChange() {
 // ─── Analyst State Endpoint ───────────────────────────────────────────────────
 
 app.get('/api/analyst/state', requireAuth, async (req, res) => {
-  const [posResult, pnlResult, statusResult, monitorResult] = await Promise.allSettled([
+  const [posResult, pnlResult, statusResult, monitorResult, ollamaResult, todayCostResult, monthStatsResult] = await Promise.allSettled([
     getPositions(),
     getDailyPnL(),
     getMarketStatus(),
     getAllPositionMonitoring(),
+    isOllamaAvailable(),
+    getTodaySpend(),
+    getUsageStats({ days: 30 }),
   ]);
 
-  const rawPositions = posResult.status    === 'fulfilled' ? (posResult.value    ?? []) : [];
-  const pnlData      = pnlResult.status    === 'fulfilled' ? (pnlResult.value    ?? {}) : {};
-  const statusData   = statusResult.status === 'fulfilled' ? (statusResult.value ?? {}) : {};
-  const monitoring   = monitorResult.status === 'fulfilled' ? (monitorResult.value ?? []) : [];
+  const rawPositions = posResult.status      === 'fulfilled' ? (posResult.value      ?? []) : [];
+  const pnlData      = pnlResult.status      === 'fulfilled' ? (pnlResult.value      ?? {}) : {};
+  const statusData   = statusResult.status   === 'fulfilled' ? (statusResult.value   ?? {}) : {};
+  const monitoring   = monitorResult.status  === 'fulfilled' ? (monitorResult.value  ?? []) : [];
+  const ollamaUp     = ollamaResult.status   === 'fulfilled' ? (ollamaResult.value   ?? false) : false;
+  const todayCost    = todayCostResult.status === 'fulfilled' ? (todayCostResult.value ?? 0) : 0;
+  const monthRows    = monthStatsResult.status === 'fulfilled' ? (monthStatsResult.value ?? []) : [];
+  const monthCost    = monthRows.reduce((sum, r) => sum + parseFloat(r.estimated_cost_usd ?? 0), 0);
 
   // Build a map of symbol → monitoring row for quick lookups
   const monMap = {};
@@ -2309,6 +2326,10 @@ app.get('/api/analyst/state', requireAuth, async (req, res) => {
     market_open:      statusData.is_open ?? false,
     universe_size:    uInfo.size   || (lastScan?.context?._raw?.movers?.universe_size ?? 0),
     universe_source:  uInfo.source || (lastScan?.context?._raw?.movers?.universe_source ?? 'unknown'),
+    ollama_available: ollamaUp,
+    ollama_model:     process.env.OLLAMA_MODEL || 'llama3.1:8b',
+    estimated_cost_today_usd:  +todayCost.toFixed(4),
+    estimated_cost_month_usd:  +monthCost.toFixed(4),
   });
 });
 
@@ -3068,12 +3089,27 @@ cron.schedule('*/5 * * * 1-5', async () => {
 });
 
 // ─── AI Scanner Cron ──────────────────────────────────────────────────────────
-// Runs every 10 min, Mon–Fri, 9:45 AM–3:30 PM ET (UTC 13:45–19:30)
+// Fires every 5 min Mon–Fri; internally throttles based on time-of-day.
+// 9:45–11:30 AM → 5 min, 11:30 AM–2 PM → 20 min, 2–3:30 PM → 10 min.
 
-cron.schedule('*/10 * * * 1-5', async () => {
-  const utcT = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
-  if (utcT < 13 * 60 + 45 || utcT >= 19 * 60 + 30) return;
+function getScanIntervalMinutes() {
+  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins >= 585 && mins < 690)  return 5;   // 9:45–11:30 AM
+  if (mins >= 690 && mins < 840)  return 20;  // 11:30 AM–2:00 PM
+  if (mins >= 840 && mins < 930)  return 10;  // 2:00–3:30 PM
+  return null;
+}
+
+let _lastScanTs = 0;
+
+cron.schedule('*/5 * * * 1-5', async () => {
   if (!_scannerState.autoEnabled) return;
+  const interval = getScanIntervalMinutes();
+  if (!interval) return;
+  const elapsed = (Date.now() - _lastScanTs) / 60000;
+  if (elapsed < interval) return;
+  _lastScanTs = Date.now();
   try {
     console.log('[scanner] Auto-scan running…');
     const result = await runAiScan({ autoExecute: _scannerState.autoEnabled, triggeredBy: 'cron' });

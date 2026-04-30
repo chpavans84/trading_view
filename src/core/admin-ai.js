@@ -439,7 +439,7 @@ export async function adminChat({ sessionId, message, adminUsername, onChunk, on
 
     const t0     = Date.now();
     const stream = anthropic.messages.stream({
-      model:      'claude-sonnet-4-6',
+      model:      'claude-haiku-4-5-20251001',
       max_tokens: 2048,
       system:     buildAdminSystemPrompt(),
       tools:      ADMIN_TOOLS,

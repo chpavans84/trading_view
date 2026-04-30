@@ -246,6 +246,16 @@ CREATE TABLE IF NOT EXISTS position_monitoring (
   last_checked_at  TIMESTAMPTZ,
   last_price       NUMERIC(12,4)
 );
+
+CREATE TABLE IF NOT EXISTS trade_rejections (
+  id               SERIAL PRIMARY KEY,
+  symbol           VARCHAR(20),
+  reason           TEXT,
+  conviction_score INT,
+  rejected_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_rejections_symbol      ON trade_rejections(symbol);
+CREATE INDEX IF NOT EXISTS idx_rejections_rejected_at ON trade_rejections(rejected_at);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -518,6 +528,60 @@ export async function getTrades({ status, limit = 50 } = {}) {
   } catch (err) {
     console.error('getTrades error:', err.message);
     return null;
+  }
+}
+
+// ─── Trade rejections ─────────────────────────────────────────────────────────
+
+export async function logRejection({ symbol, reason, conviction_score = null }) {
+  if (!dbAvailable) return;
+  try {
+    await query(
+      `INSERT INTO trade_rejections (symbol, reason, conviction_score) VALUES ($1, $2, $3)`,
+      [symbol?.toUpperCase() ?? null, reason, conviction_score ?? null]
+    );
+  } catch (err) {
+    console.error('logRejection error:', err.message);
+  }
+}
+
+export async function getRejections({ limit = 50 } = {}) {
+  if (!dbAvailable) return [];
+  try {
+    const { rows } = await query(
+      `SELECT * FROM trade_rejections ORDER BY rejected_at DESC LIMIT $1`,
+      [limit]
+    );
+    return rows;
+  } catch (err) {
+    console.error('getRejections error:', err.message);
+    return [];
+  }
+}
+
+export async function getRecentLosses({ symbol, days = 5 }) {
+  if (!dbAvailable) return { loss_count: 0, total_pnl: 0, last_loss_at: null };
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const result = await query(`
+      SELECT COUNT(*)        AS loss_count,
+             SUM(pnl_usd)   AS total_pnl,
+             MAX(closed_at) AS last_loss_at
+      FROM trades
+      WHERE symbol   = $1
+        AND closed_at >= $2
+        AND pnl_usd  < 0
+        AND status   IN ('closed', 'stopped_out')
+    `, [symbol.toUpperCase(), since.toISOString()]);
+    return {
+      loss_count:   parseInt(result.rows[0]?.loss_count  || 0),
+      total_pnl:    parseFloat(result.rows[0]?.total_pnl || 0),
+      last_loss_at: result.rows[0]?.last_loss_at || null,
+    };
+  } catch (err) {
+    console.error('getRecentLosses error:', err.message);
+    return { loss_count: 0, total_pnl: 0, last_loss_at: null };
   }
 }
 
