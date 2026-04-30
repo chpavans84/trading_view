@@ -24,7 +24,7 @@ import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
 import crypto from 'crypto';
 import { Resend } from 'resend';
-import { NASDAQ100 } from '../research/sp500.js';
+import { SP500, NASDAQ100 } from '../research/sp500.js';
 import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades } from '../core/trader.js';
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
@@ -1623,6 +1623,26 @@ app.get('/api/market', async (req, res) => {
     });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Top stocks trading today within a specific index (S&P 500 or NASDAQ 100)
+app.get('/api/market/top-stocks', async (req, res) => {
+  try {
+    const index   = req.query.index === 'nasdaq' ? 'nasdaq' : 'sp500';
+    const members = new Set(index === 'nasdaq' ? NASDAQ100 : SP500);
+
+    // Reuse the cached movers data — bump limit so we get a wide universe
+    const moversData = await getMarketMovers({ limit: 80 });
+    const seen = new Set();
+
+    const stocks = (moversData.movers ?? [])
+      .filter(m => members.has(m.symbol) && !seen.has(m.symbol) && seen.add(m.symbol))
+      .sort((a, b) => b.chg_pct - a.chg_pct); // gainers first
+
+    res.json({ index, stocks, universe_size: moversData.universe_size ?? 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
