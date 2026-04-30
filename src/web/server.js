@@ -29,7 +29,7 @@ import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, 
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
-import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
+import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
 import { chat, clearHistory } from '../core/ai-chat.js';
 import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
@@ -1626,23 +1626,44 @@ app.get('/api/market', async (req, res) => {
   }
 });
 
-// Top stocks trading today within a specific index (S&P 500 or NASDAQ 100)
+// Top stocks trading today — sourced from Moomoo real-time quotes.
+// S&P 500: top 100 by market cap (list is ordered largest-first).
+// NASDAQ 100: full 79-symbol list.
+// Server-side 3-minute cache so repeated tab switches don't hammer OpenD.
+const _topStocksCache = { sp500: null, nasdaq: null };
+const TOP_STOCKS_TTL  = 3 * 60 * 1000;
+
 app.get('/api/market/top-stocks', async (req, res) => {
   try {
     const index   = req.query.index === 'nasdaq' ? 'nasdaq' : 'sp500';
-    const members = new Set(index === 'nasdaq' ? NASDAQ100 : SP500);
+    const cached  = _topStocksCache[index];
+    if (cached && Date.now() - cached.ts < TOP_STOCKS_TTL) {
+      return res.json({ ...cached.data, cached: true });
+    }
 
-    // Reuse the cached movers data — bump limit so we get a wide universe
-    const moversData = await getMarketMovers({ limit: 80 });
-    const seen = new Set();
+    const symbols = index === 'nasdaq' ? NASDAQ100 : SP500.slice(0, 100);
+    const result  = await getMoomooQuotes(symbols);
+    const quotes  = result.quotes ?? [];
 
-    const stocks = (moversData.movers ?? [])
-      .filter(m => members.has(m.symbol) && !seen.has(m.symbol) && seen.add(m.symbol))
-      .sort((a, b) => b.chg_pct - a.chg_pct); // gainers first
+    const stocks = quotes
+      .filter(q => q.price && q.change_pct != null && !q.suspended)
+      .map(q => ({
+        symbol:  q.symbol,
+        name:    q.name,
+        price:   q.price,
+        chg_pct: q.change_pct,
+        volume:  q.volume,
+        high:    q.high,
+        low:     q.low,
+      }))
+      .sort((a, b) => b.chg_pct - a.chg_pct);
 
-    res.json({ index, stocks, universe_size: moversData.universe_size ?? 0 });
+    const data = { index, stocks, source: 'moomoo', count: stocks.length };
+    _topStocksCache[index] = { ts: Date.now(), data };
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[top-stocks] Moomoo error:', err.message);
+    res.status(503).json({ error: 'Moomoo not available: ' + err.message });
   }
 });
 
