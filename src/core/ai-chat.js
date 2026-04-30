@@ -33,11 +33,47 @@ import {
   cancelOrder, cancelAllOrders, moveStopToBreakeven,
   DAILY_PROFIT_TARGET, DAILY_LOSS_LIMIT,
 } from './trader.js';
-import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection } from './db.js';
+import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
 
 const PRICE_INPUT_PER_M  = 3.00;
 const PRICE_OUTPUT_PER_M = 15.00;
 function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
+
+// ─── Lessons cache (5-min TTL) ────────────────────────────────────────────────
+let _lessonsCache = { block: '', ts: 0 };
+const LESSONS_TTL = 5 * 60 * 1000;
+
+async function buildLessonsBlock() {
+  if (Date.now() - _lessonsCache.ts < LESSONS_TTL) return _lessonsCache.block;
+
+  const [lessons, patterns] = await Promise.all([
+    getRecentLessons({ limit: 15 }).catch(() => []),
+    getPerformancePatterns().catch(() => []),
+  ]);
+
+  let block = '';
+
+  if (lessons.length > 0) {
+    block += '\n\nYOUR RECENT TRADING LESSONS (from actual closed trades — apply these):\n';
+    for (const l of lessons) {
+      const sign = l.outcome === 'win' ? '+' : '-';
+      const pnl  = l.pnl_usd != null ? ` ($${sign}${Math.abs(l.pnl_usd).toFixed(0)})` : '';
+      block += `• ${l.date} ${l.symbol ?? ''}${pnl}: ${l.lesson}\n`;
+    }
+  }
+
+  if (patterns.length > 0) {
+    block += '\nHISTORICAL WIN RATES BY REGIME (from your own trade history):\n';
+    for (const p of patterns) {
+      const rr = p.avg_pnl >= 0 ? `+$${p.avg_pnl}` : `-$${Math.abs(p.avg_pnl)}`;
+      block += `• ${p.regime}: ${p.win_rate}% win rate over ${p.trades} trades (avg ${rr}/trade)\n`;
+    }
+    block += 'Favour regimes with >60% win rate. Be cautious in regimes below 40%.\n';
+  }
+
+  _lessonsCache = { block, ts: Date.now() };
+  return block;
+}
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -482,6 +518,9 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
   let messages = [...chatHistory.get(chatId)];
   let fullText = '';
 
+  const lessonsBlock = await buildLessonsBlock();
+  const fullSystem   = buildSystemPrompt(userConfig) + lessonsBlock;
+
   while (true) {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
 
@@ -489,7 +528,7 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
     const stream = anthropic.messages.stream({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
-      system: buildSystemPrompt(userConfig),
+      system: fullSystem,
       tools: TOOLS,
       messages,
     });

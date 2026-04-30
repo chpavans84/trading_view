@@ -256,6 +256,33 @@ CREATE TABLE IF NOT EXISTS trade_rejections (
 );
 CREATE INDEX IF NOT EXISTS idx_rejections_symbol      ON trade_rejections(symbol);
 CREATE INDEX IF NOT EXISTS idx_rejections_rejected_at ON trade_rejections(rejected_at);
+
+CREATE TABLE IF NOT EXISTS trade_lessons (
+  id           SERIAL PRIMARY KEY,
+  date         DATE NOT NULL,
+  symbol       VARCHAR(20),
+  outcome      VARCHAR(10),
+  pnl_usd      NUMERIC(12,2),
+  regime       VARCHAR(30),
+  vix          NUMERIC(6,2),
+  lesson_type  VARCHAR(30),
+  lesson       TEXT NOT NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lessons_date ON trade_lessons(date);
+
+CREATE TABLE IF NOT EXISTS performance_patterns (
+  id           SERIAL PRIMARY KEY,
+  regime       VARCHAR(30) NOT NULL,
+  vix_bucket   VARCHAR(20) NOT NULL,
+  trades       INT DEFAULT 0,
+  wins         INT DEFAULT 0,
+  total_pnl    NUMERIC(12,2) DEFAULT 0,
+  win_rate     NUMERIC(5,2) DEFAULT 0,
+  avg_pnl      NUMERIC(10,2) DEFAULT 0,
+  updated_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(regime, vix_bucket)
+);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -1189,4 +1216,56 @@ export async function deletePositionMonitoring(symbol) {
   try {
     await query(`DELETE FROM position_monitoring WHERE symbol = $1`, [symbol]);
   } catch (err) { console.error('deletePositionMonitoring error:', err.message); }
+}
+
+// ─── Trade Lessons ────────────────────────────────────────────────────────────
+
+export async function saveLesson({ date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson }) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(
+      `INSERT INTO trade_lessons (date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson]
+    );
+  } catch (e) { console.error('saveLesson error:', e.message); }
+}
+
+export async function getRecentLessons({ limit = 15 } = {}) {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows } = await query(
+      `SELECT date, symbol, outcome, pnl_usd, regime, lesson_type, lesson
+       FROM trade_lessons ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    return rows;
+  } catch { return []; }
+}
+
+export async function upsertPerformancePattern({ regime, vix_bucket, trades, wins, total_pnl }) {
+  if (!isDbAvailable()) return;
+  const win_rate = trades > 0 ? +((wins / trades) * 100).toFixed(1) : 0;
+  const avg_pnl  = trades > 0 ? +(total_pnl / trades).toFixed(2) : 0;
+  try {
+    await query(
+      `INSERT INTO performance_patterns (regime, vix_bucket, trades, wins, total_pnl, win_rate, avg_pnl)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (regime, vix_bucket) DO UPDATE
+       SET trades=$3, wins=$4, total_pnl=$5, win_rate=$6, avg_pnl=$7, updated_at=NOW()`,
+      [regime, vix_bucket, trades, wins, total_pnl, win_rate, avg_pnl]
+    );
+  } catch (e) { console.error('upsertPerformancePattern error:', e.message); }
+}
+
+export async function getPerformancePatterns() {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows } = await query(
+      `SELECT regime, vix_bucket, trades, wins, win_rate, avg_pnl
+       FROM performance_patterns WHERE trades >= 3
+       ORDER BY regime, vix_bucket`
+    );
+    return rows;
+  } catch { return []; }
 }
