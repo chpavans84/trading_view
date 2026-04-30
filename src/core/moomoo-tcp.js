@@ -20,12 +20,16 @@ const PROTO = {
   GetBasicQot:          3004,
   GetKL:                3006,
   GetOrderBook:         3014,
-  // Trade (Trd)
+  // Trade (Trd) — read
   GetAccList:           2001,
   GetFunds:             2101,
   GetPositionList:      2102,
   GetOrderList:         2201,
   GetHistoryOrderList:  2221,
+  // Trade (Trd) — write
+  UnlockTrade:          2005,
+  PlaceOrder:           2202,
+  ModifyOrder:          2205,
 };
 
 const QOT_MARKET = { US: 11, HK: 1, HK_FUTURE: 2 };
@@ -36,6 +40,18 @@ const KL_TYPE    = { KL_1Min: 1, KL_Day: 2, KL_5Min: 6, KL_15Min: 7, KL_30Min: 8
 const REHAB_TYPE = { None: 0, Forward: 1 };
 const TRD_MARKET = { HK: 1, US: 2, CN: 3, HKFUND: 4, USOption: 6 };
 const TRD_ENV    = { SIMULATE: 0, REAL: 1 };
+
+// Trading-specific enums
+const TRD_SIDE      = { Buy: 1, Sell: 2, SellShort: 3 };
+const ORDER_TYPE    = { Normal: 1, Market: 2, Stop: 10, MarketIfTouched: 12, TrailingStop: 14 };
+const MODIFY_OP     = { Normal: 1, Cancel: 2 };
+// SecurityFirm: 1=Futu HK, 2=Moomoo US (FutuInc)
+const SECURITY_FIRM = { FutuSecurities: 1, FutuInc: 2 };
+
+// Trade environment — 0=simulate (paper), 1=real live.
+// NEVER change to 1 without explicit user action in .env
+export const MOOMOO_TRADE_ENV_VALUE = parseInt(process.env.MOOMOO_TRADE_ENV ?? '0');
+export const MOOMOO_IS_SIMULATE     = MOOMOO_TRADE_ENV_VALUE === TRD_ENV.SIMULATE;
 
 // Simple LRU-style quote cache (30s TTL) to avoid hammering OpenD
 const quoteCache = new Map();
@@ -344,6 +360,239 @@ export async function getOrders({ acc_id, status = 'active' } = {}) {
     }));
 
     return { success: true, acc_id: accID.toString(), status_filter: status, order_count: orders.length, orders };
+  });
+}
+
+// ─── Trading helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Build the packetID required by all Trd write operations (anti-replay).
+ * Must be called synchronously right before sendProto() so the serial prediction
+ * matches what send() will assign (it does ++this.serial before sending).
+ */
+function makePacketID(client) {
+  return { connID: client.connID, serialNo: client.serial + 1 };
+}
+
+/** Pick the account matching the target trdEnv with US market auth. */
+async function pickAccount(client, trdEnv) {
+  const resp = await client.sendProto(
+    PROTO.GetAccList, 'Trd_GetAccList.Request', 'Trd_GetAccList.Response',
+    { c2s: { userID: 0, needGeneralSecAccount: true } }
+  );
+  if (resp.retType !== 0) throw new Error(resp.retMsg || 'Failed to get account list');
+  const list = resp.s2c.accList || [];
+  return (
+    list.find(a => a.trdEnv === trdEnv && (a.trdMarketAuthList || []).includes(TRD_MARKET.US)) ||
+    list.find(a => a.trdEnv === trdEnv) ||
+    null
+  );
+}
+
+/**
+ * Unlock real trading using MD5 of MOOMOO_TRADE_PASSWORD env var.
+ * No-op for simulate mode — unlock is only required for live orders.
+ */
+async function unlockTrade(client, trdEnv) {
+  if (trdEnv === TRD_ENV.SIMULATE) return;
+  const pwd = process.env.MOOMOO_TRADE_PASSWORD;
+  if (!pwd) throw new Error('Set MOOMOO_TRADE_PASSWORD in .env to place real orders');
+  const pwdMD5 = crypto.createHash('md5').update(pwd).digest('hex');
+  const resp = await client.sendProto(
+    PROTO.UnlockTrade, 'Trd_UnlockTrade.Request', 'Trd_UnlockTrade.Response',
+    { c2s: { unlock: true, pwdMD5, securityFirm: SECURITY_FIRM.FutuInc } }
+  );
+  if (resp.retType !== 0) throw new Error(`UnlockTrade failed: ${resp.retMsg}`);
+}
+
+/** Low-level single order placer. Called inside withClient so client is already connected. */
+async function placeSingleOrder(client, { accID, trdEnv, symbol, side, qty, orderType, price, auxPrice, remark }) {
+  const c2s = {
+    packetID:  makePacketID(client),
+    header:    { trdEnv, accID },
+    trdSide:   side,
+    orderType,
+    code:      symbol.toUpperCase(),
+    qty,
+    secMarket: TRD_MARKET.US, // TrdSecMarket_US = 2, same value as TRD_MARKET.US
+  };
+  if (price    != null) c2s.price    = price;
+  if (auxPrice != null) c2s.auxPrice = auxPrice;
+  if (remark)           c2s.remark   = String(remark).slice(0, 64);
+
+  const resp = await client.sendProto(
+    PROTO.PlaceOrder, 'Trd_PlaceOrder.Request', 'Trd_PlaceOrder.Response', { c2s }
+  );
+  if (resp.retType !== 0) throw new Error(`PlaceOrder (${remark}) failed: ${resp.retMsg}`);
+  return {
+    order_id:    resp.s2c?.orderID    ? resp.s2c.orderID.toString()    : null,
+    order_id_ex: resp.s2c?.orderIDEx  ? resp.s2c.orderIDEx             : null,
+  };
+}
+
+/**
+ * Place a market entry order plus optional stop-loss and take-profit orders.
+ * Uses MOOMOO_TRADE_ENV (0=simulate, 1=real). Defaults to simulate.
+ *
+ * stop_price    → stop-market sell (OrderType_Stop = 10)
+ * take_profit   → market-if-touched sell (OrderType_MarketIfTouched = 12)
+ * trailing_pct  → trailing stop % (OrderType_TrailingStop = 14, auxPrice = %)
+ *
+ * Returns all three order IDs so the caller can track and cancel them.
+ */
+export async function placeMoomooTrade({ symbol, side = 'buy', qty, stop_price = null, take_profit_price = null, trailing_pct = null }) {
+  const trdEnv  = MOOMOO_TRADE_ENV_VALUE;
+  const mooSide = side === 'buy' ? TRD_SIDE.Buy : TRD_SIDE.Sell;
+  const sellSide = TRD_SIDE.Sell;
+
+  return withClient(async (client) => {
+    const acc = await pickAccount(client, trdEnv);
+    if (!acc) throw new Error(`No Moomoo account found for ${MOOMOO_IS_SIMULATE ? 'simulate' : 'real'} environment`);
+    const accID = acc.accID;
+
+    await unlockTrade(client, trdEnv);
+
+    // 1. Entry — market order
+    const entry = await placeSingleOrder(client, {
+      accID, trdEnv, symbol, side: mooSide, qty,
+      orderType: ORDER_TYPE.Market,
+      remark: 'entry',
+    });
+
+    // 2. Stop-loss — stop-market sell (triggered when price drops to stop_price)
+    let stopOrder = null;
+    if (stop_price != null && side === 'buy') {
+      stopOrder = await placeSingleOrder(client, {
+        accID, trdEnv, symbol, side: sellSide, qty,
+        orderType: ORDER_TYPE.Stop,
+        auxPrice:  stop_price,
+        remark: 'stop_loss',
+      });
+    }
+
+    // 3. Take-profit — market-if-touched sell (triggered when price rises to target)
+    //    If trailing_pct is set, use TrailingStop instead of fixed take-profit
+    let tpOrder = null;
+    if (trailing_pct != null && side === 'buy') {
+      tpOrder = await placeSingleOrder(client, {
+        accID, trdEnv, symbol, side: sellSide, qty,
+        orderType: ORDER_TYPE.TrailingStop,
+        auxPrice:  trailing_pct,  // trail % for TrailingStop orders
+        remark: 'trailing_stop',
+      });
+    } else if (take_profit_price != null && side === 'buy') {
+      tpOrder = await placeSingleOrder(client, {
+        accID, trdEnv, symbol, side: sellSide, qty,
+        orderType: ORDER_TYPE.MarketIfTouched,
+        auxPrice:  take_profit_price,
+        remark: 'take_profit',
+      });
+    }
+
+    console.log(`[moomoo] ${MOOMOO_IS_SIMULATE ? 'PAPER' : 'LIVE'} order placed: ${side.toUpperCase()} ${qty}x${symbol} entry=${entry.order_id} stop=${stopOrder?.order_id ?? '-'} tp=${tpOrder?.order_id ?? '-'}`);
+
+    return {
+      success:          true,
+      simulate:         MOOMOO_IS_SIMULATE,
+      symbol:           symbol.toUpperCase(),
+      side, qty,
+      stop_price,
+      take_profit_price,
+      trailing_pct,
+      entry_order_id:   entry.order_id,
+      stop_order_id:    stopOrder?.order_id  ?? null,
+      tp_order_id:      tpOrder?.order_id   ?? null,
+    };
+  });
+}
+
+/**
+ * Cancel a specific Moomoo order by ID.
+ */
+export async function cancelMoomooOrder({ order_id }) {
+  const trdEnv = MOOMOO_TRADE_ENV_VALUE;
+  return withClient(async (client) => {
+    const acc = await pickAccount(client, trdEnv);
+    if (!acc) throw new Error('No Moomoo account found');
+    await unlockTrade(client, trdEnv);
+
+    const resp = await client.sendProto(
+      PROTO.ModifyOrder, 'Trd_ModifyOrder.Request', 'Trd_ModifyOrder.Response',
+      {
+        c2s: {
+          packetID:      makePacketID(client),
+          header:        { trdEnv, accID: acc.accID },
+          orderID:       long.fromString(String(order_id)),
+          modifyOrderOp: MODIFY_OP.Cancel,
+          forAll:        false,
+        },
+      }
+    );
+    if (resp.retType !== 0) throw new Error(`CancelOrder failed: ${resp.retMsg}`);
+    return { success: true, order_id: String(order_id) };
+  });
+}
+
+/**
+ * Cancel ALL open Moomoo orders for the US market.
+ */
+export async function cancelAllMoomooOrders() {
+  const trdEnv = MOOMOO_TRADE_ENV_VALUE;
+  return withClient(async (client) => {
+    const acc = await pickAccount(client, trdEnv);
+    if (!acc) throw new Error('No Moomoo account found');
+    await unlockTrade(client, trdEnv);
+
+    const resp = await client.sendProto(
+      PROTO.ModifyOrder, 'Trd_ModifyOrder.Request', 'Trd_ModifyOrder.Response',
+      {
+        c2s: {
+          packetID:      makePacketID(client),
+          header:        { trdEnv, accID: acc.accID },
+          orderID:       long.fromNumber(0),
+          modifyOrderOp: MODIFY_OP.Cancel,
+          forAll:        true,
+          trdMarket:     TRD_MARKET.US,
+        },
+      }
+    );
+    if (resp.retType !== 0) throw new Error(`CancelAllOrders failed: ${resp.retMsg}`);
+    return { success: true };
+  });
+}
+
+/**
+ * Close an entire Moomoo position by selling at market.
+ * Looks up the current qty from the position list first.
+ */
+export async function closeMoomooPosition({ symbol }) {
+  const trdEnv = MOOMOO_TRADE_ENV_VALUE;
+  return withClient(async (client) => {
+    const acc = await pickAccount(client, trdEnv);
+    if (!acc) throw new Error('No Moomoo account found');
+
+    const posResp = await client.sendProto(
+      PROTO.GetPositionList, 'Trd_GetPositionList.Request', 'Trd_GetPositionList.Response',
+      { c2s: { header: { trdEnv, accID: acc.accID, trdMarket: TRD_MARKET.US }, refreshCache: true } }
+    );
+    if (posResp.retType !== 0) throw new Error(`GetPositionList failed: ${posResp.retMsg}`);
+
+    const pos = (posResp.s2c?.positionList || [])
+      .find(p => p.code?.toUpperCase() === symbol.toUpperCase());
+    if (!pos || !pos.qty) throw new Error(`No open position found for ${symbol}`);
+
+    await unlockTrade(client, trdEnv);
+
+    const order = await placeSingleOrder(client, {
+      accID: acc.accID, trdEnv, symbol,
+      side: TRD_SIDE.Sell,
+      qty:  pos.qty,
+      orderType: ORDER_TYPE.Market,
+      remark: 'close_position',
+    });
+
+    console.log(`[moomoo] ${MOOMOO_IS_SIMULATE ? 'PAPER' : 'LIVE'} close: SELL ${pos.qty}x${symbol} order=${order.order_id}`);
+    return { success: true, symbol: symbol.toUpperCase(), qty_closed: pos.qty, order_id: order.order_id };
   });
 }
 
