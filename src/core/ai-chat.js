@@ -39,16 +39,18 @@ const PRICE_INPUT_PER_M  = 0.80;   // claude-haiku-4-5 input  $0.80/M tokens
 const PRICE_OUTPUT_PER_M = 4.00;   // claude-haiku-4-5 output $4.00/M tokens
 function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
 
-// ─── Lessons cache (5-min TTL) ────────────────────────────────────────────────
-let _lessonsCache = { block: '', ts: 0 };
+// ─── Lessons cache (5-min TTL, per-user) ─────────────────────────────────────
+const _lessonsCache = new Map(); // username (or '__system__') → { block, ts }
 const LESSONS_TTL = 5 * 60 * 1000;
 
-async function buildLessonsBlock() {
-  if (Date.now() - _lessonsCache.ts < LESSONS_TTL) return _lessonsCache.block;
+async function buildLessonsBlock(username = null) {
+  const key = username ?? '__system__';
+  const cached = _lessonsCache.get(key);
+  if (cached && Date.now() - cached.ts < LESSONS_TTL) return cached.block;
 
   const [lessons, patterns] = await Promise.all([
-    getRecentLessons({ limit: 15 }).catch(() => []),
-    getPerformancePatterns().catch(() => []),
+    getRecentLessons({ limit: 15, username }).catch(() => []),
+    getPerformancePatterns({ username }).catch(() => []),
   ]);
 
   let block = '';
@@ -71,7 +73,7 @@ async function buildLessonsBlock() {
     block += 'Favour regimes with >60% win rate. Be cautious in regimes below 40%.\n';
   }
 
-  _lessonsCache = { block, ts: Date.now() };
+  _lessonsCache.set(key, { block, ts: Date.now() });
   return block;
 }
 
@@ -104,7 +106,7 @@ export function clearHistory(chatId) {
   if (isDbAvailable()) clearConversationHistory(chatId).catch(() => {});
 }
 
-export function buildSystemPrompt(userCfg = null) {
+export function buildSystemPrompt(userCfg = null, username = null) {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const timeStr = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: true });
@@ -269,7 +271,11 @@ To answer a status question:
 ━━━ RESPONSE FORMAT ━━━
 Trade recommendation: SYMBOL | setup type | conviction score | catalyst + date | entry | target (+X%) | stop (-Y%) | est. profit $Z | key risk
 Position status:      SYMBOL | entry $X → now $Y | P&L: +/-$Z (N%) | stop $A (N% away) | target $B (N% away) | action
-News impact:          Headline (date) | direction | sectors affected | trade implication | confidence`;
+News impact:          Headline (date) | direction | sectors affected | trade implication | confidence
+
+━━━ SESSION IDENTITY ━━━
+Trading on behalf of: ${username ?? 'unknown'}
+Your lessons, win-rate patterns, and trade history are specific to this user.`;
 }
 
 export const SYSTEM_PROMPT = buildSystemPrompt();
@@ -518,8 +524,8 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
   let messages = [...chatHistory.get(chatId)];
   let fullText = '';
 
-  const lessonsBlock = await buildLessonsBlock();
-  const fullSystem   = buildSystemPrompt(userConfig) + lessonsBlock;
+  const lessonsBlock = await buildLessonsBlock(username);
+  const fullSystem   = buildSystemPrompt(userConfig, username) + lessonsBlock;
 
   while (true) {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
