@@ -1218,13 +1218,13 @@
   <!-- Top Trading Today — S&P 500 / NASDAQ 100 tabs -->
   <div class="table-wrap" style="margin-top:16px">
     <div class="table-head">
-      <h3>Top Trading Today</h3>
-      <div style="display:flex;gap:6px">
+      <h3>Top Trading Today <span id="topStocksBadge" style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px"></span></h3>
+      <div style="display:flex;gap:6px;align-items:center">
         <button id="idxTabSP" onclick="switchIndexTab('sp500')"
           style="background:#238636;border:none;border-radius:6px;color:#fff;padding:4px 14px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .15s">S&amp;P 500</button>
         <button id="idxTabNQ" onclick="switchIndexTab('nasdaq')"
           style="background:none;border:1px solid #30363d;border-radius:6px;color:#8b949e;padding:4px 14px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .15s">NASDAQ 100</button>
-        <button class="refresh-btn" onclick="loadTopStocks()" style="margin-left:4px">↻</button>
+        <button class="refresh-btn" onclick="loadTopStocks(undefined, true)" style="margin-left:4px">↻</button>
       </div>
     </div>
     <div id="topStocksBody" style="padding:0 0 4px">
@@ -4507,7 +4507,7 @@ async function loadMarket() {
   loadTopStocks();
 }
 
-// ── Top Trading Today (S&P / NASDAQ tabs) ──────────────────────────────────
+// ── Top Trading Today (S&P / NASDAQ tabs — Moomoo source) ──────────────────
 let _topStocksIndex = 'sp500';
 
 function switchIndexTab(index) {
@@ -4527,18 +4527,38 @@ function switchIndexTab(index) {
   loadTopStocks(index);
 }
 
-async function loadTopStocks(index) {
-  if (index !== undefined) _topStocksIndex = index;
-  const el = document.getElementById('topStocksBody');
-  if (!el) return;
-  el.innerHTML = '<div class="loading" style="padding:20px">Loading…</div>';
+function fmtVol(v) {
+  if (!v) return '—';
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+  return String(v);
+}
 
-  const d = await api(`/api/market/top-stocks?index=${_topStocksIndex}`);
-  if (!d) { el.innerHTML = '<div style="padding:16px;color:#8b949e">No data available</div>'; return; }
+async function loadTopStocks(index, forceRefresh) {
+  if (index !== undefined) _topStocksIndex = index;
+  const el    = document.getElementById('topStocksBody');
+  const badge = document.getElementById('topStocksBadge');
+  if (!el) return;
+  el.innerHTML = '<div class="loading" style="padding:20px">Fetching from Moomoo…</div>';
+
+  const url = `/api/market/top-stocks?index=${_topStocksIndex}${forceRefresh ? '&bust=' + Date.now() : ''}`;
+  const d   = await api(url);
+
+  if (!d) {
+    el.innerHTML = '<div style="padding:16px;color:#f85149">Moomoo not available — make sure OpenD is running</div>';
+    return;
+  }
+  if (d.error) {
+    el.innerHTML = `<div style="padding:16px;color:#f85149">${d.error}</div>`;
+    return;
+  }
 
   const stocks = d.stocks || [];
+  if (badge) badge.textContent = `via Moomoo · ${stocks.length} stocks`;
+
   if (!stocks.length) {
-    el.innerHTML = '<div style="padding:16px;color:#8b949e">No data — market may be closed or data unavailable</div>';
+    el.innerHTML = '<div style="padding:16px;color:#8b949e">No data — market may be closed</div>';
     return;
   }
 
@@ -4550,10 +4570,11 @@ async function loadTopStocks(index) {
       <td style="padding:8px 12px;font-weight:700;white-space:nowrap">
         <span class="sym-link" data-symbol="${s.symbol}">${s.symbol}</span>
       </td>
-      <td style="padding:8px 12px;color:#8b949e;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      <td style="padding:8px 12px;color:#8b949e;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
         ${s.name || ''}
       </td>
       <td style="padding:8px 12px;text-align:right;white-space:nowrap">${fmtDollar(s.price)}</td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap;color:#6e7681;font-size:0.8rem">${fmtVol(s.volume)}</td>
       <td style="padding:8px 12px;text-align:right;font-weight:700;white-space:nowrap" class="${colorClass(s.chg_pct)}">${fmtPct(s.chg_pct)}</td>
     </tr>`;
 
@@ -4561,13 +4582,14 @@ async function loadTopStocks(index) {
     if (!rows.length) return '';
     return `
       <div style="padding:10px 12px 4px;font-size:0.72rem;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:0.05em">
-        ${label} &nbsp;<span style="font-weight:400;color:#6e7681">${rows.length} stocks</span>
+        ${label} <span style="font-weight:400;color:#6e7681">${rows.length} stocks</span>
       </div>
       <table class="reports-table" style="margin-bottom:4px">
         <thead><tr>
           <th style="padding:6px 12px">Symbol</th>
           <th style="padding:6px 12px">Name</th>
           <th style="padding:6px 12px;text-align:right">Price</th>
+          <th style="padding:6px 12px;text-align:right">Volume</th>
           <th style="padding:6px 12px;text-align:right">Change</th>
         </tr></thead>
         <tbody>${rows.map(mkRow).join('')}</tbody>
@@ -4575,9 +4597,9 @@ async function loadTopStocks(index) {
   };
 
   el.innerHTML =
-    mkSection(gainers,   'Gainers',   '#3fb950') +
-    mkSection(decliners, 'Decliners', '#f85149') ||
-    '<div style="padding:16px;color:#8b949e">No index members in today\'s mover universe</div>';
+    (mkSection(gainers,   'Gainers',   '#3fb950') +
+     mkSection(decliners, 'Decliners', '#f85149')) ||
+    '<div style="padding:16px;color:#8b949e">No quotes returned — market may be closed</div>';
 }
 
 // ── Daily P&L ──────────────────────────────────────────
