@@ -18,7 +18,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import crypto from 'crypto';
@@ -1966,6 +1966,23 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual' } = {}) {
             conviction_score: selection.conviction ?? null,
           });
           executedTrade = result;
+          await recordTrade({
+            order_id:         result.order_id,
+            symbol:           result.symbol,
+            side:             result.side,
+            qty:              result.qty,
+            entry_price:      result.estimated_price,
+            stop_loss:        result.stop_loss,
+            take_profit:      result.take_profit,
+            dollars_invested: result.dollars_invested,
+            stop_loss_pct:    result.stop_loss_pct,
+            take_profit_pct:  result.take_profit_pct,
+            atr_pct:          result.atr_pct,
+            conviction_score: selection.conviction ?? null,
+            conviction_grade: (selection.conviction ?? 0) >= 75 ? 'A'
+                              : (selection.conviction ?? 0) >= 60 ? 'B' : 'C',
+            conviction_breakdown: { reason: selection.reason, regime: context.regime },
+          }).catch(e => console.error('[scanner] recordTrade failed:', e.message));
           logActivity('scanner', 'auto_trade', selection.symbol, '127.0.0.1');
         } catch (err) {
           executedTrade = { error: err.message };

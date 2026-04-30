@@ -4167,9 +4167,10 @@ async function loadDashboard() {
     const side      = p.side ?? 'long';
     const todayPL   = p.today_pl;
     const invested  = (p.qty && avgPrice) ? p.qty * avgPrice : null;
+    const sideLabel = side === 'long' || side == null ? '📈 Long' : '📉 Short';
     return `<tr>
       ${symCell(p.symbol, p.name)}
-      <td>${side === 'long' || side == null ? '📈' : '📉'}</td>
+      <td>${sideLabel}</td>
       <td>${p.qty}</td>
       <td style="color:#8b949e">${invested != null ? fmtDollar(invested) : '—'}</td>
       <td>$${fmt(avgPrice)}</td>
@@ -4834,9 +4835,10 @@ async function refreshPositions() {
       const side      = p.side ?? 'long';
       const todayPL   = p.today_pl;
       const invested  = (p.qty && avgPrice) ? p.qty * avgPrice : null;
+      const sideLabel = side === 'long' || side == null ? '📈 Long' : '📉 Short';
       return `<tr>
         ${symCell(p.symbol, p.name)}
-        <td>${side === 'long' || side == null ? '📈' : '📉'}</td>
+        <td>${sideLabel}</td>
         <td>${p.qty}</td>
         <td style="color:#8b949e">${invested != null ? fmtDollar(invested) : '—'}</td>
         <td>$${fmt(avgPrice)}</td>
