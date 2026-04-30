@@ -4,6 +4,36 @@ An autonomous trading system that monitors market news, earnings results, and se
 
 ---
 
+## Local AI (Free, Optional)
+
+Install Ollama to run morning briefings and EOD summaries locally at zero API cost:
+
+```bash
+# Mac
+brew install ollama
+ollama serve
+ollama pull llama3.1:8b
+
+# Windows
+# Download from ollama.com/download
+# Then: ollama pull llama3.1:8b
+```
+
+Add to `.env`:
+```
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b
+```
+
+When Ollama is running, morning briefings and EOD summaries use the local model automatically. Falls back to Anthropic if Ollama is not running. The dashboard status bar shows `🟢 Local AI` or `☁️ Cloud AI`.
+
+Recommended models:
+- `llama3.1:8b` — fast, 5 GB RAM, good for analysis
+- `qwen2.5:14b` — better quality, 9 GB RAM
+- `mistral:7b`  — fast alternative, 5 GB RAM
+
+---
+
 ## What It Does
 
 - **Reads earnings data** from SEC EDGAR and Nasdaq — no paid data feed needed

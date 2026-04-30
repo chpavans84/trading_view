@@ -3,7 +3,7 @@
  * Paper trading by default (ALPACA_BASE_URL=https://paper-api.alpaca.markets)
  * Live account is read-only — no trades placed against live money automatically.
  */
-import { closeTrade, getTrades } from './db.js';
+import { closeTrade, getTrades, getRecentLosses, logRejection } from './db.js';
 
 // Paper account (bot trades here)
 const BASE_URL   = process.env.ALPACA_BASE_URL   || 'https://paper-api.alpaca.markets';
@@ -457,6 +457,9 @@ export async function placeTrade({
   trailing_stop = false,    // true = trailing stop instead of fixed bracket
   note = '',
   userCfg = null,           // per-user bot config (from getUserBotConfig)
+  conviction_score = null,
+  conviction_grade = null,
+  conviction_breakdown = null,
 }) {
   const sizing  = userCfg?.position_sizing  || {};
   const vixT    = userCfg?.vix_thresholds   || {};
@@ -467,16 +470,47 @@ export async function placeTrade({
   const stopMult        = sizing.stop_multiplier          ?? 1.5;
   const targetMult      = sizing.target_multiplier        ?? 3.0;
 
+  // Fix 1: Hard time block — no trades during opening chaos, midday chop, or after close
+  const timeCheck = isBadTradingTime();
+  if (timeCheck.bad) {
+    const msg = `Trade rejected: ${timeCheck.reason}. No trades allowed during this window.`;
+    await logRejection({ symbol, reason: msg, conviction_score }).catch(() => {});
+    throw new Error(msg);
+  }
+
   // Duplicate check — refuse if we already hold this symbol on Alpaca
   const existingPositions = await getPositions();
   const alreadyOpen = existingPositions.find(p => p.symbol === symbol.toUpperCase());
   if (alreadyOpen)
     throw new Error(`Duplicate blocked: already holding ${alreadyOpen.qty} shares of ${symbol} (avg $${alreadyOpen.avg_entry_price})`);
 
+  // Fix 2: Multi-day re-entry block
+  const recentLosses = await getRecentLosses({ symbol, days: 5 });
+  const hoursSinceLastLoss = recentLosses.last_loss_at
+    ? (Date.now() - new Date(recentLosses.last_loss_at)) / 3600000
+    : 999;
+  if (recentLosses.loss_count >= 2 && hoursSinceLastLoss < 24) {
+    const msg = `Trade rejected: ${symbol} has lost money ${recentLosses.loss_count} times in the last 5 days (total: $${recentLosses.total_pnl.toFixed(2)}). 24-hour cooling off period active. Last loss: ${Math.floor(hoursSinceLastLoss)}h ago.`;
+    await logRejection({ symbol, reason: msg, conviction_score }).catch(() => {});
+    throw new Error(msg);
+  }
+  // Allow re-entry after 24h but cap position size as a precaution
+  const forceMinSize = recentLosses.loss_count >= 1 && hoursSinceLastLoss >= 24;
+
   // Market regime check — respects user's VIX thresholds
   const regime = await getMarketRegime({ defensive_vix: vixT.defensive ?? 25, crisis_vix: vixT.crisis ?? 35 });
-  if (side === 'buy' && regime.block_longs)
-    throw new Error(`Trade blocked: ${regime.reason}`);
+  if (side === 'buy' && regime.block_longs) {
+    const msg = `Trade blocked: ${regime.reason}`;
+    await logRejection({ symbol, reason: msg, conviction_score }).catch(() => {});
+    throw new Error(msg);
+  }
+
+  // Fix 3: Hard conviction minimum — 45 is the absolute floor regardless of user config
+  if (conviction_score !== null && conviction_score < 45) {
+    const msg = `Trade rejected: conviction score ${conviction_score}/100 is below minimum threshold of 45. Breakdown: ${JSON.stringify(conviction_breakdown)}`;
+    await logRejection({ symbol, reason: msg, conviction_score }).catch(() => {});
+    throw new Error(msg);
+  }
 
   // Get current price
   const quote = await getLatestPrice(symbol);
@@ -505,6 +539,12 @@ export async function placeTrade({
 
   // Fallback if ATR unavailable and no override
   if (dollars == null) dollars = minPos;
+
+  // Fix 5: Cap position size after a recent loss (re-entry caution)
+  if (forceMinSize) {
+    dollars = Math.min(dollars, 1500);
+    console.log(`[trade] Position capped at $1,500 for ${symbol} due to recent loss history`);
+  }
 
   // Apply regime size multiplier (0.5× in defensive, 1.0× normal)
   if (regime.size_multiplier < 1.0)
@@ -572,6 +612,8 @@ export async function placeTrade({
     order_type:       trailing_stop ? 'trailing_stop' : 'bracket',
     regime:           regime.regime,
     regime_vix:       regime.vix,
+    conviction_score,
+    conviction_grade,
     note,
     status: order.status,
   };

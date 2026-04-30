@@ -1,6 +1,15 @@
 /**
  * Shared AI chat engine — used by both the Telegram bot and the web dashboard.
  * Exports: TOOLS, SYSTEM_PROMPT, executeTool, chat()
+ *
+ * Cost estimate after optimisations:
+ * - Market context:     $0  (deterministic logic)
+ * - Stock selection:    $0  (deterministic scoring)
+ * - Conviction scores:  $0  (5-min cache)
+ * - Morning briefing:   $0  (Ollama) or $0.01/day (Haiku fallback)
+ * - EOD summary:        $0  (Ollama) or $0.01/day (Haiku fallback)
+ * - User chat:          ~$0.001/message (Haiku)
+ * - Estimated total:    $2-8/month depending on chat volume
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -24,7 +33,7 @@ import {
   cancelOrder, cancelAllOrders, moveStopToBreakeven,
   DAILY_PROFIT_TARGET, DAILY_LOSS_LIMIT,
 } from './trader.js';
-import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades } from './db.js';
+import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection } from './db.js';
 
 const PRICE_INPUT_PER_M  = 3.00;
 const PRICE_OUTPUT_PER_M = 15.00;
@@ -348,8 +357,43 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         return { account, positions, open_orders: orders };
       }
       case 'propose_trade': {
-        const result = await placeTrade({ symbol: input.symbol, side: input.side, use_atr: true, trailing_stop: input.trailing_stop ?? false, note: input.reasoning, userCfg: userCfg ?? null });
-        recordTrade({ order_id: result.order_id, symbol: result.symbol, side: result.side, qty: result.qty, entry_price: result.estimated_price, stop_loss: result.stop_loss, take_profit: result.take_profit, dollars_invested: result.dollars_invested, stop_loss_pct: result.stop_loss_pct, take_profit_pct: result.take_profit_pct, atr_pct: result.atr_pct }).catch(() => {});
+        // Fix 3: pre-fetch conviction score before placing — hard-enforced in placeTrade too
+        const positions = await getPositions().catch(() => []);
+        const convictionResult = await getConvictionScore({ symbol: input.symbol, positions }).catch(() => null);
+        const convictionScore    = convictionResult?.score    ?? null;
+        const convictionGrade    = convictionResult?.grade    ?? null;
+        const convictionBreakdown = convictionResult?.breakdown ?? null;
+
+        // Early return with clear message (placeTrade also enforces this, but this gives better UX)
+        const minConv = userCfg?.min_conviction_score ?? 45;
+        if (convictionScore !== null && convictionScore < minConv) {
+          const reason = `Conviction score ${convictionScore}/100 is below your minimum of ${minConv} (grade: ${convictionGrade})`;
+          logRejection({ symbol: input.symbol, reason, conviction_score: convictionScore }).catch(() => {});
+          return { status: 'rejected', reason, conviction_score: convictionScore, conviction_grade: convictionGrade };
+        }
+
+        const result = await placeTrade({
+          symbol:          input.symbol,
+          side:            input.side,
+          use_atr:         true,
+          trailing_stop:   input.trailing_stop ?? false,
+          note:            input.reasoning,
+          userCfg:         userCfg ?? null,
+          conviction_score:    convictionScore,
+          conviction_grade:    convictionGrade,
+          conviction_breakdown: convictionBreakdown,
+        });
+        recordTrade({
+          order_id: result.order_id, symbol: result.symbol, side: result.side,
+          qty: result.qty, entry_price: result.estimated_price,
+          stop_loss: result.stop_loss, take_profit: result.take_profit,
+          dollars_invested: result.dollars_invested,
+          stop_loss_pct: result.stop_loss_pct, take_profit_pct: result.take_profit_pct,
+          atr_pct: result.atr_pct,
+          conviction_score:     convictionScore,
+          conviction_grade:     convictionGrade,
+          conviction_breakdown: convictionBreakdown,
+        }).catch(() => {});
         if (onTrade) onTrade(result);
         return { status: 'executed', ...result };
       }
@@ -443,7 +487,7 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
 
     const t0 = Date.now();
     const stream = anthropic.messages.stream({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
       system: buildSystemPrompt(userConfig),
       tools: TOOLS,

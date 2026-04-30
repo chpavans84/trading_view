@@ -175,8 +175,16 @@ export function checkSectorConcentration({ symbol, positions = [] }) {
   return { concentrated: false };
 }
 
+const _scoreCache = new Map();
+const SCORE_CACHE_TTL = 5 * 60 * 1000;
+
 export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
+
+  const cached = _scoreCache.get(ticker);
+  if (cached && Date.now() - cached.ts < SCORE_CACHE_TTL) {
+    return { ...cached.score, cached: true };
+  }
   const sectorEtf = SECTOR_MAP[ticker] || 'SPY';
 
   // Fetch all signals in parallel — individual failures don't abort scoring
@@ -352,7 +360,7 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   // Persist to DB (non-blocking)
   recordConvictionScore({ symbol: ticker, name, score, grade, breakdown, signals, tv_available: tvAvailable, technical_summary });
 
-  return {
+  const result = {
     success: true,
     symbol: ticker,
     name,
@@ -364,4 +372,6 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     breakdown,
     signals,
   };
+  _scoreCache.set(ticker, { score: result, ts: Date.now() });
+  return result;
 }
