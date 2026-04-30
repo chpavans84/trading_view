@@ -3198,13 +3198,16 @@ cron.schedule('*/15 * * * 1-5', async () => {
 });
 
 // ─── Reflection Agent Cron ────────────────────────────────────────────────────
-// Runs at 4:15 PM ET daily — analyses today's closed trades and writes lessons
+// Fires every 5 min Mon–Fri; runs reflection at 4:15–4:19 PM ET (DST-safe).
 
-cron.schedule('15 20 * * 1-5', async () => {
+cron.schedule('*/5 * * * 1-5', async () => {
+  const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const et    = new Date(etStr);
+  const mins  = et.getHours() * 60 + et.getMinutes();
+  if (mins < 16 * 60 + 15 || mins >= 16 * 60 + 20) return; // 4:15–4:19 PM ET only
   try {
     const result = await runReflection();
     if (!result.lessons?.length) return;
-
     const lines = result.lessons.map(l => {
       const icon = l.outcome === 'win' ? '✅' : '❌';
       const src  = l.ai_source === 'ollama' ? ' [local]' : '';
