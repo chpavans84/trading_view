@@ -77,6 +77,18 @@ Answer in 3-5 sentences. Be specific and practical.`;
 }
 
 export async function isKnowledgeQuestion(text) {
+  // Action/portfolio questions — never route to knowledge base even if they
+  // contain generic words like "what are" or indicator names
+  const actionPatterns = [
+    /what (are|is) (the |my )?(trades?|positions?|stocks?|picks?) (to buy|to sell|today|now)/i,
+    /what (should|can) i (buy|sell|trade|do)/i,
+    /\b(find|scan|show|get|give) (me )?(a |some |the )?(trade|pick|setup|signal|stock to buy)/i,
+    /\b(buy|sell) (today|now|signal)/i,
+    /\b(my |open )?(positions?|portfolio|balance|p.?l|pnl)\b/i,
+    /\b(execute|place|enter|open|close) (a |the )?(trade|position|order)\b/i,
+  ];
+  if (actionPatterns.some(p => p.test(text))) return false;
+
   const knowledgePatterns = [
     /what is\b/i, /what are\b/i, /what does\b/i,
     /explain\b/i, /how does\b/i, /how do i\b/i, /how to\b/i,
