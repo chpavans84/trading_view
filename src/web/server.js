@@ -2046,7 +2046,7 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
 
   const userConfig = await getUserBotConfig(username);
   try {
-    await chat({
+    const result = await chat({
       chatId:     userChatId(username),
       message:    message.trim(),
       onChunk:    (text) => send({ text }),
@@ -2056,6 +2056,9 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
       username,
       voiceMode:  !!voice_mode,
     });
+    if (result?.knowledge_response) {
+      send({ knowledge: true, content: result.content, model: result.model ?? 'ollama' });
+    }
     // Fetch updated credit balance to send back to client
     let creditsLeft = null;
     if (user.role !== 'admin' && isDbAvailable()) {
