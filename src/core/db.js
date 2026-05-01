@@ -334,6 +334,23 @@ CREATE TABLE IF NOT EXISTS daily_picks (
 );
 CREATE INDEX IF NOT EXISTS idx_daily_picks_date ON daily_picks(date);
 CREATE INDEX IF NOT EXISTS idx_daily_picks_type ON daily_picks(type);
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id           SERIAL PRIMARY KEY,
+  topic        TEXT NOT NULL,
+  category     TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  content      TEXT NOT NULL,
+  embedding    vector(768),
+  source       TEXT DEFAULT 'built-in',
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
+  ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops)
+  WITH (lists = 50);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -1446,4 +1463,31 @@ export async function getPerformancePatterns({ username } = {}) {
     );
     return rows;
   } catch { return []; }
+}
+
+export async function saveKnowledgeChunk({ topic, category, title, content, embedding, source = 'built-in' }) {
+  await query(
+    `INSERT INTO knowledge_chunks (topic, category, title, content, embedding, source)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT DO NOTHING`,
+    [topic, category, title, content, JSON.stringify(embedding), source]
+  );
+}
+
+export async function searchKnowledge({ embedding, limit = 4 }) {
+  const { rows } = await query(
+    `SELECT title, content, category,
+            1 - (embedding <=> $1::vector) AS similarity
+     FROM knowledge_chunks
+     WHERE embedding IS NOT NULL
+     ORDER BY embedding <=> $1::vector
+     LIMIT $2`,
+    [JSON.stringify(embedding), limit]
+  );
+  return rows;
+}
+
+export async function countKnowledgeChunks() {
+  const { rows } = await query(`SELECT COUNT(*) AS total FROM knowledge_chunks`);
+  return parseInt(rows[0]?.total ?? 0);
 }
