@@ -277,6 +277,10 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     base:                 20,
   };
 
+  // ML feature weights — loaded once, used in TV block and grade-adj block below
+  const mlW = await getFactorWeights();
+  const fw  = mlW?.feature_weights ?? null; // { rsi_norm, macd_sign, ema_above, … }
+
   // TradingView technical factors (only applied when chart data is live)
   let technical_summary = 'TradingView not connected';
   if (tvAvailable) {
@@ -286,14 +290,34 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
       resistance_pct: levels.distance_to_resistance_pct,
     } : {};
 
-    if (rsi != null && rsi < 40)  breakdown.rsi_oversold         =  20;
-    if (rsi != null && rsi > 70)  breakdown.rsi_overbought       = -20;
-    if (current_price != null && ema20 != null && ema50 != null) {
-      if (current_price > ema20 && current_price > ema50) breakdown.above_both_emas =  15;
-      if (current_price < ema20 && current_price < ema50) breakdown.below_both_emas = -15;
+    // RSI — multiplied by ML weight if available
+    if (rsi != null && rsi < 40) {
+      const base = 20;
+      breakdown.rsi_oversold  = fw?.rsi_norm  != null ? Math.round(base * (1 + fw.rsi_norm))  : base;
     }
-    if (macd_hist != null && macd_hist > 0) breakdown.macd_positive =  10;
-    if (macd_hist != null && macd_hist < 0) breakdown.macd_negative = -10;
+    if (rsi != null && rsi > 70) {
+      const base = -20;
+      breakdown.rsi_overbought = fw?.rsi_norm != null ? Math.round(base * (1 - fw.rsi_norm))  : base;
+    }
+
+    // EMA trend — multiplied by ML weight
+    if (current_price != null && ema20 != null && ema50 != null) {
+      const emaMult = fw?.ema_above != null ? (1 + Math.abs(fw.ema_above)) : 1;
+      if (current_price > ema20 && current_price > ema50)
+        breakdown.above_both_emas =  Math.round(15 * emaMult);
+      if (current_price < ema20 && current_price < ema50)
+        breakdown.below_both_emas = -Math.round(15 * emaMult);
+    }
+
+    // MACD — multiplied by ML weight
+    if (macd_hist != null && macd_hist > 0) {
+      const base = 10;
+      breakdown.macd_positive = fw?.macd_sign != null ? Math.round(base * (1 + fw.macd_sign)) : base;
+    }
+    if (macd_hist != null && macd_hist < 0) {
+      const base = -10;
+      breakdown.macd_negative = fw?.macd_sign != null ? Math.round(base * (1 + Math.abs(fw.macd_sign))) : base;
+    }
     if (lvlDist.support_pct != null    && lvlDist.support_pct < 2)    breakdown.near_support    =  15;
     if (lvlDist.resistance_pct != null && lvlDist.resistance_pct < 2) breakdown.near_resistance = -15;
     if (current_price != null && bb_mid != null && current_price < bb_mid) breakdown.below_bb_mid  =  10;
@@ -315,9 +339,10 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const scoreBase  = Math.min(100, Math.max(0, raw));
   const gradeBase  = scoreBase >= 80 ? 'A' : scoreBase >= 60 ? 'B' : scoreBase >= 40 ? 'C' : 'F';
 
-  // Backtest-weighted adjustment: grades with higher historical alpha get a small boost
-  const factorWeights = await getFactorWeights();
-  const backtestAdj   = factorWeights?.adjustments?.[gradeBase] ?? 0;
+  // Grade adjustment — prefers ML model weights when available, falls back to backtest heuristic
+  const factorWeights   = mlW;
+  const backtestAdj     = factorWeights?.adjustments?.[gradeBase] ?? 0;
+  const weightsSource   = factorWeights?.source ?? 'none';
   if (backtestAdj !== 0) breakdown.backtest_alpha_adj = backtestAdj;
 
   const raw2  = Object.values(breakdown).reduce((a, b) => a + b, 0);
@@ -355,6 +380,9 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     current_price:   tech?.current_price   ?? null,
     sector_concentration: sectorCheck,
     correlation:          corrCheck,
+    weights_source:       weightsSource,           // 'ml_model' | 'backtest_heuristic' | 'none'
+    ml_model_id:          factorWeights?.model_id  ?? null,
+    ml_auc_roc:           factorWeights?.auc_roc   ?? null,
   };
 
   // Persist to DB (non-blocking)

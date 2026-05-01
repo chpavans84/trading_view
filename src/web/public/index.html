@@ -701,6 +701,30 @@
   .chat-send:hover { background: #2ea043; }
   .chat-send:disabled { background: #21262d; color: #8b949e; cursor: not-allowed; }
 
+  /* Voice assistant buttons */
+  .voice-mic-btn {
+    flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%;
+    border: 1.5px solid #30363d; background: #161b22; color: #8b949e;
+    font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .voice-mic-btn:hover { border-color: #58a6ff; color: #58a6ff; background: #0d1f38; }
+  .voice-mic-btn.listening {
+    background: #3d0f0f; border-color: #f85149; color: #f85149;
+    animation: micPulse 1s ease-in-out infinite;
+  }
+  .voice-mic-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .voice-tts-btn {
+    background: none; border: none; font-size: 1rem; cursor: pointer;
+    color: #8b949e; padding: 2px 6px; border-radius: 4px; transition: all 0.15s;
+  }
+  .voice-tts-btn:hover { color: #e6edf3; background: #21262d; }
+  .voice-tts-btn.active { color: #3fb950; }
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.5); }
+    50%       { box-shadow: 0 0 0 7px rgba(248,81,73,0); }
+  }
+
   /* Force Trade Modal */
   .force-btn { background: #238636; border: none; color: #fff; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
   .force-btn:hover { background: #2ea043; }
@@ -1463,6 +1487,21 @@
       </div>
     </div>
 
+    <!-- ML Model Stats ───────────────────────────────────────────────── -->
+    <div class="table-wrap" style="margin-bottom:20px" id="mlModelWrap">
+      <div class="table-head">
+        <h3>🤖 ML Conviction Model</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="mlSourceBadge" style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:10px;background:#21262d;color:#8b949e">loading…</span>
+          <button id="mlRetrainBtn" onclick="triggerResearchRefresh()" style="display:none;background:#238636;border:none;border-radius:6px;padding:4px 12px;color:#fff;font-size:0.78rem;font-weight:600;cursor:pointer">↺ Retrain Now</button>
+        </div>
+      </div>
+
+      <div id="mlModelBody" style="padding:20px">
+        <div style="color:#8b949e;font-size:0.85rem">Loading model stats…</div>
+      </div>
+    </div>
+
     <!-- Stock Explorer launcher (explorer itself is a floating widget) -->
     <div class="table-wrap">
       <div class="table-head">
@@ -2041,6 +2080,7 @@
       <div style="display:flex;gap:2px;margin-bottom:14px;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:4px;flex-shrink:0;flex-wrap:wrap">
         <button class="arch-tab-btn active" data-av="map"   onclick="showArch('map')">🗺️ System Map</button>
         <button class="arch-tab-btn" data-av="models" onclick="showArch('models')">🧠 AI Models</button>
+        <button class="arch-tab-btn" data-av="db"    onclick="showArch('db')">🗄️ DB Schema</button>
         <button class="arch-tab-btn" data-av="chat"  onclick="showArch('chat')">💬 Chat Flow</button>
         <button class="arch-tab-btn" data-av="scan"  onclick="showArch('scan')">🔍 Scan Engine</button>
         <button class="arch-tab-btn" data-av="score" onclick="showArch('score')">🎯 Conviction Score</button>
@@ -3036,6 +3076,433 @@
         </div>
       </div><!-- /av-data -->
 
+      <!-- ══════════ DB SCHEMA ERD ══════════ -->
+      <div id="av-db" class="arch-view" style="display:none">
+        <div style="padding:16px 20px 8px">
+          <div style="font-size:17px;font-weight:700;color:#e6edf3;margin-bottom:4px">Database Schema — Entity Relationship Diagram</div>
+          <div style="font-size:12px;color:#8b949e">18 tables · 5 functional groups · All FK/logical joins mapped. Relationships are username-based (logical, no enforced FK constraints) unless noted.</div>
+        </div>
+
+        <!-- Legend -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;padding:6px 20px 12px">
+          <span class="dblg" style="--dlc:#58a6ff">Identity &amp; Auth</span>
+          <span class="dblg" style="--dlc:#3fb950">Trading &amp; Orders</span>
+          <span class="dblg" style="--dlc:#e3b341">Analytics &amp; Scores</span>
+          <span class="dblg" style="--dlc:#bc8cff">User Activity</span>
+          <span class="dblg" style="--dlc:#8b949e">System / Ops</span>
+          <span style="margin-left:10px;font-size:11px;color:#8b949e;align-self:center">Badges: <span class="dbbadge" style="background:#c0392b">PK</span> primary key &nbsp;<span class="dbbadge" style="background:#1f6feb">FK</span> foreign key &nbsp;<span class="dbbadge" style="background:#2d6a4f">IDX</span> indexed &nbsp;<span class="dbbadge" style="background:#6e3ba1">UNQ</span> unique</span>
+        </div>
+
+        <!-- GROUP 1: Identity & Auth -->
+        <div class="db-group-label" style="--dgl:#58a6ff">Identity &amp; Auth</div>
+        <div class="db-table-row">
+
+          <div class="db-table-card" style="--dtc:#58a6ff">
+            <div class="dbt-header">users</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#6e3ba1">UNQ</span> username <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#6e3ba1">UNQ</span> email <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">password_hash <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">role <span class="dbt-type">TEXT</span> <span class="dbt-note">admin|user|viewer</span></div>
+            <div class="dbt-col">credits <span class="dbt-type">INT</span> <span class="dbt-note">default 100</span></div>
+            <div class="dbt-col">suspended <span class="dbt-type">BOOL</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+            <div class="dbt-col">last_login <span class="dbt-type">TIMESTAMPTZ</span></div>
+            <div class="dbt-col">permissions <span class="dbt-type">JSONB</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#58a6ff">
+            <div class="dbt-header">otp_tokens</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> email <span class="dbt-type">TEXT</span> → users.email</div>
+            <div class="dbt-col">token <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">expires_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+            <div class="dbt-col">used <span class="dbt-type">BOOL</span> <span class="dbt-note">default false</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#58a6ff">
+            <div class="dbt-header">bug_reports</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">title <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">description <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">status <span class="dbt-type">TEXT</span> <span class="dbt-note">open|resolved</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+        </div><!-- /group identity -->
+
+        <!-- GROUP 2: Trading & Orders -->
+        <div class="db-group-label" style="--dgl:#3fb950">Trading &amp; Orders</div>
+        <div class="db-table-row">
+
+          <div class="db-table-card" style="--dtc:#3fb950">
+            <div class="dbt-header">trades</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> symbol <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">side <span class="dbt-type">TEXT</span> <span class="dbt-note">buy|sell</span></div>
+            <div class="dbt-col">qty <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">price <span class="dbt-type">NUMERIC(10,2)</span></div>
+            <div class="dbt-col">order_id <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">status <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">pnl <span class="dbt-type">NUMERIC(10,2)</span></div>
+            <div class="dbt-col">reason <span class="dbt-type">TEXT</span> <span class="dbt-note">AI rationale</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#3fb950">
+            <div class="dbt-header">trade_rejections</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> symbol <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">reason <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">details <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#3fb950">
+            <div class="dbt-header">position_monitoring</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> symbol <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">entry_price <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">qty <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">stop_loss <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">take_profit <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">status <span class="dbt-type">TEXT</span> <span class="dbt-note">active|closed</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#3fb950">
+            <div class="dbt-header">daily_picks</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> symbol <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">pick_date <span class="dbt-type">DATE</span></div>
+            <div class="dbt-col">direction <span class="dbt-type">TEXT</span> <span class="dbt-note">long|short</span></div>
+            <div class="dbt-col">conviction <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">entry_price <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">targets <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">rationale <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+        </div><!-- /group trading -->
+
+        <!-- GROUP 3: Analytics & Scores -->
+        <div class="db-group-label" style="--dgl:#e3b341">Analytics &amp; Scores</div>
+        <div class="db-table-row">
+
+          <div class="db-table-card" style="--dtc:#e3b341">
+            <div class="dbt-header">conviction_scores</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> symbol <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">score <span class="dbt-type">INT</span> <span class="dbt-note">0-100</span></div>
+            <div class="dbt-col">technical <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">news_sentiment <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">momentum <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">analyst <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">market_context <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">insider <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">details <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">scored_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#e3b341">
+            <div class="dbt-header">daily_pnl</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">trade_date <span class="dbt-type">DATE</span></div>
+            <div class="dbt-col">realized_pnl <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">unrealized_pnl <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">total_trades <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">winning_trades <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#e3b341">
+            <div class="dbt-header">trade_lessons</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> symbol <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">lesson <span class="dbt-type">TEXT</span> <span class="dbt-note">AI-generated</span></div>
+            <div class="dbt-col">trade_id <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">ai_source <span class="dbt-type">TEXT</span> <span class="dbt-note">ollama|anthropic</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#e3b341">
+            <div class="dbt-header">performance_patterns</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">pattern_type <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">win_rate <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">avg_pnl <span class="dbt-type">NUMERIC</span></div>
+            <div class="dbt-col">sample_size <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">metadata <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">computed_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#e3b341">
+            <div class="dbt-header">daily_briefings</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col">briefing_date <span class="dbt-type">DATE</span></div>
+            <div class="dbt-col">type <span class="dbt-type">TEXT</span> <span class="dbt-note">morning|eod</span></div>
+            <div class="dbt-col">content <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">ai_source <span class="dbt-type">TEXT</span> <span class="dbt-note">ollama|anthropic</span></div>
+            <div class="dbt-col">sent_via <span class="dbt-type">TEXT</span> <span class="dbt-note">telegram|email</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+        </div><!-- /group analytics -->
+
+        <!-- GROUP 4: User Activity -->
+        <div class="db-group-label" style="--dgl:#bc8cff">User Activity</div>
+        <div class="db-table-row">
+
+          <div class="db-table-card" style="--dtc:#bc8cff">
+            <div class="dbt-header">conversation_history</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">role <span class="dbt-type">TEXT</span> <span class="dbt-note">user|assistant</span></div>
+            <div class="dbt-col">content <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">tool_calls <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">tool_results <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#bc8cff">
+            <div class="dbt-header">user_activity</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">action <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">details <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">ip_address <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#bc8cff">
+            <div class="dbt-header">doc_queries</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">query <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">response <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">doc_section <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#bc8cff">
+            <div class="dbt-header">usage_stats</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">stat_date <span class="dbt-type">DATE</span></div>
+            <div class="dbt-col">messages_sent <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">credits_used <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">api_calls <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">tokens_used <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">updated_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+        </div><!-- /group user activity -->
+
+        <!-- GROUP 5: System / Ops -->
+        <div class="db-group-label" style="--dgl:#8b949e">System / Ops</div>
+        <div class="db-table-row">
+
+          <div class="db-table-card" style="--dtc:#8b949e">
+            <div class="dbt-header">api_calls</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#1f6feb">FK</span> username <span class="dbt-type">TEXT</span> → users.username</div>
+            <div class="dbt-col">endpoint <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">method <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col">status_code <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">duration_ms <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">tokens_in <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">tokens_out <span class="dbt-type">INT</span></div>
+            <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#8b949e">
+            <div class="dbt-header">scanner_state</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col">key <span class="dbt-type">TEXT</span> <span class="dbt-note">unique config key</span></div>
+            <div class="dbt-col">value <span class="dbt-type">JSONB</span></div>
+            <div class="dbt-col">updated_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+        </div><!-- /group system -->
+
+        <!-- ── ERD Diagram with join lines ──────────────────────────────── -->
+        <div style="padding:20px 20px 8px">
+          <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:4px">Entity Relationship Diagram</div>
+          <div style="font-size:11px;color:#8b949e">Lines show actual joins. Arrow tail = many, single bar = one. Label = join column.</div>
+        </div>
+        <div id="dbErdWrap" style="padding:0 20px 24px;overflow-x:auto;min-height:200px">
+          <div class="mermaid" id="dbErdDiagram">
+erDiagram
+    users {
+        serial   id         PK
+        text     username   UK
+        text     email      UK
+        text     role
+        int      credits
+        bool     suspended
+        jsonb    permissions
+    }
+    otp_tokens {
+        serial   id         PK
+        text     email      FK
+        text     token
+        bool     used
+    }
+    bug_reports {
+        serial   id         PK
+        text     username   FK
+        text     title
+        text     status
+    }
+    trades {
+        serial   id         PK
+        text     username   FK
+        text     symbol     "IDX"
+        text     side
+        int      qty
+        numeric  price
+        numeric  pnl
+        text     status
+    }
+    trade_rejections {
+        serial   id         PK
+        text     username   FK
+        text     symbol     "IDX"
+        text     reason
+        jsonb    details
+    }
+    position_monitoring {
+        serial   id         PK
+        text     username   FK
+        text     symbol     "IDX"
+        numeric  entry_price
+        numeric  stop_loss
+        numeric  take_profit
+        text     status
+    }
+    daily_picks {
+        serial   id         PK
+        text     symbol     "IDX"
+        date     pick_date
+        text     direction
+        int      conviction
+        jsonb    targets
+    }
+    conviction_scores {
+        serial   id         PK
+        text     symbol     "IDX"
+        int      score
+        int      technical
+        int      news_sentiment
+        int      momentum
+        int      analyst
+        int      insider
+    }
+    daily_pnl {
+        serial   id         PK
+        text     username   FK
+        date     trade_date
+        numeric  realized_pnl
+        numeric  unrealized_pnl
+        int      total_trades
+        int      winning_trades
+    }
+    trade_lessons {
+        serial   id         PK
+        text     username   FK
+        text     symbol     "IDX"
+        int      trade_id
+        text     lesson
+        text     ai_source
+    }
+    performance_patterns {
+        serial   id         PK
+        text     username   FK
+        text     pattern_type
+        numeric  win_rate
+        numeric  avg_pnl
+        int      sample_size
+    }
+    daily_briefings {
+        serial   id         PK
+        date     briefing_date
+        text     type
+        text     ai_source
+        text     sent_via
+    }
+    conversation_history {
+        serial   id         PK
+        text     username   FK
+        text     role
+        text     content
+        jsonb    tool_calls
+    }
+    user_activity {
+        serial   id         PK
+        text     username   FK
+        text     action
+        jsonb    details
+        text     ip_address
+    }
+    doc_queries {
+        serial   id         PK
+        text     username   FK
+        text     query
+        text     doc_section
+    }
+    usage_stats {
+        serial   id         PK
+        text     username   FK
+        date     stat_date
+        int      messages_sent
+        int      credits_used
+        int      tokens_used
+    }
+    api_calls {
+        serial   id         PK
+        text     username   FK
+        text     endpoint
+        int      status_code
+        int      duration_ms
+        int      tokens_in
+        int      tokens_out
+    }
+    scanner_state {
+        serial   id         PK
+        text     key        UK
+        jsonb    value
+    }
+
+    users                ||--o{ otp_tokens           : "email"
+    users                ||--o{ bug_reports          : "username"
+    users                ||--o{ trades               : "username"
+    users                ||--o{ trade_rejections     : "username"
+    users                ||--o{ position_monitoring  : "username"
+    users                ||--o{ daily_pnl            : "username"
+    users                ||--o{ trade_lessons        : "username"
+    users                ||--o{ performance_patterns : "username"
+    users                ||--o{ conversation_history : "username"
+    users                ||--o{ user_activity        : "username"
+    users                ||--o{ doc_queries          : "username"
+    users                ||--o{ usage_stats          : "username"
+    users                ||--o{ api_calls            : "username"
+    trades               }o--o{ conviction_scores    : "symbol"
+    trades               }o--o{ daily_picks          : "symbol"
+    trade_lessons        }o--o{ conviction_scores    : "symbol"
+    trades               }o--|| trade_lessons        : "trade_id"
+          </div>
+        </div>
+
+      </div><!-- /av-db -->
+
     </div><!-- /adminArchPanel -->
 
     <!-- Input row (hidden when terminal is active) -->
@@ -3259,6 +3726,67 @@
 .dsc-note { font-size: 0.74rem; color: #6e7681; margin-top: 8px; font-style: italic; line-height: 1.45; }
 .dsc-note code { background: #21262d; padding: 1px 4px; border-radius: 3px; font-size: 0.71rem; color: #79c0ff; font-style: normal; }
 .dsc-body strong { color: #c9d1d9; }
+
+/* ── Mermaid ERD container ──────────────────────────────────────── */
+#dbErdDiagram { background: #0d1117; border-radius: 10px; padding: 16px; min-width: 900px; }
+#dbErdDiagram svg { max-width: none !important; }
+
+/* ── DB Schema ERD ──────────────────────────────────────────────── */
+.db-group-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--dgl); border-left: 3px solid var(--dgl);
+  padding: 4px 0 4px 10px; margin: 16px 20px 6px;
+}
+.db-table-row {
+  display: flex; gap: 10px; flex-wrap: wrap; padding: 0 20px 4px;
+}
+.db-table-card {
+  background: rgba(13,17,23,0.88);
+  border: 1px solid color-mix(in srgb, var(--dtc) 20%, transparent);
+  border-top: 2px solid var(--dtc);
+  border-radius: 8px; padding: 0; min-width: 180px; flex: 1; max-width: 260px;
+  font-size: 12px;
+}
+.dbt-header {
+  background: color-mix(in srgb, var(--dtc) 12%, transparent);
+  color: var(--dtc); font-weight: 700; font-size: 12px; font-family: monospace;
+  padding: 7px 10px; border-radius: 6px 6px 0 0; letter-spacing: .03em;
+}
+.dbt-col {
+  padding: 3px 10px; color: #8b949e; font-family: monospace; font-size: 11px;
+  border-top: 1px solid rgba(48,54,61,0.6); display: flex; align-items: center; gap: 5px;
+  flex-wrap: wrap;
+}
+.dbt-col:last-child { border-radius: 0 0 6px 6px; }
+.dbt-type { color: #79c0ff; font-size: 10px; }
+.dbt-note { color: #484f58; font-size: 10px; font-style: italic; }
+.dbbadge {
+  font-size: 9px; font-weight: 700; color: #fff; border-radius: 3px;
+  padding: 1px 4px; white-space: nowrap; flex-shrink: 0;
+}
+.dblg {
+  font-size: 11px; font-weight: 600; color: var(--dlc);
+  background: color-mix(in srgb, var(--dlc) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dlc) 25%, transparent);
+  border-radius: 12px; padding: 2px 9px;
+}
+.db-rel-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  background: rgba(13,17,23,0.8); border-radius: 8px; overflow: hidden;
+}
+.db-rel-table th {
+  background: #161b22; color: #8b949e; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em;
+  padding: 8px 12px; text-align: left; border-bottom: 1px solid #30363d;
+}
+.db-rel-table td { padding: 6px 12px; border-bottom: 1px solid #21262d; color: #c9d1d9; font-family: monospace; font-size: 11px; }
+.db-rel-table tr:last-child td { border-bottom: none; }
+.dbr-col { color: #e3b341; }
+.dbr-card { color: #8b949e; text-align: center; }
+.dbr-user td { background: rgba(31,111,235,0.04); }
+.dbr-email td { background: rgba(227,179,65,0.06); }
+.dbr-sym td { background: rgba(63,185,80,0.04); }
+.dbr-agg td { background: rgba(188,140,255,0.05); }
 </style>
 
 <!-- ── AI Chat floating widget ───────────────────────── -->
@@ -3273,6 +3801,7 @@
         <button class="chat-size-btn" onclick="setChatSize('lg')"  title="Large">L</button>
         <button class="chat-size-btn" onclick="setChatSize('xl')"  title="Full">⛶</button>
       </div>
+      <button id="voiceTTSBtn" class="voice-tts-btn" onclick="toggleTTS()" title="Read responses aloud">🔇</button>
       <button class="chat-report-btn" onclick="openReportModal()" title="Report an issue with the bot">🚩</button>
       <button onclick="clearChat()" title="Clear chat">🗑</button>
       <button onclick="toggleChat()" title="Close">✕</button>
@@ -3290,7 +3819,8 @@
 • <strong>Check portfolio</strong> — "What's my P&amp;L today?"</div>
   </div>
   <div class="chat-input-row">
-    <textarea class="chat-input" id="chatInput" placeholder="Ask anything…" rows="1"></textarea>
+    <button id="voiceMicBtn" class="voice-mic-btn" onclick="toggleMic()" title="Hold to speak">🎤</button>
+    <textarea class="chat-input" id="chatInput" placeholder="Ask anything… or tap 🎤 to speak" rows="1"></textarea>
     <button class="chat-send" id="chatSend" onclick="sendChat()">Send ↵</button>
   </div>
 </div>
@@ -3353,6 +3883,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"/>
@@ -4151,6 +4682,7 @@ let _explorerView   = 'price';
 async function loadResearch() {
   loadTopPicks();
   loadDips();
+  loadModelStats();
   try {
     const d = await api('/api/research/summary');
     const meta = d.meta;
@@ -4186,6 +4718,119 @@ async function loadResearch() {
       `Results based on technical factors only (RSI, EMA, MACD, Bollinger Bands, RS vs SPY).`;
   } catch (e) {
     document.getElementById('researchMeta').textContent = 'Failed to load research data';
+  }
+}
+
+async function loadModelStats() {
+  const body  = document.getElementById('mlModelBody');
+  const badge = document.getElementById('mlSourceBadge');
+  const btn   = document.getElementById('mlRetrainBtn');
+  if (!body) return;
+
+  try {
+    const d = await api('/api/research/status');
+    const m = d.latest_model;
+
+    // Show retrain button for admins
+    if (_currentUser?.role === 'admin' && btn) btn.style.display = '';
+
+    if (!m) {
+      badge.textContent = 'not trained';
+      badge.style.background = '#2d1f00';
+      badge.style.color = '#f0883e';
+      body.innerHTML = `
+        <div style="text-align:center;padding:24px;color:#8b949e;font-size:0.88rem">
+          No model trained yet. Run <code style="background:#21262d;padding:2px 6px;border-radius:4px;color:#79c0ff">npm run research:train</code>
+          or use the <strong style="color:#e6edf3">Retrain Now</strong> button above.
+        </div>`;
+      return;
+    }
+
+    const isML = true; // model row always means ML
+    badge.textContent  = 'ML model active';
+    badge.style.background = '#0d2f1a';
+    badge.style.color      = '#3fb950';
+
+    // ── Metric grid ──
+    const pct = v => v != null ? (v * 100).toFixed(1) + '%' : '—';
+    const metrics = [
+      { label: 'AUC-ROC',   value: pct(m.auc_roc),  color: m.auc_roc >= 0.6 ? '#3fb950' : '#d29922' },
+      { label: 'Accuracy',  value: pct(m.accuracy),  color: '#58a6ff' },
+      { label: 'F1 (class=1)', value: pct(m.f1_1),  color: '#bc8cff' },
+      { label: 'Train rows', value: (m.train_rows||0).toLocaleString(), color: '#8b949e' },
+      { label: 'Test rows',  value: (m.test_rows||0).toLocaleString(),  color: '#8b949e' },
+      { label: 'Trained',    value: m.trained_at ? new Date(m.trained_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—', color: '#8b949e' },
+    ];
+
+    const metricHtml = metrics.map(m => `
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px 16px;text-align:center">
+        <div style="font-size:0.7rem;color:#6e7681;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${m.label}</div>
+        <div style="font-size:1.1rem;font-weight:700;color:${m.color}">${m.value}</div>
+      </div>`).join('');
+
+    // ── Grade bonus adjustments ──
+    const adj = m.scoring_adjustments || {};
+    const adjOrder = ['A','B','C','D','F'];
+    const adjHtml = adjOrder.filter(g => adj[g] !== undefined).map(g => {
+      const v   = adj[g];
+      const col = v > 0 ? '#3fb950' : v < 0 ? '#f85149' : '#8b949e';
+      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid #21262d">
+        <span style="font-size:0.78rem;font-weight:700;color:#e6edf3;width:16px">Grade ${g}</span>
+        <div style="flex:1;background:#21262d;border-radius:4px;height:8px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(Math.abs(v)/10*100,100)}%;background:${col};margin-left:${v<0?0:50}%;transform:${v<0?'translateX(-100%)':'none'};border-radius:4px"></div>
+        </div>
+        <span style="font-size:0.78rem;font-weight:700;color:${col};min-width:32px;text-align:right">${v>=0?'+':''}${v} pts</span>
+      </div>`;
+    }).join('');
+
+    // ── Feature weights ──
+    const fw = m.feature_weights || {};
+    const fwEntries = Object.entries(fw).filter(([k]) => k !== 'bias')
+      .sort(([,a],[,b]) => Math.abs(b) - Math.abs(a));
+    const maxW = Math.max(...fwEntries.map(([,v]) => Math.abs(v)), 0.01);
+    const fwHtml = fwEntries.map(([name, val]) => {
+      const pctW = (Math.abs(val) / maxW * 100).toFixed(0);
+      const col  = val > 0 ? '#3fb950' : '#f85149';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+        <span style="font-size:0.72rem;color:#8b949e;width:90px;flex-shrink:0;font-family:monospace">${name}</span>
+        <div style="flex:1;background:#21262d;border-radius:3px;height:7px;overflow:hidden;position:relative">
+          <div style="position:absolute;${val<0?'right:50%':'left:50%'};width:${pctW/2}%;height:100%;background:${col};border-radius:3px"></div>
+        </div>
+        <span style="font-size:0.72rem;font-weight:600;color:${col};min-width:46px;text-align:right;font-family:monospace">${val>=0?'+':''}${val.toFixed(3)}</span>
+      </div>`;
+    }).join('');
+
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:20px">
+        ${metricHtml}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          <div style="font-size:0.75rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Grade Score Adjustments</div>
+          ${adjHtml || '<div style="color:#6e7681;font-size:0.8rem">No adjustments yet</div>'}
+        </div>
+        <div>
+          <div style="font-size:0.75rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Feature Weights <span style="font-weight:400;text-transform:none">(logistic regression)</span></div>
+          ${fwHtml || '<div style="color:#6e7681;font-size:0.8rem">No weights yet</div>'}
+          <div style="margin-top:8px;font-size:0.71rem;color:#484f58">Green = raises conviction · Red = lowers conviction · Width = magnitude</div>
+        </div>
+      </div>`;
+
+  } catch (e) {
+    if (body) body.innerHTML = '<div style="color:#8b949e;font-size:0.85rem;padding:12px">Model stats unavailable.</div>';
+  }
+}
+
+async function triggerResearchRefresh() {
+  const btn = document.getElementById('mlRetrainBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Running…'; }
+  try {
+    await api('/api/research/refresh', { method: 'POST' });
+    alert('Research refresh started — results will appear in the chat widget when complete (takes ~10–30 min).');
+  } catch (e) {
+    alert('Failed to start refresh: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↺ Retrain Now'; }
   }
 }
 
@@ -6541,6 +7186,8 @@ async function sendChat() {
               _currentUser.credits = d.credits;
               updateCreditsDisplay(d.credits, _currentUser.role);
             }
+            // Speak the full response if TTS is on
+            speakText(fullText);
           } else if (d.error) {
             const el2 = document.getElementById(assistantId);
             if (el2) el2.innerHTML = `<span style="color:#f85149">⚠️ ${d.error}</span>`;
@@ -6561,6 +7208,123 @@ async function sendChat() {
     input.focus();
     saveChatHistory();
   }
+}
+
+// ── Voice Assistant ───────────────────────────────────
+let _ttsEnabled  = false;
+let _micActive   = false;
+let _recognition = null;
+let _ttsUtterance = null;
+
+function _buildRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r = new SR();
+  r.continuous      = false;
+  r.interimResults  = true;
+  r.lang            = 'en-US';
+
+  r.onstart = () => {
+    _micActive = true;
+    const btn = document.getElementById('voiceMicBtn');
+    if (btn) { btn.classList.add('listening'); btn.title = 'Listening… tap to stop'; }
+    document.getElementById('chatInput').placeholder = '🎤 Listening…';
+  };
+
+  r.onresult = e => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    const inp = document.getElementById('chatInput');
+    if (inp) inp.value = transcript;
+  };
+
+  r.onend = () => {
+    _micActive = false;
+    const btn = document.getElementById('voiceMicBtn');
+    if (btn) { btn.classList.remove('listening'); btn.title = 'Hold to speak'; }
+    const inp = document.getElementById('chatInput');
+    if (inp) {
+      inp.placeholder = 'Ask anything… or tap 🎤 to speak';
+      if (inp.value.trim()) sendChat();  // auto-send when speech ends
+    }
+  };
+
+  r.onerror = e => {
+    _micActive = false;
+    const btn = document.getElementById('voiceMicBtn');
+    if (btn) btn.classList.remove('listening');
+    const inp = document.getElementById('chatInput');
+    if (inp) inp.placeholder = 'Ask anything… or tap 🎤 to speak';
+    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+      console.warn('SpeechRecognition error:', e.error);
+    }
+  };
+
+  return r;
+}
+
+function toggleMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    alert('Your browser does not support voice input.\nPlease use Chrome or Edge.');
+    return;
+  }
+  if (_micActive) {
+    _recognition?.stop();
+    return;
+  }
+  _recognition = _buildRecognition();
+  _recognition.start();
+}
+
+function toggleTTS() {
+  _ttsEnabled = !_ttsEnabled;
+  const btn = document.getElementById('voiceTTSBtn');
+  if (btn) {
+    btn.textContent = _ttsEnabled ? '🔊' : '🔇';
+    btn.title       = _ttsEnabled ? 'Voice ON — click to mute' : 'Read responses aloud';
+    btn.classList.toggle('active', _ttsEnabled);
+  }
+  if (!_ttsEnabled) window.speechSynthesis?.cancel();
+}
+
+function _stripMarkdown(md) {
+  return md
+    .replace(/```[\s\S]*?```/g, '')          // code blocks
+    .replace(/`[^`]*`/g, '')                  // inline code
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → label only
+    .replace(/#{1,6}\s*/g, '')               // headings
+    .replace(/\*\*([^*]+)\*\*/g, '$1')       // bold
+    .replace(/\*([^*]+)\*/g, '$1')           // italic
+    .replace(/^[-*•]\s+/gm, '')              // bullet points
+    .replace(/^\d+\.\s+/gm, '')              // numbered lists
+    .replace(/>\s*/gm, '')                   // blockquotes
+    .replace(/\n{2,}/g, '. ')               // paragraph breaks → pause
+    .replace(/\n/g, ' ')
+    .trim();
+}
+
+function speakText(text) {
+  if (!_ttsEnabled || !text) return;
+  window.speechSynthesis?.cancel();
+  const clean = _stripMarkdown(text);
+  if (!clean) return;
+  const utt = new SpeechSynthesisUtterance(clean);
+  utt.rate   = 1.05;
+  utt.pitch  = 1.0;
+  utt.volume = 1.0;
+  // prefer a natural English voice if available
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v => /samantha|google us|karen|daniel/i.test(v.name))
+    || voices.find(v => v.lang.startsWith('en') && !v.localService === false)
+    || voices[0];
+  if (preferred) utt.voice = preferred;
+  _ttsUtterance = utt;
+  window.speechSynthesis.speak(utt);
+}
+
+// Initialise: populate voices once they load (Chrome needs this)
+if (window.speechSynthesis) {
+  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
 }
 
 // ── Bot Rules page ────────────────────────────────────
@@ -6869,13 +7633,36 @@ function setAdminView(view) {
   if (isScan) scanRefreshStatus();
 }
 
+let _erdRendered = false;
 function showArch(view) {
-  ['map','models','chat','scan','score','data'].forEach(v => {
+  ['map','models','db','chat','scan','score','data'].forEach(v => {
     const el = document.getElementById('av-' + v);
     if (el) el.style.display = v === view ? 'block' : 'none';
     const btn = document.querySelector(`[data-av="${v}"]`);
     if (btn) btn.classList.toggle('active', v === view);
   });
+  if (view === 'db' && !_erdRendered) {
+    _erdRendered = true;
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#0d1117',
+        primaryColor: '#1f2937',
+        primaryTextColor: '#e6edf3',
+        primaryBorderColor: '#30363d',
+        lineColor: '#58a6ff',
+        secondaryColor: '#161b22',
+        tertiaryColor: '#21262d',
+        edgeLabelBackground: '#161b22',
+        attributeBackgroundColorEven: '#0d1117',
+        attributeBackgroundColorOdd: '#161b22',
+      },
+      er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100, minEntityHeight: 75, entityPadding: 15 }
+    });
+    mermaid.run({ nodes: [document.getElementById('dbErdDiagram')] });
+  }
 }
 
 // ── AI Scanner ─────────────────────────────────────────

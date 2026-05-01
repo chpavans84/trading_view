@@ -25,7 +25,8 @@
     "test:dashboard": "node --test --test-reporter=spec tests/dashboard.test.js",
     "research:download": "node --env-file=.env src/research/download-prices.js",
     "research:scores": "node --env-file=.env src/research/compute-scores.js",
-    "research:backtest": "node --env-file=.env src/research/backtest.js"
+    "research:backtest": "node --env-file=.env src/research/backtest.js",
+    "research:train":   "node --env-file=.env src/research/train-model.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
