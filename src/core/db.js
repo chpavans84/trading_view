@@ -1084,39 +1084,92 @@ let _factorWeightsCache = null;
 let _factorWeightsCacheTs = 0;
 const FACTOR_WEIGHTS_TTL = 24 * 60 * 60 * 1000; // 24h
 
+export function invalidateFactorWeightsCache() {
+  _factorWeightsCache   = null;
+  _factorWeightsCacheTs = 0;
+}
+
 export async function getFactorWeights() {
   if (!dbAvailable) return null;
   if (_factorWeightsCache && Date.now() - _factorWeightsCacheTs < FACTOR_WEIGHTS_TTL)
     return _factorWeightsCache;
 
   try {
-    // Win rate and avg alpha per grade across 1-month forward returns
-    const { rows } = await query(`
-      SELECT grade,
-             COUNT(*)                                               AS signals,
-             ROUND(AVG(ret_1m)::numeric, 4)                        AS avg_ret_1m,
-             ROUND(AVG(ret_1m - spy_1m)::numeric, 4)               AS avg_alpha_1m,
-             ROUND(100.0 * SUM(CASE WHEN ret_1m > 0 THEN 1 END) / COUNT(*), 1) AS win_rate_pct
-      FROM backtest_returns
-      WHERE ret_1m IS NOT NULL AND spy_1m IS NOT NULL
-      GROUP BY grade
-      ORDER BY grade
-    `);
+    // ── 1. Try ML model weights first (populated by npm run research:train) ──
+    let mlRow = null;
+    try {
+      const { rows: mlRows } = await query(`
+        SELECT id, trained_at, accuracy, auc_roc, f1_1,
+               feature_weights, scoring_adjustments,
+               train_rows, test_rows
+        FROM model_results
+        ORDER BY trained_at DESC
+        LIMIT 1
+      `);
+      if (mlRows.length > 0) mlRow = mlRows[0];
+    } catch (e) {
+      // model_results table doesn't exist yet — fall through to heuristic
+      if (e.code !== '42P01') throw e;
+    }
 
-    // Express as a multiplier: grade A gets highest bonus, F gets a penalty
+    // ── 2. Always fetch per-grade backtest stats (cheap, good for display) ──
+    let byGrade = [];
+    try {
+      const { rows } = await query(`
+        SELECT grade,
+               COUNT(*)                                                     AS signals,
+               ROUND(AVG(ret_1m)::numeric, 4)                              AS avg_ret_1m,
+               ROUND(AVG(ret_1m - spy_1m)::numeric, 4)                     AS avg_alpha_1m,
+               ROUND(100.0 * SUM(CASE WHEN ret_1m > 0 THEN 1 END) / COUNT(*), 1) AS win_rate_pct
+        FROM backtest_returns
+        WHERE ret_1m IS NOT NULL AND spy_1m IS NOT NULL
+        GROUP BY grade
+        ORDER BY grade
+      `);
+      byGrade = rows;
+    } catch { /* backtest_returns not yet populated — skip */ }
+
+    // ── 3a. ML path: use model's scoring_adjustments ─────────────────────────
+    if (mlRow) {
+      const adjustments = mlRow.scoring_adjustments ?? {};
+      _factorWeightsCache = {
+        source:          'ml_model',
+        model_id:        mlRow.id,
+        trained_at:      mlRow.trained_at,
+        auc_roc:         mlRow.auc_roc,
+        accuracy:        mlRow.accuracy,
+        f1_1:            mlRow.f1_1,
+        train_rows:      mlRow.train_rows,
+        test_rows:       mlRow.test_rows,
+        feature_weights: mlRow.feature_weights ?? {},  // { rsi_norm, macd_sign, … }
+        adjustments,                                    // { A: +8, B: +3, C: -2, F: -9 }
+        by_grade:        byGrade,
+        computed_at:     new Date().toISOString(),
+      };
+      _factorWeightsCacheTs = Date.now();
+      return _factorWeightsCache;
+    }
+
+    // ── 3b. Heuristic fallback: derive adjustments from backtest alpha ────────
+    if (byGrade.length === 0) return null;
+
     const gradeAlpha = {};
-    for (const r of rows) gradeAlpha[r.grade] = parseFloat(r.avg_alpha_1m);
-
-    // Normalize to a -10..+10 point adjustment range
-    const vals   = Object.values(gradeAlpha);
+    for (const r of byGrade) gradeAlpha[r.grade] = parseFloat(r.avg_alpha_1m);
+    const vals     = Object.values(gradeAlpha);
     const maxAlpha = Math.max(...vals);
     const minAlpha = Math.min(...vals);
-    const range  = maxAlpha - minAlpha || 1;
+    const range    = maxAlpha - minAlpha || 1;
     const adjustments = {};
     for (const [g, a] of Object.entries(gradeAlpha))
       adjustments[g] = +((a - minAlpha) / range * 20 - 10).toFixed(1);
 
-    _factorWeightsCache = { by_grade: rows, adjustments, computed_at: new Date().toISOString() };
+    _factorWeightsCache = {
+      source:          'backtest_heuristic',
+      feature_weights: null,
+      adjustments,
+      by_grade:        byGrade,
+      computed_at:     new Date().toISOString(),
+    };
     _factorWeightsCacheTs = Date.now();
     return _factorWeightsCache;
   } catch (err) {

@@ -7,6 +7,8 @@
 import net from 'net';
 import fs from 'fs';
 import http from 'http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
 import express from 'express';
@@ -18,7 +20,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
@@ -3525,6 +3527,225 @@ app.post('/api/reflection/run', requireAdmin, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Weekend Research Refresh ─────────────────────────────────────────────────
+// Runs the full research pipeline (download → scores → backtest → train) as
+// child processes sequentially. Safe to call from cron or admin API.
+
+const _execFileAsync = promisify(execFile);
+const _PROJECT_ROOT  = join(__dirname, '..', '..');
+let   _refreshRunning = false;
+let   _lastRefreshAt  = null;
+
+async function runWeekendResearchRefresh() {
+  if (_refreshRunning) {
+    console.log('[research] Already running — skipped.');
+    return { skipped: true };
+  }
+  _refreshRunning = true;
+  const startedAt = Date.now();
+  try {
+
+  console.log('[research] Weekend refresh starting…');
+  pushToChat('🔬 Weekend research refresh started — downloading prices, recomputing scores, running backtest, retraining ML model…', 'autonomous');
+
+  const node    = process.execPath;
+  const env     = process.env;
+  const results = [];
+
+  const _step = async (label, script, timeout) => {
+    const t0 = Date.now();
+    console.log(`[research] ${label}…`);
+    const { stderr } = await _execFileAsync(
+      node,
+      ['--env-file=.env', script],
+      { env, cwd: _PROJECT_ROOT, timeout }
+    );
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    if (stderr) console.warn(`[research] ${label} stderr:`, stderr.slice(0, 400));
+    console.log(`[research] ${label} ✓ ${elapsed}s`);
+    results.push({ label, ok: true, elapsed });
+    return elapsed;
+  };
+
+  // Step 1: incremental price download (catches last week's data)
+  await _step('download-prices', 'src/research/download-prices.js', 60 * 60 * 1000);
+
+  // Step 2: recompute scores for new dates only
+  await _step('compute-scores', 'src/research/compute-scores.js', 90 * 60 * 1000);
+
+  // Step 3: backtest forward returns
+  await _step('backtest', 'src/research/backtest.js', 30 * 60 * 1000);
+
+  // Step 4: retrain model (only if train-model.js exists)
+  try {
+    await _step('train-model', 'src/research/train-model.js', 15 * 60 * 1000);
+    console.log('[research] model retrained.');
+  } catch (_) { /* train-model.js not yet created — skip */ }
+
+  // Clear factor weights cache so scorer picks up new model immediately
+  invalidateFactorWeightsCache();
+  console.log('[research] weekend pipeline complete ✓');
+
+  // Fetch the newly trained model's stats for the notification
+  let modelLine = '';
+  try {
+    const { rows } = await query(`
+      SELECT id, auc_roc, accuracy, f1_1, train_rows, test_rows
+      FROM model_results ORDER BY trained_at DESC LIMIT 1
+    `);
+    if (rows.length) {
+      const m = rows[0];
+      modelLine = `\n🤖 ML model #${m.id}: AUC ${(m.auc_roc * 100).toFixed(1)}% | Acc ${(m.accuracy * 100).toFixed(1)}% | F1 ${(m.f1_1 * 100).toFixed(1)}% | ${m.train_rows}+${m.test_rows} rows`;
+    }
+  } catch { /* model_results may not exist yet */ }
+
+  const totalSec = ((Date.now() - startedAt) / 1000).toFixed(0);
+  const stepLines = results.map(r =>
+    `${r.ok ? '✅' : '❌'} ${r.label} (${r.elapsed}s)${r.error ? ' — ' + r.error : ''}`
+  ).join('\n');
+  const summary = `🔬 Research Refresh Complete (${totalSec}s)\n\n${stepLines}${modelLine}`;
+
+  pushToChat(summary, 'autonomous');
+  await sendTelegramMsg(summary).catch(() => {});
+  console.log('[research]', summary);
+
+    _lastRefreshAt = new Date().toISOString();
+    return { ok: true, results, totalSec, modelLine };
+  } finally {
+    _refreshRunning = false;
+  }
+}
+
+// ─── Daily Research Crons (weekdays, SGT-friendly — all done before 7:30 AM SGT) ─
+// All times are ET with DST-safe window checks inside the callback.
+
+// 4:30 PM ET  = 4:30 AM SGT  — incremental price download (new bars from today)
+cron.schedule('*/5 16-21 * * 1-5', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 16 * 60 + 30 || mins >= 16 * 60 + 35) return;
+  try {
+    console.log('[research] Downloading latest prices…');
+    await _execFileAsync(process.execPath, ['--env-file=.env', 'src/research/download-prices.js'],
+      { env: process.env, cwd: _PROJECT_ROOT, timeout: 15 * 60 * 1000 });
+    console.log('[research] Price download complete');
+  } catch (err) { console.error('[research] download-prices error:', err.message); }
+});
+
+// 5:30 PM ET  = 5:30 AM SGT  — recompute conviction scores for new dates
+cron.schedule('*/5 17-22 * * 1-5', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 17 * 60 + 30 || mins >= 17 * 60 + 35) return;
+  try {
+    console.log('[research] Computing historical scores…');
+    await _execFileAsync(process.execPath, ['--env-file=.env', 'src/research/compute-scores.js'],
+      { env: process.env, cwd: _PROJECT_ROOT, timeout: 30 * 60 * 1000 });
+    console.log('[research] Score computation complete');
+  } catch (err) { console.error('[research] compute-scores error:', err.message); }
+});
+
+// 6:30 PM ET  = 6:30 AM SGT  — backtest forward returns on new data
+cron.schedule('*/5 18-23 * * 1-5', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 18 * 60 + 30 || mins >= 18 * 60 + 35) return;
+  try {
+    console.log('[research] Running backtest…');
+    await _execFileAsync(process.execPath, ['--env-file=.env', 'src/research/backtest.js'],
+      { env: process.env, cwd: _PROJECT_ROOT, timeout: 20 * 60 * 1000 });
+    console.log('[research] Backtest complete');
+  } catch (err) { console.error('[research] backtest error:', err.message); }
+});
+
+// 7:00 PM ET  = 7:00 AM SGT  — retrain ML model from updated backtest data
+cron.schedule('*/5 19-23 * * 1-5', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 19 * 60 || mins >= 19 * 60 + 5) return;
+  try {
+    console.log('[research] Retraining ML model…');
+    await _execFileAsync(process.execPath, ['--env-file=.env', 'src/research/train-model.js'],
+      { env: process.env, cwd: _PROJECT_ROOT, timeout: 10 * 60 * 1000 });
+    invalidateFactorWeightsCache();
+    const sgtTime = new Date().toLocaleTimeString('en-SG', { timeZone: 'Asia/Singapore' });
+    pushToChat(
+      `🧠 Overnight ML training complete (${sgtTime} SGT) — live scorer weights updated. Check Research tab for results.`,
+      'autonomous'
+    );
+    console.log('[research] ML training complete');
+  } catch (err) { console.error('[research] train-model error:', err.message); }
+});
+
+// ─── Weekend Research Cron ────────────────────────────────────────────────────
+// Saturday 10 PM ET — full pipeline refresh for any gaps from the week.
+
+cron.schedule('*/5 * * * 6', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 22 * 60 || mins >= 22 * 60 + 5) return;
+  try {
+    await runWeekendResearchRefresh();
+  } catch (err) {
+    console.error('[research] cron error:', err.message);
+  }
+});
+
+// ─── Admin API: manual trigger (per-step or all) ──────────────────────────────
+
+const _RESEARCH_SCRIPTS = {
+  download: 'src/research/download-prices.js',
+  scores:   'src/research/compute-scores.js',
+  backtest: 'src/research/backtest.js',
+  train:    'src/research/train-model.js',
+};
+
+app.post('/api/research/run', requireAdmin, async (req, res) => {
+  const { step } = req.body;
+  const toRun = step === 'all'
+    ? Object.values(_RESEARCH_SCRIPTS)
+    : [_RESEARCH_SCRIPTS[step]];
+  if (!toRun[0]) return res.status(400).json({ error: 'Invalid step. Use: download|scores|backtest|train|all' });
+  res.json({ ok: true, message: `Running ${step}… results will appear in server logs.` });
+  // Fire-and-forget; don't block the HTTP response
+  (async () => {
+    for (const script of toRun) {
+      await _execFileAsync(process.execPath, ['--env-file=.env', script],
+        { env: process.env, cwd: _PROJECT_ROOT, timeout: 30 * 60 * 1000 })
+        .catch(e => console.error(`[research] ${script} error:`, e.message));
+    }
+    if (step === 'train' || step === 'all') invalidateFactorWeightsCache();
+  })();
+});
+
+app.post('/api/research/refresh', requireAdmin, async (req, res) => {
+  if (_refreshRunning) {
+    return res.status(409).json({ error: 'Refresh already in progress' });
+  }
+  // Fire and forget — client gets immediate ack, results push to chat when done
+  runWeekendResearchRefresh().catch(err => console.error('[research] manual trigger error:', err.message));
+  res.json({ ok: true, message: 'Research refresh started — results will appear in chat when complete.' });
+});
+
+app.get('/api/research/status', requireAdmin, async (req, res) => {
+  let latestModel = null;
+  try {
+    const { rows } = await query(`
+      SELECT id, trained_at, auc_roc, accuracy, f1_1, train_rows, test_rows,
+             feature_weights, scoring_adjustments
+      FROM model_results ORDER BY trained_at DESC LIMIT 1
+    `);
+    if (rows.length) latestModel = rows[0];
+  } catch { /* table not yet created */ }
+
+  res.json({
+    ok:              true,
+    running:         _refreshRunning,
+    last_refresh_at: _lastRefreshAt,
+    latest_model:    latestModel,
+  });
 });
 
 app.get('/api/reflection/lessons', requireAuth, async (req, res) => {
