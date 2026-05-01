@@ -3840,6 +3840,83 @@ app.get('/api/knowledge/count', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Public Chat (no auth — Ollama + knowledge base only) ────────────────────
+
+const _publicChatCalls = new Map(); // ip -> { count, resetAt }
+
+function publicChatRateLimit(req, res, next) {
+  const ip  = req.ip ?? req.connection.remoteAddress ?? 'unknown';
+  const now = Date.now();
+  const entry = _publicChatCalls.get(ip) ?? { count: 0, resetAt: now + 60_000 };
+
+  if (now > entry.resetAt) {
+    entry.count   = 0;
+    entry.resetAt = now + 60_000;
+  }
+  entry.count++;
+  _publicChatCalls.set(ip, entry);
+
+  if (entry.count > 10) {
+    return res.status(429).json({ error: 'Too many requests. Please wait a minute.' });
+  }
+  next();
+}
+
+app.post('/api/public/chat', publicChatRateLimit, async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || typeof message !== 'string' || message.trim().length < 2) {
+      return res.status(400).json({ error: 'Message required' });
+    }
+
+    const text = message.trim().slice(0, 500);
+
+    const { isKnowledgeQuestion, answerKnowledgeQuestion } = await import('../core/knowledge.js');
+
+    // Always try knowledge base first
+    if (await isKnowledgeQuestion(text)) {
+      const result = await answerKnowledgeQuestion(text);
+      return res.json({ answer: result.answer, type: 'knowledge', source: 'ollama' });
+    }
+
+    // For market/scan questions, return last cached public market data only
+    const isMarketQuestion = /market|regime|vix|trending|bullish|bearish|scan|setup|today/i.test(text);
+    if (isMarketQuestion) {
+      const { rows } = await query(
+        `SELECT state_json, updated_at FROM scanner_state ORDER BY updated_at DESC LIMIT 1`
+      );
+      const state     = rows[0]?.state_json ?? null;
+      const updatedAt = rows[0]?.updated_at ?? null;
+
+      if (state) {
+        const regime    = state.last_regime    ?? 'unknown';
+        const direction = state.last_direction ?? 'unknown';
+        const vix       = state.last_vix       ?? 'unknown';
+        const age       = updatedAt
+          ? Math.round((Date.now() - new Date(updatedAt).getTime()) / 60000)
+          : null;
+        const ageStr = age != null ? `${age} min ago` : 'recently';
+        const summary = `Market snapshot (last updated ${ageStr}): Regime is ${regime}, direction ${direction}, VIX ${vix}. Sign in to the trading dashboard for live positions, trade signals, and full analysis.`;
+        return res.json({ answer: summary, type: 'market', source: 'cache' });
+      }
+
+      return res.json({
+        answer: 'Market data is not available right now. Sign in to the trading dashboard for live analysis.',
+        type: 'market',
+        source: 'cache',
+      });
+    }
+
+    // Fallback — general trading question via Ollama, no Claude
+    const result = await answerKnowledgeQuestion(text);
+    return res.json({ answer: result.answer, type: 'general', source: 'ollama' });
+
+  } catch (err) {
+    console.error('[public-chat] error:', err.message);
+    res.status(500).json({ error: 'Chat unavailable right now.' });
+  }
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 await initDb();
