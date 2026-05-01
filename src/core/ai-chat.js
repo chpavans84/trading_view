@@ -34,7 +34,63 @@ import {
   DAILY_PROFIT_TARGET, DAILY_LOSS_LIMIT,
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
-import { getFunds, getPositions as getMoomooPositions, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
+import { getFunds, getPositions as getMoomooPositions, getQuote as moomooGetQuote, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
+
+// ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
+
+async function getLiveQuote(symbol) {
+  if (!symbol) return { error: 'Symbol required' };
+
+  // Tier 1: Moomoo (real-time)
+  try {
+    const q = await moomooGetQuote(symbol);
+    if (q?.success && q.price != null) {
+      return {
+        symbol:     q.symbol ?? symbol.toUpperCase(),
+        name:       q.name   ?? null,
+        price:      +q.price.toFixed(2),
+        change_pct: q.change_pct ?? null,
+        prev_close: q.prev_close ?? null,
+        day_high:   q.high  ?? null,
+        day_low:    q.low   ?? null,
+        volume:     q.volume ?? null,
+        source:     'moomoo',
+      };
+    }
+  } catch { /* fall through */ }
+
+  // Tier 2: Yahoo Finance fallback
+  try {
+    const r = await fetch(
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(6000) }
+    );
+    if (!r.ok) return { error: `Yahoo Finance returned ${r.status}` };
+    const d   = await r.json();
+    const res = d?.chart?.result?.[0];
+    if (!res) return { error: 'No data returned' };
+    const meta   = res.meta ?? {};
+    const q      = res.indicators?.quote?.[0] ?? {};
+    const closes = (q.close ?? []).filter(v => v != null);
+    const vols   = (q.volume ?? []).filter(v => v != null);
+    const prev   = closes.at(-2) ?? null;
+    const curr   = closes.at(-1) ?? meta.regularMarketPrice ?? null;
+    const chgPct = prev && curr ? +((curr - prev) / prev * 100).toFixed(2) : null;
+    return {
+      symbol:     symbol.toUpperCase(),
+      name:       meta.longName ?? meta.shortName ?? null,
+      price:      curr != null ? +curr.toFixed(2) : null,
+      change_pct: chgPct,
+      prev_close: prev != null ? +prev.toFixed(2) : null,
+      day_high:   meta.regularMarketDayHigh ?? null,
+      day_low:    meta.regularMarketDayLow  ?? null,
+      volume:     vols.at(-1) ?? null,
+      source:     'yahoo',
+    };
+  } catch (err) {
+    return { error: `Price fetch failed: ${err.message}` };
+  }
+}
 
 const PRICE_INPUT_PER_M  = 0.80;   // claude-haiku-4-5 input  $0.80/M tokens
 const PRICE_OUTPUT_PER_M = 4.00;   // claude-haiku-4-5 output $4.00/M tokens
@@ -308,9 +364,13 @@ export const TOOLS = [
   { name: 'move_stop_to_breakeven', description: 'Move the stop-loss order for an open position to the entry price (breakeven). Locks in a zero-loss floor — use when a position is up more than 50% of its take-profit target. Requires an active stop order (not trailing stop).',
     input_schema: { type: 'object', properties: { symbol: { type: 'string', description: 'The stock ticker whose stop to move' } }, required: ['symbol'] } },
   { name: 'get_daily_pnl',       description: `Check today's P&L against the $${DAILY_PROFIT_TARGET} target and -$${DAILY_LOSS_LIMIT} loss limit.`, input_schema: { type: 'object', properties: {} } },
-  { name: 'get_chart_technicals', description: 'Read RSI, MACD, EMAs, Bollinger Bands from TradingView.',                         input_schema: { type: 'object', properties: { symbol: { type: 'string' } } } },
+  { name: 'get_live_quote',       description: 'Get current price, change%, volume, and day range for any stock via Yahoo Finance — always works, no TradingView needed. Use this first when you need a current price.',
+                                                input_schema: { type: 'object', properties: { symbol: { type: 'string', description: 'Ticker, e.g. BAND' } }, required: ['symbol'] } },
+  { name: 'get_chart_technicals', description: 'Read RSI, MACD, EMAs, Bollinger Bands from TradingView. If it returns available:false, fall back to get_live_quote for price.',
+                                                input_schema: { type: 'object', properties: { symbol: { type: 'string' } } } },
   { name: 'get_price_levels',    description: 'Read support/resistance levels from TradingView Pine Script indicators.',            input_schema: { type: 'object', properties: { symbol: { type: 'string' }, study_filter: { type: 'string' } } } },
-  { name: 'get_ohlcv_summary',   description: 'Get compact OHLCV summary from TradingView.',                                       input_schema: { type: 'object', properties: { symbol: { type: 'string' } } } },
+  { name: 'get_ohlcv_summary',   description: 'Get compact OHLCV summary from TradingView. If it returns available:false, use get_live_quote instead.',
+                                                input_schema: { type: 'object', properties: { symbol: { type: 'string' } } } },
   { name: 'get_conviction_score', description: 'Get multi-factor conviction score (0–100). Always call before propose_trade.',     input_schema: { type: 'object', properties: { symbol: { type: 'string' }, positions: { type: 'array', items: { type: 'object', properties: { symbol: { type: 'string' } } } } }, required: ['symbol'] } },
   { name: 'get_earnings_surprise', description: 'Get earnings date, EPS estimate, and historical beat streak.',                    input_schema: { type: 'object', properties: { symbol: { type: 'string' } }, required: ['symbol'] } },
   { name: 'get_my_config',        description: "Read the user's current bot configuration (risk profile, daily limits, position sizing, VIX thresholds, conviction threshold, blocked sectors). Call this before suggesting or applying any config changes so you know the current state.", input_schema: { type: 'object', properties: {} } },
@@ -514,6 +574,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       }
       case 'move_stop_to_breakeven': return await moveStopToBreakeven(input.symbol);
       case 'get_daily_pnl':          return await getDailyPnL();
+      case 'get_live_quote':          return await getLiveQuote(input.symbol);
       case 'get_chart_technicals':   return await getChartTechnicals({ symbol: input.symbol });
       case 'get_price_levels':       return await getPriceLevels({ symbol: input.symbol, study_filter: input.study_filter });
       case 'get_ohlcv_summary':      return await getOHLCVSummary({ symbol: input.symbol });

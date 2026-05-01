@@ -1,8 +1,9 @@
 /**
  * Market sentiment data.
- * Quotes:   Moomoo OpenD (real-time) → Alpaca snapshots (batch) → Yahoo Finance (per-symbol)
+ * VIX:      CBOE (primary source, ~15s delay) → Yahoo Finance fallback
+ * Quotes:   Moomoo OpenD (real-time) → Alpaca snapshots → Yahoo Finance fallback
  * Universe: Yahoo Finance screeners → Alpaca screener → static fallback
- * VIX/futures/sectors: Yahoo Finance only (not available via Moomoo/Alpaca)
+ * Futures:  Yahoo Finance only (ES=F, NQ=F not available via Moomoo/Alpaca)
  */
 
 import { getQuotes as moomooGetQuotes, getKLines } from './moomoo-tcp.js';
@@ -147,6 +148,45 @@ async function fetchAll(symbols, gapMs = 800) {
   return results;
 }
 
+// ─── VIX from CBOE (primary source) → Yahoo fallback ────────────────────────
+
+async function fetchVix() {
+  // Tier 1: CBOE — the actual publisher of VIX
+  try {
+    const r = await fetch(
+      'https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json',
+      { headers: HEADERS, signal: AbortSignal.timeout(5000) }
+    );
+    if (r.ok) {
+      const d    = await r.json();
+      const data = d?.data ?? d;
+      const price = data?.close ?? data?.last ?? data?.price ?? null;
+      const chg   = data?.change ?? null;
+      const prev  = price != null && chg != null ? price - chg : null;
+      const chgPct = prev ? +((chg / prev) * 100).toFixed(2) : null;
+      if (price != null) return { price: +parseFloat(price).toFixed(2), chg_pct: chgPct, source: 'cboe' };
+    }
+  } catch { /* fall through */ }
+
+  // Tier 2: Yahoo Finance fallback
+  const q = await fetchQuote('^VIX');
+  return q ? { ...q, source: 'yahoo' } : null;
+}
+
+// ─── Moomoo batch quote for US ETFs/stocks ────────────────────────────────────
+
+async function fetchMoomooQuotes(symbols) {
+  try {
+    const result = await moomooGetQuotes(symbols);
+    if (!result?.success || !result.quotes?.length) return new Map();
+    const map = new Map();
+    for (const q of result.quotes) {
+      if (q.symbol) map.set(q.symbol, { symbol: q.symbol, price: q.price, chg_pct: q.change_pct, name: q.name });
+    }
+    return map;
+  } catch { return new Map(); }
+}
+
 // ─── VIX → Sentiment ─────────────────────────────────────────────────────────
 
 function vixToSentiment(vix) {
@@ -165,17 +205,25 @@ export async function getMarketSentiment() {
   const cached = cacheGet('sentiment', 5 * 60 * 1000);
   if (cached) return { ...cached, cached: true };
 
-  const symbols = ['^VIX', '^GSPC', '^IXIC', '^DJI', 'ES=F', 'NQ=F'];
-  const quotes  = await fetchAll(symbols, 800);
+  // Fetch in parallel: VIX from CBOE, index ETF proxies from Moomoo, futures from Yahoo
+  const [vixData, moomooIdx, yfFutures] = await Promise.allSettled([
+    fetchVix(),
+    fetchMoomooQuotes(['SPY', 'QQQ', 'DIA']),  // ETF proxies for S&P/Nasdaq/Dow
+    fetchAll(['ES=F', 'NQ=F'], 600),            // futures — Yahoo only
+  ]);
 
-  const vix        = quotes.get('^VIX');
-  const sp500      = quotes.get('^GSPC');
-  const nasdaq     = quotes.get('^IXIC');
-  const dow        = quotes.get('^DJI');
-  const es         = quotes.get('ES=F');
-  const nq         = quotes.get('NQ=F');
+  const vix    = vixData.status    === 'fulfilled' ? vixData.value    : null;
+  const mIdx   = moomooIdx.status  === 'fulfilled' ? moomooIdx.value  : new Map();
+  const yf     = yfFutures.status  === 'fulfilled' ? yfFutures.value  : new Map();
 
-  const vixVal     = vix?.price ?? null;
+  // Use Moomoo ETF proxies for index direction; fall back to Yahoo synthetic symbols
+  const spy    = mIdx.get('SPY')  ?? null;
+  const qqq    = mIdx.get('QQQ')  ?? null;
+  const dia    = mIdx.get('DIA')  ?? null;
+  const es     = yf.get('ES=F')   ?? null;
+  const nq     = yf.get('NQ=F')   ?? null;
+
+  const vixVal = vix?.price ?? null;
   const sentiment  = vixToSentiment(vixVal);
 
   // Market status hint
@@ -209,13 +257,14 @@ export async function getMarketSentiment() {
       note: vixVal ? `VIX at ${vixVal} — ${sentiment.label}` : 'VIX unavailable',
     },
     vix: {
-      value: vixVal,
+      value:      vixVal,
       change_pct: vix?.chg_pct ?? null,
+      source:     vix?.source  ?? null,
     },
     indices: {
-      sp500:  { price: sp500?.price,  chg_pct: sp500?.chg_pct  ?? 'n/a' },
-      nasdaq: { price: nasdaq?.price, chg_pct: nasdaq?.chg_pct ?? 'n/a' },
-      dow:    { price: dow?.price,    chg_pct: dow?.chg_pct    ?? 'n/a' },
+      sp500:  { price: spy?.price,  chg_pct: spy?.chg_pct  ?? 'n/a', proxy: 'SPY'  },
+      nasdaq: { price: qqq?.price,  chg_pct: qqq?.chg_pct  ?? 'n/a', proxy: 'QQQ'  },
+      dow:    { price: dia?.price,  chg_pct: dia?.chg_pct  ?? 'n/a', proxy: 'DIA'  },
     },
     futures: {
       es: { price: es?.price, chg_pct: es?.chg_pct ?? 'n/a', label: 'S&P 500 Futures' },
@@ -251,7 +300,11 @@ export async function getSectorPerformance() {
   if (cached) return { ...cached, cached: true };
 
   const symbols = Object.keys(SECTORS);
-  const quotes  = await fetchAll(symbols, 800);
+  // Moomoo first (real-time), Yahoo fallback for any misses
+  const moomooMap = await fetchMoomooQuotes(symbols);
+  const missing   = symbols.filter(s => !moomooMap.has(s));
+  const yfMap     = missing.length > 0 ? await fetchAll(missing, 600) : new Map();
+  const quotes    = new Map([...moomooMap, ...yfMap]);
 
   const results = symbols
     .map(sym => {

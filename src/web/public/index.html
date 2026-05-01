@@ -1248,6 +1248,12 @@
     </div>
   </div>
 
+  <!-- Claude API Cost Per Day -->
+  <div class="table-wrap" style="margin-bottom:16px">
+    <div class="table-head"><h3>Claude API Cost Per Day (Last 30 Days)</h3></div>
+    <div id="statsCostPerDay"><div class="loading">Loading…</div></div>
+  </div>
+
   <!-- Claude API Summary by Source -->
   <div class="table-wrap" style="margin-bottom:16px">
     <div class="table-head"><h3>Claude API — By Source (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
@@ -4459,17 +4465,27 @@ async function loadScores() {
 // ── Market ────────────────────────────────────────────
 async function loadMarket() {
   const d = await api('/api/market');
-  if (!d) return;
+
+  if (!d) {
+    const msg = '<div style="color:#8b949e;padding:12px 0">⚡ Server unreachable</div>';
+    document.getElementById('marketCards').innerHTML = msg;
+    document.getElementById('sectorBars').innerHTML  = msg;
+    document.getElementById('moversList').innerHTML  = msg;
+    return;
+  }
+
   const s = d.sentiment;
+  const offline = !s && !d.sectors && !d.movers;
+  const offlineNote = offline ? ' <span style="font-size:0.72rem;color:#8b949e">· offline</span>' : '';
 
   document.getElementById('marketCards').innerHTML = `
     <div class="card">
-      <div class="card-label">S&P 500</div>
+      <div class="card-label">S&amp;P 500${offlineNote}</div>
       <div class="card-value ${colorClass(s?.indices?.sp500?.chg_pct)}">${s?.indices?.sp500?.price ? '$' + Number(s.indices.sp500.price).toLocaleString() : '—'}</div>
       <div class="card-sub">${fmtPct(s?.indices?.sp500?.chg_pct)}</div>
     </div>
     <div class="card">
-      <div class="card-label">Nasdaq</div>
+      <div class="card-label">Nasdaq${offlineNote}</div>
       <div class="card-value ${colorClass(s?.indices?.nasdaq?.chg_pct)}">${s?.indices?.nasdaq?.price ? '$' + Number(s.indices.nasdaq.price).toLocaleString() : '—'}</div>
       <div class="card-sub">${fmtPct(s?.indices?.nasdaq?.chg_pct)}</div>
     </div>
@@ -4482,7 +4498,9 @@ async function loadMarket() {
   // Sector bars
   const sectors = d.sectors?.all_sectors ?? [];
   const maxAbs = Math.max(...sectors.map(s => Math.abs(s.chg_pct ?? 0)), 1);
-  document.getElementById('sectorBars').innerHTML = sectors.slice(0, 12).map(s => `
+  document.getElementById('sectorBars').innerHTML = sectors.length === 0
+    ? `<div style="color:#8b949e;padding:8px 0">${offline ? '📡 No internet — sector data unavailable' : 'No sector data — market may be closed'}</div>`
+    : sectors.slice(0, 12).map(s => `
     <div class="sector-row">
       <div class="sector-name">${s.sector}</div>
       <div class="sector-bar-wrap">
@@ -4495,7 +4513,7 @@ async function loadMarket() {
   // Movers
   const movers = d.movers?.gainers ?? [];
   document.getElementById('moversList').innerHTML = movers.length === 0
-    ? '<div style="color:#8b949e">No data — market may be closed</div>'
+    ? `<div style="color:#8b949e">${offline ? '📡 No internet — movers unavailable' : 'No data — market may be closed'}</div>`
     : movers.map(m => `
       <div class="mover">
         <div class="mover-sym"><span class="sym-link" data-symbol="${m.symbol}">${m.symbol}</span></div>
@@ -4782,9 +4800,67 @@ async function loadStats() {
 
   const sourceLabel = { auto_scan: '🔄 Auto Scanner', morning_briefing: '☀️ Morning Briefing', telegram_chat: '💬 Telegram Chat', dashboard_chat: '🖥 Dashboard Chat' };
 
+  // ── Cost Per Day table ────────────────────────────────
+  const daily = detail?.detail?.daily ?? [];
+  const summary = detail?.summary ?? [];
+  const costByDate = {};
+  for (const r of daily) {
+    if (!costByDate[r.date]) costByDate[r.date] = { date: r.date, calls: 0, input: 0, output: 0, tools: 0, cost: 0 };
+    costByDate[r.date].calls  += Number(r.calls);
+    costByDate[r.date].input  += Number(r.input_tokens);
+    costByDate[r.date].output += Number(r.output_tokens);
+    costByDate[r.date].tools  += Number(r.tool_calls);
+    costByDate[r.date].cost   += parseFloat(r.cost_usd);
+  }
+  // Fallback: use usage_stats rows if api_calls not populated
+  const costRows = Object.keys(costByDate).length > 0
+    ? Object.values(costByDate).sort((a, b) => b.date.localeCompare(a.date))
+    : summary.map(r => ({
+        date:   r.date?.split('T')[0] ?? r.date,
+        calls:  Number(r.total_messages),
+        input:  Number(r.input_tokens),
+        output: Number(r.output_tokens),
+        tools:  Number(r.total_tool_calls),
+        cost:   parseFloat(r.estimated_cost_usd),
+      })).sort((a, b) => b.date.localeCompare(a.date));
+
+  if (costRows.length > 0) {
+    const maxCost = Math.max(...costRows.map(r => r.cost), 0.0001);
+    const totalCost = costRows.reduce((s, r) => s + r.cost, 0);
+    const avgCost   = totalCost / costRows.length;
+    document.getElementById('statsCostPerDay').innerHTML = `
+      <div style="display:flex;gap:24px;padding:14px 16px 8px;border-bottom:1px solid #21262d;font-size:0.82rem;color:#8b949e">
+        <span>30-day total: <strong style="color:#e6edf3">$${totalCost.toFixed(4)}</strong></span>
+        <span>Daily avg: <strong style="color:#e6edf3">$${avgCost.toFixed(4)}</strong></span>
+        <span>Days tracked: <strong style="color:#e6edf3">${costRows.length}</strong></span>
+      </div>
+      <table>
+        <tr><th>Date</th><th>Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Tools</th><th>Cost</th><th style="width:160px">Bar</th></tr>
+        ${costRows.map(r => {
+          const barPct = Math.round((r.cost / maxCost) * 100);
+          const barColor = r.cost > avgCost * 1.5 ? '#f85149' : r.cost > avgCost ? '#f0883e' : '#3fb950';
+          const dateStr = new Date(r.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+          return `<tr>
+            <td><strong>${dateStr}</strong></td>
+            <td>${r.calls.toLocaleString()}</td>
+            <td>${r.input.toLocaleString()}</td>
+            <td>${r.output.toLocaleString()}</td>
+            <td>${r.tools.toLocaleString()}</td>
+            <td class="pos"><strong>$${r.cost.toFixed(4)}</strong></td>
+            <td>
+              <div style="background:#21262d;border-radius:4px;height:10px;overflow:hidden">
+                <div style="width:${barPct}%;height:100%;background:${barColor};border-radius:4px;transition:width .3s"></div>
+              </div>
+            </td>
+          </tr>`;
+        }).join('')}
+      </table>`;
+  } else {
+    document.getElementById('statsCostPerDay').innerHTML = '<div class="empty">No cost data yet — send a chat message to start tracking</div>';
+  }
+
   // ── By-source summary (api_calls) or fallback to usage_stats aggregate ───
   const totals = detail?.detail?.totals ?? [];
-  const summary = detail?.summary ?? [];
   if (totals.length > 0) {
     document.getElementById('statsSource').innerHTML = `<table>
         <tr><th>Source</th><th>Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Tool Calls</th><th>Avg Input/Call</th><th>Total Cost</th></tr>
@@ -4837,7 +4913,6 @@ async function loadStats() {
   }
 
   // ── Daily breakdown (api_calls) or fallback to usage_stats ───────────────
-  const daily = detail?.detail?.daily ?? [];
   const byDate = {};
   for (const r of daily) {
     if (!byDate[r.date]) byDate[r.date] = [];
@@ -7110,15 +7185,34 @@ function saveChatHistory() {
   try { localStorage.setItem(CHAT_STORAGE_KEY, msgs.innerHTML); } catch {}
 }
 
-function loadChatHistory() {
+async function loadChatHistory() {
+  const msgs = document.getElementById('chatMessages');
+  // Show cached version instantly while we fetch from server
   try {
     const saved = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (saved) {
-      document.getElementById('chatMessages').innerHTML = saved;
-      return true;
-    }
+    if (saved) msgs.innerHTML = saved;
   } catch {}
-  return false;
+
+  try {
+    const res = await fetch('/api/chat/history');
+    if (!res.ok) return;
+    const { messages } = await res.json();
+    if (!messages || !messages.length) return;
+
+    msgs.innerHTML = '';
+    for (const m of messages) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + (m.role === 'user' ? 'user' : 'assistant');
+      if (m.role === 'user') {
+        div.textContent = m.content;
+      } else {
+        div.innerHTML = renderMarkdown(m.content);
+      }
+      msgs.appendChild(div);
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+    try { localStorage.setItem(CHAT_STORAGE_KEY, msgs.innerHTML); } catch {}
+  } catch {}
 }
 
 // ── Chat window resize ────────────────────────────────
@@ -7185,9 +7279,7 @@ function toggleChat() {
   const isOpen = widget.classList.toggle('open');
   if (isOpen) {
     restoreChatSize();
-    if (!loadChatHistory()) {
-      // first open — show welcome message
-    }
+    loadChatHistory();
     // Clear notification badge
     const badge = document.getElementById('chatFabBadge');
     if (badge) badge.remove();
