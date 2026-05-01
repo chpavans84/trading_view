@@ -694,6 +694,11 @@
   .chat-msg.assistant { background: #21262d; border: 1px solid #30363d; color: #e6edf3; align-self: flex-start; border-bottom-left-radius: 4px; }
   .chat-msg.assistant strong { color: #58a6ff; }
   .chat-msg.tool-indicator { background: #0d2818; border: 1px solid #238636; color: #3fb950; font-size: 0.78rem; align-self: flex-start; padding: 5px 10px; border-radius: 8px; }
+  .knowledge-answer { background: #0d1117; border: 1px solid #1f6feb; border-left: 3px solid #1f6feb; border-radius: 8px; padding: 12px 16px; margin: 8px 0; max-width: 90%; align-self: flex-start; }
+  .knowledge-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.75rem; }
+  .knowledge-label { color: #58a6ff; font-weight: 600; font-size: 0.78rem; }
+  .knowledge-model { color: #484f58; font-size: 0.72rem; margin-left: auto; }
+  .knowledge-content { color: #c9d1d9; font-size: 0.87rem; line-height: 1.6; white-space: pre-wrap; }
   .chat-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #30363d; background: #0d1117; flex-shrink: 0; }
   .chat-input { flex: 1; padding: 9px 12px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #e6edf3; font-size: max(16px, 0.9rem); resize: none; height: 40px; max-height: 100px; outline: none; }
   .chat-input:focus { border-color: #58a6ff; }
@@ -709,11 +714,13 @@
     transition: all 0.15s;
   }
   .voice-mic-btn:hover { border-color: #58a6ff; color: #58a6ff; background: #0d1f38; }
+  .voice-mic-btn:active { transform: scale(0.93); }
   .voice-mic-btn.listening {
     background: #3d0f0f; border-color: #f85149; color: #f85149;
     animation: micPulse 1s ease-in-out infinite;
   }
   .voice-mic-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .voice-mic-btn { user-select: none; -webkit-user-select: none; touch-action: none; }
   .voice-tts-btn {
     background: none; border: none; font-size: 1rem; cursor: pointer;
     color: #8b949e; padding: 2px 6px; border-radius: 4px; transition: all 0.15s;
@@ -3819,8 +3826,11 @@ erDiagram
 • <strong>Check portfolio</strong> — "What's my P&amp;L today?"</div>
   </div>
   <div class="chat-input-row">
-    <button id="voiceMicBtn" class="voice-mic-btn" onclick="toggleMic()" title="Hold to speak">🎤</button>
-    <textarea class="chat-input" id="chatInput" placeholder="Ask anything… or tap 🎤 to speak" rows="1"></textarea>
+    <button id="voiceMicBtn" class="voice-mic-btn"
+      onmousedown="startMic()" onmouseup="stopMic()" onmouseleave="stopMic()"
+      ontouchstart="startMic(event)" ontouchend="stopMic(event)"
+      title="Hold to speak">🎤</button>
+    <textarea class="chat-input" id="chatInput" placeholder="Ask a trade question or 'what is RSI?' for trading education…" rows="1"></textarea>
     <button class="chat-send" id="chatSend" onclick="sendChat()">Send ↵</button>
   </div>
 </div>
@@ -7131,7 +7141,7 @@ async function sendChat() {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, voice_mode: _ttsEnabled }),
       signal: _chatAbort.signal,
     });
 
@@ -7165,7 +7175,19 @@ async function sendChat() {
           const el = document.getElementById(assistantId);
           if (!el) continue;
 
-          if (d.text !== undefined) {
+          if (d.knowledge) {
+            // Replace placeholder bubble with styled knowledge answer
+            fullText = d.content;
+            el.className = 'knowledge-answer';
+            el.innerHTML = `
+              <div class="knowledge-header">
+                <span class="knowledge-icon">📚</span>
+                <span class="knowledge-label">Trading Coach</span>
+                <span class="knowledge-model">via Ollama · ${d.model ?? 'llama3.1:8b'}</span>
+              </div>
+              <div class="knowledge-content">${d.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+            msgs.scrollTop = msgs.scrollHeight;
+          } else if (d.text !== undefined) {
             if (toolIndicatorId) { document.getElementById(toolIndicatorId)?.remove(); toolIndicatorId = null; }
             fullText += d.text;
             el.innerHTML = renderMarkdown(fullText);
@@ -7227,7 +7249,7 @@ function _buildRecognition() {
   r.onstart = () => {
     _micActive = true;
     const btn = document.getElementById('voiceMicBtn');
-    if (btn) { btn.classList.add('listening'); btn.title = 'Listening… tap to stop'; }
+    if (btn) { btn.classList.add('listening'); btn.title = 'Listening… release to send'; }
     document.getElementById('chatInput').placeholder = '🎤 Listening…';
   };
 
@@ -7262,18 +7284,22 @@ function _buildRecognition() {
   return r;
 }
 
-function toggleMic() {
+function startMic(e) {
+  if (e) e.preventDefault();  // prevent touch scroll / text selection
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
     alert('Your browser does not support voice input.\nPlease use Chrome or Edge.');
     return;
   }
-  if (_micActive) {
-    _recognition?.stop();
-    return;
-  }
+  if (_micActive) return;  // already recording
   _recognition = _buildRecognition();
   _recognition.start();
+}
+
+function stopMic(e) {
+  if (e) e.preventDefault();
+  if (!_micActive) return;
+  _recognition?.stop();  // onend fires → auto-sends if there's a transcript
 }
 
 function toggleTTS() {
