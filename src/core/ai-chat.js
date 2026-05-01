@@ -93,8 +93,8 @@ async function getLiveQuote(symbol) {
   }
 }
 
-const PRICE_INPUT_PER_M  = 0.80;   // claude-haiku-4-5 input  $0.80/M tokens
-const PRICE_OUTPUT_PER_M = 4.00;   // claude-haiku-4-5 output $4.00/M tokens
+const PRICE_INPUT_PER_M  = 3.00;   // claude-sonnet-4-6 input  $3.00/M tokens
+const PRICE_OUTPUT_PER_M = 15.00;  // claude-sonnet-4-6 output $15.00/M tokens
 function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
 
 // ─── Lessons cache (5-min TTL, per-user) ─────────────────────────────────────
@@ -699,7 +699,7 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
 
     const t0 = Date.now();
     const stream = anthropic.messages.stream({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: fullSystem,
       tools: TOOLS,
