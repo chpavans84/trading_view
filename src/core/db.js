@@ -186,6 +186,14 @@ DO $$ BEGIN
     ALTER TABLE users ADD COLUMN bot_config JSONB DEFAULT NULL;
   END IF;
 END $$;
+-- Add username to trades for per-user trade history
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name='trades' AND column_name='username') THEN
+    ALTER TABLE trades ADD COLUMN username VARCHAR(64);
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_trades_username ON trades(username);
 
 CREATE TABLE IF NOT EXISTS bug_reports (
   id          SERIAL PRIMARY KEY,
@@ -268,13 +276,19 @@ CREATE TABLE IF NOT EXISTS trade_lessons (
   lesson_type  VARCHAR(30),
   lesson       TEXT NOT NULL,
   ai_source    VARCHAR(20),
+  username     VARCHAR(64),
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_lessons_date ON trade_lessons(date);
--- Add ai_source to existing tables created before this migration
+-- Backfill columns added after initial release
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trade_lessons' AND column_name='ai_source') THEN
     ALTER TABLE trade_lessons ADD COLUMN ai_source VARCHAR(20);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='trade_lessons' AND column_name='username') THEN
+    ALTER TABLE trade_lessons ADD COLUMN username VARCHAR(64);
   END IF;
 END $$;
 
@@ -282,14 +296,44 @@ CREATE TABLE IF NOT EXISTS performance_patterns (
   id           SERIAL PRIMARY KEY,
   regime       VARCHAR(30) NOT NULL,
   vix_bucket   VARCHAR(20) NOT NULL,
+  username     VARCHAR(64) NOT NULL DEFAULT 'system',
   trades       INT DEFAULT 0,
   wins         INT DEFAULT 0,
   total_pnl    NUMERIC(12,2) DEFAULT 0,
   win_rate     NUMERIC(5,2) DEFAULT 0,
   avg_pnl      NUMERIC(10,2) DEFAULT 0,
-  updated_at   TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(regime, vix_bucket)
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='performance_patterns' AND column_name='username') THEN
+    ALTER TABLE performance_patterns ADD COLUMN username VARCHAR(64) DEFAULT 'system';
+    ALTER TABLE performance_patterns DROP CONSTRAINT IF EXISTS performance_patterns_regime_vix_bucket_key;
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_perf_patterns_user
+  ON performance_patterns(username, regime, vix_bucket);
+
+-- Daily picks log: every strong-buy and intraday pick saved for future simulation
+CREATE TABLE IF NOT EXISTS daily_picks (
+  id            SERIAL PRIMARY KEY,
+  date          DATE         NOT NULL,
+  type          VARCHAR(20)  NOT NULL,  -- 'strong_buy' | 'intraday'
+  symbol        VARCHAR(20)  NOT NULL,
+  name          VARCHAR(100),
+  score         NUMERIC(5,1),           -- conviction score (strong_buy)
+  grade         VARCHAR(5),             -- A/B (strong_buy)
+  horizon       VARCHAR(50),
+  price         NUMERIC(12,4),          -- entry price at pick time
+  rvol          NUMERIC(6,2),
+  atr_pct       NUMERIC(6,2),
+  stop_price    NUMERIC(12,4),
+  target_price  NUMERIC(12,4),
+  signals       JSONB,                  -- full signals for replay
+  created_at    TIMESTAMPTZ  DEFAULT NOW(),
+  UNIQUE(date, type, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_picks_date ON daily_picks(date);
+CREATE INDEX IF NOT EXISTS idx_daily_picks_type ON daily_picks(type);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -363,12 +407,15 @@ export async function loadConversationHistory(chatId) {
   }
 }
 
-export async function appendConversationMessage(chatId, role, content) {
+export async function appendConversationMessage(chatId, message) {
   if (!dbAvailable) return;
+  const { role, content } = message ?? {};
+  if (!role) return;
+  const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
   try {
     await query(
       `INSERT INTO conversation_history (chat_id, role, content) VALUES ($1, $2, $3)`,
-      [chatId, role, typeof content === 'string' ? content : JSON.stringify(content)]
+      [chatId, role, contentStr]
     );
     // Keep only last 40 messages per chat
     await query(
@@ -513,6 +560,7 @@ export async function recordTrade({
   stop_loss, take_profit, dollars_invested,
   stop_loss_pct, take_profit_pct, atr_pct,
   conviction_score, conviction_grade, conviction_breakdown,
+  username,
 }) {
   if (!dbAvailable) return null;
   try {
@@ -520,14 +568,15 @@ export async function recordTrade({
       `INSERT INTO trades
          (order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
           dollars_invested, stop_loss_pct, take_profit_pct, atr_pct,
-          conviction_score, conviction_grade, conviction_breakdown)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          conviction_score, conviction_grade, conviction_breakdown, username)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (order_id) DO NOTHING
        RETURNING id`,
       [order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
        dollars_invested, stop_loss_pct, take_profit_pct, atr_pct,
        conviction_score, conviction_grade,
-       conviction_breakdown ? JSON.stringify(conviction_breakdown) : null]
+       conviction_breakdown ? JSON.stringify(conviction_breakdown) : null,
+       username ?? null]
     );
     return rows[0]?.id ?? null;
   } catch (err) {
@@ -549,14 +598,17 @@ export async function closeTrade({ order_id, exit_price, pnl_usd, pnl_pct }) {
   }
 }
 
-export async function getTrades({ status, limit = 50 } = {}) {
+export async function getTrades({ status, username, limit = 50 } = {}) {
   if (!dbAvailable) return null;
   try {
+    const where = [];
+    const params = [];
+    if (status)   { where.push(`status = $${params.length + 1}`);   params.push(status); }
+    if (username) { where.push(`username = $${params.length + 1}`); params.push(username); }
+    const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const { rows } = await query(
-      `SELECT * FROM trades
-       ${status ? 'WHERE status = $1' : ''}
-       ORDER BY opened_at DESC LIMIT ${limit}`,
-      status ? [status] : []
+      `SELECT * FROM trades ${whereClause} ORDER BY opened_at DESC LIMIT ${limit}`,
+      params
     );
     return rows;
   } catch (err) {
@@ -576,6 +628,65 @@ export async function logRejection({ symbol, reason, conviction_score = null }) 
     );
   } catch (err) {
     console.error('logRejection error:', err.message);
+  }
+}
+
+// ─── Daily Picks (strong-buy + intraday — stored for simulation) ─────────────
+
+export async function saveDailyPick(pick) {
+  if (!dbAvailable) return;
+  try {
+    await query(
+      `INSERT INTO daily_picks
+         (date, type, symbol, name, score, grade, horizon, price,
+          rvol, atr_pct, stop_price, target_price, signals)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       ON CONFLICT (date, type, symbol) DO UPDATE SET
+         price        = EXCLUDED.price,
+         rvol         = EXCLUDED.rvol,
+         atr_pct      = EXCLUDED.atr_pct,
+         stop_price   = EXCLUDED.stop_price,
+         target_price = EXCLUDED.target_price,
+         signals      = EXCLUDED.signals`,
+      [
+        pick.date, pick.type, pick.symbol, pick.name ?? null,
+        pick.score ?? null, pick.grade ?? null, pick.horizon ?? null,
+        pick.price ?? null, pick.rvol ?? null, pick.atr_pct ?? null,
+        pick.stop_price ?? null, pick.target_price ?? null,
+        pick.signals ? JSON.stringify(pick.signals) : null,
+      ]
+    );
+  } catch (err) {
+    console.error('saveDailyPick error:', err.message);
+  }
+}
+
+export async function getDailyPicks({ date, type, days = 30, limit = 200 } = {}) {
+  if (!dbAvailable) return [];
+  try {
+    const conditions = [];
+    const params     = [];
+    if (date) {
+      params.push(date);
+      conditions.push(`date = $${params.length}`);
+    } else {
+      params.push(days);
+      conditions.push(`date >= CURRENT_DATE - ($${params.length} || ' days')::INTERVAL`);
+    }
+    if (type) {
+      params.push(type);
+      conditions.push(`type = $${params.length}`);
+    }
+    params.push(limit);
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await query(
+      `SELECT * FROM daily_picks ${where} ORDER BY date DESC, score DESC NULLS LAST LIMIT $${params.length}`,
+      params
+    );
+    return rows;
+  } catch (err) {
+    console.error('getDailyPicks error:', err.message);
+    return [];
   }
 }
 
@@ -1227,52 +1338,58 @@ export async function deletePositionMonitoring(symbol) {
 
 // ─── Trade Lessons ────────────────────────────────────────────────────────────
 
-export async function saveLesson({ date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source }) {
+export async function saveLesson({ date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source, username }) {
   if (!isDbAvailable()) return;
   try {
     await query(
       `INSERT INTO trade_lessons
-         (date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source ?? 'unknown']
+         (date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source, username)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [date, symbol, outcome, pnl_usd, regime, vix, lesson_type, lesson, ai_source ?? 'unknown', username ?? null]
     );
   } catch (e) { console.error('saveLesson error:', e.message); }
 }
 
-export async function getRecentLessons({ limit = 15 } = {}) {
+export async function getRecentLessons({ limit = 15, username } = {}) {
   if (!isDbAvailable()) return [];
   try {
+    const where  = username ? 'WHERE username = $2' : '';
+    const params = username ? [limit, username]     : [limit];
     const { rows } = await query(
       `SELECT date, symbol, outcome, pnl_usd, regime, lesson_type, lesson, ai_source
-       FROM trade_lessons ORDER BY created_at DESC LIMIT $1`,
-      [limit]
+       FROM trade_lessons ${where} ORDER BY created_at DESC LIMIT $1`,
+      params
     );
     return rows;
   } catch { return []; }
 }
 
-export async function upsertPerformancePattern({ regime, vix_bucket, trades, wins, total_pnl }) {
+export async function upsertPerformancePattern({ regime, vix_bucket, trades, wins, total_pnl, username }) {
   if (!isDbAvailable()) return;
   const win_rate = trades > 0 ? +((wins / trades) * 100).toFixed(1) : 0;
-  const avg_pnl  = trades > 0 ? +(total_pnl / trades).toFixed(2) : 0;
+  const avg_pnl  = trades > 0 ? +(total_pnl / trades).toFixed(2)   : 0;
+  const uname    = username ?? 'system';
   try {
     await query(
-      `INSERT INTO performance_patterns (regime, vix_bucket, trades, wins, total_pnl, win_rate, avg_pnl)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (regime, vix_bucket) DO UPDATE
-       SET trades=$3, wins=$4, total_pnl=$5, win_rate=$6, avg_pnl=$7, updated_at=NOW()`,
-      [regime, vix_bucket, trades, wins, total_pnl, win_rate, avg_pnl]
+      `INSERT INTO performance_patterns (username, regime, vix_bucket, trades, wins, total_pnl, win_rate, avg_pnl)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (username, regime, vix_bucket) DO UPDATE
+       SET trades=$4, wins=$5, total_pnl=$6, win_rate=$7, avg_pnl=$8, updated_at=NOW()`,
+      [uname, regime, vix_bucket, trades, wins, total_pnl, win_rate, avg_pnl]
     );
   } catch (e) { console.error('upsertPerformancePattern error:', e.message); }
 }
 
-export async function getPerformancePatterns() {
+export async function getPerformancePatterns({ username } = {}) {
   if (!isDbAvailable()) return [];
   try {
+    const where  = username ? `WHERE username = $1` : `WHERE username = 'system'`;
+    const params = username ? [username]             : [];
     const { rows } = await query(
       `SELECT regime, vix_bucket, trades, wins, win_rate, avg_pnl
-       FROM performance_patterns WHERE trades >= 3
-       ORDER BY win_rate DESC`
+       FROM performance_patterns ${where} AND trades >= 3
+       ORDER BY win_rate DESC`,
+      params
     );
     return rows;
   } catch { return []; }

@@ -18,7 +18,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
@@ -29,8 +29,8 @@ import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, 
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
-import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
-import { chat, clearHistory } from '../core/ai-chat.js';
+import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
+import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
 import { getMarketContext } from '../core/market-context.js';
@@ -1196,6 +1196,26 @@ async function runStrongBuysScan() {
     results.sort((a, b) => b.score - a.score);
     _sbCache   = { picks: results, scanned: symbols.length, generated_at: new Date().toISOString() };
     _sbCacheTs = Date.now();
+
+    // Persist to DB for future simulation — store today's date in ET
+    if (results.length > 0 && isDbAvailable()) {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      for (const p of results) {
+        saveDailyPick({
+          date:    today,
+          type:    'strong_buy',
+          symbol:  p.symbol,
+          name:    p.name,
+          score:   p.score,
+          grade:   p.grade,
+          horizon: p.horizon,
+          price:   p.signals?.analyst_target ?? null,
+          rvol:    p.signals?.rvol ?? null,
+          signals: p.signals,
+        }).catch(() => {});
+      }
+    }
+
     return _sbCache;
   } finally {
     _sbScanning = false;
@@ -1273,10 +1293,16 @@ const INTRADAY_UNIVERSE = [
 ];
 
 async function fetchATRPct(symbol) {
+  // Tier 1: Moomoo (real-time OHLCV)
+  try {
+    const atr = await getMoomooAtrPct({ symbol, period: 14 });
+    if (atr != null) return atr;
+  } catch { /* fall through */ }
+  // Tier 2: Yahoo Finance fallback
   try {
     const r = await fetch(
       `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=30d`,
-      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(6000) }
     );
     if (!r.ok) return null;
     const d   = await r.json();
@@ -1295,10 +1321,22 @@ async function fetchATRPct(symbol) {
 }
 
 async function fetchRVOL(symbol) {
+  // Tier 1: Moomoo KLines (real-time volume)
+  try {
+    const result = await getMoomooKLines({ symbol, klType: 'day', count: 22 });
+    if (result?.success && result.candles?.length >= 5) {
+      const candles = result.candles;
+      const today   = candles.at(-1)?.volume ?? 0;
+      const prev    = candles.slice(0, -1);
+      const avgVol  = prev.reduce((s, c) => s + (c.volume ?? 0), 0) / prev.length;
+      return avgVol > 0 ? +(today / avgVol).toFixed(2) : null;
+    }
+  } catch { /* fall through */ }
+  // Tier 2: Yahoo Finance fallback
   try {
     const r = await fetch(
       `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=30d`,
-      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(6000) }
     );
     if (!r.ok) return null;
     const d   = await r.json();
@@ -1311,10 +1349,16 @@ async function fetchRVOL(symbol) {
 }
 
 async function fetchCurrentPrice(symbol) {
+  // Tier 1: Moomoo (real-time)
+  try {
+    const q = await getMoomooQuote(symbol);
+    if (q?.success && q.price != null) return { price: +q.price.toFixed(2), change_pct: q.change_pct ?? null };
+  } catch { /* fall through */ }
+  // Tier 2: Yahoo Finance fallback
   try {
     const r = await fetch(
       `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`,
-      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(6000) }
     );
     if (!r.ok) return null;
     const d = await r.json();
@@ -1432,8 +1476,39 @@ async function runIntradayScan() {
     // Sort: RVOL × ATR score (best intraday opportunity first)
     picks.sort((a, b) => (b.rvol * b.atr_pct) - (a.rvol * a.atr_pct));
 
-    _idCache   = { picks: picks.slice(0, 8), scanned: symbols.length, generated_at: new Date().toISOString() };
+    const topPicks = picks.slice(0, 8);
+    _idCache   = { picks: topPicks, scanned: symbols.length, generated_at: new Date().toISOString() };
     _idCacheTs = Date.now();
+
+    // Persist to DB for future simulation
+    if (topPicks.length > 0 && isDbAvailable()) {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      for (const p of topPicks) {
+        saveDailyPick({
+          date:         today,
+          type:         'intraday',
+          symbol:       p.symbol,
+          price:        p.price,
+          rvol:         p.rvol,
+          atr_pct:      p.atr_pct,
+          stop_price:   p.stop_price,
+          target_price: p.target_price,
+          signals: {
+            setup:       p.setup,
+            setup_desc:  p.setup_desc,
+            change_pct:  p.change_pct,
+            qty:         p.qty,
+            invested:    p.invested,
+            stop_pct:    p.stop_pct,
+            target_pct:  p.target_pct,
+            est_profit:  p.est_profit,
+            est_risk:    p.est_risk,
+            rr:          p.rr,
+          },
+        }).catch(() => {});
+      }
+    }
+
     return _idCache;
   } finally {
     _idScanning = false;
@@ -1447,6 +1522,22 @@ app.get('/api/intraday-picks', async (req, res) => {
       return res.json(_idCache);
     const result = await runIntradayScan();
     res.json(result ?? { picks: [], scanned: 0, generated_at: new Date().toISOString() });
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Historical picks log — for simulation and backtesting
+app.get('/api/picks/history', requireAuth, async (req, res) => {
+  try {
+    const { date, type, days } = req.query;
+    const picks = await getDailyPicks({
+      date:  date  || null,
+      type:  type  || null,
+      days:  days  ? parseInt(days) : 30,
+      limit: 500,
+    });
+    res.json({ picks, total: picks.length });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
@@ -1982,6 +2073,26 @@ app.post('/api/chat/clear', requireAuth, (req, res) => {
   const username = req.session?.username;
   if (username) clearHistory(userChatId(username));
   res.json({ ok: true });
+});
+
+app.get('/api/chat/history', requireAuth, async (req, res) => {
+  const username = req.session?.username;
+  if (!username) return res.json({ messages: [] });
+  const chatId = userChatId(username);
+
+  // Prefer in-memory (always up-to-date); fall back to DB
+  let msgs = chatHistory.get(chatId) ?? null;
+  if (!msgs || msgs.length === 0) {
+    msgs = await loadConversationHistory(chatId) ?? [];
+  }
+
+  // Return only user/assistant text pairs — skip tool_use/tool_result blocks
+  const displayable = msgs
+    .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .slice(-30)
+    .map(m => ({ role: m.role, content: m.content }));
+
+  res.json({ messages: displayable });
 });
 
 // ─── Admin AI Chat (SSE streaming — admin role only) ──────────────────────────
