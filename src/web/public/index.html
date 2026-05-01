@@ -1894,6 +1894,7 @@
             🚩 Reports <span id="adminRptBadge" style="display:none;position:absolute;top:4px;right:4px;background:#f85149;color:#fff;border-radius:50%;width:8px;height:8px;font-size:0;"></span>
           </button>
           <button id="adminViewTerm" onclick="setAdminView('terminal')" style="background:none;border:none;color:#8b949e;padding:6px 14px;font-size:0.8rem;cursor:pointer">💻 Terminal</button>
+          <button id="adminViewArch" onclick="setAdminView('arch')" style="background:none;border:none;color:#8b949e;padding:6px 14px;font-size:0.8rem;cursor:pointer">🏗️ Architecture</button>
         </div>
         <button id="adminClearBtn" onclick="clearAdminChat()" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:8px;padding:6px 14px;font-size:0.8rem;cursor:pointer" title="Clear conversation">↺ Clear</button>
       </div>
@@ -2033,6 +2034,765 @@
       <div id="term-status" style="font-size:0.72rem;color:#6e7681;flex-shrink:0">Disconnected</div>
     </div>
 
+    <!-- Architecture panel -->
+    <div id="adminArchPanel" style="display:none;flex:1;overflow-y:auto;min-height:0;flex-direction:column;gap:0">
+
+      <!-- Sub-nav -->
+      <div style="display:flex;gap:2px;margin-bottom:14px;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:4px;flex-shrink:0;flex-wrap:wrap">
+        <button class="arch-tab-btn active" data-av="map"   onclick="showArch('map')">🗺️ System Map</button>
+        <button class="arch-tab-btn" data-av="chat"  onclick="showArch('chat')">💬 Chat Flow</button>
+        <button class="arch-tab-btn" data-av="scan"  onclick="showArch('scan')">🔍 Scan Engine</button>
+        <button class="arch-tab-btn" data-av="score" onclick="showArch('score')">🎯 Conviction Score</button>
+        <button class="arch-tab-btn" data-av="data"  onclick="showArch('data')">📡 Data Sources</button>
+      </div>
+
+      <!-- ══════════ MAP VIEW ══════════ -->
+      <div id="av-map" class="arch-view">
+        <div class="arch-header">Full System Architecture</div>
+        <div class="arch-subhead">Every component, data source, and connection that powers your trading bot — from your question to the executed trade.</div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#8b949e">YOU</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node" style="--nc:#58a6ff">
+              <span class="amap-node-icon">📱</span>
+              <strong>Browser Dashboard</strong>
+              <span>SPA · HTTP/WebSocket · port 3000</span>
+            </div>
+            <div class="amap-node" style="--nc:#58a6ff">
+              <span class="amap-node-icon">💬</span>
+              <strong>Telegram Bot</strong>
+              <span>Long-polling · private chat only</span>
+            </div>
+            <div class="amap-node" style="--nc:#d29922">
+              <span class="amap-node-icon">⏰</span>
+              <strong>Cron Scheduler</strong>
+              <span>node-cron · 6 jobs · ET timezone · auto</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="amap-between">
+          <div class="amap-between-line" style="--ac:#e3b341"></div>
+          <div class="amap-between-label" style="--ac:#e3b341">HTTP POST · Telegram polling · Cron events</div>
+        </div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#e3b341">SERVER</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node amap-wide" style="--nc:#e3b341">
+              <span class="amap-node-icon">🖥️</span>
+              <strong>Express.js Server · :3000</strong>
+              <span>Helmet · CORS · Rate Limit 30 req/min · express-session (PostgreSQL store) · bcrypt auth · WebSocket server (node-pty terminal) · Cron manager · SSE events</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="amap-between">
+          <div class="amap-between-line" style="--ac:#58a6ff"></div>
+          <div class="amap-between-label" style="--ac:#58a6ff">Authenticated request → AI routing</div>
+        </div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#58a6ff">AI</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node" style="--nc:#58a6ff">
+              <span class="amap-node-icon">🤖</span>
+              <strong>AI Chat Engine</strong>
+              <span>ai-chat.js · Claude Haiku 4.5 · $0.80/$4.00/M tokens · 20-msg history per user · 18 tools available</span>
+            </div>
+            <div class="amap-node" style="--nc:#388bfd">
+              <span class="amap-node-icon">🔐</span>
+              <strong>Admin AI</strong>
+              <span>admin-ai.js · Claude Haiku 4.5 · Full system access · User mgmt · Scanner control</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="amap-between">
+          <div class="amap-between-line" style="--ac:#39d353"></div>
+          <div class="amap-between-label" style="--ac:#39d353">executeTool() dispatch · tools called in sequence per Claude's reasoning</div>
+        </div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#39d353">INTELLIGENCE</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node" style="--nc:#39d353">
+              <span class="amap-node-icon">🌍</span>
+              <strong>Market Context</strong>
+              <span>getMarketContext() · 15-min cache · Outputs: regime / direction / VIX / leading sectors / catalysts</span>
+            </div>
+            <div class="amap-node" style="--nc:#39d353">
+              <span class="amap-node-icon">🎯</span>
+              <strong>Stock Selector</strong>
+              <span>selectBestTrade() · Up to 12 candidates · Deterministic scoring · Zero LLM calls</span>
+            </div>
+            <div class="amap-node" style="--nc:#39d353">
+              <span class="amap-node-icon">⚡</span>
+              <strong>Conviction Engine</strong>
+              <span>getConvictionScore() · 6 weighted factors · 0–100 score · 5-min cache · Parallel fetches</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="amap-between">
+          <div class="amap-between-line" style="--ac:#3fb950"></div>
+          <div class="amap-between-label" style="--ac:#3fb950">Data requests · Fallback chains · Results flow back up</div>
+        </div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#3fb950">DATA</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node" style="--nc:#3fb950">
+              <span class="amap-node-icon">🟢</span>
+              <strong>Moomoo OpenD</strong>
+              <span>TCP :11111 · Real-time quotes · OHLCV K-lines · Positions/orders · ATR · RVOL · Trade execution</span>
+            </div>
+            <div class="amap-node" style="--nc:#d29922">
+              <span class="amap-node-icon">🟡</span>
+              <strong>Yahoo Finance</strong>
+              <span>HTTPS · Historical OHLCV · News · Analyst ratings · Earnings calendar · Futures (ES=F, NQ=F)</span>
+            </div>
+            <div class="amap-node" style="--nc:#f78166">
+              <span class="amap-node-icon">📊</span>
+              <strong>TradingView CDP</strong>
+              <span>Chrome DevTools :9222 · Live RSI/MACD/EMA/BB · Custom Pine levels · Optional</span>
+            </div>
+            <div class="amap-node" style="--nc:#bc8cff">
+              <span class="amap-node-icon">⚡</span>
+              <strong>CBOE VIX CDN</strong>
+              <span>HTTPS · Free · No API key · ~15s delay · Fallback: Yahoo ^VIX</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="amap-between">
+          <div class="amap-between-line" style="--ac:#bc8cff"></div>
+          <div class="amap-between-label" style="--ac:#bc8cff">Persist all events · chat history · trades · picks · API usage</div>
+        </div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#bc8cff">STORAGE</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node" style="--nc:#bc8cff">
+              <span class="amap-node-icon">🗄️</span>
+              <strong>PostgreSQL :5432</strong>
+              <span>users · sessions · trades · conversation_history · daily_picks · performance_patterns · api_usage_stats · conviction_scores · trade_lessons · scanner_state · bug_reports</span>
+            </div>
+            <div class="amap-node" style="--nc:#6e7681">
+              <span class="amap-node-icon">⚡</span>
+              <strong>In-Memory Cache</strong>
+              <span>TTL Map · Sentiment 2min · Market 15min · Scores 5min · Analyst 4hr · Stampede-protection (inflight dedup)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="amap-between">
+          <div class="amap-between-line" style="--ac:#3fb950"></div>
+          <div class="amap-between-label" style="--ac:#3fb950">Bracket order → fill confirmation → P&amp;L update</div>
+        </div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#3fb950">EXECUTION</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node amap-wide" style="--nc:#3fb950">
+              <span class="amap-node-icon">🚀</span>
+              <strong>Moomoo OpenD → US Exchanges</strong>
+              <span>SIMULATE (paper) or REAL (live) controlled by MOOMOO_TRADE_ENV · Bracket orders (entry + stop-loss + take-profit legs) · Order fills, confirmations, and P&amp;L flow back to app in real-time</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /av-map -->
+
+      <!-- ══════════ CHAT FLOW VIEW ══════════ -->
+      <div id="av-chat" class="arch-view" style="display:none">
+        <div class="arch-header">💬 What Happens When You Ask a Question</div>
+        <div class="arch-subhead">Tracing a single message from your keyboard to the AI's response — every module, every data call, in exact order.</div>
+        <div class="aflow">
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#58a6ff">1</div>
+            <div class="aflow-card" style="border-color:#58a6ff33">
+              <div class="aflow-title">You type a question and hit Send</div>
+              <div class="aflow-body">
+                <code>POST /api/chat</code> (user) or <code>POST /api/admin/chat</code> (admin)<br>
+                Auth middleware checks <code>express-session</code> cookie — must be a valid, non-suspended user<br>
+                Rate limiter: 30 requests/min per IP — returns 429 if exceeded<br>
+                Request body: <code>{ message, chatId }</code>
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#58a6ff">Browser → Express :3000</span>
+                <span class="atag" style="--tc:#bc8cff">Session → PostgreSQL</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#bc8cff">2</div>
+            <div class="aflow-card" style="border-color:#bc8cff33">
+              <div class="aflow-title">Load conversation context</div>
+              <div class="aflow-body">
+                <code>userChatId(username)</code> → SHA-256 hash of username → 12-digit numeric ID (stable, unique per user)<br>
+                Check <code>chatHistory Map</code> first — in-memory, zero latency<br>
+                If cold start (server restart): <code>loadConversationHistory(chatId, 20)</code> fetches last 20 messages from PostgreSQL<br>
+                History window is always capped at 20 messages to control token cost
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#6e7681">In-Memory Map (hot path)</span>
+                <span class="atag" style="--tc:#bc8cff">PostgreSQL (cold start only)</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#e3b341">3</div>
+            <div class="aflow-card" style="border-color:#e3b34133">
+              <div class="aflow-title">Build the system prompt</div>
+              <div class="aflow-body">
+                <code>buildSystemPrompt(userCfg, username)</code> assembles a ~320-token instruction block:<br>
+                &nbsp;&nbsp;• Current ET date + time → selects time-of-day strategy (morning / midday / afternoon / EOD)<br>
+                &nbsp;&nbsp;• Your profile: profit target · loss limit · max positions · conviction threshold · VIX max · blocked sectors<br>
+                &nbsp;&nbsp;• Last 15 trading lessons from your closed trades (5-min cache from PostgreSQL)<br>
+                &nbsp;&nbsp;• Historical win rates by regime (e.g. "trending: 68% win rate over 12 trades")<br>
+                &nbsp;&nbsp;• Full trading rulebook: 11 sections covering scan workflow, position monitoring, re-entry blocks, closing protocol, news analysis
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#d29922">User config (bot_config table)</span>
+                <span class="atag" style="--tc:#bc8cff">Trade lessons (5-min cache)</span>
+                <span class="atag" style="--tc:#6e7681">Time-of-day logic</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#58a6ff">4</div>
+            <div class="aflow-card" style="border-color:#58a6ff33">
+              <div class="aflow-title">Claude Haiku 4.5 processes your message</div>
+              <div class="aflow-body">
+                Claude sees: system prompt + conversation history + your message + 18 tool definitions<br>
+                Claude reasons: "Should I answer directly, or do I need to call a tool first?"<br>
+                If tool needed → returns a <code>tool_use</code> block with the tool name and arguments<br>
+                If answering directly → returns text immediately<br>
+                <strong>Pricing:</strong> $0.80/M input tokens · $4.00/M output tokens · ~$0.001 per message average<br>
+                <strong>Latency:</strong> 1–3 seconds to first token
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#58a6ff">Anthropic API (HTTPS)</span>
+                <span class="atag" style="--tc:#6e7681">claude-haiku-4-5-20251001</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#3fb950">5</div>
+            <div class="aflow-card" style="border-color:#3fb95033">
+              <div class="aflow-title">Tool execution (may repeat 2–4 times)</div>
+              <div class="aflow-body">
+                <code>executeTool(name, input)</code> dispatches to the correct module. Most common tool calls:
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-top:8px;font-size:0.76rem">
+                  <div>🟢 <code>get_live_quote</code> → Moomoo → Yahoo</div>
+                  <div>📊 <code>get_chart_technicals</code> → TV → Moomoo → Yahoo</div>
+                  <div>📰 <code>get_news</code> → Yahoo/FinancialJuice</div>
+                  <div>💼 <code>get_portfolio</code> → Moomoo TCP</div>
+                  <div>🔍 <code>scan_for_trades</code> → Stock Selector pipeline</div>
+                  <div>📈 <code>get_conviction_score</code> → Scoring Engine</div>
+                  <div>🚀 <code>propose_trade</code> → Moomoo TCP → Exchange</div>
+                  <div>⚖️ <code>get_market_regime</code> → Market Context</div>
+                </div>
+                Tool result fed back to Claude → Claude may call another tool → repeat until done
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#3fb950">Moomoo TCP :11111</span>
+                <span class="atag" style="--tc:#d29922">Yahoo Finance HTTPS</span>
+                <span class="atag" style="--tc:#f78166">TradingView CDP :9222</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#58a6ff">6</div>
+            <div class="aflow-card" style="border-color:#58a6ff33">
+              <div class="aflow-title">Claude generates your final response</div>
+              <div class="aflow-body">
+                Claude sees all tool results + full conversation history<br>
+                Applies trading rules from system prompt: time-of-day guardrails, pre-trade checklist, re-entry blocks<br>
+                Uses probabilistic language ("likely", "suggests") — never presents a trade as certain<br>
+                Formats output in Markdown (bold, lists, code blocks)<br>
+                Example: <em>"NVDA is at $892.34 (+1.2%). RSI 62, MACD histogram positive, price above both EMAs — technically strong. One key risk: earnings in 3 days…"</em>
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#58a6ff">Anthropic API</span>
+                <span class="atag" style="--tc:#6e7681">Markdown rendered in browser</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#bc8cff">7</div>
+            <div class="aflow-card" style="border-color:#bc8cff33">
+              <div class="aflow-title">Persist to history + log costs</div>
+              <div class="aflow-body">
+                <code>pushHistory(chatId, message)</code>:<br>
+                &nbsp;&nbsp;→ <code>chatHistory Map</code> — in-memory, instant, shared across all your browser tabs<br>
+                &nbsp;&nbsp;→ <code>PostgreSQL conversation_history</code> — durable, syncs to any device<br>
+                History trimmed to last 20 messages automatically<br>
+                <code>recordApiCall()</code> → logs input tokens, output tokens, cost to <code>api_usage_stats</code> table<br>
+                Visible in Stats → Cost Per Day table
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#bc8cff">PostgreSQL (async, non-blocking)</span>
+                <span class="atag" style="--tc:#6e7681">In-Memory Map (sync)</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#39d353">8</div>
+            <div class="aflow-card" style="border-color:#39d35333">
+              <div class="aflow-title">Response appears in your chat — synced across devices</div>
+              <div class="aflow-body">
+                Text rendered with Markdown formatting in the chat bubble<br>
+                Same conversation available on laptop + mobile (fetched from PostgreSQL on page load)<br>
+                Total round-trip: 2–6 seconds depending on how many tools were called
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#39d353">HTTP Response → Browser render</span>
+                <span class="atag" style="--tc:#58a6ff">Cross-device via PostgreSQL</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /av-chat -->
+
+      <!-- ══════════ SCAN ENGINE VIEW ══════════ -->
+      <div id="av-scan" class="arch-view" style="display:none">
+        <div class="arch-header">🔍 How the Scanner Finds and Executes Trades</div>
+        <div class="arch-subhead">Every 10 minutes during market hours this 7-step pipeline runs automatically — or manually from the Scanner tab. Here's exactly what happens inside each step.</div>
+        <div class="aflow">
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#d29922">1</div>
+            <div class="aflow-card" style="border-color:#d2992233">
+              <div class="aflow-title">Trigger</div>
+              <div class="aflow-body">
+                <strong>Auto:</strong> <code>node-cron</code> fires every 10 min, 9:30am–3:50pm ET, weekdays only<br>
+                <strong>Manual:</strong> "▶ Run Scan" button in Admin → Scanner tab (analysis only)<br>
+                <strong>Auto-trade:</strong> "▶ Run &amp; Trade" — executes if selection qualifies<br>
+                6 total background jobs: scan (10min) · position monitor (2min) · morning briefing (9:30am) · EOD summary (4pm) · stale position close (3:50pm) · regime refresh (15min)
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#d29922">node-cron</span>
+                <span class="atag" style="--tc:#58a6ff">Manual UI trigger</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#f85149">2</div>
+            <div class="aflow-card" style="border-color:#f8514933">
+              <div class="aflow-title">Pre-flight gate checks — abort if any fail</div>
+              <div class="aflow-body">
+                All gates must pass or scan stops here:<br>
+                ☑ <code>getMarketStatus()</code> — market must be OPEN<br>
+                ☑ Daily P&amp;L within limits — not hit $150 profit target or -$200 loss limit<br>
+                ☑ VIX below <code>max_vix</code> (default 30) — above this is too dangerous<br>
+                ☑ Open positions below <code>max_open_positions</code> (default 2)<br>
+                ☑ Time: 9:45am – 3:15pm ET only (no entries outside these hours)<br>
+                ☑ Scanner not manually paused by admin
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#f85149">Hard stops — abort on any fail</span>
+                <span class="atag" style="--tc:#bc8cff">PostgreSQL scanner_state</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#39d353">3</div>
+            <div class="aflow-card" style="border-color:#39d35333">
+              <div class="aflow-title">getMarketContext() — understand the battlefield (15-min cache)</div>
+              <div class="aflow-body">
+                Runs 4 sub-fetches in parallel via <code>Promise.allSettled()</code>:<br>
+                &nbsp;&nbsp;• <code>getMarketSentiment()</code> → VIX from CBOE CDN + SPY/QQQ/DIA from Moomoo TCP<br>
+                &nbsp;&nbsp;• <code>getSectorPerformance()</code> → 11 sector ETFs (Moomoo batch → Yahoo fallback per miss)<br>
+                &nbsp;&nbsp;• <code>getMarketMovers()</code> → top day gainers/decliners/most-active (Yahoo Finance)<br>
+                &nbsp;&nbsp;• <code>getEarningsCalendar()</code> → today's earnings reporters (Yahoo Finance)<br><br>
+                Outputs: <strong>regime</strong> (trending / volatile / news-driven / choppy) · <strong>direction</strong> (bullish / bearish / neutral) · leading sectors · today's catalysts<br>
+                <strong>If regime = "choppy" → abort scan entirely — no clear direction</strong>
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#3fb950">Moomoo TCP (indices/sectors)</span>
+                <span class="atag" style="--tc:#d29922">Yahoo Finance (movers/earnings)</span>
+                <span class="atag" style="--tc:#bc8cff">CBOE CDN (VIX)</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#6e7681">4</div>
+            <div class="aflow-card" style="border-color:#6e768133">
+              <div class="aflow-title">buildCandidates() — pick who to analyze (pure logic, zero API calls)</div>
+              <div class="aflow-body">
+                Uses only data from Step 3 — no new network requests:<br>
+                &nbsp;&nbsp;• Watchlist symbols — always included (user's custom list + default 20 large-caps)<br>
+                &nbsp;&nbsp;• Day gainers — added if regime = trending or news-driven<br>
+                &nbsp;&nbsp;• Day decliners — added if regime = volatile (bounce plays near support)<br>
+                &nbsp;&nbsp;• Earnings reporters get <strong>+3 weight boost</strong> if regime is news-driven<br>
+                &nbsp;&nbsp;• Stocks in leading sector get +1 weight boost<br>
+                Results: up to <strong>12 candidates</strong> sorted by relevance weight (most likely to qualify scores highest)
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#6e7681">Pure deterministic logic — zero latency</span>
+                <span class="atag" style="--tc:#d29922">Reuses Step 3 data</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#58a6ff">5</div>
+            <div class="aflow-card" style="border-color:#58a6ff33">
+              <div class="aflow-title">Score all 12 candidates in parallel</div>
+              <div class="aflow-body">
+                <code>Promise.allSettled(candidates.map(sym => getConvictionScore(sym)))</code><br>
+                All 12 scored simultaneously — total time typically 3–8 seconds<br>
+                Each score call fetches in parallel internally:<br>
+                &nbsp;&nbsp;• Real-time price + RVOL + ATR (Moomoo TCP)<br>
+                &nbsp;&nbsp;• 90-day OHLCV for RSI/MACD/EMA/BB computation (Moomoo → Yahoo fallback)<br>
+                &nbsp;&nbsp;• Recent news &lt; 48h (Yahoo Finance / FinancialJuice)<br>
+                &nbsp;&nbsp;• Analyst ratings + price target (Yahoo Finance, 4-hour cache)<br>
+                &nbsp;&nbsp;• Insider buying Form 4 (OpenInsider scrape)<br>
+                Failed fetches score zero for that factor — never crash the whole scan
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#3fb950">Moomoo TCP (real-time)</span>
+                <span class="atag" style="--tc:#d29922">Yahoo Finance (news/ratings)</span>
+                <span class="atag" style="--tc:#f78166">TradingView CDP (optional)</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#39d353">6</div>
+            <div class="aflow-card" style="border-color:#39d35333">
+              <div class="aflow-title">selectBestTrade() — filter and pick the single winner</div>
+              <div class="aflow-body">
+                All 12 scored candidates filtered through gates in order:<br>
+                ☑ Score ≥ <code>min_conviction</code> (your threshold, default 50/100)<br>
+                ☑ No existing open position in this symbol<br>
+                ☑ Symbol did NOT stop out in last 60 minutes (re-entry block)<br>
+                ☑ Sector not in your sectors_blocklist<br>
+                ☑ Historical win rate for current regime is acceptable<br>
+                → Returns the single highest-scoring qualifying candidate, or null
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#39d353">Deterministic filter engine</span>
+                <span class="atag" style="--tc:#bc8cff">PostgreSQL trade history (re-entry check)</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="aflow-step" style="gap:8px">
+              <div class="aflow-num" style="background:#f85149;width:28px;height:28px;font-size:0.7rem;flex-shrink:0">7a</div>
+              <div class="aflow-card" style="border-color:#f8514933">
+                <div class="aflow-title" style="font-size:0.82rem">No qualifying trade</div>
+                <div class="aflow-body" style="font-size:0.76rem">
+                  Score below threshold<br>
+                  Logged to scan history with top candidates + scores<br>
+                  Wait 10 minutes for next cycle<br>
+                  Telegram ping if manually triggered
+                </div>
+                <div class="aflow-tags"><span class="atag" style="--tc:#f85149">No action taken</span></div>
+              </div>
+            </div>
+            <div class="aflow-step" style="gap:8px">
+              <div class="aflow-num" style="background:#3fb950;width:28px;height:28px;font-size:0.7rem;flex-shrink:0">7b</div>
+              <div class="aflow-card" style="border-color:#3fb95033">
+                <div class="aflow-title" style="font-size:0.82rem">Execute the trade</div>
+                <div class="aflow-body" style="font-size:0.76rem">
+                  Position size = target_profit ÷ (ATR × target_mult)<br>
+                  Stop = entry − (ATR × 1.5×)<br>
+                  Target = entry + (ATR × 3.0×)<br>
+                  <code>placeMoomooTrade()</code> → Exchange<br>
+                  <code>saveDailyPick()</code> → PostgreSQL<br>
+                  Telegram: symbol · entry · stop · target · score
+                </div>
+                <div class="aflow-tags">
+                  <span class="atag" style="--tc:#3fb950">Moomoo → Exchange</span>
+                  <span class="atag" style="--tc:#bc8cff">PostgreSQL daily_picks</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /av-scan -->
+
+      <!-- ══════════ CONVICTION SCORE VIEW ══════════ -->
+      <div id="av-score" class="arch-view" style="display:none">
+        <div class="arch-header">🎯 How the 0–100 Conviction Score is Built</div>
+        <div class="arch-subhead">Six independent factors scored in parallel and combined into a single number. A stock needs ≥ 50 to qualify for a trade. Here's exactly what goes into each factor.</div>
+
+        <div style="background:rgba(13,17,23,0.8);border:1px solid #21262d;border-radius:12px;padding:14px;margin-bottom:16px">
+          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Score composition</div>
+          <div style="display:flex;height:24px;border-radius:6px;overflow:hidden;gap:2px">
+            <div style="flex:30;background:#58a6ff;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#fff;min-width:40px">Tech 30</div>
+            <div style="flex:25;background:#e3b341;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:38px">News 25</div>
+            <div style="flex:20;background:#3fb950;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:34px">Momo 20</div>
+            <div style="flex:10;background:#bc8cff;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:28px">Anlst 10</div>
+            <div style="flex:10;background:#39d353;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:26px">Mkt 10</div>
+            <div style="flex:5;background:#f78166;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:18px">5</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:0.62rem;color:#6e7681"><span>0</span><span>= 100 pts max</span></div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:10px">
+
+          <div class="score-factor-card" style="--sc:#58a6ff">
+            <div class="sfc-header">
+              <div class="sfc-weight" style="background:#58a6ff">30 pts</div>
+              <div class="sfc-name">Technical Analysis</div>
+              <div class="sfc-src">TV CDP → Moomoo 90-day OHLCV → Yahoo Finance (cascade fallback)</div>
+            </div>
+            <div class="sfc-body">
+              <div class="sfc-items">
+                <div class="sfc-item">📈 RSI in 40–65 sweet spot — not overbought (>70), not oversold (<30)</div>
+                <div class="sfc-item">📊 MACD histogram positive and rising — bullish momentum confirmed</div>
+                <div class="sfc-item">🔼 Price above both EMA20 and EMA50 — aligned with medium + short-term trend</div>
+                <div class="sfc-item">🎯 Bollinger Band %B position 0.4–0.7 — midrange, room to run without overextension</div>
+              </div>
+              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
+                <strong style="color:#8b949e">Fallback chain:</strong> TradingView live indicators → Moomoo 90-day OHLCV (compute indicators in JS) → Yahoo Finance daily OHLCV (compute indicators in JS)
+              </div>
+            </div>
+          </div>
+
+          <div class="score-factor-card" style="--sc:#e3b341">
+            <div class="sfc-header">
+              <div class="sfc-weight" style="background:#e3b341;color:#0d1117">25 pts</div>
+              <div class="sfc-name">News Catalyst</div>
+              <div class="sfc-src">FinancialJuice (< 4h) · Yahoo Finance news · Alpaca news API</div>
+            </div>
+            <div class="sfc-body">
+              <div class="sfc-items">
+                <div class="sfc-item">📰 Fresh news within 48 hours = full points. Older = scaled down. No news = zero</div>
+                <div class="sfc-item">⚡ Breaking news < 4h from FinancialJuice gets highest weight — closest to market reaction</div>
+                <div class="sfc-item">💰 Earnings surprise magnitude: big beat boosts score, miss penalizes</div>
+                <div class="sfc-item">📅 Pre-earnings drift: does this stock historically run up before reporting? If yes, +points</div>
+              </div>
+              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
+                <strong style="color:#8b949e">Staleness rule:</strong> News > 48h is flagged as stale and not traded on. Macro news (tariffs, Fed) is mapped to beneficiary/victim tickers rather than the macro topic itself.
+              </div>
+            </div>
+          </div>
+
+          <div class="score-factor-card" style="--sc:#3fb950">
+            <div class="sfc-header">
+              <div class="sfc-weight" style="background:#3fb950;color:#0d1117">20 pts</div>
+              <div class="sfc-name">Momentum</div>
+              <div class="sfc-src">Moomoo TCP real-time → Yahoo Finance daily (fallback)</div>
+            </div>
+            <div class="sfc-body">
+              <div class="sfc-items">
+                <div class="sfc-item">🚀 RVOL > 1.5× 21-day average volume — unusual activity is the market "voting" with money</div>
+                <div class="sfc-item">📈 Price change today > 0% — stock is already moving in the right direction</div>
+                <div class="sfc-item">💪 Volume confirmation — price move must be backed by above-average volume</div>
+                <div class="sfc-item">📉 ATR (Average True Range) computed here — used later for stop/target sizing</div>
+              </div>
+              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
+                <strong style="color:#8b949e">RVOL formula:</strong> today's volume ÷ 20-day average volume. RVOL > 2.0× = strong signal. > 3.0× = exceptional. Moomoo is the primary source; Yahoo 30-day OHLCV used as fallback.
+              </div>
+            </div>
+          </div>
+
+          <div class="score-factor-card" style="--sc:#bc8cff">
+            <div class="sfc-header">
+              <div class="sfc-weight" style="background:#bc8cff;color:#0d1117">10 pts</div>
+              <div class="sfc-name">Analyst Consensus</div>
+              <div class="sfc-src">Yahoo Finance quoteSummary · 4-hour cache per symbol</div>
+            </div>
+            <div class="sfc-body">
+              <div class="sfc-items">
+                <div class="sfc-item">⭐ Mean analyst rating &lt; 2.5 (scale: 1.0=Strong Buy · 2.0=Buy · 3.0=Hold · 5.0=Strong Sell)</div>
+                <div class="sfc-item">🎯 Price target upside > 5% from current price (analyst consensus target vs. live price)</div>
+                <div class="sfc-item">👥 Buy + Strong Buy count vs. Sell + Strong Sell count — net buy recommendation</div>
+              </div>
+              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
+                <strong style="color:#8b949e">Cache strategy:</strong> Analyst ratings change slowly (weekly/monthly), so 4-hour cache is safe and avoids hammering Yahoo. Uses yahoo-finance2 npm package which auto-handles auth tokens.
+              </div>
+            </div>
+          </div>
+
+          <div class="score-factor-card" style="--sc:#39d353">
+            <div class="sfc-header">
+              <div class="sfc-weight" style="background:#39d353;color:#0d1117">10 pts</div>
+              <div class="sfc-name">Market Conditions</div>
+              <div class="sfc-src">Reuses Step 3 context data — no additional API call</div>
+            </div>
+            <div class="sfc-body">
+              <div class="sfc-items">
+                <div class="sfc-item">📊 VIX level: &lt;18 = full points · 18–25 = partial · &gt;25 = reduced · &gt;35 (crisis) = zero</div>
+                <div class="sfc-item">🎯 Regime match: stock is trending in line with the overall market regime</div>
+                <div class="sfc-item">🏆 Sector leadership: stock's sector is in the current "leading sectors" list from context</div>
+              </div>
+              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
+                <strong style="color:#8b949e">Cost = $0:</strong> Reuses data already fetched in getMarketContext(). No extra API calls, no extra latency.
+              </div>
+            </div>
+          </div>
+
+          <div class="score-factor-card" style="--sc:#f78166">
+            <div class="sfc-header">
+              <div class="sfc-weight" style="background:#f78166;color:#0d1117">5 pts</div>
+              <div class="sfc-name">Insider Activity</div>
+              <div class="sfc-src">OpenInsider.com · SEC Form 4 filings</div>
+            </div>
+            <div class="sfc-body">
+              <div class="sfc-items">
+                <div class="sfc-item">🏛️ Executive purchases (Form 4 SEC filings) in the last 30 days</div>
+                <div class="sfc-item">📊 Net buying volume > selling volume = positive signal</div>
+                <div class="sfc-item">🎯 Cluster buying (multiple insiders buying simultaneously) = maximum 5 points</div>
+              </div>
+              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
+                <strong style="color:#8b949e">Failure handling:</strong> If OpenInsider is unavailable, this factor scores zero and the other 95 points still apply normally.
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div style="background:rgba(13,17,23,0.8);border:1px solid #21262d;border-radius:12px;padding:14px;margin-top:16px">
+          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Score thresholds — what each band means for trade decisions</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">
+            <div style="background:#3fb95014;border:1px solid #3fb95030;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:1.15rem;font-weight:700;color:#3fb950">80–100</div>
+              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">🔥 Strong Buy</div>
+              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Rarely seen. Max position size. Highest confidence.</div>
+            </div>
+            <div style="background:#d2992214;border:1px solid #d2992230;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:1.15rem;font-weight:700;color:#d29922">60–79</div>
+              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">✅ Buy Signal</div>
+              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Standard conviction. Normal position size.</div>
+            </div>
+            <div style="background:#58a6ff14;border:1px solid #58a6ff30;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:1.15rem;font-weight:700;color:#58a6ff">50–59</div>
+              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">🟡 Borderline</div>
+              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Meets threshold. Smaller size. Watch closely.</div>
+            </div>
+            <div style="background:#f8514914;border:1px solid #f8514930;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:1.15rem;font-weight:700;color:#f85149">0–49</div>
+              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">❌ No Trade</div>
+              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Does not qualify. Scanner moves on.</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /av-score -->
+
+      <!-- ══════════ DATA SOURCES VIEW ══════════ -->
+      <div id="av-data" class="arch-view" style="display:none">
+        <div class="arch-header">📡 Data Sources &amp; Fallback Chains</div>
+        <div class="arch-subhead">Every external integration — what it provides, how it's used, and what happens when it fails.</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+
+          <div class="datasrc-card" style="--dc:#3fb950">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#3fb950">PRIMARY</div>
+              <div class="dsc-name">🟢 Moomoo OpenD</div>
+              <div class="dsc-conn">TCP socket · 127.0.0.1:11111</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Provides:</strong> Real-time bid/ask/last price · OHLCV K-lines (daily + intraday) · Portfolio positions with live P&amp;L · Open orders · Cash balance &amp; buying power · ATR computation · RVOL vs 20-day avg · Trade execution (paper + live)</div>
+              <div class="dsc-chain"><strong>Used in:</strong> getLiveQuote (Tier 1) · getPortfolio · getChartTechnicals (Tier 1) · getSectorPerformance (primary) · getMarketSentiment (SPY/QQQ/DIA) · placeTrade</div>
+              <div class="dsc-note">Mode: <code>MOOMOO_TRADE_ENV=SIMULATE</code> (paper trading) or <code>REAL</code> (live money). OpenD must be running and logged in before server starts. TCP connection is persistent — reconnects automatically on drop.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#d29922">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#d29922;color:#0d1117">FALLBACK</div>
+              <div class="dsc-name">🟡 Yahoo Finance</div>
+              <div class="dsc-conn">HTTPS · query2.finance.yahoo.com · No API key</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Provides:</strong> Historical OHLCV 90-day daily · Analyst ratings + consensus price targets · Earnings calendar + historical surprise data · Symbol news (7 days) · Market movers (gainers/decliners/most active) · Futures prices (ES=F, NQ=F) · Short interest · ^VIX fallback</div>
+              <div class="dsc-chain"><strong>Fallback for:</strong> Moomoo when OpenD is unavailable. Always used for: futures (Moomoo can't query ES=F), analyst ratings, historical earnings, insider-mapped news.</div>
+              <div class="dsc-note">No API key required — uses unofficial public endpoint. Random User-Agent string to avoid rate limiting. Analyst data cached 4 hours. News cached 15 min. Timeout: 6–7 seconds per request.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#bc8cff">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#bc8cff;color:#0d1117">FREE</div>
+              <div class="dsc-name">⚡ CBOE VIX CDN</div>
+              <div class="dsc-conn">HTTPS · cdn.cboe.com/api/global/delayed_quotes/quotes/_VIX.json</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Provides:</strong> VIX index current level + daily change · ~15-second delay · No API key · No authentication · No rate limits</div>
+              <div class="dsc-chain"><strong>Fallback:</strong> Yahoo Finance ^VIX (if CBOE CDN returns non-200)</div>
+              <div class="dsc-note">Primary VIX source. Polled in getMarketSentiment() every 2 minutes (with TTL cache). VIX level is the single most important input to market regime classification and position sizing decisions.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#f78166">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#f78166;color:#0d1117">OPTIONAL</div>
+              <div class="dsc-name">📊 TradingView Desktop</div>
+              <div class="dsc-conn">Chrome DevTools Protocol · localhost:9222</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Provides:</strong> Live indicator values from your actual chart (RSI, MACD histogram, EMA20/50, Bollinger Bands) · Custom Pine indicator drawn levels (support/resistance lines) · Labeled price levels from scripts · Current chart symbol + timeframe</div>
+              <div class="dsc-chain"><strong>Fallback when TV is off:</strong> Moomoo 90-day OHLCV → RSI/MACD/EMA/BB computed in pure JavaScript (same math, slightly delayed data)</div>
+              <div class="dsc-note">Availability checked every 15 seconds (reduced from 60s to detect recovery faster). System degrades gracefully — no crash, no error to user. Requires TradingView launched with <code>--remote-debugging-port=9222</code> flag.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#58a6ff">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#58a6ff">PAID</div>
+              <div class="dsc-name">🤖 Anthropic Claude API</div>
+              <div class="dsc-conn">HTTPS · api.anthropic.com · claude-haiku-4-5-20251001</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Pricing:</strong> $0.80/M input tokens · $4.00/M output tokens · ~$0.001 per user message · Estimated $2–8/month total at normal usage<br><strong>Used for:</strong> User chat · Admin chat · Morning briefing fallback (when Ollama is down)</div>
+              <div class="dsc-chain"><strong>Fallback for briefings:</strong> Ollama (local, free) — llama3.1:8b runs locally on your Mac. All chat routes try Ollama first for zero-cost generation.</div>
+              <div class="dsc-note">All API calls tracked in <code>api_usage_stats</code> table: input tokens, output tokens, cost, model, timestamp. Viewable in Stats → Cost Per Day table with daily rollup.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#bc8cff">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#bc8cff;color:#0d1117">LOCAL</div>
+              <div class="dsc-name">🗄️ PostgreSQL</div>
+              <div class="dsc-conn">TCP · localhost:5432 · pool: 10 connections · auto-schema on startup</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Tables:</strong> users · user_sessions · trades · conversation_history · daily_picks · conviction_scores · performance_patterns · api_usage_stats · daily_pnl · scanner_state · position_monitoring · activity_log · rejection_log · bug_reports · trade_lessons · otp_tokens</div>
+              <div class="dsc-chain"><strong>Fallback:</strong> In-memory store when DB is unavailable (<code>isDbAvailable</code> flag). App continues working — chat still works, scans still work — but nothing persists to disk.</div>
+              <div class="dsc-note">Connection pool initialized at startup with auto-retry. All writes are async and non-blocking — they never block the API response. Schema is auto-applied (CREATE IF NOT EXISTS) on every server start.</div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /av-data -->
+
+    </div><!-- /adminArchPanel -->
+
     <!-- Input row (hidden when terminal is active) -->
     <div id="adminInputRow" style="display:flex;gap:10px;margin-top:12px;flex-shrink:0">
       <textarea id="adminInput" placeholder="Ask anything — 'suspend user malli', 'reset credits for raghu to 50', 'pause the scanner'…"
@@ -2102,6 +2862,158 @@
   padding: 3px 0;
   opacity: 0.8;
 }
+
+/* ── Architecture Panel ──────────────────────────────────────── */
+.arch-tab-btn {
+  background: none; border: none; color: #8b949e;
+  padding: 6px 12px; font-size: 0.78rem; cursor: pointer;
+  border-radius: 7px; transition: all 0.15s; white-space: nowrap;
+}
+.arch-tab-btn:hover { color: #e6edf3; background: #21262d; }
+.arch-tab-btn.active { background: #1f6feb; color: #fff; font-weight: 600; }
+
+.arch-view { padding-bottom: 24px; }
+.arch-header { font-size: 1.0rem; font-weight: 700; color: #e6edf3; margin-bottom: 4px; }
+.arch-subhead { font-size: 0.79rem; color: #8b949e; margin-bottom: 16px; line-height: 1.55; }
+
+/* ── System Map ── */
+.amap-layer { margin-bottom: 4px; }
+.amap-layer-label {
+  font-size: 0.6rem; font-weight: 700; color: var(--ll,#6e7681);
+  text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 5px;
+}
+.amap-layer-label::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ll,#6e7681); display: inline-block; flex-shrink: 0;
+}
+.amap-layer-nodes { display: flex; gap: 8px; flex-wrap: wrap; }
+.amap-node {
+  flex: 1; min-width: 130px;
+  background: color-mix(in srgb, var(--nc) 6%, #0d1117);
+  border: 1px solid color-mix(in srgb, var(--nc) 22%, transparent);
+  border-radius: 10px; padding: 10px 12px; cursor: default; transition: all 0.2s;
+}
+.amap-node:hover {
+  background: color-mix(in srgb, var(--nc) 12%, #0d1117);
+  border-color: color-mix(in srgb, var(--nc) 45%, transparent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--nc) 15%, transparent);
+}
+.amap-node.amap-wide { flex: 999; min-width: 100%; }
+.amap-node-icon { font-size: 1.05rem; display: block; margin-bottom: 4px; }
+.amap-node strong { display: block; font-size: 0.81rem; color: var(--nc); margin-bottom: 3px; }
+.amap-node span { display: block; font-size: 0.7rem; color: #8b949e; line-height: 1.4; }
+
+@keyframes archDots {
+  from { background-position: 0 0; }
+  to   { background-position: 0 16px; }
+}
+@keyframes archBounce {
+  from { transform: translateY(0); }
+  to   { transform: translateY(3px); }
+}
+.amap-between { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 2px 0 6px; }
+.amap-between-line {
+  width: 2px; height: 20px; position: relative;
+  background: repeating-linear-gradient(to bottom,
+    var(--ac) 0, var(--ac) 4px, transparent 4px, transparent 9px);
+  background-size: 100% 9px;
+  animation: archDots 0.65s linear infinite;
+}
+.amap-between-line::after {
+  content: '▼'; font-size: 9px; color: var(--ac);
+  position: absolute; bottom: -13px; left: 50%; transform: translateX(-50%);
+  animation: archBounce 1.2s ease-in-out infinite alternate;
+}
+.amap-between-label {
+  font-size: 0.64rem;
+  color: color-mix(in srgb, var(--ac) 55%, #6e7681);
+  margin-top: 14px; text-align: center; line-height: 1.3;
+}
+
+/* ── Flow Steps ── */
+.aflow { display: flex; flex-direction: column; }
+.aflow-step { display: flex; gap: 12px; align-items: flex-start; }
+.aflow-num {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.78rem; font-weight: 700; color: #fff; margin-top: 2px;
+  box-shadow: 0 0 14px color-mix(in srgb, currentColor 40%, transparent);
+}
+.aflow-card {
+  flex: 1; background: rgba(13,17,23,0.85);
+  border: 1px solid #21262d; border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 2px;
+  transition: border-color 0.2s;
+}
+.aflow-card:hover { border-color: rgba(255,255,255,0.12); }
+.aflow-title { font-size: 0.87rem; font-weight: 700; color: #e6edf3; margin-bottom: 7px; }
+.aflow-body { font-size: 0.79rem; color: #8b949e; line-height: 1.6; }
+.aflow-body code { background: #21262d; padding: 1px 5px; border-radius: 4px; font-size: 0.74rem; color: #79c0ff; }
+.aflow-body em { color: #c9d1d9; font-style: italic; }
+.aflow-body strong { color: #c9d1d9; }
+.aflow-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.atag {
+  font-size: 0.67rem; font-weight: 600; color: var(--tc);
+  background: color-mix(in srgb, var(--tc) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tc) 24%, transparent);
+  border-radius: 12px; padding: 2px 8px;
+}
+.aflow-connector { margin-left: 15px; padding: 3px 0; }
+.aflow-connector::before {
+  content: ''; display: block; width: 2px; height: 20px;
+  background: repeating-linear-gradient(to bottom,
+    #30363d 0, #30363d 3px, transparent 3px, transparent 8px);
+  background-size: 100% 8px;
+  animation: archDots 0.9s linear infinite;
+}
+
+/* ── Conviction Score Cards ── */
+.score-factor-card {
+  background: rgba(13,17,23,0.85);
+  border: 1px solid color-mix(in srgb, var(--sc) 18%, transparent);
+  border-left: 3px solid var(--sc);
+  border-radius: 10px; padding: 12px 14px; transition: all 0.2s;
+}
+.score-factor-card:hover {
+  border-color: color-mix(in srgb, var(--sc) 35%, transparent);
+  border-left-color: var(--sc);
+  transform: translateX(2px);
+}
+.sfc-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.sfc-weight {
+  font-size: 0.72rem; font-weight: 700; color: #fff;
+  padding: 3px 10px; border-radius: 12px; white-space: nowrap; flex-shrink: 0;
+}
+.sfc-name { font-size: 0.87rem; font-weight: 700; color: #e6edf3; flex: 1; }
+.sfc-src { font-size: 0.68rem; color: #6e7681; width: 100%; }
+.sfc-items { display: flex; flex-direction: column; gap: 5px; }
+.sfc-item { font-size: 0.79rem; color: #8b949e; line-height: 1.5; }
+
+/* ── Data Source Cards ── */
+.datasrc-card {
+  background: rgba(13,17,23,0.85);
+  border: 1px solid color-mix(in srgb, var(--dc) 18%, transparent);
+  border-top: 2px solid var(--dc);
+  border-radius: 10px; padding: 14px; transition: all 0.2s;
+}
+.datasrc-card:hover {
+  border-color: color-mix(in srgb, var(--dc) 35%, transparent);
+  border-top-color: var(--dc);
+}
+.dsc-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.dsc-badge {
+  font-size: 0.62rem; font-weight: 700; color: #fff;
+  padding: 2px 8px; border-radius: 12px; white-space: nowrap; flex-shrink: 0;
+}
+.dsc-name { font-size: 0.87rem; font-weight: 700; color: #e6edf3; flex: 1; }
+.dsc-conn { font-size: 0.68rem; color: #6e7681; font-family: monospace; width: 100%; }
+.dsc-provides { font-size: 0.79rem; color: #8b949e; margin-bottom: 5px; line-height: 1.55; }
+.dsc-chain { font-size: 0.79rem; color: #8b949e; margin-bottom: 5px; line-height: 1.55; }
+.dsc-note { font-size: 0.74rem; color: #6e7681; margin-top: 8px; font-style: italic; line-height: 1.45; }
+.dsc-note code { background: #21262d; padding: 1px 4px; border-radius: 3px; font-size: 0.71rem; color: #79c0ff; font-style: normal; }
+.dsc-body strong { color: #c9d1d9; }
 </style>
 
 <!-- ── AI Chat floating widget ───────────────────────── -->
@@ -5684,12 +6596,14 @@ function setAdminView(view) {
   const isRpt  = view === 'reports';
   const isTerm = view === 'terminal';
   const isScan = view === 'scanner';
+  const isArch = view === 'arch';
 
   document.getElementById('adminMessages').style.display       = isAI   ? 'flex'  : 'none';
   document.getElementById('adminChips').style.display          = isAI   ? 'flex'  : 'none';
   document.getElementById('adminReportsPanel').style.display   = isRpt  ? 'flex'  : 'none';
   document.getElementById('adminTerminalPanel').style.display  = isTerm ? 'flex'  : 'none';
   document.getElementById('adminScannerPanel').style.display   = isScan ? 'flex'  : 'none';
+  document.getElementById('adminArchPanel').style.display      = isArch ? 'flex'  : 'none';
   document.getElementById('adminClearBtn').style.display       = isAI   ? ''      : 'none';
   document.getElementById('adminInputRow').style.display       = isAI   ? 'flex'  : 'none';
 
@@ -5702,10 +6616,21 @@ function setAdminView(view) {
   document.getElementById('adminViewTerm').style.color      = isTerm ? ac : ic;
   document.getElementById('adminViewScan').style.background = isScan ? active : inactive;
   document.getElementById('adminViewScan').style.color      = isScan ? ac : ic;
+  document.getElementById('adminViewArch').style.background = isArch ? active : inactive;
+  document.getElementById('adminViewArch').style.color      = isArch ? ac : ic;
 
   if (isRpt)  loadAdminReports();
   if (isTerm) termInit();
   if (isScan) scanRefreshStatus();
+}
+
+function showArch(view) {
+  ['map','chat','scan','score','data'].forEach(v => {
+    const el = document.getElementById('av-' + v);
+    if (el) el.style.display = v === view ? 'block' : 'none';
+    const btn = document.querySelector(`[data-av="${v}"]`);
+    if (btn) btn.classList.toggle('active', v === view);
+  });
 }
 
 // ── AI Scanner ─────────────────────────────────────────
