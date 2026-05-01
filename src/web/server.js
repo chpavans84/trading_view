@@ -30,7 +30,7 @@ import { SP500, NASDAQ100 } from '../research/sp500.js';
 import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades } from '../core/trader.js';
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
-import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
+import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews } from '../core/news.js';
 import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
@@ -3251,6 +3251,35 @@ app.get('/api/research/stock', async (req, res) => {
     if (!prices.length) return res.status(404).json({ error: 'Symbol not found in backtest data' });
     res.json({ symbol, prices, scores, returns });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// Stock Explorer extras — news + analyst rating (fetched lazily after chart loads)
+app.get('/api/explorer/extras', requireAuth, async (req, res) => {
+  try {
+    const symbol = (req.query.symbol || '').toUpperCase().trim();
+    if (!symbol) return res.status(400).json({ error: 'symbol required' });
+
+    const [newsResult, scoreResult] = await Promise.allSettled([
+      getSymbolNews({ symbol, limit: 8 }),
+      getConvictionScore({ symbol, positions: [] }),
+    ]);
+
+    const news    = newsResult.status    === 'fulfilled' ? newsResult.value    : null;
+    const scoring = scoreResult.status === 'fulfilled' ? scoreResult.value : null;
+
+    const analyst = scoring ? {
+      consensus:  scoring.signals?.analyst_consensus  ?? null,
+      target:     scoring.signals?.analyst_target     ?? null,
+      upside_pct: scoring.signals?.analyst_upside_pct ?? null,
+      score:      scoring.score ?? null,
+      grade:      scoring.grade ?? null,
+    } : null;
+
+    res.json({ symbol, news: news?.articles ?? [], analyst });
+  } catch (err) {
+    console.error('[explorer/extras]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Dip analysis — worst drops with reasons

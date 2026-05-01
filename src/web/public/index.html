@@ -447,6 +447,29 @@
   }
   .float-explorer-close:hover { color: #e6edf3; background: rgba(248,81,73,0.15); }
   .float-explorer-body { overflow-y: auto; flex: 1; }
+  /* Explorer — News & Analyst extras */
+  .exnews-section { padding:0 16px 16px;border-top:1px solid rgba(48,54,61,0.5); }
+  .exnews-toggle  { display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0 6px; }
+  .exnews-toggle h4 { font-size:0.85rem;color:#8b949e;margin:0;font-weight:600; }
+  .exnews-chevron { font-size:0.7rem;color:#8b949e;transition:transform 0.2s; }
+  .exnews-item    { display:flex;flex-direction:column;gap:3px;padding:8px 0;border-bottom:1px solid rgba(48,54,61,0.4); }
+  .exnews-item:last-child { border-bottom:none; }
+  .exnews-title   { font-size:0.82rem;color:#e6edf3;line-height:1.4; }
+  .exnews-title a { color:#58a6ff;text-decoration:none; }
+  .exnews-title a:hover { text-decoration:underline; }
+  .exnews-meta    { font-size:0.72rem;color:#484f58; }
+  .exnews-sentiment { font-size:0.7rem;padding:1px 6px;border-radius:4px;font-weight:600;margin-left:6px; }
+  .exnews-sentiment.pos { background:rgba(63,185,80,0.15);color:#3fb950; }
+  .exnews-sentiment.neg { background:rgba(248,81,73,0.15);color:#f85149; }
+  .exnews-sentiment.neu { background:rgba(139,148,158,0.1);color:#8b949e; }
+  .ex-analyst-bar { display:flex;gap:12px;flex-wrap:wrap;padding:10px 0 4px;align-items:center; }
+  .ex-analyst-pill { padding:4px 10px;border-radius:20px;font-size:0.78rem;font-weight:600;border:1px solid; }
+  .ex-analyst-pill.strong_buy  { background:rgba(63,185,80,0.15);border-color:#3fb950;color:#3fb950; }
+  .ex-analyst-pill.buy         { background:rgba(88,166,255,0.12);border-color:#58a6ff;color:#58a6ff; }
+  .ex-analyst-pill.hold        { background:rgba(210,153,34,0.12);border-color:#d29922;color:#d29922; }
+  .ex-analyst-pill.sell,.ex-analyst-pill.strong_sell { background:rgba(248,81,73,0.12);border-color:#f85149;color:#f85149; }
+  .ex-analyst-target { font-size:0.82rem;color:#c9d1d9; }
+  .ex-analyst-upside { font-size:0.78rem;font-weight:600; }
 
   /* Stock Explorer search autocomplete */
   .explorer-search-wrap {
@@ -5124,6 +5147,7 @@ async function loadStockExplorer() {
   document.getElementById('explorerStats').style.display     = 'none';
   document.getElementById('explorerChartWrap').style.display = 'none';
   document.getElementById('explorerDips').style.display      = 'none';
+  document.getElementById('explorerExtras').style.display    = 'none';
   if (_lwChart) { try { _lwChart.remove(); } catch {} _lwChart = null; }
 
   // Show loading state
@@ -5139,6 +5163,8 @@ async function loadStockExplorer() {
     document.getElementById('ev-score').style.display      = '';
     document.getElementById('ev-return').style.display     = '';
     setExplorerView('price');
+    // Load news + analyst lazily so chart renders immediately
+    loadExplorerExtras(symbol);
   } catch (e) {
     _explorerData = null;
     document.getElementById('ev-score').style.display  = 'none';
@@ -5520,6 +5546,94 @@ function toggleDips() {
   const open    = inner.style.display !== 'none';
   inner.style.display      = open ? 'none' : 'block';
   chevron.style.transform  = open ? '' : 'rotate(90deg)';
+}
+
+// ── Explorer Extras: News + Analyst Rating ────────────
+
+async function loadExplorerExtras(symbol) {
+  document.getElementById('explorerExtras').style.display = 'block';
+  document.getElementById('exAnalystInner').innerHTML = '<span style="color:#484f58">Loading…</span>';
+  document.getElementById('exNewsInner').innerHTML    = '<span style="color:#484f58">Loading…</span>';
+  // Start both sections open
+  toggleExSection('analyst', true);
+  toggleExSection('news', true);
+  try {
+    const data = await api(`/api/explorer/extras?symbol=${symbol}`);
+    renderExplorerAnalyst(data.analyst);
+    renderExplorerNews(data.news, symbol);
+  } catch {
+    document.getElementById('exAnalystInner').innerHTML = '<span style="color:#484f58">Unavailable</span>';
+    document.getElementById('exNewsInner').innerHTML    = '<span style="color:#484f58">Unavailable</span>';
+  }
+}
+
+function toggleExSection(section, forceOpen) {
+  const body    = document.getElementById(section === 'news' ? 'exNewsBody'    : 'exAnalystBody');
+  const chevron = document.getElementById(section === 'news' ? 'exNewsChevron' : 'exAnalystChevron');
+  const open    = forceOpen !== undefined ? !forceOpen : body.style.display !== 'none';
+  body.style.display     = open ? 'none' : 'block';
+  chevron.style.transform = open ? '' : 'rotate(90deg)';
+}
+
+function renderExplorerAnalyst(analyst) {
+  const inner   = document.getElementById('exAnalystInner');
+  const summary = document.getElementById('exAnalystSummary');
+  if (!analyst || (!analyst.consensus && !analyst.score)) {
+    inner.innerHTML   = '<span style="color:#484f58">No analyst data available</span>';
+    summary.textContent = '';
+    return;
+  }
+  const cls     = analyst.consensus?.replace(' ','_').toLowerCase() ?? 'hold';
+  const label   = (analyst.consensus ?? 'N/A').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const upside  = analyst.upside_pct != null
+    ? `<span class="ex-analyst-upside" style="color:${analyst.upside_pct >= 0 ? '#3fb950':'#f85149'}">${analyst.upside_pct >= 0 ? '+' : ''}${parseFloat(analyst.upside_pct).toFixed(1)}% upside</span>`
+    : '';
+  const target  = analyst.target != null
+    ? `<span class="ex-analyst-target">PT <strong style="color:#e6edf3">$${parseFloat(analyst.target).toFixed(0)}</strong></span>`
+    : '';
+  const score   = analyst.score  != null
+    ? `<span style="font-size:0.78rem;color:#8b949e">Conviction <strong style="color:#e6edf3">${parseFloat(analyst.score).toFixed(0)}</strong>${analyst.grade ? ` · Grade <strong style="color:#58a6ff">${analyst.grade}</strong>` : ''}</span>`
+    : '';
+  inner.innerHTML = `
+    <div class="ex-analyst-bar">
+      <span class="ex-analyst-pill ${cls}">${label}</span>
+      ${target} ${upside}
+    </div>
+    ${score}`;
+  summary.textContent = analyst.consensus ? label : '';
+}
+
+function renderExplorerNews(articles, symbol) {
+  const inner   = document.getElementById('exNewsInner');
+  const summary = document.getElementById('exNewsSummary');
+  if (!articles?.length) {
+    inner.innerHTML = '<span style="color:#484f58">No recent news found</span>';
+    summary.textContent = '';
+    return;
+  }
+  summary.textContent = `${articles.length} article${articles.length !== 1 ? 's' : ''}`;
+  const sentimentTag = (title) => {
+    const t = title.toLowerCase();
+    if (/beat|surges?|jumps?|rally|upgrade|raises? (guidance|target|outlook)|strong|record|wins?|bullish/i.test(t))
+      return '<span class="exnews-sentiment pos">▲ Positive</span>';
+    if (/miss|drop|falls?|slump|cut|downgrade|lowers? (guidance|target)|warn|weak|bearish|crash/i.test(t))
+      return '<span class="exnews-sentiment neg">▼ Negative</span>';
+    return '<span class="exnews-sentiment neu">– Neutral</span>';
+  };
+  const timeAgo = (iso) => {
+    const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+    if (mins < 60)  return `${mins}m ago`;
+    if (mins < 1440) return `${Math.round(mins/60)}h ago`;
+    return `${Math.round(mins/1440)}d ago`;
+  };
+  inner.innerHTML = articles.map(a => `
+    <div class="exnews-item">
+      <div class="exnews-title">
+        <a href="${a.url}" target="_blank" rel="noopener">${a.title.replace(/</g,'&lt;')}</a>
+        ${sentimentTag(a.title)}
+      </div>
+      <div class="exnews-meta">${a.source ?? ''} · ${timeAgo(a.published)}</div>
+    </div>`).join('');
 }
 
 // ── What-If Simulator ─────────────────────────────────
@@ -9876,6 +9990,32 @@ async function connectAlpaca() {
         <h4 style="font-size:0.85rem;color:#8b949e;margin:0" id="dipsHeading">Dips detected for this stock</h4>
       </div>
       <div id="explorerDipsInner" style="display:none"></div>
+    </div>
+
+    <!-- Analyst rating + News -->
+    <div id="explorerExtras" style="display:none">
+      <!-- Analyst Rating -->
+      <div class="exnews-section" id="explorerAnalystWrap">
+        <div class="exnews-toggle" onclick="toggleExSection('analyst')">
+          <span class="exnews-chevron" id="exAnalystChevron">▶</span>
+          <h4>📊 Analyst Rating</h4>
+          <span id="exAnalystSummary" style="font-size:0.75rem;color:#8b949e;margin-left:auto"></span>
+        </div>
+        <div id="exAnalystBody" style="display:none;padding-bottom:6px">
+          <div id="exAnalystInner" style="color:#8b949e;font-size:0.82rem">Loading…</div>
+        </div>
+      </div>
+      <!-- News -->
+      <div class="exnews-section" id="explorerNewsWrap">
+        <div class="exnews-toggle" onclick="toggleExSection('news')">
+          <span class="exnews-chevron" id="exNewsChevron">▶</span>
+          <h4>📰 Latest News</h4>
+          <span id="exNewsSummary" style="font-size:0.75rem;color:#8b949e;margin-left:auto"></span>
+        </div>
+        <div id="exNewsBody" style="display:none">
+          <div id="exNewsInner" style="color:#8b949e;font-size:0.82rem">Loading…</div>
+        </div>
+      </div>
     </div>
 
     <!-- Empty state -->
