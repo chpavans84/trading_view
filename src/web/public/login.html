@@ -245,5 +245,92 @@
     el.style.display = 'block';
   }
 </script>
+
+<!-- ── Public Trading Coach Chat Widget ───────────────────────────────────── -->
+<div id="publicChatWidget" style="position:fixed;bottom:24px;right:24px;z-index:1000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+
+  <!-- Chat panel (hidden by default) -->
+  <div id="publicChatPanel" style="display:none;flex-direction:column;width:340px;height:460px;background:#0d1117;border:1px solid #30363d;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.5);margin-bottom:12px;overflow:hidden;">
+    <!-- Header -->
+    <div style="background:#161b22;padding:12px 16px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="color:#e6edf3;font-weight:600;font-size:0.9rem;">📚 Trading Coach</div>
+        <div style="color:#484f58;font-size:0.72rem;">Powered by Ollama · Free · No login needed</div>
+      </div>
+      <button onclick="togglePublicChat()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:1.1rem;">✕</button>
+    </div>
+    <!-- Messages -->
+    <div id="publicChatMessages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
+      <div style="background:#0d1117;border:1px solid #1f6feb;border-left:3px solid #1f6feb;border-radius:8px;padding:10px 12px;font-size:0.83rem;color:#c9d1d9;">
+        Hi! Ask me anything about trading — RSI, MACD, stop losses, strategies, patterns. I run locally on Ollama, completely free.
+      </div>
+    </div>
+    <!-- Input -->
+    <div style="padding:10px;border-top:1px solid #21262d;display:flex;gap:8px;">
+      <input id="publicChatInput" type="text" placeholder="e.g. What is RSI divergence?"
+        style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3;padding:8px 12px;font-size:0.85rem;outline:none;"
+        onkeydown="if(event.key==='Enter')sendPublicChat()" />
+      <button onclick="sendPublicChat()" style="background:#1f6feb;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:0.85rem;font-weight:600;">Send</button>
+    </div>
+  </div>
+
+  <!-- Collapsed toggle button -->
+  <button id="chatToggle" onclick="togglePublicChat()" style="background:#1f6feb;color:#fff;border:none;border-radius:50px;padding:12px 20px;cursor:pointer;font-size:0.9rem;font-weight:600;box-shadow:0 4px 12px rgba(31,111,235,0.4);display:flex;align-items:center;gap:8px;">
+    📚 Trading Coach
+  </button>
+</div>
+
+<script>
+  function togglePublicChat() {
+    const panel  = document.getElementById('publicChatPanel');
+    const toggle = document.getElementById('chatToggle');
+    const open   = panel.style.display === 'none';
+    panel.style.display  = open ? 'flex' : 'none';
+    toggle.style.display = open ? 'none' : 'flex';
+    if (open) setTimeout(() => document.getElementById('publicChatInput').focus(), 50);
+  }
+
+  async function sendPublicChat() {
+    const input = document.getElementById('publicChatInput');
+    const msgs  = document.getElementById('publicChatMessages');
+    const text  = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    input.disabled = true;
+
+    // User bubble
+    const userDiv = document.createElement('div');
+    userDiv.style.cssText = 'background:#21262d;border-radius:8px;padding:8px 12px;font-size:0.83rem;color:#e6edf3;align-self:flex-end;max-width:85%;word-break:break-word;';
+    userDiv.textContent = text;
+    msgs.appendChild(userDiv);
+
+    // Thinking indicator
+    const thinking = document.createElement('div');
+    thinking.style.cssText = 'color:#484f58;font-size:0.78rem;padding:4px 2px;';
+    thinking.textContent = 'Thinking…';
+    msgs.appendChild(thinking);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    try {
+      const resp = await fetch('/api/public/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+      const data = await resp.json();
+      thinking.remove();
+
+      const answerDiv = document.createElement('div');
+      answerDiv.style.cssText = 'background:#0d1117;border:1px solid #1f6feb;border-left:3px solid #1f6feb;border-radius:8px;padding:10px 12px;font-size:0.83rem;color:#c9d1d9;line-height:1.55;white-space:pre-wrap;word-break:break-word;';
+      answerDiv.textContent = data.answer ?? data.error ?? 'No response.';
+      msgs.appendChild(answerDiv);
+    } catch {
+      thinking.textContent = 'Connection error. Please try again.';
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+    input.disabled = false;
+    input.focus();
+  }
+</script>
 </body>
 </html>
