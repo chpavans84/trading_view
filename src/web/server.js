@@ -3698,6 +3698,53 @@ cron.schedule('*/5 * * * 6', async () => {
   }
 });
 
+// ─── Weekly Ollama model update ───────────────────────────────────────────────
+// Fires every Sunday at 10 AM SGT (2 AM UTC / 10 PM ET Sat) — quiet window,
+// Ollama already running. Pulls nomic-embed-text + llama3.1:8b; skips if offline.
+
+async function runOllamaModelUpdate() {
+  const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+  const chatModel = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+  const models    = ['nomic-embed-text', chatModel];
+  const results   = [];
+
+  for (const model of models) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5 * 60 * 1000); // 5 min per model
+      const resp = await fetch(`${ollamaUrl}/api/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: model, stream: false }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      const data = await resp.json().catch(() => ({}));
+      const status = data.status ?? (resp.ok ? 'ok' : `HTTP ${resp.status}`);
+      results.push(`${model}: ${status}`);
+      console.log(`[ollama-update] ${model} → ${status}`);
+    } catch (err) {
+      results.push(`${model}: failed (${err.message})`);
+      console.warn(`[ollama-update] ${model} failed:`, err.message);
+    }
+  }
+  return results;
+}
+
+// Every Sunday — fire once between 10:00–10:05 AM SGT (UTC+8 = 02:00–02:05 UTC)
+cron.schedule('*/5 2 * * 0', async () => {
+  const utc  = new Date();
+  const mins = utc.getUTCHours() * 60 + utc.getUTCMinutes();
+  if (mins < 2 * 60 || mins >= 2 * 60 + 5) return;
+  console.log('[ollama-update] weekly model refresh starting…');
+  try {
+    const results = await runOllamaModelUpdate();
+    console.log('[ollama-update] done:', results.join(' | '));
+  } catch (err) {
+    console.error('[ollama-update] cron error:', err.message);
+  }
+});
+
 // ─── Admin API: manual trigger (per-step or all) ──────────────────────────────
 
 const _RESEARCH_SCRIPTS = {
