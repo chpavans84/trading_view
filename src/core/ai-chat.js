@@ -35,6 +35,7 @@ import {
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
 import { getFunds, getPositions as getMoomooPositions, getQuote as moomooGetQuote, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
+import { isKnowledgeQuestion, answerKnowledgeQuestion } from './knowledge.js';
 
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
 
@@ -322,9 +323,14 @@ WHEN ASKED "what are you doing?" OR "status?" — be specific and brief:
 ❌ Never say "I'm monitoring the market" without a specific number or symbol.
 
 ━━━ RESPONSE FORMAT ━━━
-Trade recommendation: SYMBOL | setup type | conviction score | catalyst + date | entry | target (+X%) | stop (-Y%) | est. profit $Z | key risk
-Position status:      SYMBOL | entry $X → now $Y | P&L: +/-$Z (N%) | stop $A (N% away) | target $B (N% away) | action
-News impact:          Headline (date) | direction | sectors affected | trade implication | confidence
+Default to plain conversational sentences. Avoid bullet lists and headers unless the user is explicitly requesting data or a list.
+
+Use a compact table ONLY when the user asks for position status, trade history, or a ranked list of stocks. Keep tables to ≤5 rows — drop columns if needed to stay readable.
+
+Trade recommendation (table only when proposing a specific trade):
+SYMBOL | score | entry | target (+X%) | stop (-Y%) | why
+
+For everything else — analysis, market color, explanations, casual questions — write 1–3 sentences like you're talking to the user, not filing a report.
 
 ━━━ SESSION IDENTITY ━━━
 Trading on behalf of: ${username ?? 'unknown'}
@@ -642,7 +648,19 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
  * onTool(name)  — called when a tool starts executing (for UI "thinking" indicator)
  * Returns the full response text.
  */
-export async function chat({ chatId, message, onChunk, onTool, signal, userConfig = null, username = null }) {
+export async function chat({ chatId, message, onChunk, onTool, signal, userConfig = null, username = null, voiceMode = false }) {
+  // Route knowledge/education questions to Ollama (no Claude API cost)
+  if (await isKnowledgeQuestion(message)) {
+    const result = await answerKnowledgeQuestion(message);
+    return {
+      role: 'assistant',
+      content: result.answer,
+      source: result.source,
+      model: result.model ?? 'ollama',
+      knowledge_response: true,
+    };
+  }
+
   if (!chatHistory.has(chatId)) await loadHistoryForChat(chatId);
   pushHistory(chatId, { role: 'user', content: message });
 
@@ -650,7 +668,8 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
   let fullText = '';
 
   const lessonsBlock = await buildLessonsBlock(username);
-  const fullSystem   = buildSystemPrompt(userConfig, username) + lessonsBlock;
+  const voiceHint    = voiceMode ? '\n\n━━━ VOICE MODE ━━━\nUser is listening via audio — keep this reply under 3 sentences. No bullet lists, no tables, no markdown. Speak like a person, not a report.' : '';
+  const fullSystem   = buildSystemPrompt(userConfig, username) + lessonsBlock + voiceHint;
 
   while (true) {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
