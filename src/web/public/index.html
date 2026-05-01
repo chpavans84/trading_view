@@ -2040,6 +2040,7 @@
       <!-- Sub-nav -->
       <div style="display:flex;gap:2px;margin-bottom:14px;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:4px;flex-shrink:0;flex-wrap:wrap">
         <button class="arch-tab-btn active" data-av="map"   onclick="showArch('map')">🗺️ System Map</button>
+        <button class="arch-tab-btn" data-av="models" onclick="showArch('models')">🧠 AI Models</button>
         <button class="arch-tab-btn" data-av="chat"  onclick="showArch('chat')">💬 Chat Flow</button>
         <button class="arch-tab-btn" data-av="scan"  onclick="showArch('scan')">🔍 Scan Engine</button>
         <button class="arch-tab-btn" data-av="score" onclick="showArch('score')">🎯 Conviction Score</button>
@@ -2099,12 +2100,17 @@
             <div class="amap-node" style="--nc:#58a6ff">
               <span class="amap-node-icon">🤖</span>
               <strong>AI Chat Engine</strong>
-              <span>ai-chat.js · Claude Haiku 4.5 · $0.80/$4.00/M tokens · 20-msg history per user · 18 tools available</span>
+              <span>ai-chat.js · <span style="color:#f78166;font-weight:600">ALWAYS Claude Haiku 4.5</span> · needs tool-calling · $0.80/$4.00/M · 20-msg history · 18 tools</span>
             </div>
             <div class="amap-node" style="--nc:#388bfd">
               <span class="amap-node-icon">🔐</span>
               <strong>Admin AI</strong>
-              <span>admin-ai.js · Claude Haiku 4.5 · Full system access · User mgmt · Scanner control</span>
+              <span>admin-ai.js · <span style="color:#f78166;font-weight:600">ALWAYS Claude Haiku 4.5</span> · needs tool-calling · Full system access · User mgmt</span>
+            </div>
+            <div class="amap-node" style="--nc:#39d353">
+              <span class="amap-node-icon">🦙</span>
+              <strong>Local AI (Ollama)</strong>
+              <span><span style="color:#39d353;font-weight:600">FREE — used for batch jobs only:</span> morning briefing · EOD summary · trade reflection lessons · Falls back to Claude Haiku when offline</span>
             </div>
           </div>
         </div>
@@ -2204,6 +2210,222 @@
         </div>
 
       </div><!-- /av-map -->
+
+      <!-- ══════════ AI MODELS VIEW ══════════ -->
+      <div id="av-models" class="arch-view" style="display:none">
+        <div class="arch-header">🧠 Claude vs Ollama — Which AI Does What</div>
+        <div class="arch-subhead">Two AI models run in this system. They are <strong style="color:#e6edf3">never interchangeable</strong> — each is chosen deliberately based on whether the task needs tool-calling and real-time data, or is a pure text generation job.</div>
+
+        <!-- Decision rule -->
+        <div style="background:linear-gradient(135deg,rgba(31,111,235,0.12),rgba(57,211,83,0.08));border:1px solid #30363d;border-radius:12px;padding:16px;margin-bottom:18px">
+          <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">The one rule that decides which model runs</div>
+          <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center">
+            <div style="background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.25);border-radius:10px;padding:12px;text-align:center">
+              <div style="font-size:1.5rem;margin-bottom:6px">🔧</div>
+              <div style="font-size:0.82rem;font-weight:700;color:#f85149;margin-bottom:4px">Needs Tool Calls?</div>
+              <div style="font-size:0.74rem;color:#8b949e">Fetch live prices, check portfolio, execute trades, scan market, read news</div>
+            </div>
+            <div style="font-size:1.4rem;color:#6e7681;text-align:center">→</div>
+            <div style="background:rgba(31,111,235,0.08);border:1px solid rgba(31,111,235,0.25);border-radius:10px;padding:12px;text-align:center">
+              <div style="font-size:1.5rem;margin-bottom:6px">☁️</div>
+              <div style="font-size:0.82rem;font-weight:700;color:#58a6ff;margin-bottom:4px">ALWAYS Claude Haiku 4.5</div>
+              <div style="font-size:0.74rem;color:#8b949e">Ollama (llama3.1) does not support tool-calling — period</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;margin-top:10px">
+            <div style="background:rgba(57,211,83,0.08);border:1px solid rgba(57,211,83,0.25);border-radius:10px;padding:12px;text-align:center">
+              <div style="font-size:1.5rem;margin-bottom:6px">📝</div>
+              <div style="font-size:0.82rem;font-weight:700;color:#39d353;margin-bottom:4px">Pure text generation?</div>
+              <div style="font-size:0.74rem;color:#8b949e">Data already in hand. Just needs to write a summary, briefing, or lesson sentence</div>
+            </div>
+            <div style="font-size:1.4rem;color:#6e7681;text-align:center">→</div>
+            <div style="background:rgba(57,211,83,0.08);border:1px solid rgba(57,211,83,0.25);border-radius:10px;padding:12px;text-align:center">
+              <div style="font-size:1.5rem;margin-bottom:6px">🦙</div>
+              <div style="font-size:0.82rem;font-weight:700;color:#39d353;margin-bottom:4px">Ollama first (FREE)</div>
+              <div style="font-size:0.74rem;color:#8b949e">If Ollama is offline → falls back to Claude Haiku automatically</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Side by side comparison -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+
+          <!-- Claude card -->
+          <div style="background:rgba(31,111,235,0.06);border:2px solid rgba(31,111,235,0.3);border-radius:12px;padding:16px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+              <div style="font-size:1.6rem">☁️</div>
+              <div>
+                <div style="font-size:0.9rem;font-weight:700;color:#58a6ff">Claude Haiku 4.5</div>
+                <div style="font-size:0.7rem;color:#6e7681">claude-haiku-4-5-20251001 · Anthropic API</div>
+              </div>
+            </div>
+            <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Used for</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#3fb950;flex-shrink:0">✓</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">ALL user chat (always)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">Every message you type in the chat widget</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#3fb950;flex-shrink:0">✓</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">ALL admin chat (always)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">Every message in Admin → Assistant tab</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#d29922;flex-shrink:0">↩</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">Morning briefing (fallback)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">Only when Ollama is offline</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#d29922;flex-shrink:0">↩</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">EOD summary (fallback)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">Only when Ollama is offline</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#d29922;flex-shrink:0">↩</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">Trade reflection lessons (fallback)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">Only when Ollama is offline</div>
+                </div>
+              </div>
+            </div>
+            <div style="border-top:1px solid #21262d;padding-top:10px">
+              <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Why Claude (not Ollama) for chat</div>
+              <div style="font-size:0.76rem;color:#8b949e;line-height:1.5">Supports <strong style="color:#c9d1d9">tool-calling</strong> — Claude can call <code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">get_live_quote</code>, <code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">get_portfolio</code>, <code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">propose_trade</code> and 15 other tools in real-time. Ollama (llama3.1:8b) has no tool-calling capability — it can only output text.</div>
+            </div>
+            <div style="margin-top:10px;background:#0d1117;border-radius:8px;padding:10px">
+              <div style="font-size:0.7rem;color:#6e7681;margin-bottom:4px">Pricing per operation</div>
+              <div style="font-size:0.76rem;color:#8b949e">Input: <span style="color:#58a6ff">$0.80/M tokens</span> · Output: <span style="color:#58a6ff">$4.00/M tokens</span></div>
+              <div style="font-size:0.76rem;color:#8b949e;margin-top:2px">~$0.001/chat message · ~$2–8/month total</div>
+            </div>
+          </div>
+
+          <!-- Ollama card -->
+          <div style="background:rgba(57,211,83,0.06);border:2px solid rgba(57,211,83,0.3);border-radius:12px;padding:16px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+              <div style="font-size:1.6rem">🦙</div>
+              <div>
+                <div style="font-size:0.9rem;font-weight:700;color:#39d353">Ollama · llama3.1:8b</div>
+                <div style="font-size:0.7rem;color:#6e7681">Runs locally on your Mac · FREE · No API key</div>
+              </div>
+            </div>
+            <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Used for</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#3fb950;flex-shrink:0">✓</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">Morning briefing (9:30 AM ET)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">Market context + regime + sector focus + game plan. Data already fetched — Ollama just writes the narrative. Saves ~$0.01/day.</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#3fb950;flex-shrink:0">✓</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">EOD summary (4:00 PM ET)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">Today's P&amp;L + trades + what worked + what to watch tomorrow. All numbers come from DB — Ollama just writes the analysis text.</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:flex-start">
+                <span style="color:#3fb950;flex-shrink:0">✓</span>
+                <div>
+                  <div style="font-size:0.8rem;color:#e6edf3;font-weight:600">Trade reflection lessons (nightly)</div>
+                  <div style="font-size:0.72rem;color:#6e7681">For every closed trade: writes one 25-word lesson. e.g. "NVDA — avoid entries when RSI &gt; 70 in volatile regime; momentum was exhausted." These lessons are loaded into Claude's system prompt the next day.</div>
+                </div>
+              </div>
+            </div>
+            <div style="border-top:1px solid #21262d;padding-top:10px">
+              <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Why NOT used for chat</div>
+              <div style="font-size:0.76rem;color:#8b949e;line-height:1.5">llama3.1:8b has <strong style="color:#f85149">no tool-calling</strong>. If you asked it "what is NVDA's price?" it would hallucinate an answer rather than actually fetching it. It can only generate text from its training data — no real-time lookups possible.</div>
+            </div>
+            <div style="margin-top:10px;background:#0d1117;border-radius:8px;padding:10px">
+              <div style="font-size:0.7rem;color:#6e7681;margin-bottom:4px">Setup</div>
+              <div style="font-size:0.76rem;color:#8b949e"><code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">brew install ollama</code> then <code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">ollama pull llama3.1:8b</code></div>
+              <div style="font-size:0.72rem;color:#6e7681;margin-top:4px">If Ollama is not running, all 3 tasks automatically fall back to Claude with no error to you.</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- The code flow -->
+        <div style="background:rgba(13,17,23,0.9);border:1px solid #21262d;border-radius:12px;padding:16px">
+          <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px">How the decision is made in code — <code style="color:#79c0ff;font-style:normal;font-size:0.8rem">localAI()</code> in ollama.js</div>
+          <div class="aflow">
+
+            <div class="aflow-step">
+              <div class="aflow-num" style="background:#d29922;width:26px;height:26px;font-size:0.7rem">1</div>
+              <div class="aflow-card" style="border-color:#d2992230;padding:10px 12px">
+                <div class="aflow-title" style="font-size:0.82rem">Batch job fires (cron or manual)</div>
+                <div class="aflow-body" style="font-size:0.75rem">Morning briefing, EOD summary, or trade reflection nightly agent calls <code>localAI({ prompt, system, maxTokens })</code></div>
+              </div>
+            </div>
+            <div class="aflow-connector"></div>
+
+            <div class="aflow-step">
+              <div class="aflow-num" style="background:#39d353;width:26px;height:26px;font-size:0.7rem">2</div>
+              <div class="aflow-card" style="border-color:#39d35330;padding:10px 12px">
+                <div class="aflow-title" style="font-size:0.82rem">Check: is Ollama running?</div>
+                <div class="aflow-body" style="font-size:0.75rem"><code>isOllamaAvailable()</code> pings <code>http://localhost:11434/api/tags</code> with a 3-second timeout. Result cached for 60 seconds.</div>
+              </div>
+            </div>
+            <div class="aflow-connector"></div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div class="aflow-step" style="gap:8px">
+                <div class="aflow-num" style="background:#39d353;width:24px;height:24px;font-size:0.68rem;flex-shrink:0">3a</div>
+                <div class="aflow-card" style="border-color:#39d35330;padding:9px 11px">
+                  <div class="aflow-title" style="font-size:0.78rem">Ollama is running ✓</div>
+                  <div class="aflow-body" style="font-size:0.73rem">
+                    POST to <code>localhost:11434/api/generate</code><br>
+                    Model: <code>llama3.1:8b</code><br>
+                    15-second timeout<br>
+                    Returns: <code>{ text, source: 'ollama', model }</code><br>
+                    <strong style="color:#39d353">Cost: $0.00</strong>
+                  </div>
+                </div>
+              </div>
+              <div class="aflow-step" style="gap:8px">
+                <div class="aflow-num" style="background:#58a6ff;width:24px;height:24px;font-size:0.68rem;flex-shrink:0">3b</div>
+                <div class="aflow-card" style="border-color:#58a6ff30;padding:9px 11px">
+                  <div class="aflow-title" style="font-size:0.78rem">Ollama is offline or fails</div>
+                  <div class="aflow-body" style="font-size:0.73rem">
+                    Anthropic API called instead<br>
+                    Model: <code>claude-haiku-4-5</code><br>
+                    Same prompt, same result<br>
+                    Returns: <code>{ text, source: 'anthropic', model }</code><br>
+                    <strong style="color:#58a6ff">Cost: ~$0.001</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="aflow-connector"></div>
+
+            <div class="aflow-step">
+              <div class="aflow-num" style="background:#bc8cff;width:26px;height:26px;font-size:0.7rem">4</div>
+              <div class="aflow-card" style="border-color:#bc8cff30;padding:10px 12px">
+                <div class="aflow-title" style="font-size:0.82rem">Result saved with source label</div>
+                <div class="aflow-body" style="font-size:0.75rem">
+                  The <code>ai_source</code> field (<code>'ollama'</code> or <code>'anthropic'</code>) is saved to PostgreSQL alongside the content.<br>
+                  In trade lessons: visible as <code>[local]</code> label in the reflection log.<br>
+                  In briefings: <code>daily_briefings</code> table stores the text + source.
+                </div>
+                <div class="aflow-tags">
+                  <span class="atag" style="--tc:#bc8cff">PostgreSQL trade_lessons · daily_briefings</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div><!-- /av-models -->
 
       <!-- ══════════ CHAT FLOW VIEW ══════════ -->
       <div id="av-chat" class="arch-view" style="display:none">
@@ -2764,14 +2986,37 @@
 
           <div class="datasrc-card" style="--dc:#58a6ff">
             <div class="dsc-header">
-              <div class="dsc-badge" style="background:#58a6ff">PAID</div>
-              <div class="dsc-name">🤖 Anthropic Claude API</div>
+              <div class="dsc-badge" style="background:#58a6ff">PAID · ALWAYS-ON FOR CHAT</div>
+              <div class="dsc-name">☁️ Anthropic Claude Haiku 4.5</div>
               <div class="dsc-conn">HTTPS · api.anthropic.com · claude-haiku-4-5-20251001</div>
             </div>
             <div class="dsc-body">
-              <div class="dsc-provides"><strong>Pricing:</strong> $0.80/M input tokens · $4.00/M output tokens · ~$0.001 per user message · Estimated $2–8/month total at normal usage<br><strong>Used for:</strong> User chat · Admin chat · Morning briefing fallback (when Ollama is down)</div>
-              <div class="dsc-chain"><strong>Fallback for briefings:</strong> Ollama (local, free) — llama3.1:8b runs locally on your Mac. All chat routes try Ollama first for zero-cost generation.</div>
-              <div class="dsc-note">All API calls tracked in <code>api_usage_stats</code> table: input tokens, output tokens, cost, model, timestamp. Viewable in Stats → Cost Per Day table with daily rollup.</div>
+              <div class="dsc-provides">
+                <strong>Always used for (no exception):</strong> All user chat · All admin chat<br>
+                <strong>Why always?</strong> These need <strong>tool-calling</strong> — fetching live prices, portfolio, executing trades. Ollama cannot do this.<br>
+                <strong>Used as fallback for:</strong> Morning briefing · EOD summary · Trade reflection lessons — only when Ollama is offline<br>
+                <strong>Pricing:</strong> $0.80/M input · $4.00/M output · ~$0.001/message · ~$2–8/month total
+              </div>
+              <div class="dsc-note">All API calls tracked in <code>api_usage_stats</code> table: input tokens, output tokens, cost, model, timestamp. Viewable in Stats → Cost Per Day table.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#39d353">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#39d353;color:#0d1117">FREE · LOCAL</div>
+              <div class="dsc-name">🦙 Ollama · llama3.1:8b</div>
+              <div class="dsc-conn">HTTP · localhost:11434 · runs on your Mac · no API key</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides">
+                <strong>Used for batch/narrative jobs only:</strong><br>
+                &nbsp;&nbsp;• <strong>Morning briefing</strong> (9:30 AM ET cron) — writes market narrative from pre-fetched context data<br>
+                &nbsp;&nbsp;• <strong>EOD summary</strong> (4:00 PM ET cron) — writes daily performance analysis from DB trade data<br>
+                &nbsp;&nbsp;• <strong>Trade reflection lessons</strong> (nightly) — writes one 25-word lesson per closed trade<br>
+                <strong>Never used for:</strong> User chat · Admin chat (no tool-calling support in llama3.1)
+              </div>
+              <div class="dsc-chain"><strong>Availability check:</strong> Pings <code>localhost:11434/api/tags</code> with 3s timeout, result cached 60s. If offline → automatic Claude Haiku fallback — you won't notice.</div>
+              <div class="dsc-note">Setup: <code>brew install ollama</code> then <code>ollama pull llama3.1:8b</code> then <code>ollama serve</code>. Not strictly required — the system works without it, just uses Claude for briefings at ~$0.01/day extra cost.</div>
             </div>
           </div>
 
@@ -6625,7 +6870,7 @@ function setAdminView(view) {
 }
 
 function showArch(view) {
-  ['map','chat','scan','score','data'].forEach(v => {
+  ['map','models','chat','scan','score','data'].forEach(v => {
     const el = document.getElementById('av-' + v);
     if (el) el.style.display = v === view ? 'block' : 'none';
     const btn = document.querySelector(`[data-av="${v}"]`);
