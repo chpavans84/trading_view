@@ -528,10 +528,12 @@ app.post('/api/public/chat', publicChatRateLimit, async (req, res) => {
 
     const { isKnowledgeQuestion, answerKnowledgeQuestion } = await import('../core/knowledge.js');
 
-    // Always try knowledge base first
+    // Always try knowledge base first — skip silently if Ollama is offline
     if (await isKnowledgeQuestion(text)) {
       const result = await answerKnowledgeQuestion(text);
-      return res.json({ answer: result.answer, type: 'knowledge', source: 'ollama' });
+      if (result.source !== 'error') {
+        return res.json({ answer: result.answer, type: 'knowledge', source: 'ollama' });
+      }
     }
 
     // For market/scan questions, return last cached public market data only
@@ -589,7 +591,14 @@ app.post('/api/public/chat', publicChatRateLimit, async (req, res) => {
 
     // Fallback — general trading question via Ollama, no Claude
     const result = await answerKnowledgeQuestion(text);
-    return res.json({ answer: result.answer, type: 'general', source: 'ollama' });
+    if (result.source !== 'error') {
+      return res.json({ answer: result.answer, type: 'general', source: 'ollama' });
+    }
+    return res.json({
+      answer: 'The trading coach is temporarily offline. For live trade signals and analysis, please sign in to the dashboard.',
+      type: 'offline',
+      source: 'cache',
+    });
 
   } catch (err) {
     console.error('[public-chat] error:', err.message);
