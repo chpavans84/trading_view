@@ -33,6 +33,7 @@ import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseI
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend } from '../core/news.js';
 import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
+import { seedKnowledge } from '../core/knowledge.js';
 import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
 import { getMarketContext } from '../core/market-context.js';
@@ -2013,7 +2014,7 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
 // ─── AI Chat (SSE streaming) ──────────────────────────────────────────────────
 
 app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
-  const { message } = req.body;
+  const { message, voice_mode } = req.body;
   if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
   // Credit check: admins are unlimited; viewers consume 1 credit per message
@@ -2053,6 +2054,7 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
       signal:     abort.signal,
       userConfig,
       username,
+      voiceMode:  !!voice_mode,
     });
     // Fetch updated credit balance to send back to client
     let creditsLeft = null;
@@ -3757,9 +3759,43 @@ app.get('/api/reflection/lessons', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Knowledge Base ───────────────────────────────────────────────────────────
+
+app.post('/api/knowledge/add', requireAuth, async (req, res) => {
+  try {
+    const { title, content, category = 'custom', topic = 'custom' } = req.body;
+    if (!title || !content) return res.status(400).json({ error: 'title and content required' });
+
+    const { getEmbedding } = await import('../core/knowledge.js');
+    const { saveKnowledgeChunk, countKnowledgeChunks } = await import('../core/db.js');
+
+    const embedding = await getEmbedding(title + ' ' + content);
+    if (!embedding) return res.status(503).json({ error: 'Ollama embedding unavailable' });
+
+    await saveKnowledgeChunk({ topic, category, title, content, embedding, source: 'user' });
+    const total = await countKnowledgeChunks();
+    res.json({ success: true, total });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/knowledge/count', requireAuth, async (req, res) => {
+  try {
+    const { countKnowledgeChunks } = await import('../core/db.js');
+    const total = await countKnowledgeChunks();
+    res.json({ total });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 await initDb();
+seedKnowledge()
+  .then(r => { if (r?.seeded) console.log(`[knowledge] seeded ${r.seeded} chunks`); })
+  .catch(e => console.error('[knowledge] seed error:', e.message));
 await pgStore._ensureTable();
 await migrateUsersToDb();
 setInterval(cleanupOtpTokens, 60 * 60 * 1000); // clean expired OTPs every hour
