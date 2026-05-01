@@ -335,22 +335,18 @@ CREATE TABLE IF NOT EXISTS daily_picks (
 CREATE INDEX IF NOT EXISTS idx_daily_picks_date ON daily_picks(date);
 CREATE INDEX IF NOT EXISTS idx_daily_picks_type ON daily_picks(type);
 
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
   id           SERIAL PRIMARY KEY,
   topic        TEXT NOT NULL,
   category     TEXT NOT NULL,
   title        TEXT NOT NULL,
   content      TEXT NOT NULL,
-  embedding    vector(768),
+  embedding    TEXT,
   source       TEXT DEFAULT 'built-in',
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
-  ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 50);
+CREATE INDEX IF NOT EXISTS knowledge_chunks_category_idx ON knowledge_chunks(category);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -1475,16 +1471,28 @@ export async function saveKnowledgeChunk({ topic, category, title, content, embe
 }
 
 export async function searchKnowledge({ embedding, limit = 4 }) {
+  // Fetch all chunks with stored embeddings and rank by cosine similarity in JS
+  // (pgvector extension not required — embedding stored as JSON text)
   const { rows } = await query(
-    `SELECT title, content, category,
-            1 - (embedding <=> $1::vector) AS similarity
-     FROM knowledge_chunks
-     WHERE embedding IS NOT NULL
-     ORDER BY embedding <=> $1::vector
-     LIMIT $2`,
-    [JSON.stringify(embedding), limit]
+    `SELECT title, content, category, embedding FROM knowledge_chunks WHERE embedding IS NOT NULL`
   );
-  return rows;
+  if (!rows.length) return [];
+
+  const dot   = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
+  const norm  = (a)    => Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+  const qNorm = norm(embedding);
+
+  return rows
+    .map(r => {
+      try {
+        const e   = JSON.parse(r.embedding);
+        const sim = dot(embedding, e) / (qNorm * norm(e));
+        return { title: r.title, content: r.content, category: r.category, similarity: sim };
+      } catch { return null; }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, limit);
 }
 
 export async function countKnowledgeChunks() {
