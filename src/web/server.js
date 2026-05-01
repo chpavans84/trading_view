@@ -500,13 +500,106 @@ async function requireAdmin(req, res, next) {
   res.status(403).json({ error: 'Forbidden' });
 }
 
+// ─── Public Chat — must be registered BEFORE the requireAuth middleware ───────
+// Express processes routes top-to-bottom; placing this first means requireAuth
+// never fires for /api/public/* requests.
+
+const _publicChatCalls = new Map(); // ip -> { count, resetAt }
+
+function publicChatRateLimit(req, res, next) {
+  const ip    = req.ip ?? req.connection?.remoteAddress ?? 'unknown';
+  const now   = Date.now();
+  const entry = _publicChatCalls.get(ip) ?? { count: 0, resetAt: now + 60_000 };
+  if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + 60_000; }
+  entry.count++;
+  _publicChatCalls.set(ip, entry);
+  if (entry.count > 10) return res.status(429).json({ error: 'Too many requests. Please wait a minute.' });
+  next();
+}
+
+app.post('/api/public/chat', publicChatRateLimit, async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || typeof message !== 'string' || message.trim().length < 2) {
+      return res.status(400).json({ error: 'Message required' });
+    }
+
+    const text = message.trim().slice(0, 500);
+
+    const { isKnowledgeQuestion, answerKnowledgeQuestion } = await import('../core/knowledge.js');
+
+    // Always try knowledge base first
+    if (await isKnowledgeQuestion(text)) {
+      const result = await answerKnowledgeQuestion(text);
+      return res.json({ answer: result.answer, type: 'knowledge', source: 'ollama' });
+    }
+
+    // For market/scan questions, return last cached public market data only
+    const isMarketQuestion = /market|regime|vix|trending|bullish|bearish|scan|setup|today|top pick|what stock|watch.?list|strong buy|briefing/i.test(text);
+    if (isMarketQuestion) {
+      const [scanRows, picksRows, briefingRows] = await Promise.all([
+        query(`SELECT state_json, updated_at FROM scanner_state ORDER BY updated_at DESC LIMIT 1`),
+        query(
+          `SELECT symbol, name, score, grade, price, horizon
+           FROM daily_picks
+           WHERE date = CURRENT_DATE AND type = 'strong_buy'
+           ORDER BY score DESC NULLS LAST LIMIT 5`
+        ),
+        query(
+          `SELECT content, regime, direction, vix
+           FROM daily_briefings
+           WHERE date = CURRENT_DATE
+           ORDER BY created_at DESC LIMIT 1`
+        ),
+      ]);
+
+      const state     = scanRows.rows[0]?.state_json ?? null;
+      const updatedAt = scanRows.rows[0]?.updated_at ?? null;
+      const picks     = picksRows.rows;
+      const briefing  = briefingRows.rows[0] ?? null;
+      const parts     = [];
+
+      if (state || briefing) {
+        const regime    = briefing?.regime    ?? state?.last_regime    ?? 'unknown';
+        const direction = briefing?.direction ?? state?.last_direction ?? 'unknown';
+        const vix       = briefing?.vix       ?? state?.last_vix       ?? 'unknown';
+        const age       = updatedAt ? Math.round((Date.now() - new Date(updatedAt).getTime()) / 60000) : null;
+        parts.push(`📊 Market snapshot (${age != null ? `${age} min ago` : 'today'}): Regime ${regime} · Direction ${direction} · VIX ${vix}`);
+      }
+
+      if (picks.length > 0) {
+        const pickLines = picks.map(p => {
+          const score   = p.score   ? ` (score ${p.score})` : '';
+          const grade   = p.grade   ? ` [${p.grade}]`       : '';
+          const price   = p.price   ? ` @ $${Number(p.price).toFixed(2)}` : '';
+          const horizon = p.horizon ? ` · ${p.horizon}`     : '';
+          return `  • ${p.symbol}${grade}${score}${price}${horizon}`;
+        }).join('\n');
+        parts.push(`\n🔍 Today's scanner picks (strong buys):\n${pickLines}`);
+      }
+
+      if (briefing?.content) {
+        const excerpt = briefing.content.slice(0, 300).replace(/\n+/g, ' ');
+        parts.push(`\n📋 Today's briefing: ${excerpt}${briefing.content.length > 300 ? '…' : ''}`);
+      }
+
+      parts.push('\nSign in to the trading dashboard for live positions, trade signals, and full analysis.');
+      return res.json({ answer: parts.join('\n'), type: 'market', source: 'cache' });
+    }
+
+    // Fallback — general trading question via Ollama, no Claude
+    const result = await answerKnowledgeQuestion(text);
+    return res.json({ answer: result.answer, type: 'general', source: 'ollama' });
+
+  } catch (err) {
+    console.error('[public-chat] error:', err.message);
+    res.status(500).json({ error: 'Chat unavailable right now.' });
+  }
+});
+
 // ─── API routes ───────────────────────────────────────────────────────────────
-// requireAuth + apiLimiter must be registered BEFORE any route definitions
-// /api/public/* is intentionally excluded — those routes handle their own rate limiting
-app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/public/')) return next();
-  requireAuth(req, res, next);
-}, apiLimiter);
+// requireAuth + apiLimiter applied to all /api/* routes registered below this line
+app.use('/api', requireAuth, apiLimiter);
 
 app.post('/api/users/add', requireAdmin, async (req, res) => {
   const { username, password, role = 'viewer', credits = 100 } = req.body;
@@ -3841,125 +3934,6 @@ app.get('/api/knowledge/count', requireAuth, async (req, res) => {
     res.json({ total });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Public Chat (no auth — Ollama + knowledge base only) ────────────────────
-
-const _publicChatCalls = new Map(); // ip -> { count, resetAt }
-
-function publicChatRateLimit(req, res, next) {
-  const ip  = req.ip ?? req.connection.remoteAddress ?? 'unknown';
-  const now = Date.now();
-  const entry = _publicChatCalls.get(ip) ?? { count: 0, resetAt: now + 60_000 };
-
-  if (now > entry.resetAt) {
-    entry.count   = 0;
-    entry.resetAt = now + 60_000;
-  }
-  entry.count++;
-  _publicChatCalls.set(ip, entry);
-
-  if (entry.count > 10) {
-    return res.status(429).json({ error: 'Too many requests. Please wait a minute.' });
-  }
-  next();
-}
-
-app.post('/api/public/chat', publicChatRateLimit, async (req, res) => {
-  try {
-    const { message } = req.body;
-    if (!message || typeof message !== 'string' || message.trim().length < 2) {
-      return res.status(400).json({ error: 'Message required' });
-    }
-
-    const text = message.trim().slice(0, 500);
-
-    const { isKnowledgeQuestion, answerKnowledgeQuestion } = await import('../core/knowledge.js');
-
-    // Always try knowledge base first
-    if (await isKnowledgeQuestion(text)) {
-      const result = await answerKnowledgeQuestion(text);
-      return res.json({ answer: result.answer, type: 'knowledge', source: 'ollama' });
-    }
-
-    // For market/scan questions, return last cached public market data only
-    const isMarketQuestion = /market|regime|vix|trending|bullish|bearish|scan|setup|today|top pick|what stock|watch.?list|strong buy|briefing/i.test(text);
-    if (isMarketQuestion) {
-      // Fetch all locally cached public market data in parallel
-      const [scanRows, picksRows, briefingRows] = await Promise.all([
-        query(`SELECT state_json, updated_at FROM scanner_state ORDER BY updated_at DESC LIMIT 1`),
-        query(
-          `SELECT symbol, name, score, grade, price, horizon
-           FROM daily_picks
-           WHERE date = CURRENT_DATE AND type = 'strong_buy'
-           ORDER BY score DESC NULLS LAST LIMIT 5`
-        ),
-        query(
-          `SELECT content, regime, direction, vix
-           FROM daily_briefings
-           WHERE date = CURRENT_DATE
-           ORDER BY created_at DESC LIMIT 1`
-        ),
-      ]);
-
-      const state     = scanRows.rows[0]?.state_json ?? null;
-      const updatedAt = scanRows.rows[0]?.updated_at ?? null;
-      const picks     = picksRows.rows;
-      const briefing  = briefingRows.rows[0] ?? null;
-
-      // Build the answer from whatever data is available
-      const parts = [];
-
-      // 1. Market regime / VIX
-      if (state || briefing) {
-        const regime    = briefing?.regime    ?? state?.last_regime    ?? 'unknown';
-        const direction = briefing?.direction ?? state?.last_direction ?? 'unknown';
-        const vix       = briefing?.vix       ?? state?.last_vix       ?? 'unknown';
-        const age       = updatedAt
-          ? Math.round((Date.now() - new Date(updatedAt).getTime()) / 60000)
-          : null;
-        const ageStr = age != null ? `${age} min ago` : 'today';
-        parts.push(`📊 Market snapshot (${ageStr}): Regime ${regime} · Direction ${direction} · VIX ${vix}`);
-      }
-
-      // 2. Today's top scanner picks
-      if (picks.length > 0) {
-        const pickLines = picks.map(p => {
-          const score   = p.score   ? ` (score ${p.score})` : '';
-          const grade   = p.grade   ? ` [${p.grade}]`       : '';
-          const price   = p.price   ? ` @ $${Number(p.price).toFixed(2)}` : '';
-          const horizon = p.horizon ? ` · ${p.horizon}`     : '';
-          return `  • ${p.symbol}${grade}${score}${price}${horizon}`;
-        }).join('\n');
-        parts.push(`\n🔍 Today's scanner picks (strong buys):\n${pickLines}`);
-      }
-
-      // 3. Morning briefing excerpt (first 300 chars)
-      if (briefing?.content) {
-        const excerpt = briefing.content.slice(0, 300).replace(/\n+/g, ' ');
-        parts.push(`\n📋 Today's briefing: ${excerpt}${briefing.content.length > 300 ? '…' : ''}`);
-      }
-
-      if (parts.length > 0) {
-        parts.push('\nSign in to the trading dashboard for live positions, trade signals, and full analysis.');
-        return res.json({ answer: parts.join('\n'), type: 'market', source: 'cache' });
-      }
-
-      return res.json({
-        answer: 'Market data is not available right now — the scanner may not have run yet today. Sign in to the trading dashboard for live analysis.',
-        type: 'market',
-        source: 'cache',
-      });
-    }
-
-    // Fallback — general trading question via Ollama, no Claude
-    const result = await answerKnowledgeQuestion(text);
-    return res.json({ answer: result.answer, type: 'general', source: 'ollama' });
-
-  } catch (err) {
-    console.error('[public-chat] error:', err.message);
-    res.status(500).json({ error: 'Chat unavailable right now.' });
   }
 });
 
