@@ -649,16 +649,20 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
  * Returns the full response text.
  */
 export async function chat({ chatId, message, onChunk, onTool, signal, userConfig = null, username = null, voiceMode = false }) {
-  // Route knowledge/education questions to Ollama (no Claude API cost)
+  // Route knowledge/education questions to Ollama (no Claude API cost).
+  // Fall through to Claude if Ollama is offline so the user always gets an answer.
   if (await isKnowledgeQuestion(message)) {
     const result = await answerKnowledgeQuestion(message);
-    return {
-      role: 'assistant',
-      content: result.answer,
-      source: result.source,
-      model: result.model ?? 'ollama',
-      knowledge_response: true,
-    };
+    if (result.source !== 'error') {
+      return {
+        role: 'assistant',
+        content: result.answer,
+        source: result.source,
+        model: result.model ?? 'ollama',
+        knowledge_response: true,
+      };
+    }
+    // Ollama offline — fall through to Claude below
   }
 
   if (!chatHistory.has(chatId)) await loadHistoryForChat(chatId);
