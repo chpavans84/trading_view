@@ -502,7 +502,11 @@ async function requireAdmin(req, res, next) {
 
 // ─── API routes ───────────────────────────────────────────────────────────────
 // requireAuth + apiLimiter must be registered BEFORE any route definitions
-app.use('/api', requireAuth, apiLimiter);
+// /api/public/* is intentionally excluded — those routes handle their own rate limiting
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/public/')) return next();
+  requireAuth(req, res, next);
+}, apiLimiter);
 
 app.post('/api/users/add', requireAdmin, async (req, res) => {
   const { username, password, role = 'viewer', credits = 100 } = req.body;
