@@ -292,7 +292,13 @@ const sessionMiddleware = session({
 });
 app.use(sessionMiddleware);
 
-app.use(express.static(join(__dirname, 'public')));
+app.use(express.static(join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  },
+}));
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
