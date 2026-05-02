@@ -3659,11 +3659,21 @@
         </div><!-- /group system -->
 
         <!-- ── ERD Diagram with join lines ──────────────────────────────── -->
-        <div style="padding:20px 20px 8px">
-          <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:4px">Entity Relationship Diagram</div>
-          <div style="font-size:11px;color:#8b949e">Lines show actual joins. Arrow tail = many, single bar = one. Label = join column.</div>
+        <div style="padding:20px 20px 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-size:15px;font-weight:700;color:#e6edf3;margin-bottom:4px">Entity Relationship Diagram</div>
+            <div style="font-size:11px;color:#8b949e">Lines show actual joins. Arrow tail = many, single bar = one. Label = join column.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <button onclick="erdZoom(-0.15)" title="Zoom out" style="background:#21262d;border:1px solid #30363d;border-radius:6px;color:#e6edf3;width:30px;height:30px;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center">−</button>
+            <span id="erdZoomPct" style="font-size:0.8rem;color:#8b949e;min-width:38px;text-align:center">100%</span>
+            <button onclick="erdZoom(0.15)" title="Zoom in" style="background:#21262d;border:1px solid #30363d;border-radius:6px;color:#e6edf3;width:30px;height:30px;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center">+</button>
+            <button onclick="erdZoomFit()" title="Fit to window" style="background:#21262d;border:1px solid #30363d;border-radius:6px;color:#8b949e;padding:0 10px;height:30px;cursor:pointer;font-size:0.78rem">Fit</button>
+            <button onclick="erdZoomReset()" title="Reset to 100%" style="background:#21262d;border:1px solid #30363d;border-radius:6px;color:#8b949e;padding:0 10px;height:30px;cursor:pointer;font-size:0.78rem">1:1</button>
+            <span style="font-size:0.72rem;color:#484f58;margin-left:2px">scroll or drag to pan</span>
+          </div>
         </div>
-        <div id="dbErdWrap" style="padding:0 20px 24px;overflow-x:auto;min-height:200px">
+        <div id="dbErdWrap" style="padding:16px 20px 24px;overflow:auto;min-height:300px;max-height:72vh;cursor:grab;user-select:none;position:relative">
           <div id="dbErdDiagram"><script type="text/plain" id="erdSource">
 erDiagram
     users {
@@ -8572,6 +8582,88 @@ function setAdminView(view) {
   if (isScan) scanRefreshStatus();
 }
 
+// ── ERD zoom + pan ─────────────────────────────────────
+let _erdScale = 1, _erdSvgW = 0, _erdSvgH = 0, _erdPanInit = false;
+
+function _erdSvg() { return document.querySelector('#dbErdDiagram svg'); }
+
+function applyErdZoom() {
+  const svg = _erdSvg();
+  if (!svg) return;
+  if (!_erdSvgW) {
+    _erdSvgW = parseFloat(svg.getAttribute('width'))  || svg.getBoundingClientRect().width  || 800;
+    _erdSvgH = parseFloat(svg.getAttribute('height')) || svg.getBoundingClientRect().height || 600;
+  }
+  svg.style.width  = (_erdSvgW * _erdScale) + 'px';
+  svg.style.height = (_erdSvgH * _erdScale) + 'px';
+  svg.style.display = 'block';
+  const lbl = document.getElementById('erdZoomPct');
+  if (lbl) lbl.textContent = Math.round(_erdScale * 100) + '%';
+}
+
+function erdZoom(delta) {
+  _erdScale = Math.max(0.2, Math.min(6, _erdScale + delta));
+  applyErdZoom();
+}
+
+function erdZoomReset() {
+  _erdScale = 1;
+  applyErdZoom();
+}
+
+function erdZoomFit() {
+  const wrap = document.getElementById('dbErdWrap');
+  const svg  = _erdSvg();
+  if (!svg || !wrap) return;
+  if (!_erdSvgW) {
+    _erdSvgW = parseFloat(svg.getAttribute('width'))  || svg.getBoundingClientRect().width  || 800;
+    _erdSvgH = parseFloat(svg.getAttribute('height')) || svg.getBoundingClientRect().height || 600;
+  }
+  const pad = 32;
+  _erdScale = Math.min(
+    (wrap.clientWidth  - pad) / _erdSvgW,
+    (wrap.clientHeight - pad) / _erdSvgH,
+    1
+  );
+  applyErdZoom();
+}
+
+function erdInitPan() {
+  if (_erdPanInit) return;
+  _erdPanInit = true;
+  const wrap = document.getElementById('dbErdWrap');
+  if (!wrap) return;
+
+  // Mouse-wheel zoom (Ctrl+wheel or plain wheel over ERD)
+  wrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    erdZoom(e.deltaY < 0 ? 0.12 : -0.12);
+  }, { passive: false });
+
+  // Drag-to-pan
+  let panning = false, startX = 0, startY = 0, scrollX = 0, scrollY = 0;
+  wrap.addEventListener('mousedown', (e) => {
+    panning = true;
+    startX  = e.clientX;
+    startY  = e.clientY;
+    scrollX = wrap.scrollLeft;
+    scrollY = wrap.scrollTop;
+    wrap.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!panning) return;
+    wrap.scrollLeft = scrollX - (e.clientX - startX);
+    wrap.scrollTop  = scrollY - (e.clientY - startY);
+  });
+  window.addEventListener('mouseup', () => {
+    panning = false;
+    const wrap = document.getElementById('dbErdWrap');
+    if (wrap) wrap.style.cursor = 'grab';
+  });
+  wrap.style.cursor = 'grab';
+}
+
 let _erdRendered = false;
 function showArch(view) {
   ['map','models','db','chat','scan','score','data'].forEach(v => {
@@ -8606,6 +8698,10 @@ function showArch(view) {
     if (srcTxt) {
       mermaid.render('erd-svg-out', srcTxt).then(({ svg }) => {
         erdEl.innerHTML = svg;
+        _erdSvgW = 0;
+        _erdScale = 1;
+        // auto-fit on first render
+        requestAnimationFrame(() => { erdZoomFit(); erdInitPan(); });
       }).catch(err => {
         erdEl.innerHTML = `<pre style="color:#f85149;font-size:0.78rem;white-space:pre-wrap;padding:12px">${err?.message ?? String(err)}</pre>`;
       });
