@@ -27,14 +27,15 @@ const FEATURE_NAMES = [
 
 function toFeatures(row) {
   const date = new Date(row.score_date);
+  const vix = row.vix_close ?? row.vix ?? null;
   return [
-    ((row.rsi         ?? 50)  - 50) / 50,               // rsi_norm
-    Math.sign(row.macd_hist   ?? 0),                     // macd_sign  −1|0|+1
-    row.ema_trend === 'above'  ? 1 : 0,                  // ema_above
-    row.bb_position            ?? 0.5,                   // bb_pos      0..1
-    Math.min((row.volume_ratio ?? 1) / 3, 2) - 1,       // vol_ratio  normalized
-    ((row.score       ?? 50)  - 50) / 50,               // score_norm
-    row.vix != null ? (row.vix - 20) / 15 : 0,          // vix_norm
+    ((row.rsi      ?? 50) - 50) / 50,                   // rsi_norm
+    Math.sign(row.macd_hist ?? 0),                       // macd_sign  −1|0|+1
+    row.above_emas ? 1 : 0,                              // ema_above  (bool col)
+    0,                                                   // bb_pos placeholder (not stored)
+    0,                                                   // vol_ratio placeholder (not stored)
+    ((row.score    ?? 50) - 50) / 50,                   // score_norm
+    vix != null ? (vix - 20) / 15 : 0,                  // vix_norm
     date.getDay() / 4,                                   // dow  Mon=0.25 … Fri=1.25
   ];
 }
@@ -52,20 +53,14 @@ function toLabel(row) {
 // ── Data loading ──────────────────────────────────────────────────────────────
 
 async function loadData() {
-  // Probe whether backtest_scores has a vix column
-  let hasVix = false;
-  try {
-    await pool.query('SELECT vix FROM backtest_scores LIMIT 1');
-    hasVix = true;
-  } catch { /* column absent — use 0 */ }
-
-  const vixExpr = hasVix ? 's.vix' : 'NULL::float AS vix';
+  const vixExpr = 'NULL::float AS vix'; // vix_close already selected directly
 
   const { rows } = await pool.query(`
     SELECT
       s.symbol, s.score_date, s.score, s.grade,
-      s.rsi, s.macd_hist, s.ema_trend, s.bb_position,
-      s.volume_ratio, s.regime,
+      s.rsi, s.macd_hist,
+      s.above_emas,
+      s.vix_close,
       ${vixExpr},
       r.ret_1w, r.ret_1m
     FROM backtest_scores s
