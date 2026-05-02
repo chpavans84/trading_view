@@ -2,10 +2,14 @@
  * News, earnings, and financials data from free public sources.
  *
  * Sources:
+ *   Yahoo Finance (yahoo-finance2)  — next earnings date via calendarEvents module (primary)
  *   Yahoo Finance search endpoint  — news headlines (no auth needed)
  *   SEC EDGAR XBRL API             — earnings actuals, revenue, EPS (authoritative, no limits)
  *   SEC EDGAR full-text search     — 8-K, 10-Q, 10-K filings
+ *   Nasdaq calendar API            — fallback earnings date (often blocked)
  */
+
+import YahooFinance from 'yahoo-finance2';
 
 const YF_SEARCH    = 'https://query2.finance.yahoo.com';
 const ALPACA_NEWS  = 'https://data.alpaca.markets/v1beta1/news';
@@ -330,25 +334,40 @@ export async function getEarnings({ symbol } = {}) {
     return { ...q, revenue: rev?.revenue ?? null, earnings_quality };
   });
 
-  // Next earnings date — Nasdaq calendar (accurate call date, not fiscal quarter-end)
+  // Next earnings date — Yahoo Finance calendarEvents (primary), Nasdaq calendar (fallback)
   let nextEarningsDates = [];
   try {
-    const today = new Date();
-    const dates = Array.from({ length: 45 }, (_, d) =>
-      new Date(today.getTime() + d * 86400000).toISOString().split('T')[0]
-    );
-    outer: for (let i = 0; i < dates.length; i += 5) {
-      const batch = dates.slice(i, i + 5);
-      const results = await Promise.allSettled(
-        batch.map(d => fetchJSON(`https://api.nasdaq.com/api/calendar/earnings?date=${d}`, NASDAQ_HEADERS))
-      );
-      for (let j = 0; j < results.length; j++) {
-        if (results[j].status !== 'fulfilled') continue;
-        const match = (results[j].value?.data?.rows || []).find(r => r.symbol?.toUpperCase() === ticker);
-        if (match) { nextEarningsDates.push(batch[j]); break outer; }
-      }
-    }
+    const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+    const cal = await yf.quoteSummary(ticker, { modules: ['calendarEvents'] });
+    const dates = cal?.calendarEvents?.earnings?.earningsDate ?? [];
+    const today = new Date(); today.setHours(0,0,0,0);
+    const future = dates
+      .map(d => (d instanceof Date ? d : new Date(d)))
+      .filter(d => !isNaN(d) && d >= today)
+      .sort((a, b) => a - b);
+    if (future.length) nextEarningsDates = [future[0].toISOString().split('T')[0]];
   } catch (_) {}
+
+  // Fallback: Nasdaq calendar (often blocked by anti-scraping, but try if Yahoo gave nothing)
+  if (!nextEarningsDates.length) {
+    try {
+      const today = new Date();
+      const dates = Array.from({ length: 45 }, (_, d) =>
+        new Date(today.getTime() + d * 86400000).toISOString().split('T')[0]
+      );
+      outer: for (let i = 0; i < dates.length; i += 5) {
+        const batch = dates.slice(i, i + 5);
+        const results = await Promise.allSettled(
+          batch.map(d => fetchJSON(`https://api.nasdaq.com/api/calendar/earnings?date=${d}`, NASDAQ_HEADERS))
+        );
+        for (let j = 0; j < results.length; j++) {
+          if (results[j].status !== 'fulfilled') continue;
+          const match = (results[j].value?.data?.rows || []).find(r => r.symbol?.toUpperCase() === ticker);
+          if (match) { nextEarningsDates.push(batch[j]); break outer; }
+        }
+      }
+    } catch (_) {}
+  }
 
   return {
     success: true,
