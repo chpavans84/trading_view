@@ -5838,7 +5838,7 @@ function renderExplorerStats() {
   document.getElementById('explorerStatsInner').innerHTML = [
     lastPrice  ? `<div><div style="font-size:0.72rem;color:#8b949e">Latest Price</div><div style="font-size:1.2rem;font-weight:700">$${parseFloat(lastPrice.close).toFixed(2)}</div></div>` : '',
     totalReturn ? `<div><div style="font-size:0.72rem;color:#8b949e">3Y Return</div><div style="font-size:1.2rem;font-weight:700;color:${parseFloat(totalReturn)>=0?'#3fb950':'#f85149'}">${parseFloat(totalReturn)>=0?'+':''}${totalReturn}%</div></div>` : '',
-    lastScore  ? `<div><div style="font-size:0.72rem;color:#8b949e">Latest Grade</div><div style="font-size:1.2rem;font-weight:700;color:${gradeColor[lastScore.grade]||'#e6edf3'}">Grade ${lastScore.grade} (${parseFloat(lastScore.score).toFixed(0)})</div></div>` : '',
+    lastScore  ? `<div title="Historical score from the offline research pipeline (EOD indicators: RSI, EMA, MACD). Different from the live conviction score below which uses real-time news, analyst ratings, and insider data."><div style="font-size:0.72rem;color:#8b949e">Backtest Score <span style="color:#484f58">(pipeline)</span></div><div style="font-size:1.2rem;font-weight:700;color:${gradeColor[lastScore.grade]||'#e6edf3'}">Grade ${lastScore.grade} (${parseFloat(lastScore.score).toFixed(0)})</div><div style="font-size:0.68rem;color:#484f58">${lastScore.score_date ? new Date(lastScore.score_date).toLocaleDateString([],{month:'short',day:'numeric'}) : 'historical'}</div></div>` : '',
     `<div><div style="font-size:0.72rem;color:#8b949e">Dip Events</div><div style="font-size:1.2rem;font-weight:700;color:#f0883e">${dips}</div></div>`,
     prices.length ? `<div><div style="font-size:0.72rem;color:#8b949e">Data Points</div><div style="font-size:1.2rem;font-weight:700">${prices.length}</div></div>` : '',
   ].join('');
@@ -6241,7 +6241,7 @@ function renderExplorerAnalyst(analyst) {
     ? `<span class="ex-analyst-target">PT <strong style="color:#e6edf3">$${parseFloat(analyst.target).toFixed(0)}</strong></span>`
     : '';
   const score   = analyst.score  != null
-    ? `<span style="font-size:0.78rem;color:#8b949e">Conviction <strong style="color:#e6edf3">${parseFloat(analyst.score).toFixed(0)}</strong>${analyst.grade ? ` · Grade <strong style="color:#58a6ff">${analyst.grade}</strong>` : ''}</span>`
+    ? `<span style="font-size:0.78rem;color:#8b949e" title="Live conviction score — computed right now using 14 real-time data sources (news, analyst ratings, insider activity, earnings, technicals). Different from the Backtest Score in the stats bar above.">Live Conviction <strong style="color:#e6edf3">${parseFloat(analyst.score).toFixed(0)}</strong>${analyst.grade ? ` · Grade <strong style="color:#58a6ff">${analyst.grade}</strong>` : ''}</span>`
     : '';
   inner.innerHTML = `
     <div class="ex-analyst-bar">
