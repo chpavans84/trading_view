@@ -20,14 +20,14 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
 import crypto from 'crypto';
 import { Resend } from 'resend';
 import { SP500, NASDAQ100 } from '../research/sp500.js';
-import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades } from '../core/trader.js';
+import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades, clearPnlCache } from '../core/trader.js';
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews } from '../core/news.js';
@@ -1000,6 +1000,17 @@ app.get('/api/earnings-trend', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// Throttled on-demand sync: fire-and-forget, max once per 45s
+let _lastSyncMs = 0;
+function triggerSyncIfDue() {
+  const now = Date.now();
+  if (now - _lastSyncMs < 45_000) return;
+  _lastSyncMs = now;
+  syncClosedTrades().then(r => {
+    if (r.synced > 0) console.log('[sync] on-demand closed', r.trades.map(t => `${t.symbol} $${t.pnl_usd}`).join(', '));
+  }).catch(err => console.error('[sync] on-demand error:', err.message));
+}
+
 // Overview — everything needed for the dashboard in one call
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
@@ -1012,6 +1023,9 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       ? { apiKey: dbUser.alpaca_api_key, secretKey: dbUser.alpaca_secret_key, baseUrl: dbUser.alpaca_base_url }
       : null;
 
+    // Keep DB in sync with Alpaca on every dashboard load (throttled to once per 45s)
+    if (source === 'alpaca' || isAdmin) triggerSyncIfDue();
+
     // P&L: admin→bot's paper account, regular user→their own paper account, live→null
     const getPnl = () => {
       if (source === 'alpaca_live' || source === 'moomoo') return Promise.resolve(null);
@@ -1021,16 +1035,24 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       return Promise.resolve(null);
     };
 
-    const [acctRes, pnlRes, sentRes] = await Promise.allSettled([
+    const getOpenOrders = () => {
+      if (source === 'alpaca_live') return getLiveOrders({ status: 'open' }).catch(() => []);
+      if (source === 'alpaca' || isAdmin) return getOrders({ status: 'open' }).catch(() => []);
+      return Promise.resolve([]);
+    };
+
+    const [acctRes, pnlRes, sentRes, openOrdersRes] = await Promise.allSettled([
       getAccountData(source, req.session.username),
       getPnl(),
       getMarketSentiment(),
+      getOpenOrders(),
     ]);
-    const acctData = acctRes.status === 'fulfilled' ? acctRes.value : { account: null, positions: [] };
+    const acctData   = acctRes.status === 'fulfilled' ? acctRes.value : { account: null, positions: [] };
     if (acctData.needs_alpaca_setup) return res.json({ needs_alpaca_setup: true });
     const { account, positions } = acctData;
-    const pnl       = pnlRes.status  === 'fulfilled' ? pnlRes.value  : null;
-    const sentiment = sentRes.status === 'fulfilled' ? sentRes.value : null;
+    const pnl        = pnlRes.status       === 'fulfilled' ? pnlRes.value       : null;
+    const sentiment  = sentRes.status      === 'fulfilled' ? sentRes.value      : null;
+    const openOrders = openOrdersRes.status === 'fulfilled' ? (openOrdersRes.value ?? []) : [];
 
     // Recent trades — scoped to the logged-in user's own account
     let trades = [];
@@ -1062,8 +1084,37 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         }));
       } catch { trades = []; }
     } else if (isAdmin) {
-      // Admin paper account — bot's paper trade DB
-      trades = await getTrades({ limit: 10 }) ?? [];
+      // Admin paper account — DB trades (force trades) + Alpaca orders (quick trades)
+      const [openTrades, recentClosed, alpacaOrders] = await Promise.all([
+        getTrades({ status: 'open', limit: 50 }),
+        getTrades({ status: 'closed', limit: 10 }),
+        getOrders({ status: 'all' }).catch(() => []),
+      ]);
+      const seen = new Set();
+      const dbTrades = [...(openTrades ?? []), ...(recentClosed ?? [])].filter(t => {
+        if (seen.has(t.id)) return false;
+        seen.add(t.id);
+        return true;
+      }).map(t => ({ ...t, source: 'force' }));
+      // Include Alpaca quick trades that aren't already tracked in the DB
+      const dbOrderIds = new Set(dbTrades.map(t => t.order_id).filter(Boolean));
+      const qtTrades = (Array.isArray(alpacaOrders) ? alpacaOrders : [])
+        .filter(o => !o.parent_id && !dbOrderIds.has(o.id) && o.status !== 'canceled')
+        .slice(0, 15)
+        .map(o => ({
+          symbol:      o.symbol,
+          side:        o.side,
+          qty:         parseFloat(o.qty || 0),
+          entry_price: parseFloat(o.filled_avg_price || 0) || null,
+          stop_loss:   null,
+          take_profit: null,
+          status:      ['filled', 'partially_filled'].includes(o.status) ? 'closed' : 'open',
+          opened_at:   o.created_at,
+          source:      'quick',
+        }));
+      trades = [...dbTrades, ...qtTrades]
+        .sort((a, b) => new Date(b.opened_at) - new Date(a.opened_at))
+        .slice(0, 20);
     } else if (userCreds && isPaperUrl(userCreds.baseUrl)) {
       // Regular user — their own paper Alpaca account
       try { trades = await getUserOrders(userCreds, { status: 'all', limit: 10 }); }
@@ -1083,6 +1134,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       source,
       account,
       positions:     positions ?? [],
+      open_orders:   openOrders,
       pnl,
       sentiment,
       recent_trades: trades ?? [],
@@ -1140,14 +1192,33 @@ app.get('/api/trades', requireAuth, async (req, res) => {
       return res.json({ source: 'alpaca_live', trades: [], message: 'No live Alpaca account connected' });
     }
 
-    // Paper source — admin sees the bot's paper trade DB
+    // Paper source — admin sees DB force trades merged with Alpaca quick trades
     if (tradesAdmin) {
-      const trades = await getTrades({ status, limit });
-      if (!trades) {
-        const orders = await getOrders({ status: 'filled' });
-        return res.json({ source: 'alpaca_paper', trades: orders });
-      }
-      return res.json({ source: 'db', trades });
+      const [dbTrades, alpacaOrders] = await Promise.allSettled([
+        getTrades({ status, limit }),
+        getOrders({ status: 'all', limit: 50 }),
+      ]);
+      const db = (dbTrades.status === 'fulfilled' ? dbTrades.value : null) ?? [];
+      const ao = (alpacaOrders.status === 'fulfilled' ? alpacaOrders.value : null) ?? [];
+      const dbIds = new Set(db.map(t => t.order_id).filter(Boolean));
+      const qtFromAlpaca = ao
+        .filter(o => !o.parent_id && !dbIds.has(o.id) && o.status !== 'canceled')
+        .map(o => ({
+          symbol:           o.symbol,
+          side:             o.side,
+          qty:              parseFloat(o.qty || 0),
+          entry_price:      parseFloat(o.filled_avg_price || 0) || null,
+          stop_loss:        null,
+          take_profit:      null,
+          status:           ['filled', 'partially_filled'].includes(o.status) ? 'closed' : 'open',
+          opened_at:        o.created_at,
+          source:           'quick',
+        }))
+        .filter(qt => !status || qt.status === status);
+      const merged = [...db.map(t => ({ ...t, source: 'force' })), ...qtFromAlpaca]
+        .sort((a, b) => new Date(b.opened_at) - new Date(a.opened_at))
+        .slice(0, limit);
+      return res.json({ source: 'db', trades: merged });
     }
 
     // Paper source — regular user with their own paper credentials
@@ -2066,9 +2137,27 @@ app.post('/api/trade/force', requireAuth, async (req, res, next) => {
       note: 'forced via dashboard',
     });
     logActivity(req.session.username, 'trade_forced', `${side.toUpperCase()} ${ticker}${dollars ? ' $'+dollars : ''}`, req.ip);
+    clearPnlCache();
+    // Persist to DB immediately so Recent Trades reflects this trade
+    recordTrade({
+      order_id:          result.order_id,
+      symbol:            result.symbol,
+      side:              result.side,
+      qty:               result.qty,
+      entry_price:       result.estimated_price,
+      stop_loss:         result.stop_loss,
+      take_profit:       result.take_profit,
+      dollars_invested:  result.dollars_invested,
+      stop_loss_pct:     result.stop_loss_pct,
+      take_profit_pct:   result.take_profit_pct,
+      atr_pct:           result.atr_pct,
+      conviction_score:  result.conviction_score,
+      conviction_grade:  result.conviction_grade,
+      username:          req.session.username,
+    }).catch(e => console.error('[trade/force] recordTrade:', e.message));
     res.json(result);
   } catch (err) {
-    console.error(err); res.status(500).json({ error: 'Internal server error' });
+    console.error(err); res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
 
@@ -2083,11 +2172,72 @@ app.post('/api/trade/close', requireAuth, async (req, res, next) => {
     const { symbol } = req.body;
     if (!symbol) return res.status(400).json({ error: 'symbol is required' });
     const ticker2 = symbol.toUpperCase().trim();
+
+    // Capture position data BEFORE closing so we have entry/current prices for PnL
+    const positions = await getPositions().catch(() => []);
+    const pos = Array.isArray(positions) ? positions.find(p => p.symbol === ticker2) : null;
+
     const result = await closePosition(ticker2);
     logActivity(req.session.username, 'position_closed', ticker2, req.ip);
+    clearPnlCache();
+    // Sync immediately so DB reflects the close before next dashboard load
+    syncClosedTrades().catch(() => {});
+
+    // Persist the close to DB immediately
+    if (pos) {
+      const entryPrice = parseFloat(pos.avg_entry_price) || 0;
+      const exitPrice  = parseFloat(pos.current_price)   || entryPrice;
+      const posQty     = parseFloat(pos.qty)             || 0;
+      const isLong     = (pos.side || 'long') === 'long';
+      const pnlUsd     = isLong
+        ? +((exitPrice - entryPrice) * posQty).toFixed(2)
+        : +((entryPrice - exitPrice) * posQty).toFixed(2);
+      const pnlPct     = entryPrice > 0
+        ? +((exitPrice - entryPrice) / entryPrice * 100 * (isLong ? 1 : -1)).toFixed(4)
+        : 0;
+
+      getOpenTrade(ticker2).then(async (openTrade) => {
+        if (openTrade) {
+          await closeTrade({ order_id: openTrade.order_id, exit_price: exitPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct });
+        } else {
+          await recordTrade({
+            order_id:    `manual_close_${ticker2}_${Date.now()}`,
+            symbol:      ticker2,
+            side:        isLong ? 'sell' : 'buy',
+            qty:         posQty,
+            entry_price: entryPrice,
+            exit_price:  exitPrice,
+            status:      'closed',
+            pnl_usd:     pnlUsd,
+            pnl_pct:     pnlPct,
+            username:    req.session.username,
+          });
+        }
+      }).catch(e => console.error('[trade/close] recordTrade:', e.message));
+    }
+
     res.json(result);
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Move stop to breakeven for an open position
+app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
+  const user  = await getUser(req.session.username) || {};
+  const perms = getPermissions(user);
+  if (!perms.widgets.includes('force_trade')) return res.status(403).json({ error: 'Forbidden' });
+  next();
+}, async (req, res) => {
+  try {
+    const { symbol } = req.body;
+    if (!symbol) return res.status(400).json({ error: 'symbol is required' });
+    const ticker = symbol.toUpperCase().trim();
+    const result = await moveStopToBreakeven(ticker);
+    logActivity(req.session.username, 'stop_moved', `${ticker} stop → BE $${result.new_stop}`, req.ip);
+    res.json(result);
+  } catch (err) {
+    console.error(err); res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
 
@@ -2110,9 +2260,64 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
     if (!qty || qty < 1) return res.status(400).json({ error: 'qty must be ≥ 1' });
     const result = await placeQuickTrade({ symbol, side, qty: Number(qty), order_type, limit_price, stop_loss, take_profit });
     logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${qty} ${symbol.toUpperCase()} @ ${order_type}`, req.ip);
+    clearPnlCache();
+
+    // Persist to DB immediately
+    const ticker = symbol.toUpperCase().trim();
+    if (side === 'buy') {
+      recordTrade({
+        order_id:         result.order_id,
+        symbol:           ticker,
+        side:             'buy',
+        qty:              result.qty,
+        entry_price:      result.estimated_price,
+        stop_loss:        result.stop_loss,
+        take_profit:      result.take_profit,
+        dollars_invested: result.estimated_cost,
+        username:         req.session.username,
+      }).catch(e => console.error('[trade/quick] recordTrade buy:', e.message));
+    } else {
+      // SELL — close the open DB trade for this symbol, or create a closed record
+      const exitPrice = result.estimated_price;
+      getOpenTrade(ticker).then(async (openTrade) => {
+        if (openTrade) {
+          const entryPrice = parseFloat(openTrade.entry_price) || exitPrice;
+          const pnlUsd = +((exitPrice - entryPrice) * result.qty).toFixed(2);
+          const pnlPct = entryPrice > 0 ? +((exitPrice - entryPrice) / entryPrice * 100).toFixed(4) : 0;
+          await closeTrade({ order_id: openTrade.order_id, exit_price: exitPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct });
+        } else {
+          await recordTrade({
+            order_id:    result.order_id,
+            symbol:      ticker,
+            side:        'sell',
+            qty:         result.qty,
+            entry_price: exitPrice,
+            exit_price:  exitPrice,
+            status:      'closed',
+            pnl_usd:     0,
+            pnl_pct:     0,
+            username:    req.session.username,
+          });
+        }
+      }).catch(e => console.error('[trade/quick] recordTrade sell:', e.message));
+    }
+
     res.json(result);
   } catch (err) {
     console.error('Quick trade error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manual sync — busts PnL cache and runs syncClosedTrades immediately
+app.post('/api/sync', requireAuth, async (req, res) => {
+  try {
+    clearPnlCache();
+    _lastSyncMs = 0; // reset throttle so triggerSyncIfDue fires immediately
+    const result = await syncClosedTrades();
+    res.json({ ok: true, synced: result.synced, trades: result.trades });
+  } catch (err) {
+    console.error('[sync] manual error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

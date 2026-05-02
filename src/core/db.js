@@ -574,22 +574,26 @@ export async function recordTrade({
   stop_loss_pct, take_profit_pct, atr_pct,
   conviction_score, conviction_grade, conviction_breakdown,
   username,
+  status = 'open', exit_price = null, pnl_usd = null, pnl_pct = null,
 }) {
   if (!dbAvailable) return null;
   try {
+    const closedAt = status === 'closed' ? new Date().toISOString() : null;
     const { rows } = await query(
       `INSERT INTO trades
          (order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
           dollars_invested, stop_loss_pct, take_profit_pct, atr_pct,
-          conviction_score, conviction_grade, conviction_breakdown, username)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          conviction_score, conviction_grade, conviction_breakdown, username,
+          status, exit_price, pnl_usd, pnl_pct, closed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (order_id) DO NOTHING
        RETURNING id`,
       [order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
        dollars_invested, stop_loss_pct, take_profit_pct, atr_pct,
        conviction_score, conviction_grade,
        conviction_breakdown ? JSON.stringify(conviction_breakdown) : null,
-       username ?? null]
+       username ?? null,
+       status, exit_price ?? null, pnl_usd ?? null, pnl_pct ?? null, closedAt]
     );
     return rows[0]?.id ?? null;
   } catch (err) {
@@ -598,16 +602,38 @@ export async function recordTrade({
   }
 }
 
-export async function closeTrade({ order_id, exit_price, pnl_usd, pnl_pct }) {
+export async function closeTrade({ order_id, symbol, exit_price, pnl_usd, pnl_pct }) {
   if (!dbAvailable) return;
   try {
-    await query(
-      `UPDATE trades SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4, closed_at=NOW()
-       WHERE order_id=$1`,
-      [order_id, exit_price, pnl_usd, pnl_pct]
-    );
+    if (order_id) {
+      await query(
+        `UPDATE trades SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4, closed_at=NOW()
+         WHERE order_id=$1 AND status='open'`,
+        [order_id, exit_price, pnl_usd, pnl_pct]
+      );
+    } else if (symbol) {
+      await query(
+        `UPDATE trades SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4, closed_at=NOW()
+         WHERE id = (SELECT id FROM trades WHERE symbol=$1 AND status='open' ORDER BY opened_at DESC LIMIT 1)`,
+        [symbol.toUpperCase(), exit_price, pnl_usd, pnl_pct]
+      );
+    }
   } catch (err) {
     console.error('closeTrade error:', err.message);
+  }
+}
+
+export async function getOpenTrade(symbol) {
+  if (!dbAvailable) return null;
+  try {
+    const { rows } = await query(
+      `SELECT * FROM trades WHERE symbol = $1 AND status = 'open' ORDER BY opened_at DESC LIMIT 1`,
+      [symbol.toUpperCase()]
+    );
+    return rows[0] ?? null;
+  } catch (err) {
+    console.error('getOpenTrade error:', err.message);
+    return null;
   }
 }
 
