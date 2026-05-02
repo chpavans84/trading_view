@@ -13,7 +13,8 @@ export async function captureScreenshot({ region, filename, method } = {}) {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fname = (filename || `tv_${region}_${ts}`).replace(/[\/\\]/g, '_');
+  const regionName = region || 'full';
+  const fname = (filename || `tv_${regionName}_${ts}`).replace(/[\/\\]/g, '_');
   const filePath = join(SCREENSHOT_DIR, `${fname}.png`);
 
   if (method === 'api') {
@@ -32,7 +33,7 @@ export async function captureScreenshot({ region, filename, method } = {}) {
   const client = await getClient();
   let clip = undefined;
 
-  if (region === 'chart') {
+  if (regionName === 'chart') {
     const bounds = await evaluate(`
       (function() {
         var el = document.querySelector('[data-name="pane-canvas"]')
