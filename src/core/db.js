@@ -492,16 +492,17 @@ export async function getApiCallStats({ days = 30 } = {}) {
   try {
     const { rows: daily } = await query(
       `SELECT
-         called_at::date AS date,
+         TO_CHAR(called_at::date, 'YYYY-MM-DD')  AS date,
          source,
-         COUNT(*)                          AS calls,
-         SUM(input_tokens)                 AS input_tokens,
-         SUM(output_tokens)                AS output_tokens,
-         SUM(tool_calls)                   AS tool_calls,
-         SUM(cost_usd)                     AS cost_usd,
-         ROUND(AVG(duration_ms))           AS avg_duration_ms,
-         ROUND(AVG(input_tokens))          AS avg_input_tokens,
-         ROUND(AVG(output_tokens))         AS avg_output_tokens
+         MODE() WITHIN GROUP (ORDER BY model)    AS model,
+         COUNT(*)                                 AS calls,
+         SUM(input_tokens)                        AS input_tokens,
+         SUM(output_tokens)                       AS output_tokens,
+         SUM(tool_calls)                          AS tool_calls,
+         SUM(cost_usd)                            AS cost_usd,
+         ROUND(AVG(duration_ms))                  AS avg_duration_ms,
+         ROUND(AVG(input_tokens))                 AS avg_input_tokens,
+         ROUND(AVG(output_tokens))                AS avg_output_tokens
        FROM api_calls
        WHERE called_at >= NOW() - ($1 || ' days')::INTERVAL
        GROUP BY date, source

@@ -7511,23 +7511,27 @@ async function loadStats() {
   const summary = detail?.summary ?? [];
   const costByDate = {};
   for (const r of daily) {
-    if (!costByDate[r.date]) costByDate[r.date] = { date: r.date, calls: 0, input: 0, output: 0, tools: 0, cost: 0 };
-    costByDate[r.date].calls  += Number(r.calls);
-    costByDate[r.date].input  += Number(r.input_tokens);
-    costByDate[r.date].output += Number(r.output_tokens);
-    costByDate[r.date].tools  += Number(r.tool_calls);
-    costByDate[r.date].cost   += parseFloat(r.cost_usd);
+    const dateKey = typeof r.date === 'string' ? r.date.split('T')[0] : (r.date instanceof Date ? r.date.toISOString().split('T')[0] : String(r.date ?? '').split('T')[0]);
+    if (!dateKey) continue;
+    if (!costByDate[dateKey]) costByDate[dateKey] = { date: dateKey, calls: 0, input: 0, output: 0, tools: 0, cost: 0, models: {} };
+    costByDate[dateKey].calls  += Number(r.calls);
+    costByDate[dateKey].input  += Number(r.input_tokens);
+    costByDate[dateKey].output += Number(r.output_tokens);
+    costByDate[dateKey].tools  += Number(r.tool_calls);
+    costByDate[dateKey].cost   += parseFloat(r.cost_usd);
+    if (r.model) costByDate[dateKey].models[r.model] = (costByDate[dateKey].models[r.model] || 0) + Number(r.calls);
   }
   // Fallback: use usage_stats rows if api_calls not populated
   const costRows = Object.keys(costByDate).length > 0
     ? Object.values(costByDate).sort((a, b) => b.date.localeCompare(a.date))
     : summary.map(r => ({
-        date:   r.date?.split('T')[0] ?? r.date,
+        date:   (r.date?.split('T')[0] ?? r.date ?? '').split('T')[0],
         calls:  Number(r.total_messages),
         input:  Number(r.input_tokens),
         output: Number(r.output_tokens),
         tools:  Number(r.total_tool_calls),
         cost:   parseFloat(r.estimated_cost_usd),
+        models: {},
       })).sort((a, b) => b.date.localeCompare(a.date));
 
   if (costRows.length > 0) {
@@ -7541,13 +7545,18 @@ async function loadStats() {
         <span>Days tracked: <strong style="color:#e6edf3">${costRows.length}</strong></span>
       </div>
       <table>
-        <tr><th>Date</th><th>Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Tools</th><th>Cost</th><th style="width:160px">Bar</th></tr>
+        <tr><th>Date</th><th>Model</th><th>Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Tools</th><th>Cost</th><th style="width:120px">Bar</th></tr>
         ${costRows.map(r => {
           const barPct = Math.round((r.cost / maxCost) * 100);
           const barColor = r.cost > avgCost * 1.5 ? '#f85149' : r.cost > avgCost ? '#f0883e' : '#3fb950';
-          const dateStr = new Date(r.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+          const rawDate = r.date || '';
+          const dateStr = rawDate ? new Date(rawDate + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : '—';
+          const topModel = r.models && Object.keys(r.models).length
+            ? Object.entries(r.models).sort((a,b) => b[1]-a[1])[0][0].replace('claude-','').replace(/-\d{8}$/,'')
+            : '—';
           return `<tr>
             <td><strong>${dateStr}</strong></td>
+            <td style="color:#79c0ff;font-size:0.78rem">${topModel}</td>
             <td>${r.calls.toLocaleString()}</td>
             <td>${r.input.toLocaleString()}</td>
             <td>${r.output.toLocaleString()}</td>
