@@ -3673,7 +3673,7 @@
             <span style="font-size:0.72rem;color:#484f58;margin-left:2px">scroll or drag to pan</span>
           </div>
         </div>
-        <div id="dbErdWrap" style="padding:16px 20px 24px;overflow:auto;min-height:300px;max-height:72vh;cursor:grab;user-select:none;position:relative">
+        <div id="dbErdWrap" style="padding:16px 20px 24px;overflow:auto;min-height:500px;height:75vh;cursor:grab;user-select:none;position:relative;background:#0d1117;border-radius:8px;border:1px solid #21262d;margin:0 20px 24px">
           <div id="dbErdDiagram"><script type="text/plain" id="erdSource">
 erDiagram
     users {
@@ -8591,12 +8591,27 @@ function applyErdZoom() {
   const svg = _erdSvg();
   if (!svg) return;
   if (!_erdSvgW) {
-    _erdSvgW = parseFloat(svg.getAttribute('width'))  || svg.getBoundingClientRect().width  || 800;
-    _erdSvgH = parseFloat(svg.getAttribute('height')) || svg.getBoundingClientRect().height || 600;
+    // viewBox gives the true intrinsic size — width/height may be "100%" which parseFloat misreads
+    const vb = svg.getAttribute('viewBox');
+    if (vb) {
+      const parts = vb.trim().split(/[\s,]+/).map(Number);
+      _erdSvgW = parts[2] || 0;
+      _erdSvgH = parts[3] || 0;
+    }
+    // Fall back to bounding rect if no viewBox
+    if (!_erdSvgW) {
+      svg.removeAttribute('width'); svg.removeAttribute('height');
+      const r = svg.getBoundingClientRect();
+      _erdSvgW = r.width  || 1200;
+      _erdSvgH = r.height || 800;
+    }
   }
-  svg.style.width  = (_erdSvgW * _erdScale) + 'px';
-  svg.style.height = (_erdSvgH * _erdScale) + 'px';
+  // Set width/height attributes directly so the SVG renders at the scaled size
+  // (transform:scale doesn't extend scroll area; attribute change does)
+  svg.setAttribute('width',  Math.round(_erdSvgW * _erdScale));
+  svg.setAttribute('height', Math.round(_erdSvgH * _erdScale));
   svg.style.display = 'block';
+  svg.style.maxWidth = 'none';
   const lbl = document.getElementById('erdZoomPct');
   if (lbl) lbl.textContent = Math.round(_erdScale * 100) + '%';
 }
