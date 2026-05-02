@@ -1412,57 +1412,63 @@
     <!-- Key Insight -->
     <div id="researchInsight" style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px;margin-bottom:20px;font-size:0.87rem;color:#8b949e"></div>
 
-    <!-- Two column: Top Picks + Dip Analyzer -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-
-      <!-- Top Picks -->
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>🏆 Top Picks by Grade <button class="doc-btn" onclick="openResearchDoc('research_toppicks')" title="How this works">?</button></h3>
-          <div style="display:flex;gap:6px;align-items:center">
-            <select id="topPickGrade" onchange="loadTopPicks()" style="background:#21262d;border:1px solid #30363d;border-radius:4px;padding:3px 8px;color:#e6edf3;font-size:0.8rem">
-              <option value="B">Grade B</option>
-              <option value="C">Grade C</option>
-              <option value="A">Grade A</option>
-            </select>
-            <select id="topPickPeriod" onchange="loadTopPicks()" style="background:#21262d;border:1px solid #30363d;border-radius:4px;padding:3px 8px;color:#e6edf3;font-size:0.8rem">
-              <option value="1m">1 Month</option>
-              <option value="1w">1 Week</option>
-              <option value="3m">3 Months</option>
-            </select>
-          </div>
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
-          <thead>
-            <tr style="border-bottom:1px solid #30363d">
-              <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Symbol</th>
-              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg Return</th>
-              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate</th>
-              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Signals</th>
-            </tr>
-          </thead>
-          <tbody id="topPicksBody"><tr><td colspan="4" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr></tbody>
-        </table>
+    <!-- ── Picks & Dips container ─────────────────────────────────────── -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div class="table-head">
+        <h3>📈 Picks &amp; Dips Analysis</h3>
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
 
-      <!-- Worst Dips -->
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>📉 Biggest Dips + Reasons <button class="doc-btn" onclick="openResearchDoc('research_dips')" title="How this works">?</button></h3>
-          <span style="font-size:0.75rem;color:#8b949e">drops &gt;4% in 1 week</span>
+        <!-- Top Picks -->
+        <div style="border-right:1px solid #21262d">
+          <div class="table-head" style="border-top:none;border-left:none;border-right:none">
+            <h3 style="font-size:0.9rem">🏆 Top Picks by Grade <button class="doc-btn" onclick="openResearchDoc('research_toppicks')" title="How this works">?</button></h3>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="topPickGrade" onchange="loadTopPicks()" style="background:#21262d;border:1px solid #30363d;border-radius:4px;padding:3px 8px;color:#e6edf3;font-size:0.8rem">
+                <option value="B">Grade B</option>
+                <option value="C">Grade C</option>
+                <option value="A">Grade A</option>
+              </select>
+              <select id="topPickPeriod" onchange="loadTopPicks()" style="background:#21262d;border:1px solid #30363d;border-radius:4px;padding:3px 8px;color:#e6edf3;font-size:0.8rem">
+                <option value="1m">1 Month</option>
+                <option value="1w">1 Week</option>
+                <option value="3m">3 Months</option>
+              </select>
+            </div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+            <thead>
+              <tr style="border-bottom:1px solid #30363d">
+                <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Symbol</th>
+                <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg Return</th>
+                <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate</th>
+                <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Signals</th>
+              </tr>
+            </thead>
+            <tbody id="topPicksBody"><tr><td colspan="4" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr></tbody>
+          </table>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
-          <thead>
-            <tr style="border-bottom:1px solid #30363d">
-              <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Symbol</th>
-              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Date</th>
-              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Drop</th>
-              <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">Reason</th>
-              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Recovery 1M</th>
-            </tr>
-          </thead>
-          <tbody id="dipsBody"><tr><td colspan="5" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr></tbody>
-        </table>
+
+        <!-- Biggest Dips -->
+        <div>
+          <div class="table-head" style="border-top:none;border-left:none;border-right:none">
+            <h3 style="font-size:0.9rem">📉 Biggest Dips + Reasons <button class="doc-btn" onclick="openResearchDoc('research_dips')" title="How this works">?</button></h3>
+            <span style="font-size:0.75rem;color:#8b949e">drops &gt;4% in 1 week</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+            <thead>
+              <tr style="border-bottom:1px solid #30363d">
+                <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Symbol</th>
+                <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Date</th>
+                <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Drop</th>
+                <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">Reason</th>
+                <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Recovery 1M</th>
+              </tr>
+            </thead>
+            <tbody id="dipsBody"><tr><td colspan="5" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr></tbody>
+          </table>
+        </div>
+
       </div>
     </div>
 
@@ -1544,89 +1550,85 @@
       </div>
     </div>
 
-    <!-- ML Model Stats ───────────────────────────────────────────────── -->
-    <div class="table-wrap" style="margin-bottom:20px" id="mlModelWrap">
+    <!-- ── ML & Analytics container ──────────────────────────────────── -->
+    <div class="table-wrap" style="margin-bottom:20px">
       <div class="table-head">
-        <h3>🤖 ML Conviction Model</h3>
+        <h3>🤖 ML Model &amp; Analytics</h3>
         <div style="display:flex;gap:8px;align-items:center">
           <span id="mlSourceBadge" style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:10px;background:#21262d;color:#8b949e">loading…</span>
           <button id="mlRetrainBtn" onclick="triggerResearchRefresh()" style="display:none;background:#238636;border:none;border-radius:6px;padding:4px 12px;color:#fff;font-size:0.78rem;font-weight:600;cursor:pointer">↺ Retrain Now</button>
         </div>
       </div>
 
-      <div id="mlModelBody" style="padding:20px">
+      <!-- ML Model Stats -->
+      <div id="mlModelBody" style="padding:20px;border-bottom:1px solid #21262d">
         <div style="color:#8b949e;font-size:0.85rem">Loading model stats…</div>
       </div>
-    </div>
 
-    <!-- Pipeline Status Bar -->
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div class="table-head">
-        <h3>🔧 Data Pipeline Status</h3>
-        <span style="font-size:0.75rem;color:#8b949e">Run npm run research:download → scores → backtest to refresh</span>
+      <!-- Pipeline Status -->
+      <div style="padding:12px 16px 8px;border-bottom:1px solid #21262d">
+        <div style="font-size:0.75rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🔧 Data Pipeline Status <span style="font-weight:400;text-transform:none;color:#484f58">· npm run research:download → scores → backtest</span></div>
+        <div id="pipelineStatus" style="display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:#21262d;border-radius:6px;overflow:hidden">
+          <div style="background:#0d1117;padding:14px 16px;text-align:center;color:#484f58;font-size:0.8rem">Loading…</div>
+        </div>
       </div>
-      <div id="pipelineStatus" style="display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:#21262d">
-        <div style="background:#0d1117;padding:14px 16px;text-align:center;color:#484f58;font-size:0.8rem">Loading…</div>
-      </div>
-    </div>
 
-    <!-- Regime Analysis Table -->
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div class="table-head">
-        <h3>📊 Win Rate by Market Regime</h3>
-        <span style="font-size:0.75rem;color:#8b949e">Which regime × grade combo works best?</span>
+      <!-- Regime Analysis -->
+      <div style="border-bottom:1px solid #21262d">
+        <div style="padding:12px 16px 0">
+          <div style="font-size:0.75rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:0">📊 Win Rate by Market Regime <span style="font-weight:400;text-transform:none;color:#484f58">· which regime × grade combo works best?</span></div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+          <thead>
+            <tr style="border-bottom:1px solid #30363d">
+              <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Regime</th>
+              <th style="padding:8px 8px;text-align:center;color:#8b949e;font-weight:500">Grade</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Signals</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate 1W</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg Return 1M</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Alpha vs SPY</th>
+            </tr>
+          </thead>
+          <tbody id="regimeAnalysisBody">
+            <tr><td colspan="6" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr>
+          </tbody>
+        </table>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
-        <thead>
-          <tr style="border-bottom:1px solid #30363d">
-            <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Regime</th>
-            <th style="padding:8px 8px;text-align:center;color:#8b949e;font-weight:500">Grade</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Signals</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate 1W</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg Return 1M</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Alpha vs SPY</th>
-          </tr>
-        </thead>
-        <tbody id="regimeAnalysisBody">
-          <tr><td colspan="6" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
 
-    <!-- Indicator Edge -->
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div class="table-head">
-        <h3>⚡ Indicator Edge (avg 1-week return)</h3>
-        <span style="font-size:0.75rem;color:#8b949e">Green = historically profitable condition · Red = historically losing</span>
+      <!-- Indicator Edge -->
+      <div style="border-bottom:1px solid #21262d">
+        <div style="padding:12px 16px 0">
+          <div style="font-size:0.75rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em">⚡ Indicator Edge <span style="font-weight:400;text-transform:none;color:#484f58">· avg 1-week return per condition · green = profitable · red = losing</span></div>
+        </div>
+        <div id="indicatorEdge" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px">
+          <div style="color:#484f58;font-size:0.8rem;padding:12px">Loading…</div>
+        </div>
       </div>
-      <div id="indicatorEdge" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px">
-        <div style="color:#484f58;font-size:0.8rem;padding:12px">Loading…</div>
-      </div>
-    </div>
 
-    <!-- Live Bot Accuracy -->
-    <div class="table-wrap" style="margin-bottom:20px">
-      <div class="table-head">
-        <h3>🎯 Live Bot Accuracy — Conviction vs Actual P&amp;L</h3>
-        <span style="font-size:0.75rem;color:#8b949e">How well does the conviction score predict real wins?</span>
+      <!-- Live Bot Accuracy -->
+      <div>
+        <div style="padding:12px 16px 0">
+          <div style="font-size:0.75rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em">🎯 Live Bot Accuracy <span style="font-weight:400;text-transform:none;color:#484f58">· conviction score vs actual P&amp;L on closed trades</span></div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+          <thead>
+            <tr style="border-bottom:1px solid #30363d">
+              <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Conviction Band</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Trades</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg P&amp;L</th>
+              <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Total P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody id="liveAccuracyBody">
+            <tr><td colspan="5" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr>
+          </tbody>
+        </table>
+        <div id="liveAccuracyNote" style="padding:10px 16px;font-size:0.78rem;color:#484f58">
+          Populates automatically as the bot closes real trades with conviction scores.
+        </div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
-        <thead>
-          <tr style="border-bottom:1px solid #30363d">
-            <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Conviction Band</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Trades</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg P&amp;L</th>
-            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Total P&amp;L</th>
-          </tr>
-        </thead>
-        <tbody id="liveAccuracyBody">
-          <tr><td colspan="5" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr>
-        </tbody>
-      </table>
-      <div id="liveAccuracyNote" style="padding:10px 16px;font-size:0.78rem;color:#484f58">
-        Populates automatically as the bot closes real trades with conviction scores.
-      </div>
+
     </div>
 
 
