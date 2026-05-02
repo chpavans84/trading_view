@@ -1,13 +1,17 @@
 /**
  * Layer 2 — Intelligent Stock Selector
  * Takes market context from Layer 1 and finds the single best trade.
- * Fully deterministic — no LLM calls.
+ * Scoring: deterministic indicators → ML conviction → Claude Haiku judgment → blended result.
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { getSymbolNews, getPreEarningsDrift } from './news.js';
 import { getRelativeStrength, SECTOR_MAP } from './sentiment.js';
 import { getChartTechnicals, isTradingViewAvailable } from './tradingview-bridge.js';
 import { getPerformancePatterns } from './db.js';
+import { getConvictionScore } from './scoring.js';
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Filter out things we should never trade
 function isValidSymbol(sym) {
@@ -177,26 +181,36 @@ export async function selectBestTrade({ context, positions = [], blocked_symbols
 
   const tvAvailable = await isTradingViewAvailable().catch(() => false);
 
-  // Fetch per-candidate data in parallel
+  // Fetch per-candidate data in parallel (news + drift + RS + technicals + ML conviction)
   const candidateData = await Promise.all(
     rawCandidates.map(async symbol => {
-      const [newsRes, driftRes, rsRes, techRes] = await Promise.allSettled([
+      const [news, drift, rs, tech, convScore] = await Promise.allSettled([
         getSymbolNews({ symbol, limit: 3 }),
         getPreEarningsDrift({ symbol }),
         getRelativeStrength({ symbol }),
         tvAvailable ? getChartTechnicals({ symbol }) : Promise.resolve(null),
-      ]);
+        getConvictionScore({ symbol, positions: [] }),
+      ]).then(r => r.map(p => p.status === 'fulfilled' ? p.value : null));
 
-      const news  = newsRes.status  === 'fulfilled' ? newsRes.value  : null;
-      const drift = driftRes.status === 'fulfilled' ? driftRes.value : null;
-      const rs    = rsRes.status    === 'fulfilled' ? rsRes.value    : null;
-      const tech  = techRes.status  === 'fulfilled' ? techRes.value  : null;
+      const mlScore     = convScore?.score ?? null;
+      const mlGrade     = convScore?.grade ?? 'n/a';
+      const backtestAdj = convScore?.breakdown?.backtest_alpha_adj ?? 0;
 
-      return { symbol, news, drift, rs, tech };
+      // Extract flat fields for candidateTable
+      const headlines = (news?.headlines ?? []).map(h => h.title).slice(0, 2).join(' | ') || 'none';
+      const rsVal     = rs?.rs_score != null ? rs.rs_score.toFixed(1) : 'n/a';
+      const rsi       = tech?.rsi != null ? tech.rsi.toFixed(0) : 'n/a';
+      const macd_sig  = tech?.macd_hist != null ? (tech.macd_hist > 0 ? 'positive' : 'negative') : 'n/a';
+      const ema_trend = (tech?.current_price != null && tech?.ema20 != null && tech?.ema50 != null)
+        ? (tech.current_price > tech.ema20 && tech.current_price > tech.ema50 ? 'above' : 'below')
+        : 'n/a';
+      const drift_pct = drift?.drift_pct != null ? drift.drift_pct.toFixed(1) : '0';
+
+      return { symbol, news, drift, rs, tech, mlScore, mlGrade, backtestAdj, headlines, rsVal, rsi, macd_sig, ema_trend, drift_pct };
     })
   );
 
-  // Score all candidates
+  // Score all candidates with the deterministic scorer
   const scored = (await Promise.all(candidateData.map(async data => ({
     ...data,
     score: await scoreCandidate({ symbol: data.symbol, data, context }),
@@ -213,16 +227,82 @@ export async function selectBestTrade({ context, positions = [], blocked_symbols
     };
   }
 
-  const headline = best.news?.headlines?.[0]?.title ?? null;
+  // ── Claude Haiku final judgment ────────────────────────────────────────────
+  // Build a compact candidate table (top 6 by deterministic score)
+  const topCandidates = scored.slice(0, 6);
+  const candidateTable = topCandidates.map(c =>
+    `${c.symbol}: ML=${c.mlScore ?? 'n/a'}(${c.mlGrade}) BacktestAdj=${c.backtestAdj > 0 ? '+' : ''}${c.backtestAdj} | RS=${c.rsVal}% | RSI=${c.rsi} | MACD=${c.macd_sig} | EMA=${c.ema_trend} | Drift=${c.drift_pct}% | News: ${c.headlines}`
+  ).join('\n');
+
+  const prompt = `You are a systematic trading bot selecting the single best intraday trade setup.
+
+Market regime: ${context.regime}
+VIX: ${context.vix ?? 'unknown'}
+Leading sectors: ${(context.leading_sectors ?? []).join(', ') || 'none'}
+
+Candidates (sorted by deterministic score):
+${candidateTable}
+
+Rules:
+- Pick exactly ONE symbol or say NO_TRADE.
+- ML Score is backtested conviction (0–100 adjusted by 3 years of historical data). Prefer stocks with ML Score >= 65 and positive BacktestAdj.
+- BacktestAdj is the historical alpha adjustment: positive means this grade historically outperforms SPY, negative means it underperforms.
+- Prefer RSI 40–65 (not extended), MACD positive, EMA above, RS positive.
+- Avoid if ML Score < 40 or BacktestAdj <= -5.
+- In volatile regime, smaller positions preferred.
+- Respond with JSON only: { "symbol": "TICKER", "conviction": 0-100, "reason": "one sentence" }
+  or { "symbol": null, "conviction": 0, "reason": "why no trade" }`;
+
+  let result = { symbol: best.symbol, conviction: best.score, reason: buildReason(best.symbol, best.score, best) };
+
+  try {
+    const ctrl    = new AbortController();
+    const timer   = setTimeout(() => ctrl.abort(), 20_000);
+    const message = await anthropic.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 120,
+      messages:   [{ role: 'user', content: prompt }],
+    });
+    clearTimeout(timer);
+
+    const raw  = message.content?.[0]?.text?.trim() ?? '';
+    const json = raw.match(/\{[\s\S]*\}/)?.[0];
+    if (json) {
+      const parsed = JSON.parse(json);
+      if (parsed.symbol && isValidSymbol(parsed.symbol)) {
+        result.symbol    = parsed.symbol;
+        result.conviction = Math.max(0, Math.min(100, Number(parsed.conviction) || best.score));
+        result.reason    = parsed.reason || result.reason;
+      } else if (parsed.symbol === null) {
+        return { symbol: null, no_trade_reason: parsed.reason || 'Claude Haiku: no clean setup', candidates_considered: rawCandidates };
+      }
+    }
+  } catch {
+    // Haiku offline or timed out — keep deterministic result
+  }
+
+  // ── Blend conviction: 60% ML score + 40% Claude judgment ──────────────────
+  if (result.symbol) {
+    const candidate = candidateData.find(c => c.symbol === result.symbol);
+    if (candidate?.mlScore != null) {
+      result.conviction   = Math.round(0.6 * candidate.mlScore + 0.4 * result.conviction);
+      result.ml_score     = candidate.mlScore;
+      result.ml_grade     = candidate.mlGrade;
+      result.backtest_adj = candidate.backtestAdj;
+    }
+  }
 
   return {
-    symbol:               best.symbol,
-    reason:               buildReason(best.symbol, best.score, best),
-    conviction:           best.score,
-    entry_strategy:       `Buy ${best.symbol} on momentum confirmation`,
+    symbol:               result.symbol,
+    reason:               result.reason,
+    conviction:           result.conviction,
+    ml_score:             result.ml_score ?? null,
+    ml_grade:             result.ml_grade ?? null,
+    backtest_adj:         result.backtest_adj ?? null,
+    entry_strategy:       `Buy ${result.symbol} on momentum confirmation`,
     risk_note:            best.tech?.current_price ? `Stop below recent support (~${(best.tech.current_price * 0.97).toFixed(2)})` : 'Use 2–3% stop below entry',
     candidates_considered: rawCandidates,
     no_trade_reason:      null,
-    top_candidates:       scored.slice(0, 3).map(c => ({ symbol: c.symbol, score: c.score })),
+    top_candidates:       scored.slice(0, 3).map(c => ({ symbol: c.symbol, score: c.score, ml_score: c.mlScore, ml_grade: c.mlGrade })),
   };
 }
