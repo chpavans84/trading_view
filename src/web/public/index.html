@@ -1206,7 +1206,7 @@
   <div id="moomooRiskPanel" style="display:none;margin-top:20px">
     <div class="table-wrap">
       <div class="table-head">
-        <h3>💰 Portfolio Risk — Moomoo Live</h3>
+        <h3>💰 Portfolio Risk — Moomoo Live <button class="doc-btn" onclick="openResearchDoc('moomoo_risk')" title="How this works">?</button></h3>
         <button class="refresh-btn" onclick="loadMoomooRisk()">↻ Refresh</button>
       </div>
       <div id="moomooRiskBody" style="padding:16px 20px">
@@ -1234,7 +1234,7 @@
     </div>
 
     <div class="table-wrap">
-      <div class="table-head"><h3>P&amp;L History</h3></div>
+      <div class="table-head"><h3>P&amp;L History <button class="doc-btn" onclick="openResearchDoc('pnl')" title="How this works">?</button></h3></div>
       <div id="pnlTable"><div class="loading">Loading…</div></div>
     </div>
   </div>
@@ -1300,7 +1300,7 @@
   <!-- Top Trading Today — S&P 500 / NASDAQ 100 tabs -->
   <div class="table-wrap" style="margin-top:16px">
     <div class="table-head">
-      <h3>Top Trading Today <span id="topStocksBadge" style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px"></span></h3>
+      <h3>Top Trading Today <span id="topStocksBadge" style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px"></span> <button class="doc-btn" onclick="openResearchDoc('top_trading')" title="How this works">?</button></h3>
       <div style="display:flex;gap:6px;align-items:center">
         <button id="idxTabSP" onclick="switchIndexTab('sp500')"
           style="background:#238636;border:none;border-radius:6px;color:#fff;padding:4px 14px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:all .15s">S&amp;P 500</button>
@@ -1332,7 +1332,7 @@
 
   <!-- Claude API Cost Per Day -->
   <div class="table-wrap" style="margin-bottom:16px">
-    <div class="table-head"><h3>Claude API Cost Per Day (Last 30 Days)</h3></div>
+    <div class="table-head"><h3>Claude API Cost Per Day (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
     <div id="statsCostPerDay"><div class="loading">Loading…</div></div>
   </div>
 
@@ -1416,7 +1416,7 @@
     <!-- ── Picks & Dips container ─────────────────────────────────────── -->
     <div class="table-wrap" style="margin-bottom:20px">
       <div class="table-head">
-        <h3>📈 Picks &amp; Dips Analysis</h3>
+        <h3>📈 Picks &amp; Dips Analysis <button class="doc-btn" onclick="openResearchDoc('research_overview')" title="How this works">?</button></h3>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
 
@@ -1554,7 +1554,7 @@
     <!-- ── ML & Analytics container ──────────────────────────────────── -->
     <div class="table-wrap" style="margin-bottom:20px">
       <div class="table-head">
-        <h3>🤖 ML Model &amp; Analytics</h3>
+        <h3>🤖 ML Model &amp; Analytics <button class="doc-btn" onclick="openResearchDoc('ml_analytics')" title="How this works">?</button></h3>
         <div style="display:flex;gap:8px;align-items:center">
           <span id="mlSourceBadge" style="font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:10px;background:#21262d;color:#8b949e">loading…</span>
           <button id="mlRetrainBtn" onclick="triggerResearchRefresh()" style="display:none;background:#238636;border:none;border-radius:6px;padding:4px 12px;color:#fff;font-size:0.78rem;font-weight:600;cursor:pointer">↺ Retrain Now</button>
@@ -1864,7 +1864,7 @@
 
     <!-- Risk Profile Presets -->
     <div class="br-card" style="margin-bottom:16px">
-      <h3>⚡ Risk Profile</h3>
+      <h3>⚡ Risk Profile <button class="doc-btn" onclick="openResearchDoc('bot_risk')" title="How this works">?</button></h3>
       <div style="font-size:0.8rem;color:#8b949e;margin-bottom:10px">Choose a preset or customise individual values below</div>
       <div class="br-profile">
         <button class="br-profile-btn cons" onclick="applyBrProfile('conservative')" id="brProf-conservative">🛡 Conservative</button>
@@ -1887,7 +1887,7 @@
     <div class="br-grid">
       <!-- Daily Risk Limits -->
       <div class="br-card">
-        <h3>📊 Daily Risk Limits</h3>
+        <h3>📊 Daily Risk Limits <button class="doc-btn" onclick="openResearchDoc('bot_risk')" title="How this works">?</button></h3>
         <div class="br-row">
           <span class="lbl">Profit target (stop trading when hit)</span>
           <div style="display:flex;align-items:center;gap:4px"><span style="color:#8b949e;font-size:0.8rem">$</span><input class="br-inp" id="br-daily_profit_target" type="number" min="10" max="10000" step="10" oninput="brMarkModified(this)"></div>
@@ -1919,7 +1919,7 @@
 
       <!-- Position Sizing -->
       <div class="br-card">
-        <h3>📐 Position Sizing</h3>
+        <h3>📐 Position Sizing <button class="doc-btn" onclick="openResearchDoc('bot_sizing')" title="How this works">?</button></h3>
         <div class="br-row">
           <span class="lbl">Target profit per trade</span>
           <div style="display:flex;align-items:center;gap:4px"><span style="color:#8b949e;font-size:0.8rem">$</span><input class="br-inp" id="br-ps-target_profit_per_trade" type="number" min="10" max="5000" step="10" oninput="brMarkModified(this)"></div>
@@ -1949,7 +1949,7 @@
 
       <!-- VIX Regime -->
       <div class="br-card">
-        <h3>🌡 VIX Regime Thresholds</h3>
+        <h3>🌡 VIX Regime Thresholds <button class="doc-btn" onclick="openResearchDoc('bot_vix')" title="How this works">?</button></h3>
         <div class="br-row">
           <span class="lbl">Defensive mode above VIX</span>
           <input class="br-inp" id="br-vt-defensive" type="number" min="10" max="80" step="1" oninput="brMarkModified(this);brUpdateVixBar()">
@@ -1970,7 +1970,7 @@
 
       <!-- Blocked Sectors -->
       <div class="br-card">
-        <h3>🚫 Blocked Sectors</h3>
+        <h3>🚫 Blocked Sectors <button class="doc-btn" onclick="openResearchDoc('bot_sectors')" title="How this works">?</button></h3>
         <div style="font-size:0.8rem;color:#8b949e;margin-bottom:8px">Bot will never open a position in these ETF sectors</div>
         <div class="sector-grid" id="brSectorGrid">
           <!-- populated by JS -->
@@ -1979,7 +1979,7 @@
 
       <!-- Scanner Schedule (static) -->
       <div class="br-card">
-        <h3>🕐 Scanner Schedule (ET)</h3>
+        <h3>🕐 Scanner Schedule (ET) <button class="doc-btn" onclick="openResearchDoc('bot_schedule')" title="How this works">?</button></h3>
         <div class="br-row"><span class="lbl">Morning briefing</span><span style="font-size:0.82rem;color:#e6edf3">9:00 AM Mon–Fri</span></div>
         <div class="br-row"><span class="lbl">Scan interval</span><span style="font-size:0.82rem;color:#e6edf3">Every 10 min</span></div>
         <div class="br-row"><span class="lbl">Active window</span><span style="font-size:0.82rem;color:#3fb950">9:45 AM – 3:30 PM</span></div>
@@ -1990,7 +1990,7 @@
 
       <!-- Entry checklist (static) -->
       <div class="br-card">
-        <h3>✅ Trade Entry Checklist</h3>
+        <h3>✅ Trade Entry Checklist <button class="doc-btn" onclick="openResearchDoc('bot_checklist')" title="How this works">?</button></h3>
         <div style="font-size:0.8rem;color:#8b949e">Steps the bot runs on every scan (in order):</div>
         <ol style="margin:10px 0 0;padding-left:18px;font-size:0.8rem;color:#8b949e;line-height:1.8">
           <li>Daily P&amp;L → stop if target hit or loss limit reached</li>
@@ -2006,7 +2006,7 @@
 
       <!-- Conviction Factors — full width -->
       <div class="br-card br-full">
-        <h3>🎯 Conviction Score Factors (0–100, fixed weights)</h3>
+        <h3>🎯 Conviction Score Factors (0–100, fixed weights) <button class="doc-btn" onclick="openResearchDoc('bot_scoring')" title="How this works">?</button></h3>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0 24px">
           <div class="factor-list" id="brFactors"><!-- filled by JS --></div>
         </div>
@@ -4746,6 +4746,193 @@ const WIDGET_DOCS = {
       <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-top:20px;font-size:0.82rem;color:#6e7681">
         💡 <strong style="color:#8b949e">Pattern to watch:</strong> Stocks with large dips but strong 1-month recovery are often the best "buy the dip" candidates when the bot grades them B or higher.
       </div>
+    `,
+  },
+
+  moomoo_risk: {
+    title: '💰 Portfolio Risk — Moomoo Live',
+    body: `
+      <p>Shows live portfolio metrics pulled from your Moomoo brokerage account via the OpenD API — real positions, real capital, real risk.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">What's Displayed</h4>
+      <ul style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:5px">
+        <li><strong style="color:#e6edf3">Net Asset Value</strong> — total portfolio value including cash and open positions</li>
+        <li><strong style="color:#e6edf3">Buying Power</strong> — cash available to place new trades</li>
+        <li><strong style="color:#e6edf3">Unrealised P&L</strong> — paper gain/loss on open positions at current prices</li>
+        <li><strong style="color:#e6edf3">Day P&L</strong> — intraday change since market open</li>
+        <li><strong style="color:#e6edf3">Positions</strong> — each open holding with avg cost, current price, and % change</li>
+      </ul>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">How to Switch to Moomoo</h4>
+      <p style="color:#8b949e">Use the source selector (top of the page) and choose <strong style="color:#e6edf3">💰 Moomoo</strong>. This panel only appears when Moomoo is selected and your OpenD desktop app is running on port 11111.</p>
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-top:20px;font-size:0.82rem;color:#6e7681">
+        💡 <strong style="color:#8b949e">Note:</strong> Moomoo data is read-only — the bot cannot place trades via Moomoo. It uses Alpaca for paper/live execution.
+      </div>
+    `,
+  },
+
+  top_trading: {
+    title: '📈 Top Trading Today — How It Works',
+    body: `
+      <p>Shows the most actively traded stocks in the <strong style="color:#e6edf3">S&P 500</strong> and <strong style="color:#e6edf3">NASDAQ-100</strong> today, ranked by a combination of volume and price movement.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Why This Matters</h4>
+      <p style="color:#8b949e">Stocks with unusually high volume relative to their average are drawing institutional attention — either buyers stepping in or sellers distributing. High-volume moves have more follow-through than low-volume ones.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Columns</h4>
+      <ul style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:5px">
+        <li><strong style="color:#e6edf3">Symbol</strong> — click to open the stock's TradingView chart</li>
+        <li><strong style="color:#e6edf3">Price / Change</strong> — last price and % change from yesterday's close</li>
+        <li><strong style="color:#e6edf3">Volume</strong> — today's total shares traded</li>
+        <li><strong style="color:#e6edf3">Rel Vol</strong> — today's volume divided by the 20-day average. &gt;2× means double the normal interest.</li>
+      </ul>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">S&P 500 vs NASDAQ-100</h4>
+      <p style="color:#8b949e">Use the tabs to switch between the broader large-cap universe (S&P 500) and the tech-heavy NASDAQ-100. NASDAQ tends to be more volatile and better for momentum plays.</p>
+    `,
+  },
+
+  ml_analytics: {
+    title: '🤖 ML Model & Analytics — How It Works',
+    body: `
+      <p>The ML Model section shows the performance of the logistic regression model trained on 3 years of backtest data to predict which stock signals will deliver positive 1-week returns.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">What the Model Does</h4>
+      <p style="color:#8b949e">Every night, the model trains on historical (symbol, date, indicator snapshot) → (1-week return) pairs. It learns which combinations of RSI, MACD, EMA position, VIX, and conviction score are most predictive of positive outcomes. The result is a set of <strong style="color:#e6edf3">grade adjustments</strong> (+/− points) applied to the live scoring engine.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Metrics Explained</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600;width:130px">AUC-ROC</td><td style="padding:8px 0;color:#8b949e">Area under the ROC curve. 0.5 = random guess. 0.6+ = useful signal. 0.7+ = strong signal.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600">Accuracy</td><td style="padding:8px 0;color:#8b949e">% of test-set predictions that were correct. Baseline (always-positive) would be ~48–52% in a balanced market.</td></tr>
+        <tr><td style="padding:8px 0;color:#e3b341;font-weight:600">F1 Score</td><td style="padding:8px 0;color:#8b949e">Harmonic mean of precision and recall for the positive class. Penalises models that just predict everything as positive.</td></tr>
+      </table>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Feature Weights</h4>
+      <p style="color:#8b949e">The bar chart shows which features the model weighted most heavily. Wide green bars = the feature raises conviction when above-average. Wide red bars = it lowers conviction. The dominant feature is typically <strong style="color:#e6edf3">VIX</strong> — higher fear (higher VIX) historically precedes mean-reversion bounces.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Retraining</h4>
+      <p style="color:#8b949e">The model retrains automatically every Saturday night (weekend cron). Click <strong style="color:#e6edf3">↺ Retrain Now</strong> to force an immediate retrain — useful after running the full research pipeline.</p>
+    `,
+  },
+
+  bot_risk: {
+    title: '⚡ Risk Profile & Daily Limits — How It Works',
+    body: `
+      <p>Risk profiles control how aggressively the bot trades each day — balancing profit potential against capital at risk.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Profiles</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#3fb950;font-weight:600;width:120px">🛡 Conservative</td><td style="padding:8px 0;color:#8b949e">$75 daily target · $100 loss limit · 1 position max · Score ≥65 required. Best during high-VIX or uncertain markets.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#d29922;font-weight:600">⚖ Moderate</td><td style="padding:8px 0;color:#8b949e">$150 daily target · $200 loss limit · 2 positions max · Score ≥50. The default — balanced for most market conditions.</td></tr>
+        <tr><td style="padding:8px 0;color:#f85149;font-weight:600">🚀 Aggressive</td><td style="padding:8px 0;color:#f85149">$300 daily target · $500 loss limit · 3 positions max · Score ≥35. Higher reward, higher risk. Use only in strong trending markets.</td></tr>
+      </table>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Daily Limits Explained</h4>
+      <ul style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:5px">
+        <li><strong style="color:#e6edf3">Profit target</strong> — bot stops trading for the day once cumulative P&L hits this. Locks in gains.</li>
+        <li><strong style="color:#e6edf3">Loss limit</strong> — bot stops trading once daily losses reach this. Prevents runaway losses.</li>
+        <li><strong style="color:#e6edf3">Max positions</strong> — how many stocks can be held at once. More positions = more diversification but less per-trade size.</li>
+        <li><strong style="color:#e6edf3">Min conviction score</strong> — signals below this are ignored entirely.</li>
+      </ul>
+    `,
+  },
+
+  bot_sizing: {
+    title: '📐 Position Sizing — How It Works',
+    body: `
+      <p>The bot sizes every trade based on <strong style="color:#e6edf3">ATR (Average True Range)</strong> — a measure of how much a stock typically moves in a day. This keeps risk consistent across all positions regardless of stock price.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">The Sizing Formula</h4>
+      <p style="color:#8b949e">Target profit per trade ÷ (ATR% × target multiplier) = number of shares to buy. The bot then checks the resulting dollar value against your min/max limits and clamps if needed.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Key Settings</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600;width:170px">Target profit per trade</td><td style="padding:8px 0;color:#8b949e">How much the bot aims to make on each individual trade before the take-profit triggers.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600">Min/Max position size</td><td style="padding:8px 0;color:#8b949e">Hard dollar floors and ceilings — the bot never invests less than the minimum or more than the maximum per trade.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600">Stop multiplier</td><td style="padding:8px 0;color:#8b949e">Stop-loss is set at entry − (ATR% × stop multiplier). Larger = wider stop, fewer stop-outs, but bigger losses when stopped.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600">Target multiplier</td><td style="padding:8px 0;color:#8b949e">Take-profit is set at entry + (ATR% × target multiplier). The ratio target/stop is your reward-to-risk ratio.</td></tr>
+        <tr><td style="padding:8px 0;color:#e3b341;font-weight:600">Min ATR%</td><td style="padding:8px 0;color:#8b949e">Stocks with ATR% below this are too low-volatility for the sizing math to work — the bot skips them entirely.</td></tr>
+      </table>
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-top:20px;font-size:0.82rem;color:#6e7681">
+        💡 <strong style="color:#8b949e">Reward-to-risk ratio</strong> is shown below the inputs. A ratio ≥ 2:1 means you need to be right only 34% of the time to be profitable long-term.
+      </div>
+    `,
+  },
+
+  bot_vix: {
+    title: '🌡 VIX Regime Thresholds — How It Works',
+    body: `
+      <p>VIX (CBOE Volatility Index) measures market fear. The bot uses it to automatically reduce position sizes and eventually halt trading when the market becomes too turbulent.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Three Regimes</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#3fb950;font-weight:600;width:130px">Normal (VIX ≤ threshold)</td><td style="padding:8px 0;color:#8b949e">Full position sizing. Bot trades normally.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#d29922;font-weight:600">Defensive (above defensive threshold)</td><td style="padding:8px 0;color:#8b949e">Position sizes cut to 50%. The bot still trades but is more selective and risks less per trade.</td></tr>
+        <tr><td style="padding:8px 0;color:#f85149;font-weight:600">Crisis (above crisis threshold)</td><td style="padding:8px 0;color:#8b949e">No new long positions. Bot may still close existing positions. Conviction score also receives a −20 penalty.</td></tr>
+      </table>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Fixed Score Penalties</h4>
+      <p style="color:#8b949e">The scoring engine applies automatic VIX deductions regardless of your thresholds: −5 pts when VIX 20–25, −10 pts when VIX 25–35, −20 pts when VIX &gt;35. This reduces conviction scores in turbulent markets even before the sizing cutbacks kick in.</p>
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-top:20px;font-size:0.82rem;color:#6e7681">
+        💡 <strong style="color:#8b949e">Tip:</strong> Most traders set defensive threshold at 25–30 and crisis at 35–40. Below 20 = calm, 20–25 = normal, &gt;30 = elevated fear.
+      </div>
+    `,
+  },
+
+  bot_sectors: {
+    title: '🚫 Blocked Sectors — How It Works',
+    body: `
+      <p>Sector blocking lets you permanently exclude entire market sectors from the bot's trading universe — the bot will never open a position in any stock belonging to a blocked sector.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Why Block a Sector?</h4>
+      <ul style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:5px">
+        <li>You already have heavy exposure to that sector in your personal portfolio</li>
+        <li>You have a strong view (bearish on energy, avoid biotech, etc.)</li>
+        <li>Regulatory or ethical reasons (avoid weapons, tobacco, etc.)</li>
+        <li>The sector is in a confirmed downtrend and you want to wait it out</li>
+      </ul>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Sector ETFs Used</h4>
+      <p style="color:#8b949e">The bot maps stocks to sectors via their primary ETF: XLK (Tech), XLV (Healthcare), XLF (Financials), XLY (Consumer Disc.), XLC (Comms), XLI (Industrials), XLE (Energy), XLU (Utilities), XLP (Staples), XLRE (Real Estate), XLB (Materials).</p>
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-top:20px;font-size:0.82rem;color:#6e7681">
+        💡 <strong style="color:#8b949e">Tip:</strong> Blocking a sector doesn't affect existing open positions — only prevents new entries.
+      </div>
+    `,
+  },
+
+  bot_schedule: {
+    title: '🕐 Scanner Schedule — How It Works',
+    body: `
+      <p>The bot runs on a fixed schedule during US market hours (Eastern Time). The schedule is system-wide — all users share the same scan cadence.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Schedule Breakdown</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600;width:150px">9:00 AM</td><td style="padding:8px 0;color:#8b949e">Morning briefing — market overview, earnings today, sector outlook sent to Telegram and chat.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600">9:45 AM</td><td style="padding:8px 0;color:#8b949e">Trading starts. Avoids the first 15 min open (high spread, erratic moves).</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600">Every 10 min</td><td style="padding:8px 0;color:#8b949e">Full scan: build candidate list → score each → execute if above threshold.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#d29922;font-weight:600">12:30–1:30 PM</td><td style="padding:8px 0;color:#8b949e">Lunch lull pause — no new positions during low-volume midday chop.</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#e3b341;font-weight:600">3:30 PM</td><td style="padding:8px 0;color:#8b949e">Last scan. No new entries after this — avoids the volatile 30-minute close.</td></tr>
+        <tr><td style="padding:8px 0;color:#f85149;font-weight:600">3:50 PM</td><td style="padding:8px 0;color:#8b949e">End-of-day flatten — all open positions closed to prevent overnight exposure.</td></tr>
+      </table>
+    `,
+  },
+
+  bot_checklist: {
+    title: '✅ Trade Entry Checklist — How It Works',
+    body: `
+      <p>Before executing any trade, the bot runs through this checklist in order. If any step fails, the bot skips to the next scan cycle instead of forcing a trade.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">The 8-Step Gate</h4>
+      <ol style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:8px">
+        <li><strong style="color:#e6edf3">Daily P&L check</strong> — if today's profit target is already hit, stop (no need to risk it). If today's loss limit is hit, stop (don't dig deeper).</li>
+        <li><strong style="color:#e6edf3">Market status</strong> — confirms the market is open. Skips pre-market, after-hours, and holidays.</li>
+        <li><strong style="color:#e6edf3">Position count</strong> — stops if you're already at the max simultaneous position limit.</li>
+        <li><strong style="color:#e6edf3">VIX check</strong> — stops if VIX exceeds your max-VIX setting (crisis mode).</li>
+        <li><strong style="color:#e6edf3">Candidate list</strong> — builds a shortlist of 4–6 stocks from today's movers, earnings beats, and strong sectors.</li>
+        <li><strong style="color:#e6edf3">Filter candidates</strong> — removes blocked sectors, stocks already held, and low-ATR names.</li>
+        <li><strong style="color:#e6edf3">Conviction scoring</strong> — scores each candidate. Any stock below the minimum threshold is dropped.</li>
+        <li><strong style="color:#e6edf3">Execute</strong> — buys the highest-scoring candidate with a bracket order (stop + take-profit set simultaneously).</li>
+      </ol>
+    `,
+  },
+
+  bot_scoring: {
+    title: '🎯 Conviction Score Factors — How It Works',
+    body: `
+      <p>The conviction score (0–100) is built from a weighted sum of individual factors. Each factor adds or subtracts points based on what the data shows for that stock right now.</p>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Factor Categories</h4>
+      <ul style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px">
+        <li><strong style="color:#e6edf3">Technical momentum</strong> — RSI strength, MACD signal, EMA alignment, volume trend. Stocks in uptrends with strong momentum score higher.</li>
+        <li><strong style="color:#e6edf3">Earnings quality</strong> — recent EPS beats, analyst estimate revisions, earnings growth rate. Fundamental tailwinds add conviction.</li>
+        <li><strong style="color:#e6edf3">Relative strength</strong> — how the stock is performing vs SPY (the market). Outperformers score higher; laggards get penalised.</li>
+        <li><strong style="color:#e6edf3">Sector strength</strong> — points added/removed based on the stock's sector ETF performance today.</li>
+        <li><strong style="color:#e6edf3">VIX regime</strong> — automatic deductions in high-VIX environments (−5/−10/−20 pts at different thresholds).</li>
+        <li><strong style="color:#e6edf3">TradingView [TV]</strong> — Pine Script levels from your live chart (key supports, liquidity zones) are used when TradingView Desktop is connected.</li>
+        <li><strong style="color:#e6edf3">ML adjustment</strong> — ±0–10 pts applied by the trained logistic regression model based on how similar signals have performed historically.</li>
+      </ul>
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Grade Thresholds</h4>
+      <p style="color:#8b949e">A ≥80 · B 65–79 · C 50–64 · F &lt;50. The bot only trades Grade B+ by default (configurable via Min conviction score in Daily Risk Limits).</p>
     `,
   },
 
