@@ -780,6 +780,33 @@
   .trade-result.success { background: #0d2818; border: 1px solid #238636; color: #3fb950; }
   .trade-result.error   { background: #2d1318; border: 1px solid #f85149; color: #f85149; }
 
+  /* ── Position expand rows ──────────────────────────────────────────────── */
+  .pos-expand-btn { font-size:0.75rem; color:#58a6ff; cursor:pointer; transition:transform .2s; display:inline-block; user-select:none; }
+  tr.pos-main-row { cursor:pointer; }
+  tr.pos-main-row:hover td { background:rgba(88,166,255,0.04); }
+  .pos-detail-panel {
+    padding:14px 18px 16px 22px;
+    background:linear-gradient(135deg,rgba(22,27,34,0.7) 0%,rgba(13,17,23,0.6) 100%);
+    border-top:1px solid rgba(88,166,255,0.12);
+    border-bottom:1px solid #21262d;
+  }
+  .pos-detail-label { font-size:0.68rem; color:#8b949e; text-transform:uppercase; letter-spacing:.07em; margin-bottom:7px; font-weight:600; }
+  .pos-order-pill { display:inline-flex; align-items:center; gap:5px; padding:4px 12px; border-radius:20px; font-size:0.78rem; font-weight:700; white-space:nowrap; }
+  .pos-pill-stop   { background:#2d1318; border:1px solid rgba(248,81,73,0.45); color:#f85149; }
+  .pos-pill-target { background:#0d2818; border:1px solid rgba(63,185,80,0.45); color:#3fb950; }
+  .pos-pill-none   { color:#484f58; font-size:0.77rem; font-style:italic; }
+  .pos-act { border-radius:6px; font-size:0.78rem; font-weight:600; padding:5px 13px; cursor:pointer; white-space:nowrap; transition:all .15s; }
+  .pos-act-close  { background:#2d1318; border:1px solid #f85149; color:#f85149; }
+  .pos-act-close:hover  { background:#f85149; color:#fff; }
+  .pos-act-be     { background:#1a1f3a; border:1px solid #58a6ff; color:#58a6ff; }
+  .pos-act-be:hover     { background:#1f6feb; color:#fff; border-color:#1f6feb; }
+  .pos-act-buy    { background:#0d2818; border:1px solid #3fb950; color:#3fb950; }
+  .pos-act-buy:hover    { background:#238636; color:#fff; border-color:#238636; }
+  .pos-act-sell   { background:#2d1318; border:1px solid #da3633; color:#da3633; }
+  .pos-act-sell:hover   { background:#da3633; color:#fff; }
+  .pos-qty-inp { background:#0d1117; border:1px solid #30363d; border-radius:5px; color:#e6edf3; font-size:0.8rem; padding:4px 8px; width:60px; }
+  .pos-qty-inp:focus { outline:none; border-color:#58a6ff; }
+
   /* ── Home Page ─────────────────────────────────────────────────────────── */
   #page-home { padding: 0; }
 
@@ -1529,6 +1556,76 @@
 
       <div id="mlModelBody" style="padding:20px">
         <div style="color:#8b949e;font-size:0.85rem">Loading model stats…</div>
+      </div>
+    </div>
+
+    <!-- Pipeline Status Bar -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div class="table-head">
+        <h3>🔧 Data Pipeline Status</h3>
+        <span style="font-size:0.75rem;color:#8b949e">Run npm run research:download → scores → backtest to refresh</span>
+      </div>
+      <div id="pipelineStatus" style="display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:#21262d">
+        <div style="background:#0d1117;padding:14px 16px;text-align:center;color:#484f58;font-size:0.8rem">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Regime Analysis Table -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div class="table-head">
+        <h3>📊 Win Rate by Market Regime</h3>
+        <span style="font-size:0.75rem;color:#8b949e">Which regime × grade combo works best?</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+        <thead>
+          <tr style="border-bottom:1px solid #30363d">
+            <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Regime</th>
+            <th style="padding:8px 8px;text-align:center;color:#8b949e;font-weight:500">Grade</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Signals</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate 1W</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg Return 1M</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Alpha vs SPY</th>
+          </tr>
+        </thead>
+        <tbody id="regimeAnalysisBody">
+          <tr><td colspan="6" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Indicator Edge -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div class="table-head">
+        <h3>⚡ Indicator Edge (avg 1-week return)</h3>
+        <span style="font-size:0.75rem;color:#8b949e">Green = historically profitable condition · Red = historically losing</span>
+      </div>
+      <div id="indicatorEdge" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px">
+        <div style="color:#484f58;font-size:0.8rem;padding:12px">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Live Bot Accuracy -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div class="table-head">
+        <h3>🎯 Live Bot Accuracy — Conviction vs Actual P&amp;L</h3>
+        <span style="font-size:0.75rem;color:#8b949e">How well does the conviction score predict real wins?</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+        <thead>
+          <tr style="border-bottom:1px solid #30363d">
+            <th style="padding:8px 16px;text-align:left;color:#8b949e;font-weight:500">Conviction Band</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Trades</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Win Rate</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Avg P&amp;L</th>
+            <th style="padding:8px 8px;text-align:right;color:#8b949e;font-weight:500">Total P&amp;L</th>
+          </tr>
+        </thead>
+        <tbody id="liveAccuracyBody">
+          <tr><td colspan="5" style="padding:20px;text-align:center;color:#8b949e">Loading...</td></tr>
+        </tbody>
+      </table>
+      <div id="liveAccuracyNote" style="padding:10px 16px;font-size:0.78rem;color:#484f58">
+        Populates automatically as the bot closes real trades with conviction scores.
       </div>
     </div>
 
@@ -4716,6 +4813,7 @@ async function loadResearch() {
   loadTopPicks();
   loadDips();
   loadModelStats();
+  loadResearchExtras();
   try {
     const d = await api('/api/research/summary');
     const meta = d.meta;
@@ -4752,6 +4850,111 @@ async function loadResearch() {
   } catch (e) {
     document.getElementById('researchMeta').textContent = 'Failed to load research data';
   }
+}
+
+async function loadResearchExtras() {
+  // ── Pipeline status ──────────────────────────────────────────────────────
+  try {
+    const ps = await fetch('/api/research/pipeline-status').then(r => r.json());
+    const steps = [
+      { label: 'Price Data',   rows: ps.prices?.rows,      latest: ps.prices?.latest },
+      { label: 'Scores',       rows: ps.scores?.rows,      latest: ps.scores?.latest },
+      { label: 'Backtest',     rows: ps.returns?.rows,     latest: ps.returns?.latest },
+      { label: 'Knowledge',    rows: ps.knowledge?.rows,   latest: null },
+      { label: 'Live Signals', rows: ps.live_scores?.rows, latest: ps.live_scores?.latest },
+    ];
+    document.getElementById('pipelineStatus').innerHTML = steps.map(s => {
+      const hasData   = parseInt(s.rows) > 0;
+      const latestStr = s.latest ? new Date(s.latest).toLocaleDateString() : 'n/a';
+      const color     = hasData ? '#238636' : '#da3633';
+      return `<div style="background:#0d1117;padding:14px 16px;text-align:center">
+        <div style="font-size:1.2rem">${hasData ? '✅' : '❌'}</div>
+        <div style="font-size:0.8rem;font-weight:600;color:#e6edf3;margin:4px 0">${s.label}</div>
+        <div style="font-size:0.72rem;color:${color}">${Number(s.rows).toLocaleString()} rows</div>
+        <div style="font-size:0.7rem;color:#484f58">${latestStr}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.warn('pipeline-status:', e.message); }
+
+  // ── Regime analysis ──────────────────────────────────────────────────────
+  try {
+    const ra    = await fetch('/api/research/regime-analysis').then(r => r.json());
+    const tbody = document.getElementById('regimeAnalysisBody');
+    if (!ra.regimes?.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#8b949e">Run research pipeline first — no regime data yet</td></tr>';
+    } else {
+      tbody.innerHTML = ra.regimes.map(r => {
+        const wr       = parseFloat(r.win_rate_1w);
+        const wrColor  = wr >= 60 ? '#3fb950' : wr >= 50 ? '#d29922' : '#f85149';
+        const alpha    = parseFloat(r.alpha_1m);
+        const alphaColor = alpha > 0 ? '#3fb950' : '#f85149';
+        const gradeBg  = r.grade==='A' ? '#1f6feb' : r.grade==='B' ? '#238636' : r.grade==='C' ? '#9e6a03' : '#6e3535';
+        return `<tr style="border-bottom:1px solid #21262d">
+          <td style="padding:8px 16px;color:#e6edf3;text-transform:capitalize">${r.regime}</td>
+          <td style="padding:8px;text-align:center">
+            <span style="background:${gradeBg};color:#fff;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600">${r.grade}</span>
+          </td>
+          <td style="padding:8px;text-align:right;color:#8b949e">${Number(r.signals).toLocaleString()}</td>
+          <td style="padding:8px;text-align:right;color:${wrColor};font-weight:600">${wr}%</td>
+          <td style="padding:8px;text-align:right;color:#e6edf3">${r.avg_ret_1m}%</td>
+          <td style="padding:8px;text-align:right;color:${alphaColor};font-weight:600">${alpha > 0 ? '+' : ''}${alpha}%</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) { console.warn('regime-analysis:', e.message); }
+
+  // ── Indicator edge ───────────────────────────────────────────────────────
+  try {
+    const ic = await fetch('/api/research/indicator-correlation').then(r => r.json());
+    const c  = ic.correlations;
+    if (c) {
+      const items = [
+        { label: 'RSI 40–60 (neutral)',   val: c.rsi_neutral_ret,    desc: 'Not overbought or oversold' },
+        { label: 'RSI > 70 (overbought)', val: c.rsi_overbought_ret, desc: 'Extended, risky entry' },
+        { label: 'RSI < 35 (oversold)',   val: c.rsi_oversold_ret,   desc: 'Potential bounce' },
+        { label: 'MACD Positive',         val: c.macd_positive_ret,  desc: 'Bullish momentum' },
+        { label: 'MACD Negative',         val: c.macd_negative_ret,  desc: 'Bearish momentum' },
+        { label: 'Price above EMA',       val: c.ema_above_ret,      desc: 'In uptrend' },
+        { label: 'Price below EMA',       val: c.ema_below_ret,      desc: 'In downtrend' },
+        { label: 'High Volume (>1.5×)',   val: c.high_volume_ret,    desc: 'Institutional interest' },
+        { label: 'Low Volume (<0.8×)',    val: c.low_volume_ret,     desc: 'Weak participation' },
+      ];
+      document.getElementById('indicatorEdge').innerHTML = items.map(item => {
+        const v   = parseFloat(item.val);
+        const col = v > 0.1 ? '#3fb950' : v < -0.1 ? '#f85149' : '#d29922';
+        const bg  = v > 0.1 ? '#0d2b0d' : v < -0.1 ? '#2b0d0d' : '#1a1600';
+        return `<div style="background:${bg};border:1px solid #30363d;border-radius:8px;padding:12px 14px">
+          <div style="font-size:0.78rem;color:#8b949e;margin-bottom:4px">${item.label}</div>
+          <div style="font-size:1.3rem;font-weight:700;color:${col}">${v > 0 ? '+' : ''}${isNaN(v) ? 'n/a' : v.toFixed(2)}%</div>
+          <div style="font-size:0.72rem;color:#484f58;margin-top:2px">${item.desc}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch(e) { console.warn('indicator-correlation:', e.message); }
+
+  // ── Live bot accuracy ────────────────────────────────────────────────────
+  try {
+    const la    = await fetch('/api/research/live-accuracy').then(r => r.json());
+    const tbody = document.getElementById('liveAccuracyBody');
+    if (!la.accuracy?.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="padding:20px;text-align:center;color:#8b949e">No closed trades with conviction scores yet</td></tr>';
+    } else {
+      tbody.innerHTML = la.accuracy.map(r => {
+        const wr      = parseFloat(r.win_rate);
+        const wrColor = wr >= 60 ? '#3fb950' : wr >= 50 ? '#d29922' : '#f85149';
+        const pnl     = parseFloat(r.avg_pnl);
+        const pnlColor = pnl >= 0 ? '#3fb950' : '#f85149';
+        const total   = parseFloat(r.total_pnl);
+        return `<tr style="border-bottom:1px solid #21262d">
+          <td style="padding:8px 16px;color:#e6edf3;font-weight:600">${r.grade_band}</td>
+          <td style="padding:8px;text-align:right;color:#8b949e">${r.trades}</td>
+          <td style="padding:8px;text-align:right;color:${wrColor};font-weight:600">${wr}%</td>
+          <td style="padding:8px;text-align:right;color:${pnlColor}">$${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+          <td style="padding:8px;text-align:right;color:${total >= 0 ? '#3fb950' : '#f85149'}">$${total >= 0 ? '+' : ''}${total.toFixed(2)}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) { console.warn('live-accuracy:', e.message); }
 }
 
 async function loadModelStats() {
@@ -4932,11 +5135,8 @@ async function loadDips() {
 }
 
 function exploreStock(symbol) {
-  const input = document.getElementById('explorerSymbol');
-  if (input) { input.value = symbol; document.getElementById('explorerClearBtn').style.display = ''; }
+  exploreSymbol(symbol);
   explorerCloseDropdown();
-  loadStockExplorer();
-  document.getElementById('page-research').scrollTop = 9999;
 }
 
 // ── Stock Explorer Autocomplete ───────────────────────────────────────────────
@@ -5904,47 +6104,225 @@ async function executeForceTrade() {
   const dollars = document.getElementById('tradeDollars').value;
   if (!symbol) { alert('Enter a symbol'); return; }
 
-  const btn = document.getElementById('btnExecute');
+  const btn    = document.getElementById('btnExecute');
+  const result = document.getElementById('tradeResult');
   btn.disabled = true;
   btn.textContent = 'Executing…';
-  document.getElementById('tradeResult').innerHTML = '';
+  result.innerHTML = '';
 
   const body = { symbol, side };
   if (dollars) body.dollars = parseFloat(dollars);
 
-  const r = await fetch('/api/trade/force', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const d = await r.json();
+  try {
+    const r = await fetch('/api/trade/force', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
 
-  if (!r.ok || d.error) {
-    document.getElementById('tradeResult').innerHTML =
-      `<div class="trade-result error">❌ ${d.error || 'Trade failed'}</div>`;
+    if (!r.ok || d.error) {
+      result.innerHTML = `<div class="trade-result error">❌ ${d.error || 'Trade failed'}</div>`;
+      btn.disabled = false;
+      btn.textContent = 'Execute Trade';
+      return;
+    }
+
+    result.innerHTML = `
+      <div class="trade-result success">
+        ✅ <strong>${d.side?.toUpperCase()} ${d.symbol}</strong> executed on paper account<br>
+        Qty: ${d.qty} shares @ $${Number(d.entry_price).toFixed(2)}<br>
+        Position size: $${Number(d.dollars_invested || d.qty * d.entry_price).toLocaleString()}<br>
+        Stop loss: $${Number(d.stop_loss).toFixed(2)} &nbsp;|&nbsp; Take profit: $${Number(d.take_profit).toFixed(2)}<br>
+        ATR: ${d.atr_pct ?? '—'}% &nbsp;|&nbsp; Est. profit if target hit: $${Number(d.estimated_profit).toFixed(0)}<br>
+        Risk/Reward: ${d.risk_reward}x
+      </div>`;
+    btn.textContent = '✓ Done';
+    setTimeout(() => { loadDashboard(); }, 1200);
+  } catch (err) {
+    result.innerHTML = `<div class="trade-result error">❌ ${err.message || 'Network error — try again'}</div>`;
     btn.disabled = false;
     btn.textContent = 'Execute Trade';
-    return;
   }
-
-  document.getElementById('tradeResult').innerHTML = `
-    <div class="trade-result success">
-      ✅ <strong>${d.side?.toUpperCase()} ${d.symbol}</strong> executed on paper account<br>
-      Qty: ${d.qty} shares @ $${Number(d.entry_price).toFixed(2)}<br>
-      Position size: $${Number(d.dollars_invested || d.qty * d.entry_price).toLocaleString()}<br>
-      Stop loss: $${Number(d.stop_loss).toFixed(2)} &nbsp;|&nbsp; Take profit: $${Number(d.take_profit).toFixed(2)}<br>
-      ATR: ${d.atr_pct ?? '—'}% &nbsp;|&nbsp; Est. profit if target hit: $${Number(d.estimated_profit).toFixed(0)}<br>
-      Risk/Reward: ${d.risk_reward}x
-    </div>`;
-  btn.textContent = '✓ Done';
-  // Refresh dashboard positions after 1s
-  setTimeout(() => { loadDashboard(); }, 1200);
 }
 
 // Close modal on overlay click
 document.getElementById('tradeModal').addEventListener('click', e => {
   if (e.target === document.getElementById('tradeModal')) closeTradeModal();
 });
+
+// ── Position expand / action state ────────────────────
+const _expandedPositions  = new Set();
+let   _cachedOpenOrders   = [];
+let   _cachedDbTradeMap   = {};
+
+function togglePosRow(symbol, e) {
+  if (e?.target?.closest?.('.sym-link,.pos-act,.pos-qty-inp')) return;
+  const row    = document.getElementById(`pos-detail-${symbol}`);
+  const toggle = document.getElementById(`pos-toggle-${symbol}`);
+  if (!row) return;
+  const opening = row.style.display === 'none';
+  row.style.display   = opening ? 'table-row' : 'none';
+  if (toggle) toggle.textContent = opening ? '▲' : '▼';
+  opening ? _expandedPositions.add(symbol) : _expandedPositions.delete(symbol);
+}
+
+function _buildPosTable(positions, isMoomoo) {
+  if (!positions.length) return '<div class="empty">No open positions</div>';
+
+  const stopOrderMap = {};
+  (_cachedOpenOrders ?? []).forEach(o => {
+    if (o.type === 'stop' || o.type === 'stop_limit' || o.type === 'trailing_stop')
+      stopOrderMap[o.symbol] = o;
+  });
+
+  const colHdr = `<tr>
+    <th>Symbol</th><th>Side</th><th>Shares</th><th>$ Invested</th>
+    <th>Avg Cost</th><th>Current</th><th>Unrealized P&L</th>
+    ${isMoomoo ? '<th>Today P&L</th>' : ''}<th></th>
+  </tr>`;
+
+  const rows = positions.map(p => {
+    const avgPrice  = p.avg_entry_price ?? p.avg_price ?? p.avg_cost;
+    const unrlPL    = p.unrealized_pl;
+    const unrlPLPct = p.unrealized_plpc ?? p.unrealized_pl_pct;
+    const side      = p.side ?? 'long';
+    const todayPL   = p.today_pl;
+    const invested  = (p.qty && avgPrice) ? p.qty * avgPrice : null;
+    const sideLabel = side === 'long' || side == null ? '📈 Long' : '📉 Short';
+    const dbTrade   = _cachedDbTradeMap[p.symbol];
+    const stopOrder = stopOrderMap[p.symbol];
+    const stopLoss  = dbTrade?.stop_loss  ?? (stopOrder ? parseFloat(stopOrder.stop_price) : null);
+    const takeProft = dbTrade?.take_profit ?? null;
+    const hasStop   = stopLoss != null;
+    const isExp     = _expandedPositions.has(p.symbol);
+
+    const stopPill   = hasStop   ? `<span class="pos-order-pill pos-pill-stop">🔴 Stop $${Number(stopLoss).toFixed(2)}</span>` : '';
+    const targetPill = takeProft ? `<span class="pos-order-pill pos-pill-target">🟢 Target $${Number(takeProft).toFixed(2)}</span>` : '';
+    const nonePill   = !stopPill && !targetPill ? `<span class="pos-pill-none">No active stop orders — position unprotected</span>` : '';
+    const beBtn      = hasStop ? `<button class="pos-act pos-act-be" onclick="posMoveStp('${p.symbol}',this)">🔒 Move Stop →BE</button>` : '';
+
+    const detail = `<tr id="pos-detail-${p.symbol}" style="display:${isExp?'table-row':'none'}">
+      <td colspan="99" style="padding:0">
+        <div class="pos-detail-panel">
+          <div style="display:flex;gap:28px;flex-wrap:wrap">
+            <div>
+              <div class="pos-detail-label">Active Orders</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                ${stopPill}${targetPill}${nonePill}
+              </div>
+            </div>
+            <div>
+              <div class="pos-detail-label">Quick Actions</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <button class="pos-act pos-act-close" onclick="posClose('${p.symbol}',this)">🔴 Close All</button>
+                ${beBtn}
+                <span style="display:flex;align-items:center;gap:5px;font-size:0.78rem;color:#8b949e">
+                  <input id="pos-buy-qty-${p.symbol}" type="number" min="1" value="1" class="pos-qty-inp" placeholder="qty" onclick="event.stopPropagation()">
+                  <button class="pos-act pos-act-buy" onclick="posBuyMore('${p.symbol}',this)">➕ Buy More</button>
+                </span>
+                <span style="display:flex;align-items:center;gap:5px;font-size:0.78rem;color:#8b949e">
+                  <input id="pos-sell-qty-${p.symbol}" type="number" min="1" max="${p.qty}" value="1" class="pos-qty-inp" placeholder="qty" onclick="event.stopPropagation()">
+                  <button class="pos-act pos-act-sell" onclick="posSellPartial('${p.symbol}',this)">🔻 Sell Partial</button>
+                </span>
+                <span id="pos-msg-${p.symbol}" style="font-size:0.75rem;color:#8b949e"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+
+    return `<tr class="pos-main-row" onclick="togglePosRow('${p.symbol}',event)">
+      ${symCell(p.symbol, p.name)}
+      <td>${sideLabel}</td>
+      <td>${p.qty}</td>
+      <td style="color:#8b949e">${invested != null ? fmtDollar(invested) : '—'}</td>
+      <td>$${fmt(avgPrice)}</td>
+      <td>$${fmt(p.current_price)}</td>
+      <td class="${colorClass(unrlPL)}">${unrlPL != null ? (unrlPL >= 0 ? '+' : '-') + fmtDollar(unrlPL) : '—'}${unrlPLPct != null ? ` <span style="font-size:0.78rem">(${fmtPct(unrlPLPct)})</span>` : ''}</td>
+      ${isMoomoo ? `<td class="${colorClass(todayPL)}">${todayPL != null ? (todayPL >= 0 ? '+' : '-') + fmtDollar(todayPL) : '—'}</td>` : ''}
+      <td style="text-align:center;padding:0 12px"><span id="pos-toggle-${p.symbol}" class="pos-expand-btn">${isExp ? '▲' : '▼'}</span></td>
+    </tr>${detail}`;
+  }).join('');
+
+  return `<table>${colHdr}${rows}</table>`;
+}
+
+async function posClose(symbol, btn) {
+  if (!confirm(`Close entire ${symbol} position at market price?`)) return;
+  const msgEl = document.getElementById(`pos-msg-${symbol}`);
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳';
+  if (msgEl) { msgEl.style.color = '#8b949e'; msgEl.textContent = 'Closing…'; }
+  try {
+    const r = await fetch('/api/trade/close', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol}) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Close failed');
+    if (msgEl) { msgEl.style.color = '#3fb950'; msgEl.textContent = '✓ Position closed'; }
+    _expandedPositions.delete(symbol);
+    setTimeout(loadDashboard, 1500);
+  } catch (e) {
+    if (msgEl) { msgEl.style.color = '#f85149'; msgEl.textContent = e.message; }
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function posMoveStp(symbol, btn) {
+  const msgEl = document.getElementById(`pos-msg-${symbol}`);
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳';
+  if (msgEl) { msgEl.style.color = '#8b949e'; msgEl.textContent = 'Moving stop…'; }
+  try {
+    const r = await fetch('/api/trade/move-stop', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol}) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    if (msgEl) { msgEl.style.color = '#58a6ff'; msgEl.textContent = `🔒 Stop moved → $${Number(d.new_stop).toFixed(2)}`; }
+    btn.disabled = false; btn.textContent = orig;
+  } catch (e) {
+    if (msgEl) { msgEl.style.color = '#f85149'; msgEl.textContent = e.message; }
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function posBuyMore(symbol, btn) {
+  const qty = parseInt(document.getElementById(`pos-buy-qty-${symbol}`)?.value);
+  const msgEl = document.getElementById(`pos-msg-${symbol}`);
+  if (!qty || qty < 1) { if (msgEl) { msgEl.style.color='#f85149'; msgEl.textContent='Enter qty'; } return; }
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳';
+  if (msgEl) { msgEl.style.color = '#8b949e'; msgEl.textContent = 'Placing…'; }
+  try {
+    const r = await fetch('/api/trade/quick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, side:'buy', qty, order_type:'market'}) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Order failed');
+    if (msgEl) { msgEl.style.color = '#3fb950'; msgEl.textContent = `✓ Bought ${qty} more ${symbol}`; }
+    btn.disabled = false; btn.textContent = orig;
+  } catch (e) {
+    if (msgEl) { msgEl.style.color = '#f85149'; msgEl.textContent = e.message; }
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function posSellPartial(symbol, btn) {
+  const qty = parseInt(document.getElementById(`pos-sell-qty-${symbol}`)?.value);
+  const msgEl = document.getElementById(`pos-msg-${symbol}`);
+  if (!qty || qty < 1) { if (msgEl) { msgEl.style.color='#f85149'; msgEl.textContent='Enter qty'; } return; }
+  if (!confirm(`Sell ${qty} share${qty>1?'s':''} of ${symbol} at market?`)) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳';
+  if (msgEl) { msgEl.style.color = '#8b949e'; msgEl.textContent = 'Placing…'; }
+  try {
+    const r = await fetch('/api/trade/quick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, side:'sell', qty, order_type:'market'}) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Order failed');
+    if (msgEl) { msgEl.style.color = '#e3b341'; msgEl.textContent = `✓ Sold ${qty} ${symbol}`; }
+    btn.disabled = false; btn.textContent = orig;
+  } catch (e) {
+    if (msgEl) { msgEl.style.color = '#f85149'; msgEl.textContent = e.message; }
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
 
 async function logout() {
   try { await fetch('/auth/logout', { method: 'POST' }); } catch {}
@@ -6005,6 +6383,17 @@ function liveText(id, newText) {
 
 let _dashSource = null; // track which source last built the skeleton
 
+async function forceSyncDashboard() {
+  const btn = event?.target;
+  const origText = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Syncing…'; }
+  try {
+    await fetch('/api/sync', { method: 'POST' });
+  } catch { /* non-fatal */ }
+  await loadDashboard();
+  if (btn) { btn.disabled = false; btn.textContent = origText || '↻ Sync'; }
+}
+
 async function loadDashboard() {
   const d = await api('/api/dashboard?source=' + currentSource);
   if (!d) return;
@@ -6063,12 +6452,12 @@ async function loadDashboard() {
         <h3>Open Positions <span id="pos-source-badge" style="font-size:0.75rem"></span> <button class="doc-btn" onclick="openResearchDoc('dashboard_positions')" title="How this works">?</button></h3>
         <span id="pos-total-invested" style="font-size:0.85rem;color:#8b949e"></span>
         <span id="pos-total-pl" style="font-size:0.85rem"></span>
-        <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
+        <button class="refresh-btn" onclick="forceSyncDashboard()">↻ Sync</button>
       </div>
       <div id="pos-body"><div class="loading">Loading…</div></div>`;
 
     document.getElementById('recentTradesTable').innerHTML = `
-      <div class="table-head"><h3>Recent Trades <button class="doc-btn" onclick="openResearchDoc('dashboard_trades')" title="How this works">?</button></h3></div>
+      <div class="table-head"><h3>Recent Trades <button class="doc-btn" onclick="openResearchDoc('dashboard_trades')" title="How this works">?</button></h3><button class="refresh-btn" onclick="forceSyncDashboard()" style="margin-left:auto">↻ Sync</button></div>
       <div id="trades-body"><div class="loading">Loading…</div></div>`;
   }
 
@@ -6110,37 +6499,21 @@ async function loadDashboard() {
     investedEl.innerHTML = `Invested: <strong style="color:#e6edf3">${fmtDollar(totalInvestedDash)}</strong>`;
   }
 
-  const posRows = d.positions.map(p => {
-    const avgPrice  = p.avg_entry_price ?? p.avg_price ?? p.avg_cost;
-    const unrlPL    = p.unrealized_pl;
-    const unrlPLPct = p.unrealized_plpc ?? p.unrealized_pl_pct;
-    const side      = p.side ?? 'long';
-    const todayPL   = p.today_pl;
-    const invested  = (p.qty && avgPrice) ? p.qty * avgPrice : null;
-    const sideLabel = side === 'long' || side == null ? '📈 Long' : '📉 Short';
-    return `<tr>
-      ${symCell(p.symbol, p.name)}
-      <td>${sideLabel}</td>
-      <td>${p.qty}</td>
-      <td style="color:#8b949e">${invested != null ? fmtDollar(invested) : '—'}</td>
-      <td>$${fmt(avgPrice)}</td>
-      <td>$${fmt(p.current_price)}</td>
-      <td class="${colorClass(unrlPL)}">${unrlPL != null ? (unrlPL >= 0 ? '+' : '-') + fmtDollar(unrlPL) : '—'}${unrlPLPct != null ? ` <span style="font-size:0.78rem">(${fmtPct(unrlPLPct)})</span>` : ''}</td>
-      ${isMoomoo ? `<td class="${colorClass(todayPL)}">${todayPL != null ? (todayPL >= 0 ? '+' : '-') + fmtDollar(todayPL) : '—'}</td>` : ''}
-    </tr>`;
-  }).join('');
+  // Cache for the 3s refreshPositions() to use without a full reload
+  _cachedOpenOrders = d.open_orders ?? [];
+  _cachedDbTradeMap = {};
+  (d.recent_trades ?? []).forEach(t => { if (t.status === 'open') _cachedDbTradeMap[t.symbol] = t; });
 
-  document.getElementById('pos-body').innerHTML = d.positions.length === 0
-    ? '<div class="empty">No open positions</div>'
-    : `<table><tr><th>Symbol</th><th>Side</th><th>Shares</th><th>$ Invested</th><th>Avg Cost</th><th>Current</th><th>Unrealized P&L</th>${isMoomoo ? '<th>Today P&L</th>' : ''}</tr>${posRows}</table>`;
+  document.getElementById('pos-body').innerHTML = _buildPosTable(d.positions, isMoomoo);
 
   document.getElementById('trades-body').innerHTML = d.recent_trades.length === 0
     ? '<div class="empty">No trades yet</div>'
-    : `<table><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Time</th></tr>
+    : `<table><tr><th>Symbol</th><th>Side</th><th>Type</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Time</th></tr>
       ${d.recent_trades.map(t => `<tr>
         ${symCell(t.symbol, t.name)}
         <td>${t.side === 'buy' ? '📈' : '📉'} ${t.side}</td>
-        <td>${fmtDollar(t.entry_price)}</td>
+        <td style="font-size:0.75rem;color:${t.source==='quick'?'#8b949e':'#58a6ff'}">${t.source === 'quick' ? 'Quick' : 'Force'}</td>
+        <td>${t.entry_price ? fmtDollar(t.entry_price) : '—'}</td>
         <td class="neg">${fmtDollar(t.stop_loss)}</td>
         <td class="pos">${fmtDollar(t.take_profit)}</td>
         <td><span class="badge badge-${t.status}">${t.status}</span></td>
@@ -6211,7 +6584,7 @@ async function loadStrongBuys(force = false) {
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="width:8px;height:8px;border-radius:50%;background:${gColor};flex-shrink:0;display:inline-block"></span>
                 <div>
-                  <strong>${p.symbol}</strong>
+                  <strong><span class="sym-link" data-symbol="${p.symbol}">${p.symbol}</span></strong>
                   ${p.name ? `<div style="font-size:0.73rem;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${p.name}</div>` : ''}
                 </div>
               </div>
@@ -6287,7 +6660,7 @@ async function loadIntradayPicks(force = false) {
           const rvolColor = (p.rvol ?? 0) >= 2 ? '#3fb950' : (p.rvol ?? 0) >= 1.5 ? '#e3b341' : '#8b949e';
           const rrColor   = (p.rr ?? 0) >= 2.5 ? '#3fb950' : (p.rr ?? 0) >= 1.5 ? '#e3b341' : '#8b949e';
           return `<tr>
-            <td><strong>${p.symbol}</strong></td>
+            <td><strong><span class="sym-link" data-symbol="${p.symbol}">${p.symbol}</span></strong></td>
             <td><span style="background:${sColor}22;color:${sColor};border:1px solid ${sColor}55;border-radius:20px;padding:2px 9px;font-size:0.73rem;white-space:nowrap">${p.setup}</span></td>
             <td style="font-size:0.85rem">
               $${(p.price ?? 0).toFixed(2)}
@@ -6944,40 +7317,18 @@ async function refreshPositions() {
       return s + (p.qty && ap ? p.qty * ap : 0);
     }, 0);
 
-    const posRows = positions.map(p => {
-      const avgPrice  = p.avg_entry_price ?? p.avg_cost;
-      const unrlPL    = p.unrealized_pl;
-      const unrlPLPct = p.unrealized_plpc ?? p.unrealized_pl_pct;
-      const side      = p.side ?? 'long';
-      const todayPL   = p.today_pl;
-      const invested  = (p.qty && avgPrice) ? p.qty * avgPrice : null;
-      const sideLabel = side === 'long' || side == null ? '📈 Long' : '📉 Short';
-      return `<tr>
-        ${symCell(p.symbol, p.name)}
-        <td>${sideLabel}</td>
-        <td>${p.qty}</td>
-        <td style="color:#8b949e">${invested != null ? fmtDollar(invested) : '—'}</td>
-        <td>$${fmt(avgPrice)}</td>
-        <td>$${fmt(p.current_price)}</td>
-        <td class="${colorClass(unrlPL)}">${unrlPL != null ? (unrlPL >= 0 ? '+' : '-') + fmtDollar(unrlPL) : '—'}${unrlPLPct != null ? ` <span style="font-size:0.78rem">(${fmtPct(unrlPLPct)})</span>` : ''}</td>
-        ${isMoomoo ? `<td class="${colorClass(todayPL)}">${todayPL != null ? (todayPL >= 0 ? '+' : '-') + fmtDollar(todayPL) : '—'}</td>` : ''}
-      </tr>`;
-    }).join('');
+    // Update header stats in-place (don't rebuild the full positionsTable skeleton)
+    const srcBadgeR = document.getElementById('pos-source-badge');
+    if (srcBadgeR) srcBadgeR.innerHTML = isMoomoo ? '<span style="color:#3fb950">● Moomoo Real</span>' : '<span style="color:#1f6feb">● Alpaca Paper</span>';
+    const investedElR = document.getElementById('pos-total-invested');
+    if (investedElR) investedElR.innerHTML = totalInvested > 0 ? `Invested: <strong style="color:#e6edf3">${fmtDollar(totalInvested)}</strong>` : '';
+    const totalElR = document.getElementById('pos-total-pl');
+    if (totalElR && isMoomoo) {
+      totalElR.className = colorClass(totalUnrPL);
+      totalElR.textContent = totalUnrPL != null ? 'Unrealized: ' + (totalUnrPL >= 0 ? '+' : '-') + fmtDollar(totalUnrPL) : '';
+    }
 
-    const lastUpdated = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-    document.getElementById('positionsTable').innerHTML = `
-      <div class="table-head">
-        <h3>Open Positions ${isMoomoo ? '<span style="font-size:0.75rem;color:#3fb950">● Moomoo Real</span>' : '<span style="font-size:0.75rem;color:#1f6feb">● Alpaca Paper</span>'}</h3>
-        ${totalInvested > 0 ? `<span style="font-size:0.85rem;color:#8b949e">Invested: <strong style="color:#e6edf3">${fmtDollar(totalInvested)}</strong></span>` : ''}
-        ${isMoomoo && totalUnrPL != null ? `<span style="font-size:0.85rem" class="${colorClass(totalUnrPL)}">Unrealized: ${totalUnrPL >= 0 ? '+' : ''}${fmtDollar(totalUnrPL)}</span>` : ''}
-        <span style="font-size:0.75rem;color:#8b949e">↻ ${lastUpdated}</span>
-      </div>
-      ${positions.length === 0 ? '<div class="empty">No open positions</div>' : `
-      <table>
-        <tr><th>Symbol</th><th>Side</th><th>Shares</th><th>$ Invested</th><th>Avg Cost</th><th>Current</th><th>Unrealized P&L</th>${isMoomoo ? '<th>Today P&L</th>' : ''}</tr>
-        ${posRows}
-      </table>`}
-    `;
+    document.getElementById('pos-body').innerHTML = _buildPosTable(positions, isMoomoo);
   } catch { /* silent — don't disrupt the page on transient errors */ }
 }
 
@@ -9801,12 +10152,26 @@ async function connectAlpaca() {
     const sym = target;
     tip.style.display = 'none';
     target = null;
-    openFloatExplorer();
-    const inp = document.getElementById('explorerSymbol');
-    if (inp) inp.value = sym;
-    loadStockExplorer(sym);
+    exploreSymbol(sym);
+  });
+
+  // Direct click on any sym-link also opens the explorer immediately
+  document.addEventListener('click', e => {
+    const el = e.target.closest('.sym-link[data-symbol]');
+    if (!el) return;
+    tip.style.display = 'none';
+    target = null;
+    exploreSymbol(el.dataset.symbol);
   });
 })();
+
+function exploreSymbol(sym) {
+  if (!sym) return;
+  openFloatExplorer();
+  const inp = document.getElementById('explorerSymbol');
+  if (inp) { inp.value = sym; document.getElementById('explorerClearBtn').style.display = ''; }
+  loadStockExplorer();
+}
 </script>
 
 <!-- ── Floating Stock Explorer ─────────────────────────────────────────── -->
@@ -9853,18 +10218,22 @@ async function connectAlpaca() {
       .qt-result.err { background:#2b0a0a; border:1px solid #f85149; color:#f85149; }
     </style>
 
-    <!-- Row 1: Symbol price + Side + Order type -->
+    <!-- Trading-time warning (shown during bad windows) -->
+    <div id="qtTimeWarn" style="display:none;background:#2d1f00;border:1px solid #f0883e;border-radius:6px;padding:7px 12px;margin-bottom:10px;font-size:0.78rem;color:#f0883e"></div>
+
+    <!-- Row 1: Price + Shares + Order type -->
     <div class="qt-row">
       <div class="qt-field">
         <div class="qt-label">Live Price</div>
-        <div class="qt-price-badge" id="qtPrice">—</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="qt-price-badge" id="qtPrice">—</div>
+          <button onclick="qtRefreshPrice()" title="Refresh price" style="background:none;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#8b949e;cursor:pointer;font-size:0.82rem">↻</button>
+        </div>
       </div>
       <div class="qt-field">
-        <div class="qt-label">Side</div>
-        <div class="qt-seg">
-          <button id="qtSideBuy"  onclick="qtSetSide('buy')"  class="qt-active-buy">▲ Buy</button>
-          <button id="qtSideSell" onclick="qtSetSide('sell')">▼ Sell</button>
-        </div>
+        <div class="qt-label">Shares</div>
+        <input class="qt-inp" id="qtShares" type="number" min="1" step="1" placeholder="10" oninput="qtUpdateCost()">
+        <div class="qt-cost" id="qtCost">Est. cost: —</div>
       </div>
       <div class="qt-field">
         <div class="qt-label">Order Type</div>
@@ -9879,13 +10248,8 @@ async function connectAlpaca() {
       </div>
     </div>
 
-    <!-- Row 2: Shares + Cost + Stop + Target + Buttons -->
+    <!-- Row 2: Stop + Target + Submit buttons -->
     <div class="qt-row" style="align-items:flex-end">
-      <div class="qt-field">
-        <div class="qt-label">Shares</div>
-        <input class="qt-inp" id="qtShares" type="number" min="1" step="1" placeholder="10" oninput="qtUpdateCost()">
-        <div class="qt-cost" id="qtCost">Est. cost: —</div>
-      </div>
       <div class="qt-field">
         <div class="qt-label">Stop Loss ($) <span style="color:#8b949e;font-weight:400">optional</span></div>
         <input class="qt-inp" id="qtStopLoss" type="number" min="0" step="0.01" placeholder="e.g. 145.00">
@@ -9898,7 +10262,6 @@ async function connectAlpaca() {
         <button class="qt-buy-btn"  id="qtBuyBtn"  onclick="qtSubmit('buy')">🟢 Buy</button>
         <button class="qt-sell-btn" id="qtSellBtn" onclick="qtSubmit('sell')">🔴 Sell</button>
       </div>
-      <button onclick="qtRefreshPrice()" title="Refresh price" style="background:none;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#8b949e;cursor:pointer;font-size:0.85rem;margin-bottom:2px">↻</button>
     </div>
 
     <div class="qt-result" id="qtResult"></div>
@@ -10044,7 +10407,6 @@ function toggleFloatExplorer() {
 }
 
 // ── Quick Trade panel ──────────────────────────────────────────────────────
-let _qtSide = 'buy';
 let _qtType = 'market';
 let _qtPrice = null;
 
@@ -10055,13 +10417,22 @@ function toggleQuickTrade() {
   panel.style.display = open ? '' : 'none';
   btn.style.background = open ? '#1f6feb' : '#1a1f3a';
   btn.style.color      = '#fff';
-  if (open) qtRefreshPrice();
+  if (open) { qtRefreshPrice(); qtCheckTime(); }
 }
 
-function qtSetSide(side) {
-  _qtSide = side;
-  document.getElementById('qtSideBuy').className  = side === 'buy'  ? 'qt-active-buy'  : '';
-  document.getElementById('qtSideSell').className = side === 'sell' ? 'qt-active-sell' : '';
+function qtCheckTime() {
+  const warn = document.getElementById('qtTimeWarn');
+  if (!warn) return;
+  const etStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const et = new Date(etStr);
+  const t  = et.getHours() * 60 + et.getMinutes();
+  let msg = null;
+  if (t >= 9*60+30 && t < 9*60+45)   msg = '⚠️ Opening chaos (9:30–9:45 AM ET) — wide spreads. Force Trade blocked; Quick Trade allowed.';
+  else if (t >= 11*60+30 && t < 14*60) msg = '⚠️ Midday chop (11:30 AM–2:00 PM ET) — low volume. Force Trade is blocked during this window. Use Quick Trade here instead.';
+  else if (t >= 15*60+30)              msg = '⚠️ Closing volatility (3:30 PM+ ET) — Force Trade blocked. Quick Trade allowed.';
+  else if (t < 9*60+30 || t >= 16*60)  msg = '⚠️ Market is closed (outside 9:30 AM–4:00 PM ET). Orders will queue for next open.';
+  if (msg) { warn.textContent = msg; warn.style.display = ''; }
+  else        { warn.style.display = 'none'; }
 }
 
 function qtSetType(type) {
@@ -10118,6 +10489,9 @@ async function qtSubmit(side) {
     if (!r.ok) throw new Error(data.error || 'Order failed');
     const emoji = side === 'buy' ? '🟢' : '🔴';
     qtShowResult('ok', `${emoji} ${side.toUpperCase()} ${data.qty} ${sym} @ ${_qtType === 'market' ? 'market' : '$'+body.limit_price} | Est. $${data.estimated_cost?.toLocaleString()} | Status: ${data.status}`);
+    // Immediately refresh positions, then full dashboard (so Recent Trades updates too)
+    setTimeout(refreshPositions, 600);
+    setTimeout(loadDashboard,    2500);
   } catch(e) {
     qtShowResult('error', `❌ ${e.message}`);
   } finally {
@@ -10131,6 +10505,7 @@ function qtShowResult(type, msg) {
   el.textContent = msg;
   el.className   = `qt-result ${type === 'error' ? 'err' : 'ok'}`;
   el.style.display = '';
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 // Auto-refresh price when symbol changes in explorer
