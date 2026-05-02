@@ -3667,175 +3667,208 @@
           <div class="mermaid" id="dbErdDiagram">
 erDiagram
     users {
-        serial   id         PK
-        text     username   UK
-        text     email      UK
-        text     role
-        int      credits
-        bool     suspended
-        jsonb    permissions
+        serial  id          PK
+        text    username    UK
+        text    email       UK
+        text    role
+        int     credits
+        bool    suspended
+        jsonb   permissions
     }
     otp_tokens {
-        serial   id         PK
-        text     email      FK
-        text     token
-        bool     used
+        serial  id      PK
+        text    email   FK
+        text    token
+        bool    used
     }
     bug_reports {
-        serial   id         PK
-        text     username   FK
-        text     title
-        text     status
+        serial  id       PK
+        text    username FK
+        text    title
+        text    status
     }
     trades {
-        serial   id         PK
-        text     username   FK
-        text     symbol     "IDX"
-        text     side
-        int      qty
-        numeric  price
-        numeric  pnl
-        text     status
+        serial  id       PK
+        text    username FK
+        text    symbol
+        text    side
+        int     qty
+        numeric price
+        numeric pnl
+        text    status
     }
     trade_rejections {
-        serial   id         PK
-        text     username   FK
-        text     symbol     "IDX"
-        text     reason
-        jsonb    details
+        serial  id       PK
+        text    username FK
+        text    symbol
+        text    reason
+        jsonb   details
     }
     position_monitoring {
-        serial   id         PK
-        text     username   FK
-        text     symbol     "IDX"
-        numeric  entry_price
-        numeric  stop_loss
-        numeric  take_profit
-        text     status
+        serial  id          PK
+        text    username    FK
+        text    symbol
+        numeric entry_price
+        numeric stop_loss
+        numeric take_profit
+        text    status
     }
     daily_picks {
-        serial   id         PK
-        text     symbol     "IDX"
-        date     pick_date
-        text     direction
-        int      conviction
-        jsonb    targets
+        serial  id         PK
+        text    symbol
+        date    pick_date
+        text    direction
+        int     conviction
+        jsonb   targets
     }
     conviction_scores {
-        serial   id         PK
-        text     symbol     "IDX"
-        int      score
-        int      technical
-        int      news_sentiment
-        int      momentum
-        int      analyst
-        int      insider
+        serial  id        PK
+        text    symbol
+        int     score
+        text    grade
+        numeric cost_usd
     }
     daily_pnl {
-        serial   id         PK
-        text     username   FK
-        date     trade_date
-        numeric  realized_pnl
-        numeric  unrealized_pnl
-        int      total_trades
-        int      winning_trades
+        serial  id             PK
+        text    username       FK
+        date    trade_date
+        numeric realized_pnl
+        numeric unrealized_pnl
+        int     total_trades
+        int     winning_trades
     }
     trade_lessons {
-        serial   id         PK
-        text     username   FK
-        text     symbol     "IDX"
-        int      trade_id
-        text     lesson
-        text     ai_source
+        serial  id       PK
+        text    username FK
+        int     trade_id FK
+        text    symbol
+        text    lesson
+        text    ai_source
     }
     performance_patterns {
-        serial   id         PK
-        text     username   FK
-        text     pattern_type
-        numeric  win_rate
-        numeric  avg_pnl
-        int      sample_size
+        serial  id           PK
+        text    username     FK
+        text    pattern_type
+        numeric win_rate
+        numeric avg_pnl
+        int     sample_size
     }
     daily_briefings {
-        serial   id         PK
-        date     briefing_date
-        text     type
-        text     ai_source
-        text     sent_via
+        serial  id            PK
+        date    briefing_date
+        text    type
+        text    ai_source
+        text    sent_via
     }
     conversation_history {
-        serial   id         PK
-        text     username   FK
-        text     role
-        text     content
-        jsonb    tool_calls
+        serial  id         PK
+        text    username   FK
+        text    role
+        text    content
+        jsonb   tool_calls
     }
     user_activity {
-        serial   id         PK
-        text     username   FK
-        text     action
-        jsonb    details
-        text     ip_address
+        serial  id         PK
+        text    username   FK
+        text    action
+        jsonb   details
+        text    ip_address
     }
     doc_queries {
-        serial   id         PK
-        text     username   FK
-        text     query
-        text     doc_section
+        serial  id          PK
+        text    username    FK
+        text    query
+        text    doc_section
     }
     usage_stats {
-        serial   id         PK
-        text     username   FK
-        date     stat_date
-        int      messages_sent
-        int      credits_used
-        int      tokens_used
+        serial  id                  PK
+        text    stat_date           UK
+        int     total_messages
+        int     total_tool_calls
+        int     input_tokens
+        int     output_tokens
+        numeric estimated_cost_usd
     }
     api_calls {
-        serial   id         PK
-        text     username   FK
-        text     endpoint
-        int      status_code
-        int      duration_ms
-        int      tokens_in
-        int      tokens_out
-    }
-    scanner_state {
-        serial   id         PK
-        text     key        UK
-        jsonb    value
+        serial  id           PK
+        text    source
+        text    model
+        text    username
+        int     input_tokens
+        int     output_tokens
+        int     tool_calls
+        numeric cost_usd
+        int     duration_ms
     }
     fundamentals {
-        serial   id              PK
-        text     symbol          "IDX"
-        date     period_end      "IDX"
-        text     period_type
-        bigint   revenue
-        bigint   gross_profit
-        bigint   operating_income
-        bigint   net_income
-        float    eps_diluted
-        float    eps_basic
-        bigint   shares_diluted
+        serial  id           PK
+        text    symbol
+        date    period_end
+        text    period_type
+        bigint  revenue
+        bigint  net_income
+        float   eps_diluted
+        bigint  shares_diluted
+    }
+    backtest_prices {
+        serial  id         PK
+        text    symbol
+        date    price_date
+        numeric open
+        numeric high
+        numeric low
+        numeric close
+        bigint  volume
+    }
+    backtest_scores {
+        serial  id              PK
+        text    symbol
+        date    score_date
+        float   rsi
+        int     ema_above
+        int     macd_sign
+        float   conviction_score
+    }
+    backtest_returns {
+        serial  id         PK
+        text    symbol
+        date    score_date
+        float   ret_1d
+        float   ret_1w
+        float   ret_1m
+        int     label
+    }
+    model_results {
+        serial  id          PK
+        text    run_label
+        float   accuracy
+        float   auc
+        float   f1
+        jsonb   weights
+        jsonb   adjustments
+    }
+    scanner_state {
+        serial  id    PK
+        text    key   UK
+        jsonb   value
     }
 
-    users                ||--o{ otp_tokens           : "email"
-    users                ||--o{ bug_reports          : "username"
-    users                ||--o{ trades               : "username"
-    users                ||--o{ trade_rejections     : "username"
-    users                ||--o{ position_monitoring  : "username"
-    users                ||--o{ daily_pnl            : "username"
-    users                ||--o{ trade_lessons        : "username"
-    users                ||--o{ performance_patterns : "username"
-    users                ||--o{ conversation_history : "username"
-    users                ||--o{ user_activity        : "username"
-    users                ||--o{ doc_queries          : "username"
-    users                ||--o{ usage_stats          : "username"
-    users                ||--o{ api_calls            : "username"
-    trades               }o--o{ conviction_scores    : "symbol"
-    trades               }o--o{ daily_picks          : "symbol"
-    trade_lessons        }o--o{ conviction_scores    : "symbol"
-    trades               }o--|| trade_lessons        : "trade_id"
+    users                ||--o{ otp_tokens            : "email"
+    users                ||--o{ bug_reports           : "username"
+    users                ||--o{ trades                : "username"
+    users                ||--o{ trade_rejections      : "username"
+    users                ||--o{ position_monitoring   : "username"
+    users                ||--o{ daily_pnl             : "username"
+    users                ||--o{ trade_lessons         : "username"
+    users                ||--o{ performance_patterns  : "username"
+    users                ||--o{ conversation_history  : "username"
+    users                ||--o{ user_activity         : "username"
+    users                ||--o{ doc_queries           : "username"
+    users                ||--o{ api_calls             : "username"
+    trades               ||--o{ trade_lessons         : "trade_id"
+    backtest_prices      ||--o{ backtest_scores       : "symbol+date"
+    backtest_scores      ||--o{ backtest_returns      : "symbol+date"
+    backtest_returns     }o--|| model_results         : "trains"
           </div>
         </div>
 
