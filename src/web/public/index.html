@@ -3664,7 +3664,7 @@
           <div style="font-size:11px;color:#8b949e">Lines show actual joins. Arrow tail = many, single bar = one. Label = join column.</div>
         </div>
         <div id="dbErdWrap" style="padding:0 20px 24px;overflow-x:auto;min-height:200px">
-          <div class="mermaid" id="dbErdDiagram">
+          <div id="dbErdDiagram"><script type="text/plain" id="erdSource">
 erDiagram
     users {
         serial  id          PK
@@ -3868,7 +3868,7 @@ erDiagram
     trades               ||--o{ trade_lessons         : "trade_id"
     backtest_prices      ||--o{ backtest_scores       : "symbol"
     backtest_scores      ||--o{ backtest_returns      : "symbol"
-          </div>
+          </script></div>
         </div>
 
       </div><!-- /av-db -->
@@ -8600,7 +8600,16 @@ function showArch(view) {
       },
       er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100, minEntityHeight: 75, entityPadding: 15 }
     });
-    mermaid.run({ nodes: [document.getElementById('dbErdDiagram')] });
+    const erdEl  = document.getElementById('dbErdDiagram');
+    const srcEl  = document.getElementById('erdSource');
+    const srcTxt = srcEl ? srcEl.textContent.trim() : '';
+    if (srcTxt) {
+      mermaid.render('erd-svg-out', srcTxt).then(({ svg }) => {
+        erdEl.innerHTML = svg;
+      }).catch(err => {
+        erdEl.innerHTML = `<pre style="color:#f85149;font-size:0.78rem;white-space:pre-wrap;padding:12px">${err?.message ?? String(err)}</pre>`;
+      });
+    }
   }
 }
 
