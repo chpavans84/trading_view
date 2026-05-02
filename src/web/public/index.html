@@ -4838,11 +4838,13 @@ async function loadResearch() {
 
 async function loadResearchExtras() {
   const noData = msg => `<div style="padding:20px;text-align:center;color:#484f58;font-size:0.82rem">${msg}</div>`;
+  const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
 
   // ── Pipeline status ──────────────────────────────────────────────────────
   const ps = await api('/api/research/pipeline-status');
   const pipeEl = document.getElementById('pipelineStatus');
-  if (!ps || ps.error) {
+  if (!pipeEl) { /* section not in DOM */ }
+  else if (!ps || ps.error) {
     pipeEl.innerHTML = noData('Pipeline status unavailable');
   } else {
     const steps = [
@@ -4869,7 +4871,8 @@ async function loadResearchExtras() {
   // ── Regime analysis ──────────────────────────────────────────────────────
   const ra    = await api('/api/research/regime-analysis');
   const regTb = document.getElementById('regimeAnalysisBody');
-  if (!ra?.regimes?.length) {
+  if (!regTb) { /* section not in DOM */ }
+  else if (!ra?.regimes?.length) {
     regTb.innerHTML = `<tr><td colspan="6">${noData('Run npm run research:download → scores → backtest → train first')}</td></tr>`;
   } else {
     regTb.innerHTML = ra.regimes.map(r => {
@@ -4895,7 +4898,8 @@ async function loadResearchExtras() {
   const ic  = await api('/api/research/indicator-correlation');
   const c   = ic?.correlations;
   const edgeEl = document.getElementById('indicatorEdge');
-  if (!c || ic.error) {
+  if (!edgeEl) { /* section not in DOM */ }
+  else if (!c || ic.error) {
     edgeEl.innerHTML = noData('Run research pipeline first');
   } else {
     const items = [
@@ -4924,7 +4928,8 @@ async function loadResearchExtras() {
   // ── Live bot accuracy ────────────────────────────────────────────────────
   const la    = await api('/api/research/live-accuracy');
   const accTb = document.getElementById('liveAccuracyBody');
-  if (!la?.accuracy?.length) {
+  if (!accTb) { /* section not in DOM */ }
+  else if (!la?.accuracy?.length) {
     accTb.innerHTML = `<tr><td colspan="5">${noData('No closed trades with conviction scores yet — populates as the bot trades')}</td></tr>`;
   } else {
     accTb.innerHTML = la.accuracy.map(r => {
@@ -4952,6 +4957,7 @@ async function loadModelStats() {
 
   try {
     const d = await api('/api/research/status');
+    if (!d) { body.innerHTML = '<div style="color:#8b949e;font-size:0.85rem;padding:12px">Could not reach server — try refreshing.</div>'; return; }
     const m = d.latest_model;
 
     // Show retrain button for admins
