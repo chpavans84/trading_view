@@ -8587,31 +8587,36 @@ let _erdScale = 1, _erdSvgW = 0, _erdSvgH = 0, _erdPanInit = false;
 
 function _erdSvg() { return document.querySelector('#dbErdDiagram svg'); }
 
+// viewBox is the only reliable source of intrinsic dimensions.
+// width/height attributes can be "100%" which parseFloat misreads as 100.
+function _erdReadDims() {
+  const svg = _erdSvg();
+  if (!svg) return;
+  const vb = svg.getAttribute('viewBox');
+  if (vb) {
+    const p = vb.trim().split(/[\s,]+/).map(Number);
+    if (p.length >= 4 && p[2] > 0 && p[3] > 0) {
+      _erdSvgW = p[2];
+      _erdSvgH = p[3];
+      return;
+    }
+  }
+  // Fallback: force a large auto size then measure
+  svg.removeAttribute('width'); svg.removeAttribute('height');
+  svg.style.cssText = 'max-width:none;display:block;';
+  const r = svg.getBoundingClientRect();
+  _erdSvgW = r.width  > 50 ? r.width  : 1400;
+  _erdSvgH = r.height > 50 ? r.height : 900;
+}
+
 function applyErdZoom() {
   const svg = _erdSvg();
   if (!svg) return;
-  if (!_erdSvgW) {
-    // viewBox gives the true intrinsic size — width/height may be "100%" which parseFloat misreads
-    const vb = svg.getAttribute('viewBox');
-    if (vb) {
-      const parts = vb.trim().split(/[\s,]+/).map(Number);
-      _erdSvgW = parts[2] || 0;
-      _erdSvgH = parts[3] || 0;
-    }
-    // Fall back to bounding rect if no viewBox
-    if (!_erdSvgW) {
-      svg.removeAttribute('width'); svg.removeAttribute('height');
-      const r = svg.getBoundingClientRect();
-      _erdSvgW = r.width  || 1200;
-      _erdSvgH = r.height || 800;
-    }
-  }
-  // Set width/height attributes directly so the SVG renders at the scaled size
-  // (transform:scale doesn't extend scroll area; attribute change does)
+  if (!_erdSvgW) _erdReadDims();
   svg.setAttribute('width',  Math.round(_erdSvgW * _erdScale));
   svg.setAttribute('height', Math.round(_erdSvgH * _erdScale));
-  svg.style.display = 'block';
   svg.style.maxWidth = 'none';
+  svg.style.display  = 'block';
   const lbl = document.getElementById('erdZoomPct');
   if (lbl) lbl.textContent = Math.round(_erdScale * 100) + '%';
 }
@@ -8628,13 +8633,10 @@ function erdZoomReset() {
 
 function erdZoomFit() {
   const wrap = document.getElementById('dbErdWrap');
-  const svg  = _erdSvg();
-  if (!svg || !wrap) return;
-  if (!_erdSvgW) {
-    _erdSvgW = parseFloat(svg.getAttribute('width'))  || svg.getBoundingClientRect().width  || 800;
-    _erdSvgH = parseFloat(svg.getAttribute('height')) || svg.getBoundingClientRect().height || 600;
-  }
-  const pad = 32;
+  if (!wrap) return;
+  if (!_erdSvgW) _erdReadDims();
+  if (!_erdSvgW) return;
+  const pad = 40;
   _erdScale = Math.min(
     (wrap.clientWidth  - pad) / _erdSvgW,
     (wrap.clientHeight - pad) / _erdSvgH
@@ -8647,23 +8649,15 @@ function erdInitPan() {
   _erdPanInit = true;
   const wrap = document.getElementById('dbErdWrap');
   if (!wrap) return;
-
-  // Mouse-wheel zoom (Ctrl+wheel or plain wheel over ERD)
   wrap.addEventListener('wheel', (e) => {
     e.preventDefault();
     erdZoom(e.deltaY < 0 ? 0.12 : -0.12);
   }, { passive: false });
-
-  // Drag-to-pan
   let panning = false, startX = 0, startY = 0, scrollX = 0, scrollY = 0;
   wrap.addEventListener('mousedown', (e) => {
-    panning = true;
-    startX  = e.clientX;
-    startY  = e.clientY;
-    scrollX = wrap.scrollLeft;
-    scrollY = wrap.scrollTop;
-    wrap.style.cursor = 'grabbing';
-    e.preventDefault();
+    panning = true; startX = e.clientX; startY = e.clientY;
+    scrollX = wrap.scrollLeft; scrollY = wrap.scrollTop;
+    wrap.style.cursor = 'grabbing'; e.preventDefault();
   });
   window.addEventListener('mousemove', (e) => {
     if (!panning) return;
@@ -8672,8 +8666,8 @@ function erdInitPan() {
   });
   window.addEventListener('mouseup', () => {
     panning = false;
-    const wrap = document.getElementById('dbErdWrap');
-    if (wrap) wrap.style.cursor = 'grab';
+    const w = document.getElementById('dbErdWrap');
+    if (w) w.style.cursor = 'grab';
   });
   wrap.style.cursor = 'grab';
 }
@@ -8704,7 +8698,7 @@ function showArch(view) {
         attributeBackgroundColorEven: '#0d1117',
         attributeBackgroundColorOdd: '#161b22',
       },
-      er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100, minEntityHeight: 75, entityPadding: 15 }
+      er: { diagramPadding: 20, layoutDirection: 'LR', entityPadding: 15 }
     });
     const erdEl  = document.getElementById('dbErdDiagram');
     const srcEl  = document.getElementById('erdSource');
@@ -8714,8 +8708,8 @@ function showArch(view) {
         erdEl.innerHTML = svg;
         _erdSvgW = 0;
         _erdScale = 1;
-        // auto-fit on first render
-        requestAnimationFrame(() => { erdZoomFit(); erdInitPan(); });
+        // wait for browser layout before measuring — rAF alone is not enough
+        setTimeout(() => { erdZoomFit(); erdInitPan(); }, 80);
       }).catch(err => {
         erdEl.innerHTML = `<pre style="color:#f85149;font-size:0.78rem;white-space:pre-wrap;padding:12px">${err?.message ?? String(err)}</pre>`;
       });
