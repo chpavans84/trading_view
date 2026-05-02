@@ -4837,108 +4837,111 @@ async function loadResearch() {
 }
 
 async function loadResearchExtras() {
+  const noData = msg => `<div style="padding:20px;text-align:center;color:#484f58;font-size:0.82rem">${msg}</div>`;
+
   // ── Pipeline status ──────────────────────────────────────────────────────
-  try {
-    const ps = await fetch('/api/research/pipeline-status').then(r => r.json());
+  const ps = await api('/api/research/pipeline-status');
+  const pipeEl = document.getElementById('pipelineStatus');
+  if (!ps || ps.error) {
+    pipeEl.innerHTML = noData('Pipeline status unavailable');
+  } else {
     const steps = [
-      { label: 'Price Data',   rows: ps.prices?.rows,      latest: ps.prices?.latest },
-      { label: 'Scores',       rows: ps.scores?.rows,      latest: ps.scores?.latest },
-      { label: 'Backtest',     rows: ps.returns?.rows,     latest: ps.returns?.latest },
-      { label: 'Knowledge',    rows: ps.knowledge?.rows,   latest: null },
-      { label: 'Live Signals', rows: ps.live_scores?.rows, latest: ps.live_scores?.latest },
+      { label: 'Price Data',   rows: ps.prices?.rows,      latest: ps.prices?.latest,      cmd: 'research:download' },
+      { label: 'Scores',       rows: ps.scores?.rows,      latest: ps.scores?.latest,      cmd: 'research:scores' },
+      { label: 'Backtest',     rows: ps.returns?.rows,     latest: ps.returns?.latest,     cmd: 'research:backtest' },
+      { label: 'Knowledge',    rows: ps.knowledge?.rows,   latest: null,                   cmd: 'auto' },
+      { label: 'Live Signals', rows: ps.live_scores?.rows, latest: ps.live_scores?.latest, cmd: 'auto' },
     ];
-    document.getElementById('pipelineStatus').innerHTML = steps.map(s => {
-      const hasData   = parseInt(s.rows) > 0;
-      const latestStr = s.latest ? new Date(s.latest).toLocaleDateString() : 'n/a';
-      const color     = hasData ? '#238636' : '#da3633';
+    pipeEl.innerHTML = steps.map(s => {
+      const n       = parseInt(s.rows) || 0;
+      const hasData = n > 0;
+      const latestStr = s.latest ? new Date(s.latest).toLocaleDateString() : 'not run';
+      const color   = hasData ? '#238636' : '#da3633';
       return `<div style="background:#0d1117;padding:14px 16px;text-align:center">
         <div style="font-size:1.2rem">${hasData ? '✅' : '❌'}</div>
         <div style="font-size:0.8rem;font-weight:600;color:#e6edf3;margin:4px 0">${s.label}</div>
-        <div style="font-size:0.72rem;color:${color}">${Number(s.rows).toLocaleString()} rows</div>
+        <div style="font-size:0.72rem;color:${color}">${n.toLocaleString()} rows</div>
         <div style="font-size:0.7rem;color:#484f58">${latestStr}</div>
       </div>`;
     }).join('');
-  } catch(e) { console.warn('pipeline-status:', e.message); }
+  }
 
   // ── Regime analysis ──────────────────────────────────────────────────────
-  try {
-    const ra    = await fetch('/api/research/regime-analysis').then(r => r.json());
-    const tbody = document.getElementById('regimeAnalysisBody');
-    if (!ra.regimes?.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#8b949e">Run research pipeline first — no regime data yet</td></tr>';
-    } else {
-      tbody.innerHTML = ra.regimes.map(r => {
-        const wr       = parseFloat(r.win_rate_1w);
-        const wrColor  = wr >= 60 ? '#3fb950' : wr >= 50 ? '#d29922' : '#f85149';
-        const alpha    = parseFloat(r.alpha_1m);
-        const alphaColor = alpha > 0 ? '#3fb950' : '#f85149';
-        const gradeBg  = r.grade==='A' ? '#1f6feb' : r.grade==='B' ? '#238636' : r.grade==='C' ? '#9e6a03' : '#6e3535';
-        return `<tr style="border-bottom:1px solid #21262d">
-          <td style="padding:8px 16px;color:#e6edf3;text-transform:capitalize">${r.regime}</td>
-          <td style="padding:8px;text-align:center">
-            <span style="background:${gradeBg};color:#fff;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600">${r.grade}</span>
-          </td>
-          <td style="padding:8px;text-align:right;color:#8b949e">${Number(r.signals).toLocaleString()}</td>
-          <td style="padding:8px;text-align:right;color:${wrColor};font-weight:600">${wr}%</td>
-          <td style="padding:8px;text-align:right;color:#e6edf3">${r.avg_ret_1m}%</td>
-          <td style="padding:8px;text-align:right;color:${alphaColor};font-weight:600">${alpha > 0 ? '+' : ''}${alpha}%</td>
-        </tr>`;
-      }).join('');
-    }
-  } catch(e) { console.warn('regime-analysis:', e.message); }
+  const ra    = await api('/api/research/regime-analysis');
+  const regTb = document.getElementById('regimeAnalysisBody');
+  if (!ra?.regimes?.length) {
+    regTb.innerHTML = `<tr><td colspan="6">${noData('Run npm run research:download → scores → backtest → train first')}</td></tr>`;
+  } else {
+    regTb.innerHTML = ra.regimes.map(r => {
+      const wr      = parseFloat(r.win_rate_1w);
+      const wrColor = wr >= 60 ? '#3fb950' : wr >= 50 ? '#d29922' : '#f85149';
+      const alpha   = parseFloat(r.alpha_1m);
+      const alphaColor = alpha > 0 ? '#3fb950' : '#f85149';
+      const gradeBg = r.grade==='A' ? '#1f6feb' : r.grade==='B' ? '#238636' : r.grade==='C' ? '#9e6a03' : '#6e3535';
+      return `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:8px 16px;color:#e6edf3">${r.regime}</td>
+        <td style="padding:8px;text-align:center">
+          <span style="background:${gradeBg};color:#fff;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600">${r.grade}</span>
+        </td>
+        <td style="padding:8px;text-align:right;color:#8b949e">${Number(r.signals).toLocaleString()}</td>
+        <td style="padding:8px;text-align:right;color:${wrColor};font-weight:600">${wr}%</td>
+        <td style="padding:8px;text-align:right;color:#e6edf3">${r.avg_ret_1m}%</td>
+        <td style="padding:8px;text-align:right;color:${alphaColor};font-weight:600">${alpha > 0 ? '+' : ''}${alpha}%</td>
+      </tr>`;
+    }).join('');
+  }
 
   // ── Indicator edge ───────────────────────────────────────────────────────
-  try {
-    const ic = await fetch('/api/research/indicator-correlation').then(r => r.json());
-    const c  = ic.correlations;
-    if (c) {
-      const items = [
-        { label: 'RSI 40–60 (neutral)',   val: c.rsi_neutral_ret,    desc: 'Not overbought or oversold' },
-        { label: 'RSI > 70 (overbought)', val: c.rsi_overbought_ret, desc: 'Extended, risky entry' },
-        { label: 'RSI < 35 (oversold)',   val: c.rsi_oversold_ret,   desc: 'Potential bounce' },
-        { label: 'MACD Positive',         val: c.macd_positive_ret,  desc: 'Bullish momentum' },
-        { label: 'MACD Negative',         val: c.macd_negative_ret,  desc: 'Bearish momentum' },
-        { label: 'Price above EMA',       val: c.ema_above_ret,      desc: 'In uptrend' },
-        { label: 'Price below EMA',       val: c.ema_below_ret,      desc: 'In downtrend' },
-        { label: 'High Volume (>1.5×)',   val: c.high_volume_ret,    desc: 'Institutional interest' },
-        { label: 'Low Volume (<0.8×)',    val: c.low_volume_ret,     desc: 'Weak participation' },
-      ];
-      document.getElementById('indicatorEdge').innerHTML = items.map(item => {
-        const v   = parseFloat(item.val);
-        const col = v > 0.1 ? '#3fb950' : v < -0.1 ? '#f85149' : '#d29922';
-        const bg  = v > 0.1 ? '#0d2b0d' : v < -0.1 ? '#2b0d0d' : '#1a1600';
-        return `<div style="background:${bg};border:1px solid #30363d;border-radius:8px;padding:12px 14px">
-          <div style="font-size:0.78rem;color:#8b949e;margin-bottom:4px">${item.label}</div>
-          <div style="font-size:1.3rem;font-weight:700;color:${col}">${v > 0 ? '+' : ''}${isNaN(v) ? 'n/a' : v.toFixed(2)}%</div>
-          <div style="font-size:0.72rem;color:#484f58;margin-top:2px">${item.desc}</div>
-        </div>`;
-      }).join('');
-    }
-  } catch(e) { console.warn('indicator-correlation:', e.message); }
+  const ic  = await api('/api/research/indicator-correlation');
+  const c   = ic?.correlations;
+  const edgeEl = document.getElementById('indicatorEdge');
+  if (!c || ic.error) {
+    edgeEl.innerHTML = noData('Run research pipeline first');
+  } else {
+    const items = [
+      { label: 'RSI 40–60 (neutral)',    val: c.rsi_neutral_ret,    desc: 'Not overbought or oversold' },
+      { label: 'RSI > 70 (overbought)',  val: c.rsi_overbought_ret, desc: 'Extended, risky entry' },
+      { label: 'RSI < 35 (oversold)',    val: c.rsi_oversold_ret,   desc: 'Potential bounce zone' },
+      { label: 'MACD Positive',          val: c.macd_positive_ret,  desc: 'Bullish momentum' },
+      { label: 'MACD Negative',          val: c.macd_negative_ret,  desc: 'Bearish momentum' },
+      { label: 'Price above EMAs',       val: c.ema_above_ret,      desc: 'In uptrend' },
+      { label: 'Price below EMAs',       val: c.ema_below_ret,      desc: 'In downtrend' },
+      { label: 'VIX < 20 (calm)',        val: c.low_vix_ret,        desc: 'Low fear environment' },
+      { label: 'VIX > 30 (fearful)',     val: c.high_vix_ret,       desc: 'High fear environment' },
+    ];
+    edgeEl.innerHTML = items.map(item => {
+      const v   = parseFloat(item.val);
+      const col = v > 0.1 ? '#3fb950' : v < -0.1 ? '#f85149' : '#d29922';
+      const bg  = v > 0.1 ? '#0d2b0d' : v < -0.1 ? '#2b0d0d' : '#1a1600';
+      return `<div style="background:${bg};border:1px solid #30363d;border-radius:8px;padding:12px 14px">
+        <div style="font-size:0.78rem;color:#8b949e;margin-bottom:4px">${item.label}</div>
+        <div style="font-size:1.3rem;font-weight:700;color:${col}">${v > 0 ? '+' : ''}${isNaN(v) ? 'n/a' : v.toFixed(2)}%</div>
+        <div style="font-size:0.72rem;color:#484f58;margin-top:2px">${item.desc}</div>
+      </div>`;
+    }).join('');
+  }
 
   // ── Live bot accuracy ────────────────────────────────────────────────────
-  try {
-    const la    = await fetch('/api/research/live-accuracy').then(r => r.json());
-    const tbody = document.getElementById('liveAccuracyBody');
-    if (!la.accuracy?.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="padding:20px;text-align:center;color:#8b949e">No closed trades with conviction scores yet</td></tr>';
-    } else {
-      tbody.innerHTML = la.accuracy.map(r => {
-        const wr      = parseFloat(r.win_rate);
-        const wrColor = wr >= 60 ? '#3fb950' : wr >= 50 ? '#d29922' : '#f85149';
-        const pnl     = parseFloat(r.avg_pnl);
-        const pnlColor = pnl >= 0 ? '#3fb950' : '#f85149';
-        const total   = parseFloat(r.total_pnl);
-        return `<tr style="border-bottom:1px solid #21262d">
-          <td style="padding:8px 16px;color:#e6edf3;font-weight:600">${r.grade_band}</td>
-          <td style="padding:8px;text-align:right;color:#8b949e">${r.trades}</td>
-          <td style="padding:8px;text-align:right;color:${wrColor};font-weight:600">${wr}%</td>
-          <td style="padding:8px;text-align:right;color:${pnlColor}">$${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
-          <td style="padding:8px;text-align:right;color:${total >= 0 ? '#3fb950' : '#f85149'}">$${total >= 0 ? '+' : ''}${total.toFixed(2)}</td>
-        </tr>`;
-      }).join('');
-    }
-  } catch(e) { console.warn('live-accuracy:', e.message); }
+  const la    = await api('/api/research/live-accuracy');
+  const accTb = document.getElementById('liveAccuracyBody');
+  if (!la?.accuracy?.length) {
+    accTb.innerHTML = `<tr><td colspan="5">${noData('No closed trades with conviction scores yet — populates as the bot trades')}</td></tr>`;
+  } else {
+    accTb.innerHTML = la.accuracy.map(r => {
+      const wr       = parseFloat(r.win_rate);
+      const wrColor  = wr >= 60 ? '#3fb950' : wr >= 50 ? '#d29922' : '#f85149';
+      const pnl      = parseFloat(r.avg_pnl);
+      const pnlColor = pnl >= 0 ? '#3fb950' : '#f85149';
+      const total    = parseFloat(r.total_pnl);
+      return `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:8px 16px;color:#e6edf3;font-weight:600">${r.grade_band}</td>
+        <td style="padding:8px;text-align:right;color:#8b949e">${r.trades}</td>
+        <td style="padding:8px;text-align:right;color:${wrColor};font-weight:600">${wr}%</td>
+        <td style="padding:8px;text-align:right;color:${pnlColor}">$${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</td>
+        <td style="padding:8px;text-align:right;color:${total >= 0 ? '#3fb950' : '#f85149'}">$${total >= 0 ? '+' : ''}${total.toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+  }
 }
 
 async function loadModelStats() {

@@ -3612,28 +3612,35 @@ app.get('/api/research/simulate', async (req, res) => {
 });
 
 // ─── Research: Regime Analysis ───────────────────────────────────────────────
+// Derives regime from vix_close (backtest_scores has no dedicated regime column)
 app.get('/api/research/regime-analysis', requireAuth, async (req, res) => {
   try {
     const { rows } = await query(`
       SELECT
-        bs.regime,
+        CASE
+          WHEN bs.vix_close <  15 THEN 'low_vix (<15)'
+          WHEN bs.vix_close <  25 THEN 'normal (15-25)'
+          WHEN bs.vix_close <  35 THEN 'elevated (25-35)'
+          ELSE                         'high_vix (35+)'
+        END AS regime,
         br.grade,
-        COUNT(*)                                                              AS signals,
-        ROUND(AVG(br.ret_1m) * 100, 2)                                       AS avg_ret_1m,
-        ROUND(AVG(br.ret_1m - br.spy_1m) * 100, 2)                          AS alpha_1m,
+        COUNT(*)                                                               AS signals,
+        ROUND(AVG(br.ret_1m) * 100, 2)                                        AS avg_ret_1m,
+        ROUND(AVG(br.ret_1m - br.spy_1m) * 100, 2)                           AS alpha_1m,
         ROUND(100.0 * SUM(CASE WHEN br.ret_1w > 0 THEN 1 ELSE 0 END)/COUNT(*), 1) AS win_rate_1w
       FROM backtest_returns br
       JOIN backtest_scores bs ON bs.symbol = br.symbol AND bs.score_date = br.score_date
       WHERE br.ret_1w IS NOT NULL AND br.ret_1m IS NOT NULL
-        AND bs.regime IS NOT NULL
-      GROUP BY bs.regime, br.grade
-      ORDER BY bs.regime, br.grade
+        AND bs.vix_close IS NOT NULL
+      GROUP BY regime, br.grade
+      ORDER BY MIN(bs.vix_close), br.grade
     `);
     res.json({ regimes: rows });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
 // ─── Research: Indicator Correlation ─────────────────────────────────────────
+// Uses actual backtest_scores column names: above_emas (bool), rsi, macd_hist
 app.get('/api/research/indicator-correlation', requireAuth, async (req, res) => {
   try {
     const { rows } = await query(`
@@ -3643,10 +3650,10 @@ app.get('/api/research/indicator-correlation', requireAuth, async (req, res) => 
         ROUND(AVG(CASE WHEN bs.rsi < 35               THEN br.ret_1w ELSE NULL END) * 100, 3) AS rsi_oversold_ret,
         ROUND(AVG(CASE WHEN bs.macd_hist > 0          THEN br.ret_1w ELSE NULL END) * 100, 3) AS macd_positive_ret,
         ROUND(AVG(CASE WHEN bs.macd_hist < 0          THEN br.ret_1w ELSE NULL END) * 100, 3) AS macd_negative_ret,
-        ROUND(AVG(CASE WHEN bs.ema_trend = 'above'    THEN br.ret_1w ELSE NULL END) * 100, 3) AS ema_above_ret,
-        ROUND(AVG(CASE WHEN bs.ema_trend = 'below'    THEN br.ret_1w ELSE NULL END) * 100, 3) AS ema_below_ret,
-        ROUND(AVG(CASE WHEN bs.volume_ratio > 1.5     THEN br.ret_1w ELSE NULL END) * 100, 3) AS high_volume_ret,
-        ROUND(AVG(CASE WHEN bs.volume_ratio < 0.8     THEN br.ret_1w ELSE NULL END) * 100, 3) AS low_volume_ret,
+        ROUND(AVG(CASE WHEN bs.above_emas = true      THEN br.ret_1w ELSE NULL END) * 100, 3) AS ema_above_ret,
+        ROUND(AVG(CASE WHEN bs.above_emas = false     THEN br.ret_1w ELSE NULL END) * 100, 3) AS ema_below_ret,
+        ROUND(AVG(CASE WHEN bs.vix_close < 20         THEN br.ret_1w ELSE NULL END) * 100, 3) AS low_vix_ret,
+        ROUND(AVG(CASE WHEN bs.vix_close > 30         THEN br.ret_1w ELSE NULL END) * 100, 3) AS high_vix_ret,
         COUNT(*) AS total
       FROM backtest_returns br
       JOIN backtest_scores bs ON bs.symbol = br.symbol AND bs.score_date = br.score_date
@@ -3683,23 +3690,26 @@ app.get('/api/research/live-accuracy', requireAuth, async (req, res) => {
 });
 
 // ─── Research: Pipeline Status ────────────────────────────────────────────────
+// Each table queried independently — missing tables show 0 rows instead of 500
 app.get('/api/research/pipeline-status', requireAuth, async (req, res) => {
-  try {
-    const checks = await Promise.all([
-      query(`SELECT COUNT(*) AS rows, MAX(price_date) AS latest FROM backtest_prices`),
-      query(`SELECT COUNT(*) AS rows, MAX(score_date) AS latest FROM backtest_scores`),
-      query(`SELECT COUNT(*) AS rows, MAX(score_date) AS latest FROM backtest_returns`),
-      query(`SELECT COUNT(*) AS rows FROM knowledge_chunks`),
-      query(`SELECT COUNT(*) AS rows, MAX(scored_at) AS latest FROM conviction_scores WHERE scored_at > NOW() - INTERVAL '7 days'`),
-    ]);
-    res.json({
-      prices:      { rows: checks[0].rows[0].rows, latest: checks[0].rows[0].latest },
-      scores:      { rows: checks[1].rows[0].rows, latest: checks[1].rows[0].latest },
-      returns:     { rows: checks[2].rows[0].rows, latest: checks[2].rows[0].latest },
-      knowledge:   { rows: checks[3].rows[0].rows },
-      live_scores: { rows: checks[4].rows[0].rows, latest: checks[4].rows[0].latest },
-    });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  const safe = async (sql) => {
+    try { const r = await query(sql); return r.rows[0]; }
+    catch { return { rows: 0, latest: null }; }
+  };
+  const [prices, scores, returns_, knowledge, live] = await Promise.all([
+    safe(`SELECT COUNT(*) AS rows, MAX(price_date) AS latest FROM backtest_prices`),
+    safe(`SELECT COUNT(*) AS rows, MAX(score_date) AS latest FROM backtest_scores`),
+    safe(`SELECT COUNT(*) AS rows, MAX(score_date) AS latest FROM backtest_returns`),
+    safe(`SELECT COUNT(*) AS rows FROM knowledge_chunks`),
+    safe(`SELECT COUNT(*) AS rows, MAX(scored_at)  AS latest FROM conviction_scores WHERE scored_at > NOW() - INTERVAL '7 days'`),
+  ]);
+  res.json({
+    prices:      { rows: prices.rows,    latest: prices.latest },
+    scores:      { rows: scores.rows,    latest: scores.latest },
+    returns:     { rows: returns_.rows,  latest: returns_.latest },
+    knowledge:   { rows: knowledge.rows },
+    live_scores: { rows: live.rows,      latest: live.latest },
+  });
 });
 
 // ─── End-of-Day Position Flatten ─────────────────────────────────────────────
