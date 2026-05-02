@@ -1446,21 +1446,36 @@ function deriveHorizon(s) {
 
 function deriveReasoning(s) {
   const parts = [];
+
+  // Lead with conviction score + grade + ML adjustment
+  const mlAdj = s.breakdown?.backtest_alpha_adj ?? 0;
+  const mlSrc = s.signals?.weights_source;
+  const mlTag = mlAdj !== 0
+    ? ` · ML adj ${mlAdj > 0 ? '+' : ''}${mlAdj}${mlSrc === 'ml_model' ? ' (live model)' : ' (backtest)'}`
+    : '';
+  parts.push(`Conviction ${s.score}/100 · Grade ${s.grade}${mlTag}`);
+
+  // Analyst signal
   if (s.signals.analyst_consensus === 'strong_buy')
     parts.push(`Wall St. Strong Buy (target $${s.signals.analyst_target ? s.signals.analyst_target.toFixed(0) : '?'}${s.signals.analyst_upside_pct ? ', +' + s.signals.analyst_upside_pct + '% upside' : ''})`);
   else if (s.signals.analyst_consensus === 'buy')
     parts.push('Analyst Buy consensus');
+
+  // Momentum & technicals
   if (s.signals.weekly_trend === 'up')    parts.push('weekly uptrend confirmed');
   if ((s.signals.rvol ?? 0) >= 2.0)      parts.push(`RVOL ${s.signals.rvol}× (heavy volume)`);
   else if ((s.signals.rvol ?? 0) >= 1.5) parts.push(`RVOL ${s.signals.rvol}× (elevated volume)`);
-  if (s.signals.insider_buys_60d >= 2)   parts.push(`${s.signals.insider_buys_60d} insider buys (60d)`);
-  if (s.breakdown?.rsi_oversold > 0)     parts.push('RSI oversold');
-  if (s.breakdown?.near_support > 0)     parts.push('near key support');
-  if (s.breakdown?.short_squeeze > 0)    parts.push(`short squeeze candidate (${s.signals.short_float}% float short)`);
   if (s.breakdown?.above_both_emas > 0)  parts.push('above EMA20/50');
   if (s.breakdown?.macd_positive > 0)    parts.push('MACD positive');
-  if (s.signals.insider_buys_60d === 1)  parts.push('1 insider buy (60d)');
-  return parts.length ? parts.join(' · ') : 'Multi-factor conviction score ≥ 50';
+  if (s.breakdown?.rsi_oversold > 0)     parts.push('RSI oversold');
+
+  // Fundamental / insider
+  if (s.signals.insider_buys_60d >= 2)   parts.push(`${s.signals.insider_buys_60d} insider buys (60d)`);
+  else if (s.signals.insider_buys_60d === 1) parts.push('1 insider buy (60d)');
+  if (s.breakdown?.near_support > 0)     parts.push('near key support');
+  if (s.breakdown?.short_squeeze > 0)    parts.push(`short squeeze candidate (${s.signals.short_float_pct ?? s.signals.short_float}% float short)`);
+
+  return parts.join(' · ');
 }
 
 // ─── Intraday Picks ───────────────────────────────────────────────────────────
