@@ -8602,7 +8602,7 @@ function applyErdZoom() {
 }
 
 function erdZoom(delta) {
-  _erdScale = Math.max(0.2, Math.min(6, _erdScale + delta));
+  _erdScale = Math.max(0.1, Math.min(10, _erdScale + delta));
   applyErdZoom();
 }
 
@@ -8622,8 +8622,7 @@ function erdZoomFit() {
   const pad = 32;
   _erdScale = Math.min(
     (wrap.clientWidth  - pad) / _erdSvgW,
-    (wrap.clientHeight - pad) / _erdSvgH,
-    1
+    (wrap.clientHeight - pad) / _erdSvgH
   );
   applyErdZoom();
 }
