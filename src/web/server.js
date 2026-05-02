@@ -3611,6 +3611,97 @@ app.get('/api/research/simulate', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// ─── Research: Regime Analysis ───────────────────────────────────────────────
+app.get('/api/research/regime-analysis', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT
+        bs.regime,
+        br.grade,
+        COUNT(*)                                                              AS signals,
+        ROUND(AVG(br.ret_1m) * 100, 2)                                       AS avg_ret_1m,
+        ROUND(AVG(br.ret_1m - br.spy_1m) * 100, 2)                          AS alpha_1m,
+        ROUND(100.0 * SUM(CASE WHEN br.ret_1w > 0 THEN 1 ELSE 0 END)/COUNT(*), 1) AS win_rate_1w
+      FROM backtest_returns br
+      JOIN backtest_scores bs ON bs.symbol = br.symbol AND bs.score_date = br.score_date
+      WHERE br.ret_1w IS NOT NULL AND br.ret_1m IS NOT NULL
+        AND bs.regime IS NOT NULL
+      GROUP BY bs.regime, br.grade
+      ORDER BY bs.regime, br.grade
+    `);
+    res.json({ regimes: rows });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// ─── Research: Indicator Correlation ─────────────────────────────────────────
+app.get('/api/research/indicator-correlation', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT
+        ROUND(AVG(CASE WHEN bs.rsi BETWEEN 40 AND 60 THEN br.ret_1w ELSE NULL END) * 100, 3) AS rsi_neutral_ret,
+        ROUND(AVG(CASE WHEN bs.rsi > 70               THEN br.ret_1w ELSE NULL END) * 100, 3) AS rsi_overbought_ret,
+        ROUND(AVG(CASE WHEN bs.rsi < 35               THEN br.ret_1w ELSE NULL END) * 100, 3) AS rsi_oversold_ret,
+        ROUND(AVG(CASE WHEN bs.macd_hist > 0          THEN br.ret_1w ELSE NULL END) * 100, 3) AS macd_positive_ret,
+        ROUND(AVG(CASE WHEN bs.macd_hist < 0          THEN br.ret_1w ELSE NULL END) * 100, 3) AS macd_negative_ret,
+        ROUND(AVG(CASE WHEN bs.ema_trend = 'above'    THEN br.ret_1w ELSE NULL END) * 100, 3) AS ema_above_ret,
+        ROUND(AVG(CASE WHEN bs.ema_trend = 'below'    THEN br.ret_1w ELSE NULL END) * 100, 3) AS ema_below_ret,
+        ROUND(AVG(CASE WHEN bs.volume_ratio > 1.5     THEN br.ret_1w ELSE NULL END) * 100, 3) AS high_volume_ret,
+        ROUND(AVG(CASE WHEN bs.volume_ratio < 0.8     THEN br.ret_1w ELSE NULL END) * 100, 3) AS low_volume_ret,
+        COUNT(*) AS total
+      FROM backtest_returns br
+      JOIN backtest_scores bs ON bs.symbol = br.symbol AND bs.score_date = br.score_date
+      WHERE br.ret_1w IS NOT NULL
+    `);
+    res.json({ correlations: rows[0] });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// ─── Research: Live Bot Accuracy ──────────────────────────────────────────────
+app.get('/api/research/live-accuracy', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT
+        CASE
+          WHEN conviction_score >= 75 THEN 'A (75+)'
+          WHEN conviction_score >= 60 THEN 'B (60-74)'
+          WHEN conviction_score >= 45 THEN 'C (45-59)'
+          ELSE 'F (<45)'
+        END AS grade_band,
+        COUNT(*)                                                               AS trades,
+        ROUND(100.0 * SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END)/COUNT(*),1) AS win_rate,
+        ROUND(AVG(pnl_usd), 2)                                                 AS avg_pnl,
+        ROUND(SUM(pnl_usd), 2)                                                 AS total_pnl
+      FROM trades
+      WHERE status = 'closed'
+        AND conviction_score IS NOT NULL
+        AND pnl_usd IS NOT NULL
+      GROUP BY grade_band
+      ORDER BY MIN(conviction_score) DESC
+    `);
+    res.json({ accuracy: rows });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
+// ─── Research: Pipeline Status ────────────────────────────────────────────────
+app.get('/api/research/pipeline-status', requireAuth, async (req, res) => {
+  try {
+    const checks = await Promise.all([
+      query(`SELECT COUNT(*) AS rows, MAX(price_date) AS latest FROM backtest_prices`),
+      query(`SELECT COUNT(*) AS rows, MAX(score_date) AS latest FROM backtest_scores`),
+      query(`SELECT COUNT(*) AS rows, MAX(score_date) AS latest FROM backtest_returns`),
+      query(`SELECT COUNT(*) AS rows FROM knowledge_chunks`),
+      query(`SELECT COUNT(*) AS rows, MAX(scored_at) AS latest FROM conviction_scores WHERE scored_at > NOW() - INTERVAL '7 days'`),
+    ]);
+    res.json({
+      prices:      { rows: checks[0].rows[0].rows, latest: checks[0].rows[0].latest },
+      scores:      { rows: checks[1].rows[0].rows, latest: checks[1].rows[0].latest },
+      returns:     { rows: checks[2].rows[0].rows, latest: checks[2].rows[0].latest },
+      knowledge:   { rows: checks[3].rows[0].rows },
+      live_scores: { rows: checks[4].rows[0].rows, latest: checks[4].rows[0].latest },
+    });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
 // ─── End-of-Day Position Flatten ─────────────────────────────────────────────
 // Runs every minute, triggers at 3:50 PM ET on weekdays.
 // Cancels all open orders then closes all positions — ensures no overnight exposure.
