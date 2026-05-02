@@ -347,6 +347,25 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
 );
 
 CREATE INDEX IF NOT EXISTS knowledge_chunks_category_idx ON knowledge_chunks(category);
+
+CREATE TABLE IF NOT EXISTS fundamentals (
+  id               SERIAL PRIMARY KEY,
+  symbol           TEXT NOT NULL,
+  period_end       DATE NOT NULL,
+  period_type      TEXT NOT NULL DEFAULT 'quarterly',
+  revenue          BIGINT,
+  gross_profit     BIGINT,
+  operating_income BIGINT,
+  net_income       BIGINT,
+  eps_diluted      FLOAT,
+  eps_basic        FLOAT,
+  shares_diluted   BIGINT,
+  fetched_at       TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(symbol, period_type, period_end)
+);
+
+CREATE INDEX IF NOT EXISTS fundamentals_symbol_idx ON fundamentals(symbol);
+CREATE INDEX IF NOT EXISTS fundamentals_period_idx ON fundamentals(period_end DESC);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
