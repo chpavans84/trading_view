@@ -2252,7 +2252,7 @@
             <div class="amap-node" style="--nc:#58a6ff">
               <span class="amap-node-icon">🤖</span>
               <strong>AI Chat Engine</strong>
-              <span>ai-chat.js · <span style="color:#f78166;font-weight:600">ALWAYS Claude Haiku 4.5</span> · needs tool-calling · $0.80/$4.00/M · 20-msg history · 18 tools</span>
+              <span>ai-chat.js · Pre-routes: knowledge → Ollama · fundamentals screen → local DB (zero API cost) · Falls through to <span style="color:#f78166;font-weight:600">Claude Haiku 4.5</span> · 20-msg history · 18 tools</span>
             </div>
             <div class="amap-node" style="--nc:#388bfd">
               <span class="amap-node-icon">🔐</span>
@@ -2290,6 +2290,11 @@
               <strong>Conviction Engine</strong>
               <span>getConvictionScore() · 6 weighted factors · 0–100 score · 5-min cache · Parallel fetches</span>
             </div>
+            <div class="amap-node" style="--nc:#39d353">
+              <span class="amap-node-icon">📊</span>
+              <strong>Fundamental Screener</strong>
+              <span>fundamental-screener.js · screenFundamentals() · CTE SQL with Q0/Q1/Q4 window functions · S&amp;P 500 + NASDAQ-100 · &lt;100ms · zero Claude API cost · Ollama 2-sentence insight</span>
+            </div>
           </div>
         </div>
 
@@ -2309,7 +2314,12 @@
             <div class="amap-node" style="--nc:#d29922">
               <span class="amap-node-icon">🟡</span>
               <strong>Yahoo Finance</strong>
-              <span>HTTPS · Historical OHLCV · News · Analyst ratings · Earnings calendar · Futures (ES=F, NQ=F)</span>
+              <span>HTTPS · Historical OHLCV · News · Analyst ratings · Fundamentals download (crumb auth) · Futures (ES=F, NQ=F)</span>
+            </div>
+            <div class="amap-node" style="--nc:#d29922">
+              <span class="amap-node-icon">📅</span>
+              <strong>Nasdaq Earnings Calendar</strong>
+              <span>HTTPS · api.nasdaq.com · Next earnings call date (accurate) · EPS estimate · BMO/AMC timing · Used in getEarnings() + scanEarnings() + getEarningsSurprise()</span>
             </div>
             <div class="amap-node" style="--nc:#f78166">
               <span class="amap-node-icon">📊</span>
@@ -2325,6 +2335,32 @@
         </div>
 
         <div class="amap-between">
+          <div class="amap-between-line" style="--ac:#e3b341"></div>
+          <div class="amap-between-label" style="--ac:#e3b341">Offline cron pipeline · populates research tables · no live API cost</div>
+        </div>
+
+        <div class="amap-layer">
+          <div class="amap-layer-label" style="--ll:#e3b341">RESEARCH PIPELINE</div>
+          <div class="amap-layer-nodes">
+            <div class="amap-node" style="--nc:#e3b341">
+              <span class="amap-node-icon">📥</span>
+              <strong>download-prices.js</strong>
+              <span>npm run research:download · 3yr OHLCV for S&amp;P 500 + NASDAQ-100 + VIX/SPY → backtest_prices</span>
+            </div>
+            <div class="amap-node" style="--nc:#e3b341">
+              <span class="amap-node-icon">🧮</span>
+              <strong>compute-scores.js → backtest.js → train-model.js</strong>
+              <span>RSI/EMA/MACD/BB per date → forward returns → logistic regression weights (AUC ~0.52) · runs Sat 10 PM + nightly 2 AM ET</span>
+            </div>
+            <div class="amap-node" style="--nc:#e3b341">
+              <span class="amap-node-icon">📊</span>
+              <strong>download-fundamentals.js</strong>
+              <span>npm run research:fundamentals · Yahoo Finance crumb auth · 6 quarters income statement · ~370 symbols (ETFs + delisted filtered via SKIP_SYMBOLS) → fundamentals table</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="amap-between">
           <div class="amap-between-line" style="--ac:#bc8cff"></div>
           <div class="amap-between-label" style="--ac:#bc8cff">Persist all events · chat history · trades · picks · API usage</div>
         </div>
@@ -2335,7 +2371,7 @@
             <div class="amap-node" style="--nc:#bc8cff">
               <span class="amap-node-icon">🗄️</span>
               <strong>PostgreSQL :5432</strong>
-              <span>users · sessions · trades · conversation_history · daily_picks · performance_patterns · api_usage_stats · conviction_scores · trade_lessons · scanner_state · bug_reports</span>
+              <span>users · sessions · trades · conversation_history · daily_picks · performance_patterns · api_usage_stats · conviction_scores · trade_lessons · scanner_state · bug_reports · <strong style="color:#e3b341">fundamentals</strong> (S&amp;P 500 + NASDAQ-100 quarterly income data)</span>
             </div>
             <div class="amap-node" style="--nc:#6e7681">
               <span class="amap-node-icon">⚡</span>
@@ -2598,6 +2634,27 @@
               <div class="aflow-tags">
                 <span class="atag" style="--tc:#58a6ff">Browser → Express :3000</span>
                 <span class="atag" style="--tc:#bc8cff">Session → PostgreSQL</span>
+              </div>
+            </div>
+          </div>
+          <div class="aflow-connector"></div>
+
+          <div class="aflow-step">
+            <div class="aflow-num" style="background:#39d353">1b</div>
+            <div class="aflow-card" style="border-color:#39d35333">
+              <div class="aflow-title">Pre-routing checks (zero Claude API cost)</div>
+              <div class="aflow-body">
+                Two short-circuit paths run <strong>before</strong> Claude is ever called:<br><br>
+                <strong style="color:#39d353">① Knowledge question?</strong> — 20 regex patterns (e.g. "what is RSI", "explain MACD") →
+                  <code>answerKnowledgeQuestion()</code> → Ollama llama3.1:8b → answer returned immediately. If Ollama offline, falls through.<br><br>
+                <strong style="color:#e3b341">② Fundamental screening?</strong> — 18 regex patterns (e.g. "revenue grew QoQ", "screen stocks", "which stocks pass") →
+                  <code>screenFundamentals(conditions)</code> → local PostgreSQL CTE query → markdown table + Ollama 2-sentence insight.
+                  Parses QoQ/YoY conditions from natural language. Falls through to Claude if DB unavailable.
+              </div>
+              <div class="aflow-tags">
+                <span class="atag" style="--tc:#39d353">Ollama localhost:11434 (knowledge)</span>
+                <span class="atag" style="--tc:#e3b341">PostgreSQL fundamentals table (screen)</span>
+                <span class="atag" style="--tc:#6e7681">~5ms response · $0 API cost</span>
               </div>
             </div>
           </div>
@@ -3104,9 +3161,22 @@
               <div class="dsc-conn">HTTPS · query2.finance.yahoo.com · No API key</div>
             </div>
             <div class="dsc-body">
-              <div class="dsc-provides"><strong>Provides:</strong> Historical OHLCV 90-day daily · Analyst ratings + consensus price targets · Earnings calendar + historical surprise data · Symbol news (7 days) · Market movers (gainers/decliners/most active) · Futures prices (ES=F, NQ=F) · Short interest · ^VIX fallback</div>
-              <div class="dsc-chain"><strong>Fallback for:</strong> Moomoo when OpenD is unavailable. Always used for: futures (Moomoo can't query ES=F), analyst ratings, historical earnings, insider-mapped news.</div>
-              <div class="dsc-note">No API key required — uses unofficial public endpoint. Random User-Agent string to avoid rate limiting. Analyst data cached 4 hours. News cached 15 min. Timeout: 6–7 seconds per request.</div>
+              <div class="dsc-provides"><strong>Provides:</strong> Historical OHLCV 90-day daily · Analyst ratings + consensus price targets · Historical EPS surprise data · Symbol news (7 days) · Market movers (gainers/decliners/most active) · Futures prices (ES=F, NQ=F) · Short interest · ^VIX fallback · Fundamentals download (6 quarters income statement via crumb auth: <code>fc.yahoo.com</code> cookie → <code>/v1/test/getcrumb</code> → <code>incomeStatementHistoryQuarterly + earningsHistory</code>)</div>
+              <div class="dsc-chain"><strong>Fallback for:</strong> Moomoo when OpenD is unavailable. Always used for: futures (Moomoo can't query ES=F), analyst ratings, historical earnings, insider-mapped news, fundamentals pipeline.</div>
+              <div class="dsc-note">No API key required — uses unofficial public endpoint. Fundamentals download uses crumb handshake (required since 2024). <strong>Note:</strong> Yahoo's <code>earningsTimestamp</code> field returns fiscal quarter-end date, not actual call date — earnings call dates now sourced from Nasdaq calendar instead. Analyst data cached 4 hours. News cached 15 min. Timeout: 6–10 seconds per request.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#d29922">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#d29922;color:#0d1117">FREE</div>
+              <div class="dsc-name">📅 Nasdaq Earnings Calendar</div>
+              <div class="dsc-conn">HTTPS · api.nasdaq.com/api/calendar/earnings · No API key</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Provides:</strong> Upcoming earnings call dates (accurate, actual call date) · EPS estimate · Call timing (BMO = before market open / AMC = after market close) · Company name</div>
+              <div class="dsc-chain"><strong>Used in:</strong> <code>getEarnings()</code> — next earnings date · <code>getEarningsSurprise()</code> — upcoming date + EPS estimate · <code>scanEarnings()</code> — multi-ticker scan up to 14 days out</div>
+              <div class="dsc-note">Replaced Yahoo Finance <code>earningsTimestamp</code> in <code>getEarnings()</code> — Yahoo's field returned the fiscal quarter-end date (e.g. NVDA May 28) instead of the actual earnings call date (May 20). Nasdaq calendar is authoritative. Scanned in batches of 5 days, stops at first match.</div>
             </div>
           </div>
 
@@ -3165,6 +3235,8 @@
                 &nbsp;&nbsp;• <strong>Morning briefing</strong> (9:30 AM ET cron) — writes market narrative from pre-fetched context data<br>
                 &nbsp;&nbsp;• <strong>EOD summary</strong> (4:00 PM ET cron) — writes daily performance analysis from DB trade data<br>
                 &nbsp;&nbsp;• <strong>Trade reflection lessons</strong> (nightly) — writes one 25-word lesson per closed trade<br>
+                &nbsp;&nbsp;• <strong>Knowledge questions</strong> (chat pre-routing) — answers "what is RSI?"-style questions before Claude is called<br>
+                &nbsp;&nbsp;• <strong>Fundamental screener insights</strong> (chat pre-routing) — 2-sentence summary after local DB screen returns results<br>
                 <strong>Never used for:</strong> User chat · Admin chat (no tool-calling support in llama3.1)
               </div>
               <div class="dsc-chain"><strong>Availability check:</strong> Pings <code>localhost:11434/api/tags</code> with 3s timeout, result cached 60s. If offline → automatic Claude Haiku fallback — you won't notice.</div>
@@ -3179,7 +3251,7 @@
               <div class="dsc-conn">TCP · localhost:5432 · pool: 10 connections · auto-schema on startup</div>
             </div>
             <div class="dsc-body">
-              <div class="dsc-provides"><strong>Tables:</strong> users · user_sessions · trades · conversation_history · daily_picks · conviction_scores · performance_patterns · api_usage_stats · daily_pnl · scanner_state · position_monitoring · activity_log · rejection_log · bug_reports · trade_lessons · otp_tokens</div>
+              <div class="dsc-provides"><strong>Tables:</strong> users · user_sessions · trades · conversation_history · daily_picks · conviction_scores · performance_patterns · api_usage_stats · daily_pnl · scanner_state · position_monitoring · activity_log · rejection_log · bug_reports · trade_lessons · otp_tokens · <strong>fundamentals</strong> (S&amp;P 500 + NASDAQ-100 quarterly income data — revenue, gross profit, operating income, net income, EPS)</div>
               <div class="dsc-chain"><strong>Fallback:</strong> In-memory store when DB is unavailable (<code>isDbAvailable</code> flag). App continues working — chat still works, scans still work — but nothing persists to disk.</div>
               <div class="dsc-note">Connection pool initialized at startup with auto-retry. All writes are async and non-blocking — they never block the API response. Schema is auto-applied (CREATE IF NOT EXISTS) on every server start.</div>
             </div>
@@ -3192,7 +3264,7 @@
       <div id="av-db" class="arch-view" style="display:none">
         <div style="padding:16px 20px 8px">
           <div style="font-size:17px;font-weight:700;color:#e6edf3;margin-bottom:4px">Database Schema — Entity Relationship Diagram</div>
-          <div style="font-size:12px;color:#8b949e">18 tables · 5 functional groups · All FK/logical joins mapped. Relationships are username-based (logical, no enforced FK constraints) unless noted.</div>
+          <div style="font-size:12px;color:#8b949e">19 tables · 5 functional groups · All FK/logical joins mapped. Relationships are username-based (logical, no enforced FK constraints) unless noted.</div>
         </div>
 
         <!-- Legend -->
@@ -3365,6 +3437,23 @@
             <div class="dbt-col">ai_source <span class="dbt-type">TEXT</span> <span class="dbt-note">ollama|anthropic</span></div>
             <div class="dbt-col">sent_via <span class="dbt-type">TEXT</span> <span class="dbt-note">telegram|email</span></div>
             <div class="dbt-col">created_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+          </div>
+
+          <div class="db-table-card" style="--dtc:#e3b341">
+            <div class="dbt-header">fundamentals</div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#c0392b">PK</span> id <span class="dbt-type">SERIAL</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> symbol <span class="dbt-type">TEXT</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#2d6a4f">IDX</span> period_end <span class="dbt-type">DATE</span></div>
+            <div class="dbt-col"><span class="dbbadge" style="background:#6e3ba1">UNQ</span> period_type <span class="dbt-type">TEXT</span> <span class="dbt-note">quarterly</span></div>
+            <div class="dbt-col">revenue <span class="dbt-type">BIGINT</span></div>
+            <div class="dbt-col">gross_profit <span class="dbt-type">BIGINT</span></div>
+            <div class="dbt-col">operating_income <span class="dbt-type">BIGINT</span></div>
+            <div class="dbt-col">net_income <span class="dbt-type">BIGINT</span></div>
+            <div class="dbt-col">eps_diluted <span class="dbt-type">FLOAT</span></div>
+            <div class="dbt-col">eps_basic <span class="dbt-type">FLOAT</span></div>
+            <div class="dbt-col">shares_diluted <span class="dbt-type">BIGINT</span></div>
+            <div class="dbt-col">fetched_at <span class="dbt-type">TIMESTAMPTZ</span></div>
+            <div class="dbt-col" style="color:#8b949e;font-size:0.72rem">Source: Yahoo Finance · ~370 symbols · 6 quarters each · npm run research:fundamentals</div>
           </div>
 
         </div><!-- /group analytics -->
@@ -3591,6 +3680,19 @@ erDiagram
         serial   id         PK
         text     key        UK
         jsonb    value
+    }
+    fundamentals {
+        serial   id              PK
+        text     symbol          "IDX"
+        date     period_end      "IDX"
+        text     period_type
+        bigint   revenue
+        bigint   gross_profit
+        bigint   operating_income
+        bigint   net_income
+        float    eps_diluted
+        float    eps_basic
+        bigint   shares_diluted
     }
 
     users                ||--o{ otp_tokens           : "email"
