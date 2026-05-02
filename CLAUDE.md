@@ -133,65 +133,65 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 
 ## Architecture
 
-### Runtime (live trading)
-
 ```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              OFFLINE ML RESEARCH PIPELINE                           │
+│                      (weekend cron Sat 10 PM ET + nightly 2 AM ET)                 │
+│                                                                                     │
+│  Yahoo Finance API                                                                  │
+│       │                                                                             │
+│       ▼                                                                             │
+│  download-prices.js ──► backtest_prices   (3yr OHLCV, S&P500/NASDAQ100/VIX/SPY)   │
+│       │                                                                             │
+│       ▼                                                                             │
+│  compute-scores.js  ──► backtest_scores   (RSI, EMA, MACD, BB, RVOL per date)     │
+│       │                                                                             │
+│       ▼                                                                             │
+│  backtest.js        ──► backtest_returns  (fwd returns 1d/1w/1m/3m, dip flags)    │
+│       │                                                                             │
+│       ▼                                                                             │
+│  train-model.js     ──► model_results     (logistic regression weights, AUC/F1)   │
+└───────────────────────────────────┬─────────────────────────────────────────────────┘
+                                    │  getFactorWeights() — 24h cache
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              LIVE SCORING & TRADING                                 │
+│                                                                                     │
+│  scoring.js  ◄── ML grade adjustments (A/B/C/F weights from model_results)         │
+│      │            + Yahoo Finance (RSI, EMA, MACD, BB, RVOL, earnings, insider)    │
+│      │            + news.js (sentiment, earnings surprise)                          │
+│      │            + sentiment.js (relative strength vs SPY, VIX regime)            │
+│      │            + tradingview-bridge.js (Pine levels from chart)                 │
+│      │                                                                              │
+│      ▼  conviction score 0–100                                                     │
+│  AI Scanner Bot (cron) ──► stock-selector.js ──► trader.js ──► Alpaca Paper API   │
+│                                                                                     │
+│  Web Dashboard (Express) ─────────────────────────────────────────────────────     │
+│  ├── /api/trade/force  ──────────────────────► trader.js ──► Alpaca Paper API     │
+│  ├── /api/trade/quick  ──────────────────────► trader.js ──► Alpaca Paper API     │
+│  ├── /api/trade/close  ──────────────────────► trader.js ──► Alpaca Paper API     │
+│  └── AI Chat (SSE)     ──────────────────────► ai-chat.js ──► Claude API          │
+│                                                                                     │
+│  All trade paths ──► recordTrade() / closeTrade() ──► PostgreSQL trades table      │
+└───────────────────────────────────┬─────────────────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼─────────────────────────────────────────────────┐
+│                                 PostgreSQL                                          │
+│  trades              ← every buy/sell from all UI paths (force/quick/close/bot)    │
+│  conviction_scores   ← live scoring history                                        │
+│  trade_rejections    ← guard-block audit log (time, VIX, duplicate blocks)        │
+│  backtest_prices     ← 3yr OHLCV for S&P500 + NASDAQ100                           │
+│  backtest_scores     ← historical indicator snapshots                              │
+│  backtest_returns    ← forward return labels for ML training                      │
+│  model_results       ← trained model weights + AUC/accuracy/F1                    │
+│  user_activity       ← all UI actions                                              │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
 Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
-                     │
-              Web Dashboard (Express)
-              ├── /api/trade/force     → trader.js → Alpaca Paper API
-              ├── /api/trade/quick     → trader.js → Alpaca Paper API
-              ├── /api/trade/close     → trader.js → Alpaca Paper API
-              ├── AI Scanner Bot (cron) → scoring.js → placeQuickTrade()
-              └── AI Chat (SSE)        → ai-chat.js → Claude API
-                     │
-              PostgreSQL (DATABASE_URL)
-              ├── trades               ← recordTrade() on every execution path
-              ├── conviction_scores    ← scoring history
-              ├── trade_rejections     ← guard-block audit log
-              ├── user_activity        ← all UI actions
-              └── backtest_*           ← ML training data (prices, scores, returns)
 ```
 
-### ML Research Pipeline (offline / weekend cron)
+**ML model:** logistic regression (pure JS) · features: RSI, MACD sign, EMA trend, BB position, vol ratio, conviction score, VIX, day-of-week · target: `ret_1w > 0.5%` · output: grade adjustments `{ A: +8, B: +3, C: -2, F: -9 }` applied to live scores · fallback: backtest alpha heuristic when no model trained
 
-```
-Yahoo Finance API
-      │
-      ▼
-download-prices.js   → backtest_prices (3yr OHLCV, S&P500 + NASDAQ100 + VIX + SPY)
-      │
-      ▼
-compute-scores.js    → backtest_scores (RSI, EMA, MACD, BB, RVOL, VIX per symbol/date)
-      │
-      ▼
-backtest.js          → backtest_returns (forward returns: 1d/1w/1m/3m, dip detection)
-      │
-      ▼
-train-model.js       → model_results (logistic regression, AUC/accuracy/F1 stored)
-      │
-      ▼
-db.getFactorWeights()   ← caches model for 24h
-      │
-      ▼
-scoring.js           → conviction score adjusted by ML grade weights (A/B/C/F)
-      │
-      ▼
-AI Scanner Bot       → placeTrade() / placeQuickTrade()
-```
-
-**Pipeline schedule:**
-- Saturday 10 PM ET — full refresh: download → scores → backtest → train (via `runWeekendResearchRefresh()`)
-- Nightly 2 AM ET  — train-model only (incremental weight update from latest scores)
-- Manual trigger   — `POST /api/research/refresh` (admin only)
-- npm scripts      — `research:download`, `research:scores`, `research:backtest`, `research:train`
-
-**ML model details:**
-- Algorithm: logistic regression (pure JS, no external ML library)
-- Features: RSI, MACD histogram sign, EMA trend, Bollinger position, volume ratio, conviction score, VIX, day-of-week
-- Target: `ret_1w > 0.5%` (binary classification)
-- Output: per-grade score adjustments stored in `model_results.scoring_adjustments` (e.g. `{ A: +8, B: +3, C: -2, F: -9 }`)
-- Fallback: if no trained model, falls back to heuristic alpha from `backtest_returns` grade averages
-- Source: `src/research/train-model.js` → `src/core/db.js:getFactorWeights()` → `src/core/scoring.js`
+**Pipeline npm scripts:** `research:download` → `research:scores` → `research:backtest` → `research:train`
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
