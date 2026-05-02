@@ -3718,6 +3718,45 @@ app.get('/api/research/pipeline-status', requireAuth, async (req, res) => {
   });
 });
 
+// ─── Fundamental Screener ─────────────────────────────────────────────────────
+
+app.get('/api/research/screen', requireAuth, async (req, res) => {
+  try {
+    const { screenFundamentals } = await import('../core/fundamental-screener.js');
+    const conditions = {
+      rev_qoq: req.query.rev_qoq === 'true',
+      rev_yoy: req.query.rev_yoy === 'true',
+      ni_qoq:  req.query.ni_qoq  === 'true',
+      ni_yoy:  req.query.ni_yoy  === 'true',
+      eps_qoq: req.query.eps_qoq === 'true',
+      eps_yoy: req.query.eps_yoy === 'true',
+    };
+    const data = await screenFundamentals(conditions);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/research/fundamentals/:symbol', requireAuth, async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    const { rows } = await query(
+      `SELECT period_end, revenue, gross_profit, operating_income,
+              net_income, eps_diluted, eps_basic, shares_diluted
+       FROM fundamentals
+       WHERE symbol = $1 AND period_type = 'quarterly'
+       ORDER BY period_end DESC
+       LIMIT 8`,
+      [symbol]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: `No fundamentals data for ${symbol}` });
+    res.json({ symbol, quarters: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── End-of-Day Position Flatten ─────────────────────────────────────────────
 // Runs every minute, triggers at 3:50 PM ET on weekdays.
 // Cancels all open orders then closes all positions — ensures no overnight exposure.

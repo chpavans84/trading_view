@@ -36,6 +36,7 @@ import {
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
 import { getFunds, getPositions as getMoomooPositions, getQuote as moomooGetQuote, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
 import { isKnowledgeQuestion, answerKnowledgeQuestion } from './knowledge.js';
+import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswer } from './fundamental-screener.js';
 
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
 
@@ -682,6 +683,52 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
       };
     }
     // Ollama offline — fall through to Claude below
+  }
+
+  // Route fundamental screening questions to local PostgreSQL (zero Claude API cost).
+  if (await isFundamentalScreeningQuestion(message)) {
+    // Parse conditions from natural language
+    const lower = message.toLowerCase();
+    const conditions = {
+      rev_qoq: /rev\w*.*qoq|quarter.*over.*quarter.*rev|revenue.*grew.*quarter/i.test(message),
+      rev_yoy: /rev\w*.*yoy|year.*over.*year.*rev|revenue.*grew.*year/i.test(message),
+      ni_qoq:  /net.income.*qoq|profit.*qoq|ni.*qoq|net.income.*quarter/i.test(message),
+      ni_yoy:  /net.income.*yoy|profit.*yoy|ni.*yoy|net.income.*year/i.test(message),
+      eps_qoq: /eps.*qoq|earnings.*qoq|eps.*quarter/i.test(message),
+      eps_yoy: /eps.*yoy|earnings.*yoy|eps.*year/i.test(message),
+    };
+    // If no specific conditions parsed, use generic "all grew" interpretation
+    const anySet = Object.values(conditions).some(Boolean);
+    if (!anySet) {
+      const wantsRevGrow  = /revenue.*grow|grow.*revenue/i.test(message);
+      const wantsProfGrow = /profit.*grow|grow.*profit/i.test(message);
+      const wantsEpsGrow  = /eps.*grow|earnings.*grow/i.test(message);
+      if (wantsRevGrow || wantsProfGrow || wantsEpsGrow) {
+        conditions.rev_qoq = wantsRevGrow;
+        conditions.rev_yoy = wantsRevGrow;
+        conditions.ni_qoq  = wantsProfGrow;
+        conditions.ni_yoy  = wantsProfGrow;
+        conditions.eps_qoq = wantsEpsGrow;
+        conditions.eps_yoy = wantsEpsGrow;
+      } else {
+        // Generic screen — show all stocks with latest data, sorted by revenue
+        // No filters; let results speak for themselves
+      }
+    }
+    try {
+      const { results } = await screenFundamentals(conditions);
+      const formatted   = await formatScreenerAnswer(results, conditions, message);
+      return {
+        role:    'assistant',
+        content: formatted.answer,
+        source:  'fundamentals_screener',
+        model:   'local_db',
+        screener_response: true,
+        count:   formatted.count,
+      };
+    } catch (err) {
+      // DB unavailable — fall through to Claude
+    }
   }
 
   if (!chatHistory.has(chatId)) await loadHistoryForChat(chatId);
