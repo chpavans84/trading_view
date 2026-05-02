@@ -10255,18 +10255,46 @@ function restoreChatSize() {
 
 const CHAT_POS_KEY = 'dlp_chat_pos_v1';
 
+function _clampChatToViewport() {
+  const w = document.getElementById('chatWidget');
+  if (!w || !w.classList.contains('open')) return;
+  // Use getBoundingClientRect for true rendered position/size
+  const rect = w.getBoundingClientRect();
+  const vw   = window.innerWidth;
+  const vh   = window.innerHeight;
+  const ww   = w.offsetWidth  || 380;
+  const wh   = w.offsetHeight || 560;
+  const top  = Math.max(0, Math.min(rect.top,  vh - wh));
+  const left = Math.max(0, Math.min(rect.left, vw - ww));
+  // Only lock to top/left if widget already has an inline position (was dragged/restored)
+  if (w.style.top || w.style.left) {
+    w.style.right  = 'auto';
+    w.style.bottom = 'auto';
+    w.style.left   = left + 'px';
+    w.style.top    = top  + 'px';
+    try { localStorage.setItem(CHAT_POS_KEY, JSON.stringify({ left: w.style.left, top: w.style.top })); } catch {}
+  } else if (rect.bottom > vh || rect.top < 0) {
+    // No saved pos but widget is out of viewport — force it to default bottom-right
+    w.style.bottom = '96px';
+    w.style.right  = '28px';
+    w.style.top    = 'auto';
+    w.style.left   = 'auto';
+  }
+}
+
+window.addEventListener('resize', _clampChatToViewport);
+
 function restoreChatPos() {
   try {
     const w = document.getElementById('chatWidget');
     const p = JSON.parse(localStorage.getItem(CHAT_POS_KEY));
     if (!p?.left) return;
-    // Clamp to viewport so it never ends up off-screen
-    const left = Math.max(0, Math.min(parseFloat(p.left), window.innerWidth  - (w.offsetWidth  || 380)));
-    const top  = Math.max(0, Math.min(parseFloat(p.top),  window.innerHeight - (w.offsetHeight || 560)));
+    // Apply saved position, then re-clamp after layout using actual rendered dimensions
     w.style.right  = 'auto';
     w.style.bottom = 'auto';
-    w.style.left   = left + 'px';
-    w.style.top    = top  + 'px';
+    w.style.left   = p.left;
+    w.style.top    = p.top;
+    requestAnimationFrame(_clampChatToViewport);
   } catch {}
 }
 
@@ -10351,6 +10379,8 @@ function toggleChat() {
     _chatOpenAt = Date.now();
     restoreChatSize();
     restoreChatPos();
+    // Always re-clamp after render in case no saved pos or viewport changed
+    requestAnimationFrame(_clampChatToViewport);
     loadChatHistory();
     // Clear notification badge
     const badge = document.getElementById('chatFabBadge');
