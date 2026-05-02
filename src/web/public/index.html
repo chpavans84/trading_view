@@ -3821,21 +3821,21 @@ erDiagram
         bigint  volume
     }
     backtest_scores {
-        serial  id              PK
+        serial  id           PK
         text    symbol
         date    score_date
         float   rsi
         int     ema_above
         int     macd_sign
-        float   conviction_score
+        float   conv_score
     }
     backtest_returns {
         serial  id         PK
         text    symbol
         date    score_date
-        float   ret_1d
-        float   ret_1w
-        float   ret_1m
+        float   ret_day
+        float   ret_week
+        float   ret_month
         int     label
     }
     model_results {
@@ -3843,7 +3843,7 @@ erDiagram
         text    run_label
         float   accuracy
         float   auc
-        float   f1
+        float   f1_score
         jsonb   weights
         jsonb   adjustments
     }
@@ -3866,9 +3866,8 @@ erDiagram
     users                ||--o{ doc_queries           : "username"
     users                ||--o{ api_calls             : "username"
     trades               ||--o{ trade_lessons         : "trade_id"
-    backtest_prices      ||--o{ backtest_scores       : "symbol+date"
-    backtest_scores      ||--o{ backtest_returns      : "symbol+date"
-    backtest_returns     }o--|| model_results         : "trains"
+    backtest_prices      ||--o{ backtest_scores       : "symbol"
+    backtest_scores      ||--o{ backtest_returns      : "symbol"
           </div>
         </div>
 
