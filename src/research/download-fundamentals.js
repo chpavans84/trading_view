@@ -16,8 +16,18 @@ const BATCH_SIZE    = 8;
 const BATCH_DELAY   = 600;   // ms between batches
 const FETCH_TIMEOUT = 10000; // ms per symbol
 
-// Deduplicated universe
-const SYMBOLS = [...new Set([...SP500, ...NASDAQ100])];
+const SKIP_SYMBOLS = new Set([
+  // ETFs — no income statements
+  'SPY','QQQ','IWM','DIA','GLD','SLV','USO','TLT','HYG','LQD',
+  // Defunct / bankrupt
+  'SIVB','FRC','FSR','GOEV','WKHS','RIDE','NKLA','SOLO','CIIC','SPNV','L3H',
+  // Acquired / delisted
+  'ABMD','SPLK','PXD','CLR','NEWR','SUMO','CYBR','SPR','HCP','PARA',
+  'CMA','DFS','FYBR','EZCORP','WBA','HES','SQ','CPE','CDEV','ESTE','SNV','MMC',
+]);
+
+// Deduplicated universe, excluding ETFs and delisted symbols
+const SYMBOLS = [...new Set([...SP500, ...NASDAQ100])].filter(s => !SKIP_SYMBOLS.has(s));
 
 // ── Yahoo Finance crumb (obtained once, reused for all requests) ──────────────
 
