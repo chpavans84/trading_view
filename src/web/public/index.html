@@ -10342,11 +10342,13 @@ function restoreChatPos() {
   });
 })();
 
+let _chatOpenAt = 0;
 function toggleChat() {
   const widget = document.getElementById('chatWidget');
   const fab    = document.getElementById('chatFab');
   const isOpen = widget.classList.toggle('open');
   if (isOpen) {
+    _chatOpenAt = Date.now();
     restoreChatSize();
     restoreChatPos();
     loadChatHistory();
@@ -10380,6 +10382,15 @@ function toggleChat() {
     if (bd) bd.style.display = 'none';
   }
 }
+
+// Click-outside to minimize AI Trading Analyst
+document.addEventListener('mousedown', function(e) {
+  const widget = document.getElementById('chatWidget');
+  const fab    = document.getElementById('chatFab');
+  if (!widget || !widget.classList.contains('open')) return;
+  if (Date.now() - _chatOpenAt < 250) return; // ignore the click that opened it
+  if (!widget.contains(e.target) && (!fab || !fab.contains(e.target))) toggleChat();
+});
 
 // Resize chat when keyboard opens/closes (visualViewport API)
 if (window.visualViewport) {
@@ -11012,7 +11023,9 @@ function exploreSymbol(sym) {
 
 <script>
 // ── Floating Explorer controls ─────────────────────────────────────────────
+let _explorerOpenAt = 0;
 function openFloatExplorer() {
+  _explorerOpenAt = Date.now();
   document.getElementById('floatExplorer').classList.add('open');
   document.getElementById('tab-explorer').classList.add('active');
   loadExplorerSymbols();
@@ -11027,6 +11040,14 @@ function toggleFloatExplorer() {
   if (panel.classList.contains('open')) closeFloatExplorer();
   else openFloatExplorer();
 }
+
+// Click-outside to minimize Explorer
+document.addEventListener('mousedown', function(e) {
+  const panel = document.getElementById('floatExplorer');
+  if (!panel || !panel.classList.contains('open')) return;
+  if (Date.now() - _explorerOpenAt < 250) return; // ignore the click that opened it
+  if (!panel.contains(e.target)) closeFloatExplorer();
+});
 
 // ── Quick Trade panel ──────────────────────────────────────────────────────
 let _qtType = 'market';
