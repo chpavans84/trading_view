@@ -2977,158 +2977,282 @@
       <!-- ══════════ CONVICTION SCORE VIEW ══════════ -->
       <div id="av-score" class="arch-view" style="display:none">
         <div class="arch-header">🎯 How the 0–100 Conviction Score is Built</div>
-        <div class="arch-subhead">Six independent factors scored in parallel and combined into a single number. A stock needs ≥ 50 to qualify for a trade. Here's exactly what goes into each factor.</div>
+        <div class="arch-subhead">Every call to <code>getConvictionScore(symbol)</code> fires 14 data fetches in parallel, scores 20+ individual factors, applies ML-trained grade adjustments, and returns a single 0–100 number in ~2–4 seconds. Here is every detail.</div>
 
-        <div style="background:rgba(13,17,23,0.8);border:1px solid #21262d;border-radius:12px;padding:14px;margin-bottom:16px">
-          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Score composition</div>
-          <div style="display:flex;height:24px;border-radius:6px;overflow:hidden;gap:2px">
-            <div style="flex:30;background:#58a6ff;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#fff;min-width:40px">Tech 30</div>
-            <div style="flex:25;background:#e3b341;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:38px">News 25</div>
-            <div style="flex:20;background:#3fb950;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:34px">Momo 20</div>
-            <div style="flex:10;background:#bc8cff;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:28px">Anlst 10</div>
-            <div style="flex:10;background:#39d353;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:26px">Mkt 10</div>
-            <div style="flex:5;background:#f78166;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#0d1117;min-width:18px">5</div>
+        <!-- ── Phase overview ── -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:12px">
+            <div style="font-size:0.62rem;font-weight:700;color:#58a6ff;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Phase 1 · Parallel Fetch</div>
+            <div style="font-size:0.78rem;color:#c9d1d9;font-weight:600">14 data calls fire simultaneously</div>
+            <div style="font-size:0.72rem;color:#6e7681;margin-top:4px">All wrapped in <code>Promise.allSettled</code> — any single failure scores zero for that factor, never aborts the whole score.</div>
           </div>
-          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:0.62rem;color:#6e7681"><span>0</span><span>= 100 pts max</span></div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:12px">
+            <div style="font-size:0.62rem;font-weight:700;color:#e3b341;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Phase 2 · Factor Scoring</div>
+            <div style="font-size:0.78rem;color:#c9d1d9;font-weight:600">20+ additive point buckets</div>
+            <div style="font-size:0.72rem;color:#6e7681;margin-top:4px">Each signal maps to a fixed point value. TV chart factors are only applied when TradingView is live and are scaled by ML feature weights.</div>
+          </div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:12px">
+            <div style="font-size:0.62rem;font-weight:700;color:#39d353;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Phase 3 · ML Adjustment</div>
+            <div style="font-size:0.78rem;color:#c9d1d9;font-weight:600">Backtest alpha applied per grade</div>
+            <div style="font-size:0.72rem;color:#6e7681;margin-top:4px">Grade computed from raw score → <code>getFactorWeights()</code> adds backtest alpha adj (e.g. A→+8, B→+3, C→-2, F→-9) → final score recalculated.</div>
+          </div>
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:10px">
-
-          <div class="score-factor-card" style="--sc:#58a6ff">
-            <div class="sfc-header">
-              <div class="sfc-weight" style="background:#58a6ff">30 pts</div>
-              <div class="sfc-name">Technical Analysis</div>
-              <div class="sfc-src">TV CDP → Moomoo 90-day OHLCV → Yahoo Finance (cascade fallback)</div>
-            </div>
-            <div class="sfc-body">
-              <div class="sfc-items">
-                <div class="sfc-item">📈 RSI in 40–65 sweet spot — not overbought (>70), not oversold (<30)</div>
-                <div class="sfc-item">📊 MACD histogram positive and rising — bullish momentum confirmed</div>
-                <div class="sfc-item">🔼 Price above both EMA20 and EMA50 — aligned with medium + short-term trend</div>
-                <div class="sfc-item">🎯 Bollinger Band %B position 0.4–0.7 — midrange, room to run without overextension</div>
-              </div>
-              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
-                <strong style="color:#8b949e">Fallback chain:</strong> TradingView live indicators → Moomoo 90-day OHLCV (compute indicators in JS) → Yahoo Finance daily OHLCV (compute indicators in JS)
-              </div>
-            </div>
+        <!-- ── 14 parallel fetches ── -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Phase 1 — 14 Parallel Data Fetches (Promise.allSettled)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.74rem">
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#58a6ff;font-weight:700">①</span> <code>getPreEarningsDrift()</code> → 10-day price momentum before next earnings · drift_direction · drift_5d_pct · Source: Yahoo Finance 10-day chart</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#58a6ff;font-weight:700">②</span> <code>getRelativeStrength()</code> → 30-day price vs sector ETF (XLK, XLF, etc.) · rs_signal (strong/neutral/weak) · rs_score % · Source: Moomoo → Yahoo</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#e3b341;font-weight:700">③</span> <code>getSymbolNews(limit:10)</code> → last 10 headlines · guidance_signal (raised/lowered/neutral) · earnings_quality inference · Source: Yahoo Finance + FinancialJuice</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#e3b341;font-weight:700">④</span> <code>getEarnings()</code> → last 4 quarters EPS vs same Q last year (YoY) · earnings_quality: strong / moderate / weak · Source: SEC EDGAR XBRL + Nasdaq calendar</div>
+            <div style="background:#3fb950;border-radius:8px;padding:8px 10px;color:#0d1117"><span style="font-weight:700">⑤</span> <code>getMarketSentiment()</code> → VIX level · bad_trading_time flag (12:30–1:30 PM ET) · Source: CBOE CDN → Yahoo ^VIX fallback</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#f78166;font-weight:700">⑥</span> <code>getInsiderBuying()</code> → Form 4 SEC filings · insider_buys_60d count · Source: OpenInsider.com scrape</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#e3b341;font-weight:700">⑦</span> <code>getEarningsSurprise()</code> → beat_streak (consecutive quarters EPS beat YoY) · upcoming earnings date · eps_estimate · Source: Nasdaq calendar + SEC EDGAR XBRL</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#58a6ff;font-weight:700">⑧</span> <code>getChartTechnicals()</code> → RSI · MACD histogram · EMA20 · EMA50 · BB upper/mid · current_price · Source: TradingView CDP (live) → Moomoo 90d → Yahoo fallback</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#58a6ff;font-weight:700">⑨</span> <code>getPriceLevels()</code> → distance_to_support_pct · distance_to_resistance_pct · Source: Pine Script <code>line.new()</code> graphics from TradingView chart (only when TV is connected)</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#6e7681;font-weight:700">⑩</span> Company name → <code>KNOWN_NAMES</code> dict (instant, 60+ tickers hardcoded) or Yahoo Finance chart meta as fallback</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#3fb950;font-weight:700">⑪</span> <code>getRVOL()</code> → today's volume ÷ 20-day avg volume · Source: Yahoo Finance 30-day daily OHLCV</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#3fb950;font-weight:700">⑫</span> <code>getWeeklyTrend()</code> → 6-month weekly closes · 10-week EMA · pct_vs_ema · trend (up/flat/down) · Source: Yahoo Finance 6-month weekly chart</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#bc8cff;font-weight:700">⑬</span> <code>getAnalystRating()</code> → consensus (strong_buy/buy/hold/sell/strong_sell) · target_price · upside_pct · total_analysts · Source: yahoo-finance2 quoteSummary · 4-hour cache</div>
+            <div style="background:#161b22;border-radius:8px;padding:8px 10px"><span style="color:#bc8cff;font-weight:700">⑭</span> <code>getShortInterest()</code> → short_float_pct · short_ratio (days to cover) · Source: yahoo-finance2 defaultKeyStatistics · 4-hour cache</div>
           </div>
-
-          <div class="score-factor-card" style="--sc:#e3b341">
-            <div class="sfc-header">
-              <div class="sfc-weight" style="background:#e3b341;color:#0d1117">25 pts</div>
-              <div class="sfc-name">News Catalyst</div>
-              <div class="sfc-src">FinancialJuice (< 4h) · Yahoo Finance news · Alpaca news API</div>
-            </div>
-            <div class="sfc-body">
-              <div class="sfc-items">
-                <div class="sfc-item">📰 Fresh news within 48 hours = full points. Older = scaled down. No news = zero</div>
-                <div class="sfc-item">⚡ Breaking news < 4h from FinancialJuice gets highest weight — closest to market reaction</div>
-                <div class="sfc-item">💰 Earnings surprise magnitude: big beat boosts score, miss penalizes</div>
-                <div class="sfc-item">📅 Pre-earnings drift: does this stock historically run up before reporting? If yes, +points</div>
-              </div>
-              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
-                <strong style="color:#8b949e">Staleness rule:</strong> News > 48h is flagged as stale and not traded on. Macro news (tariffs, Fed) is mapped to beneficiary/victim tickers rather than the macro topic itself.
-              </div>
-            </div>
-          </div>
-
-          <div class="score-factor-card" style="--sc:#3fb950">
-            <div class="sfc-header">
-              <div class="sfc-weight" style="background:#3fb950;color:#0d1117">20 pts</div>
-              <div class="sfc-name">Momentum</div>
-              <div class="sfc-src">Moomoo TCP real-time → Yahoo Finance daily (fallback)</div>
-            </div>
-            <div class="sfc-body">
-              <div class="sfc-items">
-                <div class="sfc-item">🚀 RVOL > 1.5× 21-day average volume — unusual activity is the market "voting" with money</div>
-                <div class="sfc-item">📈 Price change today > 0% — stock is already moving in the right direction</div>
-                <div class="sfc-item">💪 Volume confirmation — price move must be backed by above-average volume</div>
-                <div class="sfc-item">📉 ATR (Average True Range) computed here — used later for stop/target sizing</div>
-              </div>
-              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
-                <strong style="color:#8b949e">RVOL formula:</strong> today's volume ÷ 20-day average volume. RVOL > 2.0× = strong signal. > 3.0× = exceptional. Moomoo is the primary source; Yahoo 30-day OHLCV used as fallback.
-              </div>
-            </div>
-          </div>
-
-          <div class="score-factor-card" style="--sc:#bc8cff">
-            <div class="sfc-header">
-              <div class="sfc-weight" style="background:#bc8cff;color:#0d1117">10 pts</div>
-              <div class="sfc-name">Analyst Consensus</div>
-              <div class="sfc-src">Yahoo Finance quoteSummary · 4-hour cache per symbol</div>
-            </div>
-            <div class="sfc-body">
-              <div class="sfc-items">
-                <div class="sfc-item">⭐ Mean analyst rating &lt; 2.5 (scale: 1.0=Strong Buy · 2.0=Buy · 3.0=Hold · 5.0=Strong Sell)</div>
-                <div class="sfc-item">🎯 Price target upside > 5% from current price (analyst consensus target vs. live price)</div>
-                <div class="sfc-item">👥 Buy + Strong Buy count vs. Sell + Strong Sell count — net buy recommendation</div>
-              </div>
-              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
-                <strong style="color:#8b949e">Cache strategy:</strong> Analyst ratings change slowly (weekly/monthly), so 4-hour cache is safe and avoids hammering Yahoo. Uses yahoo-finance2 npm package which auto-handles auth tokens.
-              </div>
-            </div>
-          </div>
-
-          <div class="score-factor-card" style="--sc:#39d353">
-            <div class="sfc-header">
-              <div class="sfc-weight" style="background:#39d353;color:#0d1117">10 pts</div>
-              <div class="sfc-name">Market Conditions</div>
-              <div class="sfc-src">Reuses Step 3 context data — no additional API call</div>
-            </div>
-            <div class="sfc-body">
-              <div class="sfc-items">
-                <div class="sfc-item">📊 VIX level: &lt;18 = full points · 18–25 = partial · &gt;25 = reduced · &gt;35 (crisis) = zero</div>
-                <div class="sfc-item">🎯 Regime match: stock is trending in line with the overall market regime</div>
-                <div class="sfc-item">🏆 Sector leadership: stock's sector is in the current "leading sectors" list from context</div>
-              </div>
-              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
-                <strong style="color:#8b949e">Cost = $0:</strong> Reuses data already fetched in getMarketContext(). No extra API calls, no extra latency.
-              </div>
-            </div>
-          </div>
-
-          <div class="score-factor-card" style="--sc:#f78166">
-            <div class="sfc-header">
-              <div class="sfc-weight" style="background:#f78166;color:#0d1117">5 pts</div>
-              <div class="sfc-name">Insider Activity</div>
-              <div class="sfc-src">OpenInsider.com · SEC Form 4 filings</div>
-            </div>
-            <div class="sfc-body">
-              <div class="sfc-items">
-                <div class="sfc-item">🏛️ Executive purchases (Form 4 SEC filings) in the last 30 days</div>
-                <div class="sfc-item">📊 Net buying volume > selling volume = positive signal</div>
-                <div class="sfc-item">🎯 Cluster buying (multiple insiders buying simultaneously) = maximum 5 points</div>
-              </div>
-              <div style="margin-top:8px;font-size:0.73rem;color:#6e7681;border-top:1px solid #21262d;padding-top:8px">
-                <strong style="color:#8b949e">Failure handling:</strong> If OpenInsider is unavailable, this factor scores zero and the other 95 points still apply normally.
-              </div>
-            </div>
-          </div>
-
         </div>
 
-        <div style="background:rgba(13,17,23,0.8);border:1px solid #21262d;border-radius:12px;padding:14px;margin-top:16px">
-          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Score thresholds — what each band means for trade decisions</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">
+        <!-- ── Base factors table ── -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Phase 2A — Base Factors (always applied, TV not required)</div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:0.76rem">
+              <thead>
+                <tr style="border-bottom:1px solid #30363d">
+                  <th style="text-align:left;padding:6px 8px;color:#8b949e;font-weight:600;white-space:nowrap">Factor (breakdown key)</th>
+                  <th style="text-align:left;padding:6px 8px;color:#8b949e;font-weight:600">Condition</th>
+                  <th style="text-align:right;padding:6px 8px;color:#8b949e;font-weight:600;white-space:nowrap">Points</th>
+                  <th style="text-align:left;padding:6px 8px;color:#8b949e;font-weight:600">Source fetch</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">base</td><td style="padding:5px 8px;color:#c9d1d9">Always — every stock starts here</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+20</td><td style="padding:5px 8px;color:#6e7681">—</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">beat_streak</td><td style="padding:5px 8px;color:#c9d1d9">≥ 3 consecutive quarters EPS beat YoY</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+25</td><td style="padding:5px 8px;color:#6e7681">⑦ getEarningsSurprise</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">beat_streak</td><td style="padding:5px 8px;color:#c9d1d9">2 consecutive quarters EPS beat YoY</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681">⑦ getEarningsSurprise</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">beat_streak</td><td style="padding:5px 8px;color:#c9d1d9">1 quarter EPS beat YoY</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+8</td><td style="padding:5px 8px;color:#6e7681">⑦ getEarningsSurprise</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">earnings_quality</td><td style="padding:5px 8px;color:#c9d1d9">Strong = both EPS AND Revenue grew YoY last quarter</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+20</td><td style="padding:5px 8px;color:#6e7681">④ getEarnings</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">earnings_quality</td><td style="padding:5px 8px;color:#c9d1d9">Moderate = EPS OR Revenue grew YoY (not both)</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+8</td><td style="padding:5px 8px;color:#6e7681">④ getEarnings</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">guidance_raised</td><td style="padding:5px 8px;color:#c9d1d9">Management raised full-year guidance in headlines</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681">③ getSymbolNews</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">guidance_lowered</td><td style="padding:5px 8px;color:#c9d1d9">Management lowered or withdrew guidance</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−15</td><td style="padding:5px 8px;color:#6e7681">③ getSymbolNews</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">pre_earnings_drift</td><td style="padding:5px 8px;color:#c9d1d9">10-day price momentum is upward into earnings</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681">① getPreEarningsDrift</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">pre_earnings_drift</td><td style="padding:5px 8px;color:#c9d1d9">10-day price momentum is downward into earnings</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−10</td><td style="padding:5px 8px;color:#6e7681">① getPreEarningsDrift</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">relative_strength</td><td style="padding:5px 8px;color:#c9d1d9">30-day return vs sector ETF is strong (outperforming)</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681">② getRelativeStrength</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">relative_strength</td><td style="padding:5px 8px;color:#c9d1d9">30-day return vs sector ETF is weak (underperforming)</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−10</td><td style="padding:5px 8px;color:#6e7681">② getRelativeStrength</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">insider_buying</td><td style="padding:5px 8px;color:#c9d1d9">≥ 2 insider buys (Form 4) in last 60 days</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+10</td><td style="padding:5px 8px;color:#6e7681">⑥ getInsiderBuying</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">insider_buying</td><td style="padding:5px 8px;color:#c9d1d9">1 insider buy (Form 4) in last 60 days</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+5</td><td style="padding:5px 8px;color:#6e7681">⑥ getInsiderBuying</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">analyst_rating</td><td style="padding:5px 8px;color:#c9d1d9">Wall St. consensus = Strong Buy (mean rating ≤ 1.5 / 5.0)</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681">⑬ getAnalystRating</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">analyst_rating</td><td style="padding:5px 8px;color:#c9d1d9">Wall St. consensus = Buy (mean rating ≤ 2.5)</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+10</td><td style="padding:5px 8px;color:#6e7681">⑬ getAnalystRating</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">analyst_rating</td><td style="padding:5px 8px;color:#c9d1d9">Wall St. consensus = Sell (mean rating ≤ 4.5)</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−12</td><td style="padding:5px 8px;color:#6e7681">⑬ getAnalystRating</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">analyst_rating</td><td style="padding:5px 8px;color:#c9d1d9">Wall St. consensus = Strong Sell (mean rating > 4.5)</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−20</td><td style="padding:5px 8px;color:#6e7681">⑬ getAnalystRating</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">short_squeeze</td><td style="padding:5px 8px;color:#c9d1d9">short_float ≥ 15% AND relative strength is strong → squeeze setup</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+10</td><td style="padding:5px 8px;color:#6e7681">⑭ getShortInterest</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">short_squeeze</td><td style="padding:5px 8px;color:#c9d1d9">short_float ≥ 25% but RS not strong → crowded short, dangerous</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−5</td><td style="padding:5px 8px;color:#6e7681">⑭ getShortInterest</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">rvol</td><td style="padding:5px 8px;color:#c9d1d9">Today's volume ≥ 2.0× 20-day average (formula: today_vol ÷ avg_20d)</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681">⑪ getRVOL</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">rvol</td><td style="padding:5px 8px;color:#c9d1d9">Today's volume ≥ 1.5× 20-day average</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+8</td><td style="padding:5px 8px;color:#6e7681">⑪ getRVOL</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">rvol</td><td style="padding:5px 8px;color:#c9d1d9">Today's volume &lt; 0.5× average (abnormally quiet)</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−8</td><td style="padding:5px 8px;color:#6e7681">⑪ getRVOL</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">weekly_trend</td><td style="padding:5px 8px;color:#c9d1d9">Price > 10-week EMA by > 1% — weekly chart uptrend confirmed</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+12</td><td style="padding:5px 8px;color:#6e7681">⑫ getWeeklyTrend</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">weekly_trend</td><td style="padding:5px 8px;color:#c9d1d9">Price &lt; 10-week EMA by > 1% — weekly chart downtrend</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−12</td><td style="padding:5px 8px;color:#6e7681">⑫ getWeeklyTrend</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">high_vix</td><td style="padding:5px 8px;color:#c9d1d9">VIX > 35 — extreme fear / crisis (e.g. March 2020)</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−20</td><td style="padding:5px 8px;color:#6e7681">⑤ getMarketSentiment</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">high_vix</td><td style="padding:5px 8px;color:#c9d1d9">VIX > 28 — elevated fear</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−10</td><td style="padding:5px 8px;color:#6e7681">⑤ getMarketSentiment</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">high_vix</td><td style="padding:5px 8px;color:#c9d1d9">VIX > 25 — moderately elevated</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−5</td><td style="padding:5px 8px;color:#6e7681">⑤ getMarketSentiment</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e6edf3;font-family:monospace;font-size:0.72rem">bad_trading_time</td><td style="padding:5px 8px;color:#c9d1d9">12:30–1:30 PM ET (lunch chop — low conviction moves)</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−5</td><td style="padding:5px 8px;color:#6e7681">⑤ isBadTradingTime</td></tr>
+                <tr style="border-bottom:1px solid #161b22;background:rgba(248,81,73,0.06)"><td style="padding:5px 8px;color:#f85149;font-family:monospace;font-size:0.72rem">sector_concentrated</td><td style="padding:5px 8px;color:#f85149">Already holding a stock in the <em>same sector</em> — hard portfolio risk guard</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−25</td><td style="padding:5px 8px;color:#6e7681">checkSectorConcentration()</td></tr>
+                <tr style="background:rgba(248,81,73,0.06)"><td style="padding:5px 8px;color:#f85149;font-family:monospace;font-size:0.72rem">correlated_position</td><td style="padding:5px 8px;color:#f85149">Already holding a nearly-identical stock (e.g. NVDA while buying AMD) — correlation guard</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−20</td><td style="padding:5px 8px;color:#6e7681">checkCorrelation()</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:8px;font-size:0.72rem;color:#6e7681">Raw score after Phase 2A = sum of all rows above. Clamped to 0–100 before Phase 2B.</div>
+        </div>
+
+        <!-- ── TV-only factors ── -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:0.7rem;font-weight:700;color:#58a6ff;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Phase 2B — TradingView Live Chart Factors (only when TV is connected)</div>
+          <div style="font-size:0.72rem;color:#6e7681;margin-bottom:10px">These factors are <strong style="color:#c9d1d9">scaled by ML feature weights</strong> from the trained logistic regression model. If no model is trained yet, base values apply. Formula: <code>points = base × (1 + |feature_weight|)</code></div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:0.76rem">
+              <thead>
+                <tr style="border-bottom:1px solid #30363d">
+                  <th style="text-align:left;padding:6px 8px;color:#8b949e;font-weight:600">Factor</th>
+                  <th style="text-align:left;padding:6px 8px;color:#8b949e;font-weight:600">Condition</th>
+                  <th style="text-align:right;padding:6px 8px;color:#8b949e;font-weight:600;white-space:nowrap">Base pts</th>
+                  <th style="text-align:left;padding:6px 8px;color:#8b949e;font-weight:600">ML weight key</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">rsi_oversold</td><td style="padding:5px 8px;color:#c9d1d9">RSI &lt; 40 — oversold, potential bounce</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+20</td><td style="padding:5px 8px;color:#6e7681;font-family:monospace;font-size:0.7rem">fw.rsi_norm</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">rsi_overbought</td><td style="padding:5px 8px;color:#c9d1d9">RSI > 70 — overbought, extended</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−20</td><td style="padding:5px 8px;color:#6e7681;font-family:monospace;font-size:0.7rem">fw.rsi_norm</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">above_both_emas</td><td style="padding:5px 8px;color:#c9d1d9">price > EMA20 AND price > EMA50 — both timeframes aligned bullish</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681;font-family:monospace;font-size:0.7rem">fw.ema_above</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">below_both_emas</td><td style="padding:5px 8px;color:#c9d1d9">price &lt; EMA20 AND price &lt; EMA50 — both timeframes aligned bearish</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−15</td><td style="padding:5px 8px;color:#6e7681;font-family:monospace;font-size:0.7rem">fw.ema_above</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">macd_positive</td><td style="padding:5px 8px;color:#c9d1d9">MACD histogram > 0 — short EMA above long EMA, bullish crossover in effect</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+10</td><td style="padding:5px 8px;color:#6e7681;font-family:monospace;font-size:0.7rem">fw.macd_sign</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">macd_negative</td><td style="padding:5px 8px;color:#c9d1d9">MACD histogram &lt; 0 — bearish</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−10</td><td style="padding:5px 8px;color:#6e7681;font-family:monospace;font-size:0.7rem">fw.macd_sign</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">near_support</td><td style="padding:5px 8px;color:#c9d1d9">Price &lt; 2% above a Pine Script support level (drawn on your chart)</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+15</td><td style="padding:5px 8px;color:#6e7681">no ML weight</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">near_resistance</td><td style="padding:5px 8px;color:#c9d1d9">Price &lt; 2% below a Pine Script resistance level</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−15</td><td style="padding:5px 8px;color:#6e7681">no ML weight</td></tr>
+                <tr style="border-bottom:1px solid #161b22"><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">below_bb_mid</td><td style="padding:5px 8px;color:#c9d1d9">Price &lt; Bollinger Band midline — room to run upward without being extended</td><td style="padding:5px 8px;text-align:right;color:#3fb950;font-weight:700">+10</td><td style="padding:5px 8px;color:#6e7681">no ML weight</td></tr>
+                <tr><td style="padding:5px 8px;color:#e3b341;font-family:monospace;font-size:0.72rem">above_bb_upper</td><td style="padding:5px 8px;color:#c9d1d9">Price > upper Bollinger Band — statistically extended, mean-reversion risk</td><td style="padding:5px 8px;text-align:right;color:#f85149;font-weight:700">−10</td><td style="padding:5px 8px;color:#6e7681">no ML weight</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── Correlation groups ── -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Correlation Guard — 12 Groups (−20 pts if you already hold a group member)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:0.72rem">
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Semis:</span> <span style="color:#e6edf3">NVDA AMD MU SMCI INTC MRVL LRCX AMAT KLAC ASML ARM QCOM AVGO</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">MegaCap:</span> <span style="color:#e6edf3">AAPL MSFT</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">AdTech:</span> <span style="color:#e6edf3">META GOOGL GOOG AMZN</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Banks:</span> <span style="color:#e6edf3">JPM GS MS BAC WFC C</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Energy:</span> <span style="color:#e6edf3">XOM CVX COP OXY DVN</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">EV:</span> <span style="color:#e6edf3">TSLA RIVN LCID NIO LI XPEV</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Cybersecurity:</span> <span style="color:#e6edf3">CRWD PANW ZS NET OKTA FTNT S</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Crypto:</span> <span style="color:#e6edf3">COIN MSTR HOOD</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">E-comm:</span> <span style="color:#e6edf3">SHOP ETSY EBAY</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Rideshare:</span> <span style="color:#e6edf3">UBER LYFT DASH</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Streaming:</span> <span style="color:#e6edf3">NFLX DIS CMCSA WBD</span></div>
+            <div style="background:#161b22;border-radius:6px;padding:5px 9px;border:1px solid #30363d"><span style="color:#8b949e">Data/AI:</span> <span style="color:#e6edf3">PLTR SNOW DDOG MDB GTLB</span></div>
+          </div>
+          <div style="margin-top:8px;font-size:0.72rem;color:#6e7681">Example: If you hold NVDA and the scanner considers AMD, <code>correlated_position = −20</code> is applied to AMD's score automatically. Sector concentration check is separate — if you hold any XLK stock and the next candidate is also XLK, that's an additional <code>−25</code>.</div>
+        </div>
+
+        <!-- ── Phase 3: ML grade adjustment ── -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:0.7rem;font-weight:700;color:#39d353;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Phase 3 — ML Backtest Grade Adjustment</div>
+          <div style="font-size:0.78rem;color:#c9d1d9;margin-bottom:10px">After Phase 2A + 2B are summed, an interim grade is computed. Then <code>getFactorWeights()</code> loads the trained model weights from the <code>model_results</code> PostgreSQL table and applies a per-grade alpha adjustment.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+            <div>
+              <div style="font-size:0.68rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Interim grade assignment</div>
+              <div style="font-size:0.76rem;background:#161b22;border-radius:8px;padding:10px;font-family:monospace">
+                raw ≥ 80 → Grade <span style="color:#3fb950">A</span><br>
+                raw ≥ 60 → Grade <span style="color:#d29922">B</span><br>
+                raw ≥ 40 → Grade <span style="color:#58a6ff">C</span><br>
+                raw &lt; 40 → Grade <span style="color:#f85149">F</span>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:0.68rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Backtest alpha adj (typical values)</div>
+              <div style="font-size:0.76rem;background:#161b22;border-radius:8px;padding:10px;font-family:monospace">
+                Grade <span style="color:#3fb950">A</span> → <span style="color:#3fb950">+8</span> pts (historically outperforms SPY)<br>
+                Grade <span style="color:#d29922">B</span> → <span style="color:#3fb950">+3</span> pts<br>
+                Grade <span style="color:#58a6ff">C</span> → <span style="color:#f85149">−2</span> pts<br>
+                Grade <span style="color:#f85149">F</span> → <span style="color:#f85149">−9</span> pts (historically underperforms)
+              </div>
+            </div>
+          </div>
+          <div style="font-size:0.74rem;color:#6e7681;background:#161b22;border-radius:8px;padding:10px;border:1px solid #21262d">
+            <strong style="color:#8b949e">Source:</strong> <code>getFactorWeights()</code> loads from <code>model_results</code> table (written by <code>npm run research:train</code>). The trained logistic regression model also provides individual feature weights (<code>fw.rsi_norm</code>, <code>fw.ema_above</code>, <code>fw.macd_sign</code>) that scale the TV-only factors in Phase 2B.<br><br>
+            <strong style="color:#8b949e">Fallback:</strong> If no model has been trained yet, <code>weightsSource = 'none'</code> and the adjustment is 0. The <code>backtest_alpha_adj</code> key is omitted from the breakdown entirely.<br><br>
+            <strong style="color:#8b949e">Re-computation:</strong> After adding <code>backtest_alpha_adj</code> to the breakdown, all values are summed again and clamped 0–100. The final grade is recomputed from the final score — it may differ from the interim grade.
+          </div>
+        </div>
+
+        <!-- ── Stock selector integration ── -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:0.7rem;font-weight:700;color:#e3b341;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">How Conviction Score Feeds the Daily Scanner (selectBestTrade)</div>
+          <div class="aflow" style="margin-top:8px">
+            <div class="aflow-step" style="gap:8px">
+              <div class="aflow-num" style="background:#e3b341;color:#0d1117;width:26px;height:26px;font-size:0.68rem;flex-shrink:0">1</div>
+              <div class="aflow-card" style="border-color:#e3b34133;padding:10px">
+                <div class="aflow-title" style="font-size:0.8rem">buildCandidates() — up to 12 symbols</div>
+                <div class="aflow-body" style="font-size:0.74rem">Gathered from: market movers gainers · today's earnings reporters · sector leaders for the current leading sectors. Filtered: no open positions, no re-entry blocks, valid ticker format.</div>
+              </div>
+            </div>
+            <div class="aflow-connector" style="height:10px"></div>
+            <div class="aflow-step" style="gap:8px">
+              <div class="aflow-num" style="background:#58a6ff;width:26px;height:26px;font-size:0.68rem;flex-shrink:0">2</div>
+              <div class="aflow-card" style="border-color:#58a6ff33;padding:10px">
+                <div class="aflow-title" style="font-size:0.8rem">5 parallel fetches per candidate</div>
+                <div class="aflow-body" style="font-size:0.74rem">For each symbol simultaneously: <code>getSymbolNews</code> · <code>getPreEarningsDrift</code> · <code>getRelativeStrength</code> · <code>getChartTechnicals</code> (if TV up) · <strong style="color:#39d353">getConvictionScore</strong> (new — the full ML-scored conviction with all 14 parallel fetches inside). Extracts: <code>mlScore</code>, <code>mlGrade</code>, <code>backtestAdj</code>.</div>
+              </div>
+            </div>
+            <div class="aflow-connector" style="height:10px"></div>
+            <div class="aflow-step" style="gap:8px">
+              <div class="aflow-num" style="background:#39d353;color:#0d1117;width:26px;height:26px;font-size:0.68rem;flex-shrink:0">3</div>
+              <div class="aflow-card" style="border-color:#39d35333;padding:10px">
+                <div class="aflow-title" style="font-size:0.8rem">Deterministic scoreCandidate() — sort top 6</div>
+                <div class="aflow-body" style="font-size:0.74rem">Each candidate scored by: relative strength · RSI · MACD · EMA trend · pre-earnings drift · sector alignment · guidance · regime win-rate adjustment. Candidates sorted descending. Min threshold 45/100.</div>
+              </div>
+            </div>
+            <div class="aflow-connector" style="height:10px"></div>
+            <div class="aflow-step" style="gap:8px">
+              <div class="aflow-num" style="background:#58a6ff;width:26px;height:26px;font-size:0.68rem;flex-shrink:0">4</div>
+              <div class="aflow-card" style="border-color:#58a6ff33;padding:10px">
+                <div class="aflow-title" style="font-size:0.8rem">Claude Haiku final judgment</div>
+                <div class="aflow-body" style="font-size:0.74rem">Top-6 candidates formatted into a compact candidateTable: <code>NVDA: ML=72(B) BacktestAdj=+3 | RS=8.2% | RSI=54 | MACD=positive | EMA=above | Drift=1.4%</code>. Sent to <code>claude-haiku-4-5-20251001</code> with regime + VIX context and scoring rules. Returns JSON: <code>{ symbol, conviction, reason }</code>. 20-second timeout — falls back to deterministic winner if offline.</div>
+              </div>
+            </div>
+            <div class="aflow-connector" style="height:10px"></div>
+            <div class="aflow-step" style="gap:8px">
+              <div class="aflow-num" style="background:#3fb950;color:#0d1117;width:26px;height:26px;font-size:0.68rem;flex-shrink:0">5</div>
+              <div class="aflow-card" style="border-color:#3fb95033;padding:10px">
+                <div class="aflow-title" style="font-size:0.8rem">Conviction blend: 60% ML + 40% Claude</div>
+                <div class="aflow-body" style="font-size:0.74rem"><code>final_conviction = round(0.6 × mlScore + 0.4 × claude_conviction)</code>. Only applied when <code>mlScore != null</code>. If the DB has no data for the symbol, Claude's judgment stands alone. The result includes <code>ml_score</code>, <code>ml_grade</code>, <code>backtest_adj</code> fields for full auditability.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Cache + output ── -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px">
+            <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Cache Strategy</div>
+            <div style="font-size:0.76rem;color:#c9d1d9;display:flex;flex-direction:column;gap:6px">
+              <div><span style="color:#3fb950;font-weight:700">5 min</span> — <code>_scoreCache</code> (in-memory Map) · full conviction result per symbol · prevents re-scoring same stock on repeated chat questions</div>
+              <div><span style="color:#d29922;font-weight:700">4 hr</span> — <code>_yfSummaryCache</code> (in-memory Map) · analyst ratings + short interest per symbol · data changes slowly so safe to reuse</div>
+              <div><span style="color:#6e7681;font-weight:700">30 min</span> — <code>loadPatterns()</code> · historical win rates by regime from PostgreSQL</div>
+              <div style="margin-top:4px;font-size:0.7rem;color:#6e7681">Cache is per-process — server restart clears all caches. Each user's chat session may trigger a warm re-score (from cache) vs. a fresh score depending on timing.</div>
+            </div>
+          </div>
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:14px">
+            <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Output Object Fields</div>
+            <div style="font-size:0.74rem;color:#c9d1d9;font-family:monospace;display:flex;flex-direction:column;gap:3px">
+              <div><span style="color:#58a6ff">score</span> <span style="color:#6e7681">0–100 final conviction</span></div>
+              <div><span style="color:#58a6ff">grade</span> <span style="color:#6e7681">A / B / C / F</span></div>
+              <div><span style="color:#58a6ff">recommendation</span> <span style="color:#6e7681">strong_buy / buy / skip / avoid</span></div>
+              <div><span style="color:#58a6ff">breakdown</span> <span style="color:#6e7681">every factor key → points (full audit trail)</span></div>
+              <div><span style="color:#58a6ff">signals</span> <span style="color:#6e7681">raw values: rsi, macd_hist, ema20/50, rvol, vix, short_float_pct, etc.</span></div>
+              <div><span style="color:#58a6ff">technical_summary</span> <span style="color:#6e7681">one-sentence chart read</span></div>
+              <div><span style="color:#58a6ff">tv_available</span> <span style="color:#6e7681">bool — were TV factors applied?</span></div>
+              <div><span style="color:#58a6ff">weights_source</span> <span style="color:#6e7681">ml_model / backtest_heuristic / none</span></div>
+              <div><span style="color:#58a6ff">ml_model_id</span> <span style="color:#6e7681">model run timestamp from model_results</span></div>
+              <div><span style="color:#58a6ff">ml_auc_roc</span> <span style="color:#6e7681">AUC of the trained model (0.52 typical)</span></div>
+              <div><span style="color:#58a6ff">cached</span> <span style="color:#6e7681">true if returned from 5-min cache</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Grade thresholds ── -->
+        <div style="background:rgba(13,17,23,0.8);border:1px solid #21262d;border-radius:12px;padding:14px">
+          <div style="font-size:0.7rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Final Grade Thresholds — what each band means</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
             <div style="background:#3fb95014;border:1px solid #3fb95030;border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:1.15rem;font-weight:700;color:#3fb950">80–100</div>
-              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">🔥 Strong Buy</div>
-              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Rarely seen. Max position size. Highest confidence.</div>
+              <div style="font-size:1.4rem;font-weight:800;color:#3fb950">A</div>
+              <div style="font-size:0.9rem;font-weight:700;color:#3fb950">80–100</div>
+              <div style="font-size:0.7rem;color:#c9d1d9;margin-top:4px">strong_buy</div>
+              <div style="font-size:0.68rem;color:#6e7681;margin-top:3px">Rarely seen. Beat streak + strong RS + positive MACD + low VIX all aligned. Backtest adj +8. Max position size.</div>
             </div>
             <div style="background:#d2992214;border:1px solid #d2992230;border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:1.15rem;font-weight:700;color:#d29922">60–79</div>
-              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">✅ Buy Signal</div>
-              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Standard conviction. Normal position size.</div>
+              <div style="font-size:1.4rem;font-weight:800;color:#d29922">B</div>
+              <div style="font-size:0.9rem;font-weight:700;color:#d29922">60–79</div>
+              <div style="font-size:0.7rem;color:#c9d1d9;margin-top:4px">buy</div>
+              <div style="font-size:0.68rem;color:#6e7681;margin-top:3px">Standard trade setup. Several signals aligned but not all. Backtest adj +3. Normal position size.</div>
             </div>
             <div style="background:#58a6ff14;border:1px solid #58a6ff30;border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:1.15rem;font-weight:700;color:#58a6ff">50–59</div>
-              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">🟡 Borderline</div>
-              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Meets threshold. Smaller size. Watch closely.</div>
+              <div style="font-size:1.4rem;font-weight:800;color:#58a6ff">C</div>
+              <div style="font-size:0.9rem;font-weight:700;color:#58a6ff">40–59</div>
+              <div style="font-size:0.7rem;color:#c9d1d9;margin-top:4px">skip</div>
+              <div style="font-size:0.68rem;color:#6e7681;margin-top:3px">Mixed signals. Scanner skips unless forced via UI. Backtest adj −2. Historically underperforms B-grade picks.</div>
             </div>
             <div style="background:#f8514914;border:1px solid #f8514930;border-radius:8px;padding:10px;text-align:center">
-              <div style="font-size:1.15rem;font-weight:700;color:#f85149">0–49</div>
-              <div style="font-size:0.72rem;color:#c9d1d9;margin-top:2px">❌ No Trade</div>
-              <div style="font-size:0.7rem;color:#6e7681;margin-top:3px">Does not qualify. Scanner moves on.</div>
+              <div style="font-size:1.4rem;font-weight:800;color:#f85149">F</div>
+              <div style="font-size:0.9rem;font-weight:700;color:#f85149">0–39</div>
+              <div style="font-size:0.7rem;color:#c9d1d9;margin-top:4px">avoid</div>
+              <div style="font-size:0.68rem;color:#6e7681;margin-top:3px">Do not trade. Multiple negative signals or hard guards triggered (sector/correlation). Backtest adj −9.</div>
             </div>
           </div>
         </div>
