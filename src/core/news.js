@@ -330,16 +330,23 @@ export async function getEarnings({ symbol } = {}) {
     return { ...q, revenue: rev?.revenue ?? null, earnings_quality };
   });
 
-  // Next earnings date — try Yahoo Finance news search for "earnings date"
+  // Next earnings date — Nasdaq calendar (accurate call date, not fiscal quarter-end)
   let nextEarningsDates = [];
   try {
-    const newsData = await fetchJSON(
-      `${YF_SEARCH}/v1/finance/search?q=${encodeURIComponent(ticker + ' earnings date')}&newsCount=3&quotesCount=1`,
-      YF_HEADERS
+    const today = new Date();
+    const dates = Array.from({ length: 45 }, (_, d) =>
+      new Date(today.getTime() + d * 86400000).toISOString().split('T')[0]
     );
-    const quote = newsData?.quotes?.[0];
-    if (quote?.earningsTimestamp) {
-      nextEarningsDates.push(new Date(quote.earningsTimestamp * 1000).toISOString().split('T')[0]);
+    outer: for (let i = 0; i < dates.length; i += 5) {
+      const batch = dates.slice(i, i + 5);
+      const results = await Promise.allSettled(
+        batch.map(d => fetchJSON(`https://api.nasdaq.com/api/calendar/earnings?date=${d}`, NASDAQ_HEADERS))
+      );
+      for (let j = 0; j < results.length; j++) {
+        if (results[j].status !== 'fulfilled') continue;
+        const match = (results[j].value?.data?.rows || []).find(r => r.symbol?.toUpperCase() === ticker);
+        if (match) { nextEarningsDates.push(batch[j]); break outer; }
+      }
     }
   } catch (_) {}
 
