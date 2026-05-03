@@ -81,6 +81,7 @@ export async function isKnowledgeQuestion(text) {
     /\b(auto.?execut|book.?trade|execut.*automatically|scan.*execut|take.*profit.*auto)/i,
     /\bhow (much|did) i (made?|got?|earned?|profit)/i,
     /\bi (made?|got?|earned?)\s+\$?\d/i,
+    /\b(predict|prediction|forecast|price target|day by day|next \d+ days?|target price|where.*headed|how high|how low)\b/i,
   ];
   if (actionPatterns.some(p => p.test(text))) return false;
 
