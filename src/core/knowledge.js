@@ -38,115 +38,30 @@ function searchKnowledgeByKeyword(query) {
     .slice(0, 3);
 }
 
-async function callOllama(prompt, { onChunk } = {}) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 120_000);
-  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: OLLAMA_KNOWLEDGE_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      stream: true,
-    }),
-    signal: ctrl.signal,
-  });
-  clearTimeout(timer);
-
-  if (!resp.ok) throw new Error(`Ollama chat returned ${resp.status}`);
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let answer = '';
-  let buf = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const chunk = JSON.parse(line);
-        const token = chunk.message?.content ?? '';
-        if (token) {
-          answer += token;
-          if (onChunk) onChunk(token);
-        }
-      } catch { /* skip malformed chunk */ }
-    }
-  }
-
-  // Trim off any second topic Ollama appended unprompted
-  const secondTopicMatch = answer.match(/\n\n\*\*[A-Z][^*]{5,50}\*\*/);
-  if (secondTopicMatch && secondTopicMatch.index > 100) {
-    answer = answer.slice(0, secondTopicMatch.index).trim();
-  }
-
-  return answer;
-}
-
 export async function answerKnowledgeQuestion(userQuestion, { onChunk } = {}) {
   try {
-    // Fast path — local KB keyword search first (instant, no Ollama needed)
+    // Fast path — keyword match on local KB (instant, no API call)
     const localChunks = searchKnowledgeByKeyword(userQuestion);
     if (localChunks.length && localChunks[0].score >= 2) {
       const answer = localChunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
       return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: localChunks.length };
     }
 
+    // Vector similarity path — use embeddings for semantic match
     const embedding = await getEmbedding(userQuestion);
-
-    if (!embedding) {
-      // Ollama offline — use local KB keyword match if score >= 1, else say so
-      if (localChunks.length) {
-        const answer = localChunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
-        return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: localChunks.length };
+    if (embedding) {
+      const results = await searchKnowledge({ embedding, limit: 3 });
+      const relevant = results.filter(r => r.similarity > 0.55);
+      if (relevant.length) {
+        const answer = relevant.map(r => `**${r.title}**\n${r.content}`).join('\n\n');
+        return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: relevant.length };
       }
-      return { answer: 'Sorry, the knowledge service is offline right now. Please try again in a moment.', source: 'error' };
     }
 
-    // Vector similarity search — raise threshold to 0.55 so only genuinely relevant chunks pass
-    const results = await searchKnowledge({ embedding, limit: 3 });
-    const relevant = results.filter(r => r.similarity > 0.55);
-
-    let prompt;
-    if (relevant.length) {
-      const context = relevant.map(r => r.content).join('\n\n');
-      prompt = `You are a trading coach. Answer the question below using ONLY the provided context.
-Do not add information from other topics. Do not include unrelated concepts.
-Answer in 3-5 sentences maximum. Be specific and practical.
-
-Context:
-${context}
-
-Question: ${userQuestion}
-
-Answer:`;
-    } else {
-      // No relevant chunks in the knowledge base — answer from Ollama's built-in knowledge
-      prompt = `You are an expert trading coach. Answer the following trading question accurately and concisely.
-Give a clear, practical answer in 4-6 sentences. Cover the key concepts the trader needs to know.
-Do not add unrelated topics.
-
-Question: ${userQuestion}
-
-Answer:`;
-    }
-
-    const answer = await callOllama(prompt, { onChunk });
-
-    return {
-      answer,
-      source:      'ollama',
-      model:       OLLAMA_KNOWLEDGE_MODEL,
-      chunks_used: relevant.length,
-      streamed:    !!onChunk,
-    };
+    // No good local match — return error so caller falls through to Claude Sonnet
+    return { source: 'error' };
   } catch {
-    return { answer: 'Sorry, could not retrieve an answer right now.', source: 'error' };
+    return { source: 'error' };
   }
 }
 
