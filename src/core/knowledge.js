@@ -159,6 +159,8 @@ export async function isKnowledgeQuestion(text) {
     /\b(buy|sell) (today|now|signal)/i,
     /\b(my |open )?(positions?|portfolio|balance|p.?l|pnl)\b/i,
     /\b(execute|place|enter|open|close) (a |the )?(trade|position|order)\b/i,
+    /\b(our|my|the bot'?s?)\s+(trade\s+rules?|trading\s+rules?|rules|config|settings|setup)\b/i,
+    /\b(what are|what is|tell me)\s+(our|my|the)\s+(rules?|trade\s+rules?|limits?)\b/i,
   ];
   if (actionPatterns.some(p => p.test(text))) return false;
 
