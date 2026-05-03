@@ -706,14 +706,16 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
   // Route knowledge/education questions to Ollama (no Claude API cost).
   // Fall through to Claude if Ollama is offline so the user always gets an answer.
   if (await isKnowledgeQuestion(message)) {
-    const result = await answerKnowledgeQuestion(message);
+    const result = await answerKnowledgeQuestion(message, { onChunk });
     if (result.source !== 'error') {
       return {
         role: 'assistant',
         content: result.answer,
         source: result.source,
         model: result.model ?? 'ollama',
-        knowledge_response: true,
+        // Use the knowledge card only for instant local-KB answers;
+        // Ollama responses are already streamed via onChunk so no card needed.
+        knowledge_response: !result.streamed,
       };
     }
     // Ollama offline — fall through to Claude below
