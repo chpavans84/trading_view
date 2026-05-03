@@ -161,6 +161,11 @@ export async function isKnowledgeQuestion(text) {
     /\b(execute|place|enter|open|close) (a |the )?(trade|position|order)\b/i,
     /\b(our|my|the bot'?s?)\s+(trade\s+rules?|trading\s+rules?|rules|config|settings|setup)\b/i,
     /\b(what are|what is|tell me)\s+(our|my|the)\s+(rules?|trade\s+rules?|limits?)\b/i,
+    /\b(check|show|find|analyse?|analyze?|review|look at)\b.*(my|last).*(trade|pattern|result|performance)/i,
+    /\b(last\s+(friday|monday|tuesday|wednesday|thursday|saturday|week|month|yesterday))\b/i,
+    /\b(auto.?execut|book.?trade|execut.*automatically|scan.*execut|take.*profit.*auto)/i,
+    /\bhow (much|did) i (made?|got?|earned?|profit)/i,
+    /\bi (made?|got?|earned?)\s+\$?\d/i,
   ];
   if (actionPatterns.some(p => p.test(text))) return false;
 
@@ -171,7 +176,7 @@ export async function isKnowledgeQuestion(text) {
     /how does\b/i, /how do i\b/i, /how to\b/i,
     /teach me\b/i, /define\b/i, /meaning of\b/i, /tell me about\b/i,
     /difference between\b/i, /when (should|do) i\b/i,
-    /\b(rsi|macd|ema|sma|vwap|atr|bollinger|fibonacci|candlestick|divergence|breakout|pullback|support|resistance|trend|momentum|reversal|volume|float|short squeeze|gap up|gap down|pre.?market|after.?hours|position sizing|stop loss|take profit|risk reward|r:r|pattern|setup|strategy|indicator|order type|market order|limit order|stop limit)\b/i,
+    /\b(rsi|macd|ema|sma|vwap|atr|bollinger|fibonacci|candlestick|divergence|breakout|pullback|support|resistance|trend|momentum|reversal|volume|float|short squeeze|gap up|gap down|pre.?market|after.?hours|position sizing|stop loss|take profit|risk reward|r:r|chart pattern|candlestick pattern|bull flag|bear flag|cup and handle|setup|strategy|indicator|order type|market order|limit order|stop limit)\b/i,
     /\b(option|options|call option|put option|calls|puts|strike price|expiry|expiration|implied volatility|iv rank|theta|delta|gamma|vega|greeks|covered call|protective put|iron condor|straddle|strangle|otm|itm|atm|derivatives|contracts)\b/i,
   ];
   return knowledgePatterns.some(p => p.test(text));
