@@ -1545,3 +1545,8 @@ export async function countKnowledgeChunks() {
   const { rows } = await query(`SELECT COUNT(*) AS total FROM knowledge_chunks`);
   return parseInt(rows[0]?.total ?? 0);
 }
+
+export async function countKnowledgeChunksByTopic(category) {
+  const { rows } = await query(`SELECT COUNT(*) AS total FROM knowledge_chunks WHERE category = $1`, [category]);
+  return parseInt(rows[0]?.total ?? 0);
+}
