@@ -4366,6 +4366,7 @@ httpServer.on('error', (err) => {
 
 httpServer.listen(PORT, () => {
   console.log(`🌐 Dashboard running at http://localhost:${PORT}`);
+  console.log(`[knowledge] using model: ${process.env.OLLAMA_KNOWLEDGE_MODEL || 'llama3.2:3b'}`);
 
   // Pre-warm caches in the background so first user requests are instant
   const today = new Date().toISOString().split('T')[0];
