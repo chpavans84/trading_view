@@ -755,8 +755,8 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
       return {
         role:    'assistant',
         content: formatted.answer,
-        source:  'fundamentals_screener',
-        model:   'local_db',
+        source:  'local_db',
+        model:   'PostgreSQL',
         screener_response: true,
         count:   formatted.count,
       };
@@ -836,6 +836,11 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
 
     // Final response
     pushHistory(chatId, { role: 'assistant', content: fullText });
-    return fullText;
+    return {
+      role:    'assistant',
+      content: fullText,
+      source:  'claude',
+      model:   'claude-sonnet-4-6',
+    };
   }
 }
