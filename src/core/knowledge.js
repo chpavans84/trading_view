@@ -1,4 +1,4 @@
-import { searchKnowledge, saveKnowledgeChunk, countKnowledgeChunks } from './db.js';
+import { searchKnowledge, saveKnowledgeChunk, countKnowledgeChunks, query } from './db.js';
 
 const OLLAMA_URL            = process.env.OLLAMA_URL            || 'http://localhost:11434';
 const OLLAMA_MODEL          = process.env.OLLAMA_MODEL          || 'llama3.1:8b';
@@ -319,6 +319,107 @@ const KNOWLEDGE_BASE = [
     content: 'Between roughly 11:30 AM and 2 PM ET, trading volume drops sharply and price action becomes choppy and directionless as institutional traders break for lunch. Breakouts during this window frequently fail; trends started in the morning often stall. Many intraday traders reduce size or stop trading entirely during this window, resuming at the 2 PM "power hour" session.',
   },
 ];
+
+export function isTradeHistoryQuestion(text) {
+  const livePatterns = [
+    /should i (buy|sell|hold|close)/i,
+    /right now/i, /current price/i,
+    /place.*order/i, /scan for trade/i,
+  ];
+  if (livePatterns.some(p => p.test(text))) return false;
+
+  const patterns = [
+    /why.*i.*(profit|win|made money)/i,
+    /why.*i.*(los[st]|fail|went wrong)/i,
+    /why.*(profit|loss|win|lose)/i,
+    /what went (wrong|right)/i,
+    /my.*last.*trade/i, /recent.*trade/i,
+    /trade.*history/i, /trade.*pattern/i,
+    /how.*i.*perform/i, /my.*win rate/i,
+    /best.*trade/i, /worst.*trade/i,
+    /my.*p&?l/i, /my.*pnl/i,
+    /how much.*made/i, /how much.*lost/i,
+    /average.*profit/i, /average.*loss/i,
+    /what.*mistake/i, /compare.*trade/i,
+    /day \d.*day \d/i, /first day.*third day/i,
+    /which.*trade.*profit/i, /which.*trade.*los[st]/i,
+  ];
+  return patterns.some(p => p.test(text));
+}
+
+export async function answerTradeHistoryQuestion(userQuestion) {
+  try {
+    const { rows } = await query(`
+      SELECT
+        symbol, side,
+        TO_CHAR(created_at AT TIME ZONE 'America/New_York', 'Mon DD YYYY') AS trade_date,
+        TO_CHAR(created_at AT TIME ZONE 'America/New_York', 'HH12:MI AM')  AS entry_time,
+        entry_price, exit_price, qty,
+        ROUND(pnl_usd::numeric, 2)  AS pnl_usd,
+        ROUND(pnl_pct::numeric, 2)  AS pnl_pct,
+        conviction_score, conviction_grade,
+        conviction_breakdown
+      FROM trades
+      WHERE status = 'closed' AND pnl_usd IS NOT NULL
+      ORDER BY created_at DESC LIMIT 30
+    `);
+
+    if (!rows.length) {
+      return {
+        answer: 'No closed trades in the database yet. Start trading and I can analyse your patterns.',
+        source: 'local_db',
+      };
+    }
+
+    const wins     = rows.filter(t => t.pnl_usd > 0).length;
+    const losses   = rows.filter(t => t.pnl_usd <= 0).length;
+    const totalPnl = rows.reduce((s, t) => s + parseFloat(t.pnl_usd), 0).toFixed(2);
+    const winRate  = ((wins / rows.length) * 100).toFixed(1);
+    const avgWin   = (rows.filter(t => t.pnl_usd > 0)
+                        .reduce((s, t) => s + parseFloat(t.pnl_usd), 0) / (wins || 1)).toFixed(2);
+    const avgLoss  = (rows.filter(t => t.pnl_usd <= 0)
+                        .reduce((s, t) => s + parseFloat(t.pnl_usd), 0) / (losses || 1)).toFixed(2);
+
+    const tradeLines = rows.map((t, i) => {
+      const result = parseFloat(t.pnl_usd) > 0 ? 'WIN' : 'LOSS';
+      const regime = t.conviction_breakdown?.regime ?? 'unknown';
+      return `Day ${i + 1} | ${t.trade_date} ${t.entry_time} | ${t.symbol} | ${result} | P&L: $${t.pnl_usd} (${t.pnl_pct}%) | Conviction: ${t.conviction_score ?? 'n/a'}/${t.conviction_grade ?? 'n/a'} | Regime: ${regime}`;
+    }).join('\n');
+
+    const summary = `${rows.length} trades | Wins: ${wins} | Losses: ${losses} | Win Rate: ${winRate}% | Total P&L: $${totalPnl} | Avg Win: $${avgWin} | Avg Loss: $${avgLoss}`;
+
+    const prompt = `You are a personal trading coach analysing a trader's real trade history.
+
+Summary: ${summary}
+
+Trades (newest first):
+${tradeLines}
+
+Question: "${userQuestion}"
+
+Answer using only the data above. Reference specific dates, symbols, P&L, conviction scores, and regimes. Compare winning vs losing trade conditions. Give 3-5 sentences with specific observations then 1-2 actionable recommendations. No generic advice.`;
+
+    const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        model:    OLLAMA_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        stream:   false,
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!resp.ok) throw new Error(`Ollama ${resp.status}`);
+    const data   = await resp.json();
+    const answer = data.message?.content?.trim() ?? 'Could not analyse trades.';
+
+    return { answer, source: 'ollama', model: OLLAMA_MODEL };
+  } catch (err) {
+    console.error('[trade-history]', err.message);
+    return { answer: 'Could not load trade history right now.', source: 'error' };
+  }
+}
 
 export async function seedKnowledge() {
   const existing = await countKnowledgeChunks();

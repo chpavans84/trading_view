@@ -35,7 +35,7 @@ import {
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
 import { getFunds, getPositions as getMoomooPositions, getQuote as moomooGetQuote, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
-import { isKnowledgeQuestion, answerKnowledgeQuestion } from './knowledge.js';
+import { isKnowledgeQuestion, answerKnowledgeQuestion, isTradeHistoryQuestion, answerTradeHistoryQuestion } from './knowledge.js';
 import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswer } from './fundamental-screener.js';
 
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
@@ -719,6 +719,20 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
       };
     }
     // Ollama offline — fall through to Claude below
+  }
+
+  // Trade history — fetch from DB, answer via Ollama, no Claude API cost
+  if (isTradeHistoryQuestion(message)) {
+    const result = await answerTradeHistoryQuestion(message);
+    if (result.source !== 'error') {
+      return {
+        role:    'assistant',
+        content: result.answer,
+        source:  'ollama',
+        model:   result.model ?? OLLAMA_MODEL,
+        trade_history_response: true,
+      };
+    }
   }
 
   // Route fundamental screening questions to local PostgreSQL (zero Claude API cost).
