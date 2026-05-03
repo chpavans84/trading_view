@@ -2,7 +2,7 @@ import { searchKnowledge, saveKnowledgeChunk, countKnowledgeChunks, countKnowled
 
 const OLLAMA_URL             = process.env.OLLAMA_URL             || 'http://localhost:11434';
 const OLLAMA_MODEL           = process.env.OLLAMA_MODEL           || 'llama3.1:8b';
-const OLLAMA_KNOWLEDGE_MODEL = process.env.OLLAMA_KNOWLEDGE_MODEL || 'llama3.1:8b';
+const OLLAMA_KNOWLEDGE_MODEL = process.env.OLLAMA_KNOWLEDGE_MODEL || 'llama3.2:3b';
 
 export async function getEmbedding(text) {
   try {
