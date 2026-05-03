@@ -25,6 +25,7 @@ import {
   DAILY_PROFIT_TARGET, DAILY_LOSS_LIMIT,
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades } from './db.js';
+import { isKnowledgeQuestion, answerKnowledgeQuestion } from './knowledge.js';
 
 const PRICE_INPUT_PER_M  = 0.80;
 const PRICE_OUTPUT_PER_M = 4.00;
@@ -430,6 +431,22 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
  * Returns the full response text.
  */
 export async function chat({ chatId, message, onChunk, onTool, signal, userConfig = null, username = null }) {
+  // Route knowledge/education questions to local KB + Ollama (no Claude API cost).
+  // Fall through to Claude only if Ollama is offline or returns an error.
+  if (await isKnowledgeQuestion(message)) {
+    const result = await answerKnowledgeQuestion(message, { onChunk });
+    if (result.source !== 'error') {
+      return {
+        role: 'assistant',
+        content: result.answer,
+        source: result.source,
+        model: result.model ?? 'ollama',
+        knowledge_response: !result.streamed,
+      };
+    }
+    // Ollama offline — fall through to Claude below
+  }
+
   if (!chatHistory.has(chatId)) await loadHistoryForChat(chatId);
   pushHistory(chatId, { role: 'user', content: message });
 
