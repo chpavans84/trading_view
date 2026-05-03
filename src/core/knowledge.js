@@ -48,24 +48,30 @@ export async function answerKnowledgeQuestion(userQuestion) {
       return { answer: 'Sorry, no matching knowledge found for that question.', source: 'error' };
     }
 
-    const results = await searchKnowledge({ embedding, limit: 4 });
+    const results = await searchKnowledge({ embedding, limit: 2 });
 
-    const context = results.map(r => `[${r.category}] ${r.title}:\n${r.content}`).join('\n\n');
+    const context = results
+      .filter(r => r.similarity > 0.3)
+      .map(r => r.content)
+      .join('\n\n');
 
     const prompt = context
-      ? `You are an expert trading coach. Use the following knowledge to answer the question accurately and concisely.
+      ? `You are a trading coach. Answer the question below using ONLY the provided context.
+Do not add information from other topics. Do not include unrelated concepts.
+Answer in 3-5 sentences maximum. Be specific and practical.
 
 Context:
 ${context}
 
 Question: ${userQuestion}
 
-Answer in 3-5 sentences. Be specific and practical. No waffle.`
-      : `You are an expert trading coach. Answer this trading question accurately and concisely.
+Answer:`
+      : `You are a trading coach. Answer this trading question in 3-5 sentences.
+Be specific and practical. No waffle.
 
 Question: ${userQuestion}
 
-Answer in 3-5 sentences. Be specific and practical.`;
+Answer:`;
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 60_000);
@@ -84,8 +90,17 @@ Answer in 3-5 sentences. Be specific and practical.`;
     if (!resp.ok) throw new Error(`Ollama chat returned ${resp.status}`);
     const data = await resp.json();
 
+    // Trim answer — Ollama sometimes adds a second topic unprompted
+    let answer = (data.message?.content ?? '').trim();
+
+    // If Ollama added a bold header for a second topic, cut it off
+    const secondTopicMatch = answer.match(/\n\n\*\*[A-Z][^*]{5,50}\*\*/);
+    if (secondTopicMatch && secondTopicMatch.index > 100) {
+      answer = answer.slice(0, secondTopicMatch.index).trim();
+    }
+
     return {
-      answer:      data.message.content.trim(),
+      answer,
       source:      'ollama',
       model:       OLLAMA_MODEL,
       chunks_used: results.length,
