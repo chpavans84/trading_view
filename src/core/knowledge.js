@@ -1,7 +1,9 @@
 import { searchKnowledge, saveKnowledgeChunk, countKnowledgeChunks } from './db.js';
 
-const OLLAMA_URL   = process.env.OLLAMA_URL   || 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+const OLLAMA_URL            = process.env.OLLAMA_URL            || 'http://localhost:11434';
+const OLLAMA_MODEL          = process.env.OLLAMA_MODEL          || 'llama3.1:8b';
+// Knowledge Q&A uses a lightweight model — trading-coach (19 GB) is too slow for instant answers
+const OLLAMA_KNOWLEDGE_MODEL = process.env.OLLAMA_KNOWLEDGE_MODEL || 'llama3.1:8b';
 
 export async function getEmbedding(text) {
   try {
@@ -74,12 +76,12 @@ Question: ${userQuestion}
 Answer:`;
 
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 60_000);
+    const timer = setTimeout(() => ctrl.abort(), 120_000);
     const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
+        model: OLLAMA_KNOWLEDGE_MODEL,
         messages: [{ role: 'user', content: prompt }],
         stream: false,
       }),
@@ -102,7 +104,7 @@ Answer:`;
     return {
       answer,
       source:      'ollama',
-      model:       OLLAMA_MODEL,
+      model:       OLLAMA_KNOWLEDGE_MODEL,
       chunks_used: results.length,
     };
   } catch {
