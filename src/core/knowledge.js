@@ -37,15 +37,22 @@ function searchKnowledgeByKeyword(query) {
     .slice(0, 3);
 }
 
-export async function answerKnowledgeQuestion(userQuestion) {
+export async function answerKnowledgeQuestion(userQuestion, { onChunk } = {}) {
   try {
+    // Fast path — local KB first. On CPU-only hardware Ollama is slow (~100s for 8B model).
+    // If the question maps directly to a pre-written chunk, serve it instantly.
+    const localChunks = searchKnowledgeByKeyword(userQuestion);
+    if (localChunks.length && localChunks[0].score >= 2) {
+      const answer = localChunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
+      return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: localChunks.length };
+    }
+
     const embedding = await getEmbedding(userQuestion);
     if (!embedding) {
-      // Ollama offline — serve directly from built-in knowledge base (no LLM cost)
-      const chunks = searchKnowledgeByKeyword(userQuestion);
-      if (chunks.length) {
-        const answer = chunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
-        return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: chunks.length };
+      // Ollama offline — fall back to any local KB match (even score 1)
+      if (localChunks.length) {
+        const answer = localChunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
+        return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: localChunks.length };
       }
       return { answer: 'Sorry, no matching knowledge found for that question.', source: 'error' };
     }
@@ -83,19 +90,40 @@ Answer:`;
       body: JSON.stringify({
         model: OLLAMA_KNOWLEDGE_MODEL,
         messages: [{ role: 'user', content: prompt }],
-        stream: false,
+        stream: true,
       }),
       signal: ctrl.signal,
     });
     clearTimeout(timer);
 
     if (!resp.ok) throw new Error(`Ollama chat returned ${resp.status}`);
-    const data = await resp.json();
 
-    // Trim answer — Ollama sometimes adds a second topic unprompted
-    let answer = (data.message?.content ?? '').trim();
+    // Stream tokens to caller so the user sees text appear immediately
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let answer = '';
+    let buf = '';
 
-    // If Ollama added a bold header for a second topic, cut it off
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const chunk = JSON.parse(line);
+          const token = chunk.message?.content ?? '';
+          if (token) {
+            answer += token;
+            if (onChunk) onChunk(token);
+          }
+        } catch { /* skip malformed chunk */ }
+      }
+    }
+
+    // Trim off any second topic Ollama appended unprompted
     const secondTopicMatch = answer.match(/\n\n\*\*[A-Z][^*]{5,50}\*\*/);
     if (secondTopicMatch && secondTopicMatch.index > 100) {
       answer = answer.slice(0, secondTopicMatch.index).trim();
@@ -106,6 +134,7 @@ Answer:`;
       source:      'ollama',
       model:       OLLAMA_KNOWLEDGE_MODEL,
       chunks_used: results.length,
+      streamed:    !!onChunk,
     };
   } catch {
     return { answer: 'Sorry, could not retrieve an answer right now.', source: 'error' };
