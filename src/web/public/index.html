@@ -8162,7 +8162,7 @@ async function sendChat() {
               <div class="knowledge-header">
                 <span class="knowledge-icon">📚</span>
                 <span class="knowledge-label">Trading Coach</span>
-                <span class="knowledge-model">via Ollama · ${d.model ?? 'llama3.1:8b'}</span>
+                <span class="knowledge-model">${d.model === 'Knowledge Base' ? '🗄️ Knowledge Base (local)' : `🦙 Ollama · ${d.model ?? 'llama3.1:8b'}`}</span>
               </div>
               <div class="knowledge-content">${d.content.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
             msgs.scrollTop = msgs.scrollHeight;
@@ -8183,7 +8183,8 @@ async function sendChat() {
             msgs.scrollTop = msgs.scrollHeight;
           } else if (d.done) {
             // Show source badge on the completed message
-            if (d.source && el) {
+            // Skip for knowledge responses — they already have their own styled header card
+            if (d.source && el && !d.knowledge_response) {
               const labels = {
                 'ollama':   '🦙 Ollama (local)',
                 'local_db': '🗄️ Local DB',
