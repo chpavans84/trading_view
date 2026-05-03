@@ -1,8 +1,7 @@
-import { searchKnowledge, saveKnowledgeChunk, countKnowledgeChunks, query } from './db.js';
+import { searchKnowledge, saveKnowledgeChunk, countKnowledgeChunks, countKnowledgeChunksByTopic, query } from './db.js';
 
-const OLLAMA_URL            = process.env.OLLAMA_URL            || 'http://localhost:11434';
-const OLLAMA_MODEL          = process.env.OLLAMA_MODEL          || 'llama3.1:8b';
-// Knowledge Q&A uses a lightweight model — trading-coach (19 GB) is too slow for instant answers
+const OLLAMA_URL             = process.env.OLLAMA_URL             || 'http://localhost:11434';
+const OLLAMA_MODEL           = process.env.OLLAMA_MODEL           || 'llama3.1:8b';
 const OLLAMA_KNOWLEDGE_MODEL = process.env.OLLAMA_KNOWLEDGE_MODEL || 'llama3.1:8b';
 
 export async function getEmbedding(text) {
@@ -37,10 +36,59 @@ function searchKnowledgeByKeyword(query) {
     .slice(0, 3);
 }
 
+async function callOllama(prompt, { onChunk } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120_000);
+  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OLLAMA_KNOWLEDGE_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      stream: true,
+    }),
+    signal: ctrl.signal,
+  });
+  clearTimeout(timer);
+
+  if (!resp.ok) throw new Error(`Ollama chat returned ${resp.status}`);
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let answer = '';
+  let buf = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const chunk = JSON.parse(line);
+        const token = chunk.message?.content ?? '';
+        if (token) {
+          answer += token;
+          if (onChunk) onChunk(token);
+        }
+      } catch { /* skip malformed chunk */ }
+    }
+  }
+
+  // Trim off any second topic Ollama appended unprompted
+  const secondTopicMatch = answer.match(/\n\n\*\*[A-Z][^*]{5,50}\*\*/);
+  if (secondTopicMatch && secondTopicMatch.index > 100) {
+    answer = answer.slice(0, secondTopicMatch.index).trim();
+  }
+
+  return answer;
+}
+
 export async function answerKnowledgeQuestion(userQuestion, { onChunk } = {}) {
   try {
-    // Fast path — local KB first. On CPU-only hardware Ollama is slow (~100s for 8B model).
-    // If the question maps directly to a pre-written chunk, serve it instantly.
+    // Fast path — local KB keyword search first (instant, no Ollama needed)
     const localChunks = searchKnowledgeByKeyword(userQuestion);
     if (localChunks.length && localChunks[0].score >= 2) {
       const answer = localChunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
@@ -48,24 +96,24 @@ export async function answerKnowledgeQuestion(userQuestion, { onChunk } = {}) {
     }
 
     const embedding = await getEmbedding(userQuestion);
+
     if (!embedding) {
-      // Ollama offline — fall back to any local KB match (even score 1)
+      // Ollama offline — use local KB keyword match if score >= 1, else say so
       if (localChunks.length) {
         const answer = localChunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
         return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: localChunks.length };
       }
-      return { answer: 'Sorry, no matching knowledge found for that question.', source: 'error' };
+      return { answer: 'Sorry, the knowledge service is offline right now. Please try again in a moment.', source: 'error' };
     }
 
-    const results = await searchKnowledge({ embedding, limit: 2 });
+    // Vector similarity search — raise threshold to 0.55 so only genuinely relevant chunks pass
+    const results = await searchKnowledge({ embedding, limit: 3 });
+    const relevant = results.filter(r => r.similarity > 0.55);
 
-    const context = results
-      .filter(r => r.similarity > 0.3)
-      .map(r => r.content)
-      .join('\n\n');
-
-    const prompt = context
-      ? `You are a trading coach. Answer the question below using ONLY the provided context.
+    let prompt;
+    if (relevant.length) {
+      const context = relevant.map(r => r.content).join('\n\n');
+      prompt = `You are a trading coach. Answer the question below using ONLY the provided context.
 Do not add information from other topics. Do not include unrelated concepts.
 Answer in 3-5 sentences maximum. Be specific and practical.
 
@@ -74,66 +122,25 @@ ${context}
 
 Question: ${userQuestion}
 
-Answer:`
-      : `You are a trading coach. Answer this trading question in 3-5 sentences.
-Be specific and practical. No waffle.
+Answer:`;
+    } else {
+      // No relevant chunks in the knowledge base — answer from Ollama's built-in knowledge
+      prompt = `You are an expert trading coach. Answer the following trading question accurately and concisely.
+Give a clear, practical answer in 4-6 sentences. Cover the key concepts the trader needs to know.
+Do not add unrelated topics.
 
 Question: ${userQuestion}
 
 Answer:`;
-
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 120_000);
-    const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_KNOWLEDGE_MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        stream: true,
-      }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-
-    if (!resp.ok) throw new Error(`Ollama chat returned ${resp.status}`);
-
-    // Stream tokens to caller so the user sees text appear immediately
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let answer = '';
-    let buf = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const chunk = JSON.parse(line);
-          const token = chunk.message?.content ?? '';
-          if (token) {
-            answer += token;
-            if (onChunk) onChunk(token);
-          }
-        } catch { /* skip malformed chunk */ }
-      }
     }
 
-    // Trim off any second topic Ollama appended unprompted
-    const secondTopicMatch = answer.match(/\n\n\*\*[A-Z][^*]{5,50}\*\*/);
-    if (secondTopicMatch && secondTopicMatch.index > 100) {
-      answer = answer.slice(0, secondTopicMatch.index).trim();
-    }
+    const answer = await callOllama(prompt, { onChunk });
 
     return {
       answer,
       source:      'ollama',
       model:       OLLAMA_KNOWLEDGE_MODEL,
-      chunks_used: results.length,
+      chunks_used: relevant.length,
       streamed:    !!onChunk,
     };
   } catch {
@@ -142,8 +149,7 @@ Answer:`;
 }
 
 export async function isKnowledgeQuestion(text) {
-  // Action/portfolio questions — never route to knowledge base even if they
-  // contain generic words like "what are" or indicator names
+  // Action/portfolio questions — never route to knowledge base
   const actionPatterns = [
     /what (are|is) (the |my )?(trades?|positions?|stocks?|picks?) (to buy|to sell|today|now)/i,
     /what (should|can) i (buy|sell|trade|do)/i,
@@ -160,6 +166,7 @@ export async function isKnowledgeQuestion(text) {
     /teach me\b/i, /define\b/i, /meaning of\b/i, /tell me about\b/i,
     /difference between\b/i, /when (should|do) i\b/i,
     /\b(rsi|macd|ema|sma|vwap|atr|bollinger|fibonacci|candlestick|divergence|breakout|pullback|support|resistance|trend|momentum|reversal|volume|float|short squeeze|gap up|gap down|pre.?market|after.?hours|position sizing|stop loss|take profit|risk reward|r:r|pattern|setup|strategy|indicator)\b/i,
+    /\b(option|options|call option|put option|calls|puts|strike price|expiry|expiration|implied volatility|iv rank|theta|delta|gamma|vega|greeks|covered call|protective put|iron condor|straddle|strangle|otm|itm|atm|derivatives|contracts)\b/i,
   ];
   return knowledgePatterns.some(p => p.test(text));
 }
@@ -233,6 +240,44 @@ const KNOWLEDGE_BASE = [
   {
     topic: 'averaging down', category: 'risk_management', title: 'Never Average Down on a Losing Trade',
     content: 'Averaging down (adding to a losing position) increases your size and risk just as the trade is going against you. The market is telling you the thesis is wrong. If price hit your stop, exit — do not buy more. The only exception is a planned scaling strategy defined before entry, with a pre-set second entry level and a wider stop already accounted for in your position sizing.',
+  },
+
+  // ── Options Trading ──────────────────────────────────────────────────────────
+  {
+    topic: 'options basics calls puts', category: 'options', title: 'What Are Options — Calls and Puts',
+    content: 'An option is a contract that gives the buyer the right (but not the obligation) to buy or sell 100 shares of a stock at a set price before a specific date. A call option gives the right to BUY — you profit if the stock rises above the strike price. A put option gives the right to SELL — you profit if the stock falls below the strike price. The buyer pays a premium for this right; the seller collects the premium and takes on the obligation.',
+  },
+  {
+    topic: 'options strike price expiry', category: 'options', title: 'Strike Price and Expiration Date',
+    content: 'The strike price is the fixed price at which the option can be exercised (buying or selling the underlying stock). The expiration date is the last day the option can be used — after that it expires worthless if not exercised. Options closer to expiry (0–7 DTE) are cheaper but lose value rapidly (theta decay). Longer-dated options (30–90 DTE) cost more but give the trade time to work and decay slower.',
+  },
+  {
+    topic: 'options ITM ATM OTM', category: 'options', title: 'In the Money, At the Money, Out of the Money',
+    content: 'ITM (In the Money): a call is ITM when the stock price is above the strike price; a put is ITM when below. ITM options have intrinsic value and cost more. ATM (At the Money): strike price equals current stock price — highest theta decay, popular for selling strategies. OTM (Out of the Money): a call is OTM when stock is below strike; a put when above — no intrinsic value, all time value, cheaper but lower probability of profit.',
+  },
+  {
+    topic: 'implied volatility IV options', category: 'options', title: 'Implied Volatility (IV) and What It Means',
+    content: 'Implied Volatility (IV) reflects the market\'s expectation of how much a stock will move. High IV = expensive options (e.g., pre-earnings). Low IV = cheap options. When IV is high, selling options (collecting premium) is more profitable; when IV is low, buying options is better value. IV Crush happens after earnings when IV drops sharply and option prices collapse even if the stock moves in your direction — a common trap for options buyers.',
+  },
+  {
+    topic: 'options greeks delta theta gamma', category: 'options', title: 'Options Greeks — Delta, Theta, Gamma, Vega',
+    content: 'Delta: how much the option price moves per $1 move in the stock (call delta 0–1, put delta 0 to -1). An ATM option has delta ~0.5. Theta: daily time decay — the option loses this much value each day, accelerating near expiry. Gamma: rate of change of delta — high for near-term ATM options. Vega: sensitivity to IV — a rise in IV increases option price. For simple directional trades, focus on delta and theta; selling options benefits from theta, buying from delta.',
+  },
+  {
+    topic: 'options strategies covered call protective put', category: 'options', title: 'Basic Options Strategies',
+    content: 'Buying a call: bullish bet with limited downside (only the premium paid). Buying a put: bearish bet or portfolio hedge. Covered call: own 100 shares and sell a call above current price to collect premium — reduces upside but generates income. Protective put: own shares and buy a put to cap downside (like insurance). Long straddle: buy both a call and put at the same strike when expecting a big move but unsure of direction.',
+  },
+  {
+    topic: 'options vs stocks leverage risk time decay', category: 'options', title: 'Options vs Stocks — Leverage, Risk, Time Decay',
+    content: 'Options give leverage: controlling 100 shares for a fraction of the stock price. A $2 option on a $100 stock lets you control $10,000 in stock for $200. But options have time decay (theta) — every day the option loses value even if the stock does not move. Options can expire worthless (total loss of premium). Stocks can always recover; options have an expiry date that works against buyers. For most day traders, stocks offer better risk control.',
+  },
+  {
+    topic: 'options risky for day traders', category: 'options', title: 'Why Options Are Risky for Day Traders',
+    content: 'Options pricing involves multiple variables: stock price, strike, time to expiry, IV, and interest rates. You can be right about the direction and still lose money if IV compresses or time decay erodes your position. Wide bid/ask spreads in illiquid options can cost 10–20% of premium instantly. Expiry pressure forces rushed decisions. Beginners should paper trade options extensively before using real capital, and start with defined-risk strategies (buying calls/puts) rather than selling naked options.',
+  },
+  {
+    topic: 'put call ratio options sentiment', category: 'options', title: 'Put/Call Ratio — Options Sentiment Indicator',
+    content: 'The put/call ratio divides the number of put options traded by the number of call options traded. A ratio above 1.0 means more puts than calls — bearish sentiment. A ratio below 0.7 means excessive optimism and can signal a contrarian short. Extreme readings (above 1.3 or below 0.5) are often contrarian signals — when everyone is bearish via puts, a reversal up is likely. Track the CBOE Put/Call Ratio daily for broad market sentiment.',
   },
 
   // ── Patterns ─────────────────────────────────────────────────────────────────
@@ -423,19 +468,27 @@ Answer using only the data above. Reference specific dates, symbols, P&L, convic
 
 export async function seedKnowledge() {
   const existing = await countKnowledgeChunks();
-  if (existing >= 50) return { seeded: 0 };
 
-  const total = KNOWLEDGE_BASE.length;
+  // Always ensure options entries exist regardless of total count
+  const optionsCount = await countKnowledgeChunksByTopic('options');
+  const needsOptions = optionsCount === 0;
+
+  // If already fully seeded and options are present, skip
+  if (existing >= 50 && !needsOptions) return { seeded: 0 };
+
+  const toSeed = existing === 0
+    ? KNOWLEDGE_BASE
+    : KNOWLEDGE_BASE.filter(c => c.category === 'options' && needsOptions);
+
   let count = 0;
-
-  for (let i = 0; i < total; i++) {
-    const { topic, category, title, content } = KNOWLEDGE_BASE[i];
+  for (let i = 0; i < toSeed.length; i++) {
+    const { topic, category, title, content } = toSeed[i];
     const embedding = await getEmbedding(`${title} ${content}`);
     if (embedding) {
       await saveKnowledgeChunk({ topic, category, title, content, embedding });
       count++;
     }
-    console.log(`[knowledge] seeded ${i + 1}/${total}: ${title}`);
+    console.log(`[knowledge] seeded ${i + 1}/${toSeed.length}: ${title}`);
   }
 
   return { seeded: count };
