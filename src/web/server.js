@@ -2398,10 +2398,11 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
       creditsLeft = updated?.credits ?? null;
     }
     send({
-      done:   true,
-      credits: creditsLeft,
-      source:  chatResult?.source ?? 'claude',
-      model:   chatResult?.model  ?? 'claude-sonnet-4-6',
+      done:             true,
+      credits:          creditsLeft,
+      source:           chatResult?.source           ?? 'claude',
+      model:            chatResult?.model            ?? 'claude-sonnet-4-6',
+      knowledge_response: !!chatResult?.knowledge_response,
     });
   } catch (err) {
     if (err.name !== 'AbortError') {

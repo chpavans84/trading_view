@@ -22,11 +22,30 @@ export async function getEmbedding(text) {
   }
 }
 
+function searchKnowledgeByKeyword(query) {
+  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  return KNOWLEDGE_BASE
+    .map(chunk => {
+      const hay = `${chunk.topic} ${chunk.title} ${chunk.content}`.toLowerCase();
+      const score = words.filter(w => hay.includes(w)).length;
+      return { ...chunk, score };
+    })
+    .filter(c => c.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
 export async function answerKnowledgeQuestion(userQuestion) {
   try {
     const embedding = await getEmbedding(userQuestion);
     if (!embedding) {
-      return { answer: 'Local AI is offline. Please try again shortly.', source: 'error' };
+      // Ollama offline — serve directly from built-in knowledge base (no LLM cost)
+      const chunks = searchKnowledgeByKeyword(userQuestion);
+      if (chunks.length) {
+        const answer = chunks.map(c => `**${c.title}**\n${c.content}`).join('\n\n');
+        return { answer, source: 'local_db', model: 'Knowledge Base', chunks_used: chunks.length };
+      }
+      return { answer: 'Sorry, no matching knowledge found for that question.', source: 'error' };
     }
 
     const results = await searchKnowledge({ embedding, limit: 4 });
