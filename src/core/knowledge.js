@@ -24,7 +24,9 @@ export async function getEmbedding(text) {
 }
 
 function searchKnowledgeByKeyword(query) {
-  const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  // Only match substantive words (>= 5 chars) — filters out "with", "one",
+  // "are", "the" etc. that cause false-positive scores on generic follow-ups
+  const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 5);
   return KNOWLEDGE_BASE
     .map(chunk => {
       const hay = `${chunk.topic} ${chunk.title} ${chunk.content}`.toLowerCase();
@@ -162,10 +164,12 @@ export async function isKnowledgeQuestion(text) {
 
   const knowledgePatterns = [
     /what is\b/i, /what are\b/i, /what does\b/i,
-    /explain\b/i, /how does\b/i, /how do i\b/i, /how to\b/i,
+    // "explain" must be followed by a subject — not a bare follow-up like "explain with one example"
+    /explain\s+\w{4,}/i,
+    /how does\b/i, /how do i\b/i, /how to\b/i,
     /teach me\b/i, /define\b/i, /meaning of\b/i, /tell me about\b/i,
     /difference between\b/i, /when (should|do) i\b/i,
-    /\b(rsi|macd|ema|sma|vwap|atr|bollinger|fibonacci|candlestick|divergence|breakout|pullback|support|resistance|trend|momentum|reversal|volume|float|short squeeze|gap up|gap down|pre.?market|after.?hours|position sizing|stop loss|take profit|risk reward|r:r|pattern|setup|strategy|indicator)\b/i,
+    /\b(rsi|macd|ema|sma|vwap|atr|bollinger|fibonacci|candlestick|divergence|breakout|pullback|support|resistance|trend|momentum|reversal|volume|float|short squeeze|gap up|gap down|pre.?market|after.?hours|position sizing|stop loss|take profit|risk reward|r:r|pattern|setup|strategy|indicator|order type|market order|limit order|stop limit)\b/i,
     /\b(option|options|call option|put option|calls|puts|strike price|expiry|expiration|implied volatility|iv rank|theta|delta|gamma|vega|greeks|covered call|protective put|iron condor|straddle|strangle|otm|itm|atm|derivatives|contracts)\b/i,
   ];
   return knowledgePatterns.some(p => p.test(text));
