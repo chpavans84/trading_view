@@ -246,6 +246,19 @@ CREATE TABLE IF NOT EXISTS position_monitoring (
   last_checked_at  TIMESTAMPTZ,
   last_price       NUMERIC(12,4)
 );
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id           SERIAL PRIMARY KEY,
+  topic        TEXT NOT NULL,
+  category     TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  content      TEXT NOT NULL,
+  embedding    TEXT,
+  source       TEXT DEFAULT 'built-in',
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS knowledge_chunks_category_idx ON knowledge_chunks(category);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -1113,4 +1126,48 @@ export async function deletePositionMonitoring(symbol) {
   try {
     await query(`DELETE FROM position_monitoring WHERE symbol = $1`, [symbol]);
   } catch (err) { console.error('deletePositionMonitoring error:', err.message); }
+}
+
+// ─── Knowledge Base ───────────────────────────────────────────────────────────
+
+export async function saveKnowledgeChunk({ topic, category, title, content, embedding, source = 'built-in' }) {
+  await query(
+    `INSERT INTO knowledge_chunks (topic, category, title, content, embedding, source)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT DO NOTHING`,
+    [topic, category, title, content, JSON.stringify(embedding), source]
+  );
+}
+
+export async function searchKnowledge({ embedding, limit = 4 }) {
+  const { rows } = await query(
+    `SELECT title, content, category, topic, embedding FROM knowledge_chunks WHERE embedding IS NOT NULL`
+  );
+  if (!rows.length) return [];
+
+  const dot   = (a, b) => a.reduce((s, v, i) => s + v * b[i], 0);
+  const norm  = (a)    => Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+  const qNorm = norm(embedding);
+
+  return rows
+    .map(r => {
+      try {
+        const e   = JSON.parse(r.embedding);
+        const sim = dot(embedding, e) / (qNorm * norm(e));
+        return { title: r.title, content: r.content, category: r.category, topic: r.topic, similarity: sim };
+      } catch { return null; }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, limit);
+}
+
+export async function countKnowledgeChunks() {
+  const { rows } = await query(`SELECT COUNT(*) AS total FROM knowledge_chunks`);
+  return parseInt(rows[0]?.total ?? 0);
+}
+
+export async function countKnowledgeChunksByTopic(topic) {
+  const { rows } = await query(`SELECT COUNT(*) AS total FROM knowledge_chunks WHERE topic ILIKE $1`, [`%${topic}%`]);
+  return parseInt(rows[0]?.total ?? 0);
 }

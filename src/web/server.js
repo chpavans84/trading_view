@@ -19,6 +19,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, recordTrade } from '../core/db.js';
+import { seedKnowledge } from '../core/knowledge.js';
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'crypto';
 import { Resend } from 'resend';
@@ -3124,5 +3125,8 @@ httpServer.listen(PORT, () => {
     runIntradayScan()
       .then(r => console.log(`✅ Intraday picks warmed — ${r?.picks?.length ?? 0} picks from ${r?.scanned ?? 0} stocks`))
       .catch(e => console.warn('⚠️  Intraday picks warm failed:', e.message)),
+    seedKnowledge()
+      .then(r => { if (r.seeded > 0) console.log(`✅ Knowledge base seeded — ${r.seeded} chunks added`); })
+      .catch(e => console.warn('⚠️  Knowledge seed failed:', e.message)),
   ]);
 });
