@@ -2378,7 +2378,7 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
 
   const userConfig = await getUserBotConfig(username);
   try {
-    const result = await chat({
+    const chatResult = await chat({
       chatId:     userChatId(username),
       message:    message.trim(),
       onChunk:    (text) => send({ text }),
@@ -2388,8 +2388,8 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
       username,
       voiceMode:  !!voice_mode,
     });
-    if (result?.knowledge_response) {
-      send({ knowledge: true, content: result.content, model: result.model ?? 'ollama' });
+    if (chatResult?.knowledge_response) {
+      send({ knowledge: true, content: chatResult.content, model: chatResult.model ?? 'ollama' });
     }
     // Fetch updated credit balance to send back to client
     let creditsLeft = null;
@@ -2397,7 +2397,12 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
       const updated = await getDbUser(username);
       creditsLeft = updated?.credits ?? null;
     }
-    send({ done: true, credits: creditsLeft });
+    send({
+      done:   true,
+      credits: creditsLeft,
+      source:  chatResult?.source ?? 'claude',
+      model:   chatResult?.model  ?? 'claude-sonnet-4-6',
+    });
   } catch (err) {
     if (err.name !== 'AbortError') {
       console.error(err);

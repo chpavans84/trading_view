@@ -718,6 +718,11 @@
   .chat-msg.assistant { background: #21262d; border: 1px solid #30363d; color: #e6edf3; align-self: flex-start; border-bottom-left-radius: 4px; }
   .chat-msg.assistant strong { color: #58a6ff; }
   .chat-msg.tool-indicator { background: #0d2818; border: 1px solid #238636; color: #3fb950; font-size: 0.78rem; align-self: flex-start; padding: 5px 10px; border-radius: 8px; }
+  .msg-source-badge { display: inline-block; font-size: 0.68rem; font-weight: 600; padding: 2px 7px; border-radius: 10px; margin-bottom: 6px; letter-spacing: 0.02em; }
+  .badge-claude   { background: #1a1f35; color: #818cf8; border: 1px solid #3730a3; }
+  .badge-ollama   { background: #0d2b1a; color: #34d399; border: 1px solid #065f46; }
+  .badge-local_db { background: #1a1200; color: #fbbf24; border: 1px solid #92400e; }
+  .badge-error    { background: #2b0d0d; color: #f87171; border: 1px solid #7f1d1d; }
   .knowledge-answer { background: #0d1117; border: 1px solid #1f6feb; border-left: 3px solid #1f6feb; border-radius: 8px; padding: 12px 16px; margin: 8px 0; max-width: 90%; align-self: flex-start; }
   .knowledge-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.75rem; }
   .knowledge-label { color: #58a6ff; font-weight: 600; font-size: 0.78rem; }
@@ -7998,13 +8003,64 @@ document.getElementById('chatInput').addEventListener('keydown', e => {
 });
 
 function renderMarkdown(text) {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px">$1</code>')
-    .replace(/^#{1,3} (.+)$/gm, '<strong>$1</strong>')
-    .replace(/^[•\-] (.+)$/gm, '&nbsp;&nbsp;• $1')
-    .replace(/\n/g, '<br>');
+  if (!text) return '';
+  let html = text;
+
+  // ── Tables ──────────────────────────────────────────
+  html = html.replace(
+    /((?:\|.+\|\n?)+)/g,
+    (block) => {
+      const lines = block.trim().split('\n').filter(l => l.trim());
+      if (lines.length < 2) return block;
+      if (!/^\|[\s\-:|]+\|/.test(lines[1])) return block;
+
+      const parseRow = (line) =>
+        line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+
+      const headers = parseRow(lines[0]);
+      const rows    = lines.slice(2).map(parseRow);
+
+      const thHtml = headers.map(h =>
+        `<th style="padding:7px 12px;text-align:left;color:#8b949e;font-weight:500;border-bottom:1px solid #30363d;white-space:nowrap">${renderInline(h)}</th>`
+      ).join('');
+
+      const trHtml = rows.map(cells =>
+        '<tr style="border-bottom:1px solid #21262d">' +
+        cells.map((c) => {
+          const align = /^\$?[\+\-]?[\d,\.]+%?$/.test(c.replace(/\*\*/g,'')) ? 'right' : 'left';
+          const color = c.startsWith('+') || c.includes('✅') || c.includes('PASS') ? '#3fb950'
+            : c.startsWith('-') || c.includes('❌') || c.includes('FAIL') ? '#f85149' : '';
+          return `<td style="padding:7px 12px;text-align:${align};${color ? 'color:'+color+';font-weight:600' : ''}">${renderInline(c)}</td>`;
+        }).join('') + '</tr>'
+      ).join('');
+
+      return `<div style="overflow-x:auto;margin:8px 0"><table style="width:100%;border-collapse:collapse;font-size:0.83rem;background:#161b22;border:1px solid #30363d;border-radius:6px"><thead><tr>${thHtml}</tr></thead><tbody>${trHtml}</tbody></table></div>`;
+    }
+  );
+
+  function renderInline(t) {
+    return t
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g,     '<em>$1</em>')
+      .replace(/`([^`]+)`/g,     '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.85em">$1</code>');
+  }
+
+  // ── Block-level ──────────────────────────────────────
+  html = html
+    .replace(/^#{3} (.+)$/gm, '<div style="font-weight:700;color:#e6edf3;margin:10px 0 4px">$1</div>')
+    .replace(/^#{2} (.+)$/gm, '<div style="font-weight:700;color:#58a6ff;font-size:1.05em;margin:12px 0 4px">$1</div>')
+    .replace(/^#{1} (.+)$/gm,  '<div style="font-weight:700;color:#58a6ff;font-size:1.1em;margin:12px 0 6px">$1</div>')
+    .replace(/^---+$/gm,       '<hr style="border:none;border-top:1px solid #30363d;margin:10px 0">')
+    .replace(/^[•\-\*] (.+)$/gm,'<div style="padding:2px 0 2px 12px">• $1</div>')
+    .replace(/^\d+\. (.+)$/gm,  '<div style="padding:2px 0 2px 12px">$&</div>')
+    .replace(/\*\*(.*?)\*\*/g,  '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g,      '<em>$1</em>')
+    .replace(/`([^`]+)`/g,      '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.85em">$1</code>')
+    .replace(/\n{2,}/g,         '<br><br>')
+    .replace(/\n/g,             '<br>');
+
+  return html;
 }
 
 let _chatAbort = null;
@@ -8126,6 +8182,25 @@ async function sendChat() {
             }
             msgs.scrollTop = msgs.scrollHeight;
           } else if (d.done) {
+            // Show source badge on the completed message
+            if (d.source && el) {
+              const labels = {
+                'ollama':   '🦙 Ollama (local)',
+                'local_db': '🗄️ Local DB',
+                'claude':   '✦ Claude Sonnet',
+                'error':    '⚠️ Fallback',
+              };
+              const cls = {
+                'ollama':   'badge-ollama',
+                'local_db': 'badge-local_db',
+                'claude':   'badge-claude',
+                'error':    'badge-error',
+              };
+              const label = labels[d.source] || `✦ ${d.model || d.source}`;
+              const badgeClass = cls[d.source] || 'badge-claude';
+              const badge = `<div class="msg-source-badge ${badgeClass}">${label}</div>`;
+              el.innerHTML = badge + el.innerHTML;
+            }
             // Update credits display if server returned remaining balance
             if (d.credits !== null && d.credits !== undefined && _currentUser) {
               _currentUser.credits = d.credits;
