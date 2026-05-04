@@ -7143,127 +7143,125 @@ async function loadDashboardWatchlist() {
     return;
   }
 
-  // Placeholder rows while data loads
-  tbody.innerHTML = symbols.map(sym => _wlRowPlaceholder(sym)).join('');
+  // Render skeleton rows immediately — one row per symbol, all dashes
+  tbody.innerHTML = symbols.map(sym => _wlRow({ symbol: sym })).join('');
 
-  // Fetch live data from server
+  // Phase 1: fetch quotes fast (one per symbol, parallel)
+  symbols.forEach(async sym => {
+    try {
+      const q = await fetch(`/api/quote/${sym}`).then(r => r.ok ? r.json() : null);
+      if (!q) return;
+      const row = tbody.querySelector(`tr[data-wl="${sym}"]`);
+      if (!row) return;
+      const price    = q.mid ?? q.ask ?? q.bid ?? null;
+      const chgPct   = q.change_pct ?? null;
+      const chg      = q.change ?? null;
+      if (price != null) row.querySelector('.wl-price').textContent = `$${parseFloat(price).toFixed(2)}`;
+      if (chgPct != null) {
+        const n = parseFloat(chgPct);
+        row.querySelector('.wl-chg').innerHTML =
+          `<span style="color:${n>=0?'#3fb950':'#f85149'};font-weight:600">${n>=0?'+':''}${n.toFixed(2)}%</span>` +
+          (chg != null ? `<div style="font-size:0.72rem;color:#8b949e">${parseFloat(chg)>=0?'+':''}$${Math.abs(parseFloat(chg)).toFixed(2)}</div>` : '');
+      }
+    } catch {}
+  });
+
+  // Phase 2: fetch scores (slow — one call for all, 60s timeout)
   try {
-    const d = await api('/api/watchlist/detail', 30000);
-    if (d?.items?.length) {
-      _watchlistSet = new Set(d.items.map(i => i.symbol));
-      _wlSaveLocal();
-      updateHearts();
-      tbody.innerHTML = d.items.map(item => _wlRow(item)).join('');
-    }
+    const d = await fetch('/api/watchlist/detail').then(r => r.ok ? r.json() : null);
+    if (!d?.items?.length) return;
+    _watchlistSet = new Set(d.items.map(i => i.symbol));
+    _wlSaveLocal();
+    updateHearts();
+    // Replace full rows with enriched data
+    d.items.forEach(item => {
+      const row = tbody.querySelector(`tr[data-wl="${item.symbol}"]`);
+      if (row) row.outerHTML = _wlRow(item);
+    });
   } catch {}
 }
 
-function _wlRowPlaceholder(symbol) {
-  const name = KNOWN_NAMES[symbol] || '';
-  return `<tr>
-    <td><button class="wl-heart wl-active" data-wl-sym="${symbol}" onclick="toggleWatchlist(event,'${symbol}')" title="Remove" style="opacity:1;font-size:1rem">❤️</button></td>
-    <td>
-      <strong><span class="sym-link" data-symbol="${symbol}">${symbol}</span></strong>
-      ${name ? `<div style="font-size:0.72rem;color:#8b949e">${name}</div>` : ''}
-    </td>
-    <td colspan="12" style="color:#484f58;font-size:0.8rem">Loading…</td>
-  </tr>`;
-}
-
 function _wlRow(item) {
-  const { symbol, name, price, change, change_pct, score, grade, horizon,
+  const sym = item.symbol;
+  const { name, price, change, change_pct, score, grade, horizon,
           analyst_consensus, analyst_target, analyst_upside_pct,
-          rsi, rvol, weekly_trend, short_float, earnings_date, macd_signal, ema_trend } = item;
+          rsi, rvol, weekly_trend, short_float, earnings_date, macd_signal } = item;
 
-  const dName    = name || KNOWN_NAMES[symbol] || '';
-  const gColor   = { A:'#3fb950', B:'#58a6ff', C:'#f0883e', F:'#f85149' }[grade] || '#8b949e';
+  const dName  = name || KNOWN_NAMES[sym] || '';
+  const gColor = { A:'#3fb950', B:'#58a6ff', C:'#f0883e', F:'#f85149' }[grade] || '#8b949e';
 
-  // Price + change
-  const priceStr = price   != null ? `$${parseFloat(price).toFixed(2)}`  : '—';
-  const chgNum   = change_pct != null ? parseFloat(change_pct) : null;
-  const chgStr   = chgNum != null
-    ? `<span style="color:${chgNum>=0?'#3fb950':'#f85149'};font-weight:600">${chgNum>=0?'+':''}${chgNum.toFixed(2)}%</span>`
-    : '—';
-  const chgDollar = change != null
-    ? `<div style="font-size:0.72rem;color:#8b949e">${parseFloat(change)>=0?'+':''}$${Math.abs(parseFloat(change)).toFixed(2)}</div>`
-    : '';
+  const priceStr  = price      != null ? `$${parseFloat(price).toFixed(2)}` : '<span style="color:#484f58">—</span>';
+  const chgNum    = change_pct != null ? parseFloat(change_pct) : null;
+  const chgHtml   = chgNum != null
+    ? `<span style="color:${chgNum>=0?'#3fb950':'#f85149'};font-weight:600">${chgNum>=0?'+':''}${chgNum.toFixed(2)}%</span>` +
+      (change != null ? `<div style="font-size:0.72rem;color:#8b949e">${parseFloat(change)>=0?'+':''}$${Math.abs(parseFloat(change)).toFixed(2)}</div>` : '')
+    : '<span style="color:#484f58">—</span>';
 
-  // Score badge
   const scoreBadge = score != null
     ? `<span class="badge badge-${grade||''}" style="font-size:0.82rem">${parseFloat(score).toFixed(0)} ${grade||''}</span>`
-    : '—';
+    : '<span style="color:#484f58">—</span>';
 
-  // Analyst consensus pill
   const consHtml = analyst_consensus ? (() => {
     const lc  = analyst_consensus.toLowerCase().replace(/[^a-z]/g,'');
-    const col  = lc.includes('strongbuy')||lc.includes('buy') ? '#3fb950' : lc.includes('sell') ? '#f85149' : '#d29922';
-    const lbl  = analyst_consensus.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+    const col = lc.includes('strongbuy')||lc.includes('buy') ? '#3fb950' : lc.includes('sell') ? '#f85149' : '#d29922';
+    const lbl = analyst_consensus.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
     return `<span style="background:${col}22;color:${col};border:1px solid ${col}55;border-radius:10px;padding:2px 8px;font-size:0.72rem;font-weight:600;white-space:nowrap">${lbl}</span>`;
-  })() : '—';
+  })() : '<span style="color:#484f58">—</span>';
 
-  // PT / upside
   const ptHtml = analyst_target != null
     ? `$${parseFloat(analyst_target).toFixed(0)}` + (analyst_upside_pct != null
-        ? `<span style="color:${parseFloat(analyst_upside_pct)>=0?'#3fb950':'#f85149'};margin-left:4px;font-size:0.75rem">${parseFloat(analyst_upside_pct)>=0?'+':''}${parseFloat(analyst_upside_pct).toFixed(1)}%</span>`
+        ? ` <span style="color:${parseFloat(analyst_upside_pct)>=0?'#3fb950':'#f85149'};font-size:0.75rem">${parseFloat(analyst_upside_pct)>=0?'+':''}${parseFloat(analyst_upside_pct).toFixed(1)}%</span>`
         : '')
-    : '—';
+    : '<span style="color:#484f58">—</span>';
 
-  // RSI
-  const rsiNum  = rsi != null ? parseFloat(rsi) : null;
-  const rsiCol  = rsiNum != null ? (rsiNum >= 70 ? '#f85149' : rsiNum <= 30 ? '#3fb950' : '#e6edf3') : null;
-  const rsiHtml = rsiNum != null ? `<span style="color:${rsiCol}">${rsiNum.toFixed(1)}</span>` : '—';
+  const rsiNum  = rsi  != null ? parseFloat(rsi)  : null;
+  const rsiHtml = rsiNum != null
+    ? `<span style="color:${rsiNum>=70?'#f85149':rsiNum<=30?'#3fb950':'#e6edf3'}">${rsiNum.toFixed(1)}</span>`
+    : '<span style="color:#484f58">—</span>';
 
-  // RVOL
   const rvolNum  = rvol != null ? parseFloat(rvol) : null;
   const rvolHtml = rvolNum != null
     ? `<span style="color:${rvolNum>=2?'#3fb950':rvolNum>=1.5?'#e3b341':'#8b949e'}">${rvolNum.toFixed(1)}×</span>`
-    : '—';
+    : '<span style="color:#484f58">—</span>';
 
-  // Weekly trend
   const trendHtml = weekly_trend === 'up'   ? '<span style="color:#3fb950">↑ Up</span>'
                   : weekly_trend === 'down' ? '<span style="color:#f85149">↓ Down</span>'
-                  : '—';
+                  : '<span style="color:#484f58">—</span>';
 
-  // MACD
-  const macdHtml = macd_signal === 'bullish' ? '<span style="color:#3fb950">▲ Bull</span>'
-                 : macd_signal === 'bearish' ? '<span style="color:#f85149">▼ Bear</span>'
-                 : '—';
+  const macdHtml  = macd_signal  === 'bullish' ? '<span style="color:#3fb950">▲ Bull</span>'
+                  : macd_signal  === 'bearish' ? '<span style="color:#f85149">▼ Bear</span>'
+                  : '<span style="color:#484f58">—</span>';
 
-  // Short float
-  const sfNum   = short_float != null ? parseFloat(short_float) : null;
-  const sfHtml  = sfNum != null
+  const sfNum  = short_float != null ? parseFloat(short_float) : null;
+  const sfHtml = sfNum != null
     ? `<span style="color:${sfNum>=20?'#f85149':sfNum>=10?'#e3b341':'#8b949e'}">${sfNum.toFixed(1)}%</span>`
-    : '—';
+    : '<span style="color:#484f58">—</span>';
 
-  // Earnings date
-  const earnHtml = earnings_date
-    ? (() => {
-        const days = Math.round((new Date(earnings_date) - Date.now()) / 86400000);
-        const col  = days >= 0 && days <= 7 ? '#e3b341' : '#8b949e';
-        return `<span style="color:${col};white-space:nowrap">${earnings_date}${days>=0&&days<=30?`<div style="font-size:0.7rem">${days}d</div>`:''}`;
-      })()
-    : '—';
+  const earnHtml = earnings_date ? (() => {
+    const days = Math.round((new Date(earnings_date) - Date.now()) / 86400000);
+    const col  = days >= 0 && days <= 7 ? '#e3b341' : '#8b949e';
+    return `<span style="color:${col};white-space:nowrap">${earnings_date}${days>=0&&days<=30?` <span style="font-size:0.7rem">(${days}d)</span>`:''}</span>`;
+  })() : '<span style="color:#484f58">—</span>';
 
-  // Horizon badge
-  const HCOL = { 'Long-term hold':'#3fb950','Medium-term (weeks)':'#58a6ff','Short-term trade':'#f0883e' };
-  const hCol  = HCOL[horizon] || '#8b949e';
+  const HCOL    = { 'Long-term hold':'#3fb950','Medium-term (weeks)':'#58a6ff','Short-term trade':'#f0883e' };
+  const hCol    = HCOL[horizon] || '#8b949e';
   const horizHtml = horizon
     ? `<span class="wl-horizon" style="background:${hCol}22;color:${hCol};border:1px solid ${hCol}44">${horizon}</span>`
-    : '—';
+    : '<span style="color:#484f58">—</span>';
 
-  return `<tr>
-    <td><button class="wl-heart wl-active" data-wl-sym="${symbol}" onclick="toggleWatchlist(event,'${symbol}')" title="Remove from Watchlist" style="opacity:1;font-size:1rem">❤️</button></td>
+  return `<tr data-wl="${sym}">
+    <td><button class="wl-heart wl-active" data-wl-sym="${sym}" onclick="toggleWatchlist(event,'${sym}')" title="Remove from Watchlist" style="opacity:1;font-size:1rem">❤️</button></td>
     <td>
       <div style="display:flex;align-items:center;gap:6px">
         <span style="width:8px;height:8px;border-radius:50%;background:${gColor};flex-shrink:0;display:inline-block"></span>
         <div>
-          <strong><span class="sym-link" data-symbol="${symbol}">${symbol}</span></strong>
+          <strong><span class="sym-link" data-symbol="${sym}">${sym}</span></strong>
           ${dName ? `<div style="font-size:0.72rem;color:#8b949e;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis">${dName}</div>` : ''}
         </div>
       </div>
     </td>
-    <td style="font-size:0.9rem;font-weight:700">${priceStr}</td>
-    <td>${chgStr}${chgDollar}</td>
+    <td class="wl-price" style="font-size:0.9rem;font-weight:700">${priceStr}</td>
+    <td class="wl-chg">${chgHtml}</td>
     <td>${scoreBadge}</td>
     <td>${consHtml}</td>
     <td style="font-size:0.85rem">${ptHtml}</td>
