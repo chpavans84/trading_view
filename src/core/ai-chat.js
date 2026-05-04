@@ -1047,37 +1047,12 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
  * Returns the full response text.
  */
 export async function chat({ chatId, message, onChunk, onTool, signal, userConfig = null, username = null, voiceMode = false }) {
-  // Route knowledge/education questions to Ollama (no Claude API cost).
-  // Fall through to Claude if Ollama is offline so the user always gets an answer.
-  if (userConfig?.kb_enabled !== false && await isKnowledgeQuestion(message)) {
-    const result = await answerKnowledgeQuestion(message, { onChunk });
-    if (result.source !== 'error') {
-      return {
-        role: 'assistant',
-        content: result.answer,
-        source: result.source,
-        model: result.model ?? 'ollama',
-        // Use the knowledge card only for instant local-KB answers;
-        // Ollama responses are already streamed via onChunk so no card needed.
-        knowledge_response: !result.streamed,
-      };
-    }
-    // Ollama offline — fall through to Claude below
-  }
+  // Ollama / local-KB routing is disabled — all questions go to Claude Sonnet
+  // which has the correct live date/time in the system prompt and access to
+  // real-time tools (market status, trade history, etc.).
+  // Previously routed knowledge and trade-history questions here; removed
+  // because stale KB chunks were giving wrong answers (e.g. "market is closed").
 
-  // Trade history — fetch from DB, answer via Ollama, no Claude API cost
-  if (isTradeHistoryQuestion(message)) {
-    const result = await answerTradeHistoryQuestion(message);
-    if (result.source !== 'error') {
-      return {
-        role:    'assistant',
-        content: result.answer,
-        source:  'ollama',
-        model:   result.model ?? OLLAMA_MODEL,
-        trade_history_response: true,
-      };
-    }
-  }
 
   // Route fundamental screening questions to local PostgreSQL (zero Claude API cost).
   if (await isFundamentalScreeningQuestion(message)) {
