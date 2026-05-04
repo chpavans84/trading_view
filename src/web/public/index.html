@@ -1411,7 +1411,6 @@
 
     <div class="widget-panel active" id="widget-panel-positions">
       <div id="positionsTable"><div class="loading">Loading…</div></div>
-      <div class="cards" id="pnlCards" style="margin-top:16px;margin-bottom:0"></div>
       <!-- ── P&L History ── -->
       <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
         <div class="table-wrap" style="margin-bottom:16px">
@@ -8687,7 +8686,7 @@ async function loadPnl() {
     const bestDayR  = hist.reduce((m, r) => Math.max(m, r.pnl || 0), 0);
     const worstDayR = hist.reduce((m, r) => Math.min(m, r.pnl || 0), 0);
 
-    document.getElementById('pnlCards').innerHTML = `
+    if (document.getElementById('pnlCards')) document.getElementById('pnlCards').innerHTML = `
       <div class="card">
         <div class="card-label">Unrealized P&amp;L</div>
         <div class="card-value" style="color:${unrealPl >= 0 ? '#3fb950' : '#f85149'}">${usd(unrealPl)}</div>
@@ -8817,7 +8816,7 @@ async function loadPnl() {
   const todayColor = todayPnl >= 0 ? '#3fb950' : '#f85149';
 
   // ── Summary cards ──────────────────────────────────
-  document.getElementById('pnlCards').innerHTML = `
+  if (document.getElementById('pnlCards')) document.getElementById('pnlCards').innerHTML = `
     <div class="card">
       <div class="card-label">Total P&amp;L (${days}d)</div>
       <div class="card-value" style="color:${totalPnl >= 0 ? '#3fb950' : '#f85149'}">${usd(totalPnl)}</div>
