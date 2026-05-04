@@ -192,10 +192,45 @@ const DEFAULT_WATCHLIST = [
 // In-memory history cache (shared across sessions keyed by chatId)
 export const chatHistory = new Map();
 
+// Tool results that are time-sensitive must never be replayed from history.
+// Strip them so Claude always calls the tool fresh instead of using stale data.
+const EPHEMERAL_TOOLS = new Set(['get_daily_pnl', 'get_market_status', 'get_market_regime']);
+
+function _stripEphemeralToolResults(rows) {
+  if (!rows?.length) return rows;
+  // Collect tool_use_ids that belong to ephemeral tools (from assistant messages)
+  const ephemeralIds = new Set();
+  for (const msg of rows) {
+    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block.type === 'tool_use' && EPHEMERAL_TOOLS.has(block.name)) {
+        ephemeralIds.add(block.id);
+      }
+    }
+  }
+  if (!ephemeralIds.size) return rows;
+  // Remove tool_use blocks and their matching tool_result blocks
+  return rows
+    .map(msg => {
+      if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+        const filtered = msg.content.filter(b => !(b.type === 'tool_use' && ephemeralIds.has(b.id)));
+        if (!filtered.length) return null;
+        return { ...msg, content: filtered };
+      }
+      if (msg.role === 'user' && Array.isArray(msg.content)) {
+        const filtered = msg.content.filter(b => !(b.type === 'tool_result' && ephemeralIds.has(b.tool_use_id)));
+        if (!filtered.length) return null;
+        return { ...msg, content: filtered };
+      }
+      return msg;
+    })
+    .filter(Boolean);
+}
+
 export async function loadHistoryForChat(chatId) {
   if (chatHistory.has(chatId)) return;
   const rows = await loadConversationHistory(chatId, 20);
-  chatHistory.set(chatId, rows ?? []);
+  chatHistory.set(chatId, _stripEphemeralToolResults(rows ?? []));
 }
 
 export function pushHistory(chatId, message) {
