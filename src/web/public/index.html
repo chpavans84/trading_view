@@ -12861,11 +12861,12 @@ function exploreSymbol(sym) {
       .qt-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px; }
       .qt-field { display:flex; flex-direction:column; gap:4px; }
       .qt-label { font-size:0.72rem; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; }
-      .qt-inp { background:var(--bg); border:1px solid var(--faint); border-radius:6px; color:var(--text); font-size:0.85rem; padding:6px 10px; width:100px; transition:border-color .15s; }
+      .qt-inp { background:var(--bg); border:1px solid var(--faint); border-radius:6px; color:var(--text); font-size:0.85rem; padding:6px 10px; width:108px; transition:border-color .15s; }
       .qt-inp:focus { outline:none; border-color:var(--accent); }
       .qt-inp.wide { width:130px; }
-      .qt-seg { display:flex; border:1px solid var(--faint); border-radius:6px; overflow:hidden; }
-      .qt-seg button { background:var(--bg); border:none; color:var(--text2); font-size:0.78rem; padding:6px 12px; cursor:pointer; transition:all .15s; }
+      .qt-seg { display:flex; border:1px solid var(--faint); border-radius:6px; overflow:hidden; flex-wrap:nowrap; }
+      .qt-seg button { background:var(--bg); border:none; color:var(--text2); font-size:0.78rem; padding:6px 10px; cursor:pointer; transition:all .15s; white-space:nowrap; }
+      .qt-seg button:not(:last-child) { border-right:1px solid var(--faint); }
       .qt-seg button.qt-active-buy  { background:rgba(16,185,129,0.15); color:var(--green); font-weight:700; }
       .qt-seg button.qt-active-sell { background:rgba(244,63,94,0.15);  color:var(--red);   font-weight:700; }
       .qt-seg button.qt-active-mkt  { background:rgba(14,165,233,0.15); color:var(--accent);font-weight:700; }
@@ -12877,12 +12878,14 @@ function exploreSymbol(sym) {
       .qt-result { font-size:0.82rem; margin-top:8px; padding:8px 12px; border-radius:6px; display:none; }
       .qt-result.ok  { background:rgba(16,185,129,0.12); border:1px solid var(--green); color:var(--green); }
       .qt-result.err { background:rgba(244,63,94,0.12);  border:1px solid var(--red);   color:var(--red); }
+      .qt-divider { border:none; border-top:1px solid var(--faint); margin:8px 0; }
+      .qt-optional { color:#6e7681; font-weight:400; font-size:0.68rem; }
     </style>
 
-    <!-- Trading-time warning (shown during bad windows) -->
+    <!-- Trading-time warning -->
     <div id="qtTimeWarn" style="display:none;background:#2d1f00;border:1px solid #f0883e;border-radius:6px;padding:7px 12px;margin-bottom:10px;font-size:0.78rem;color:#f0883e"></div>
 
-    <!-- Row 1: Price + Shares + Order type -->
+    <!-- Row 1: Price + Shares -->
     <div class="qt-row">
       <div class="qt-field">
         <div class="qt-label">Live Price</div>
@@ -12897,26 +12900,63 @@ function exploreSymbol(sym) {
         <div class="qt-cost" id="qtCost">Est. cost: —</div>
       </div>
       <div class="qt-field">
-        <div class="qt-label">Order Type</div>
+        <div class="qt-label">Time in Force</div>
         <div class="qt-seg">
-          <button id="qtTypeMkt" onclick="qtSetType('market')" class="qt-active-mkt">Market</button>
-          <button id="qtTypeLmt" onclick="qtSetType('limit')">Limit</button>
+          <button id="qtTifDay" onclick="qtSetTif('day')"  class="qt-active-mkt">Day</button>
+          <button id="qtTifGtc" onclick="qtSetTif('gtc')">GTC</button>
+          <button id="qtTifOpg" onclick="qtSetTif('opg')">MOO</button>
+          <button id="qtTifCls" onclick="qtSetTif('cls')">MOC</button>
         </div>
       </div>
+    </div>
+
+    <!-- Row 2: Order Type -->
+    <div class="qt-row">
+      <div class="qt-field" style="flex:1;min-width:260px">
+        <div class="qt-label">Order Type</div>
+        <div class="qt-seg">
+          <button id="qtTypeMkt" onclick="qtSetType('market')"       class="qt-active-mkt">Market</button>
+          <button id="qtTypeLmt" onclick="qtSetType('limit')">Limit</button>
+          <button id="qtTypeStop" onclick="qtSetType('stop')">Stop</button>
+          <button id="qtTypeStopLmt" onclick="qtSetType('stop_limit')">Stop Limit</button>
+          <button id="qtTypeTrail" onclick="qtSetType('trailing_stop')">Trailing</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Conditional price fields based on order type -->
+    <div class="qt-row" id="qtPriceFields">
+      <!-- Limit price (limit, stop_limit) -->
       <div class="qt-field" id="qtLimitField" style="display:none">
         <div class="qt-label">Limit Price ($)</div>
         <input class="qt-inp" id="qtLimitPrice" type="number" min="0" step="0.01" placeholder="0.00">
       </div>
+      <!-- Stop price (stop, stop_limit) -->
+      <div class="qt-field" id="qtStopPriceField" style="display:none">
+        <div class="qt-label">Stop Price ($)</div>
+        <input class="qt-inp" id="qtStopPrice" type="number" min="0" step="0.01" placeholder="trigger $">
+      </div>
+      <!-- Trailing stop fields -->
+      <div class="qt-field" id="qtTrailAmtField" style="display:none">
+        <div class="qt-label">Trail Amount ($)</div>
+        <input class="qt-inp" id="qtTrailPrice" type="number" min="0.01" step="0.01" placeholder="e.g. 2.00">
+      </div>
+      <div class="qt-field" id="qtTrailPctField" style="display:none">
+        <div class="qt-label" style="display:flex;align-items:center;gap:6px">Trail Percent (%) <span style="color:#8b949e;font-weight:400;font-size:0.68rem">or use $</span></div>
+        <input class="qt-inp" id="qtTrailPercent" type="number" min="0.1" step="0.1" placeholder="e.g. 1.5">
+      </div>
     </div>
 
-    <!-- Row 2: Stop + Target + Submit buttons -->
-    <div class="qt-row" style="align-items:flex-end">
+    <hr class="qt-divider">
+
+    <!-- Row 3: Optional bracket legs (market / limit orders only) + Submit -->
+    <div class="qt-row" id="qtBracketRow" style="align-items:flex-end">
       <div class="qt-field">
-        <div class="qt-label">Stop Loss ($) <span style="color:#8b949e;font-weight:400">optional</span></div>
+        <div class="qt-label">Stop Loss ($) <span class="qt-optional">optional</span></div>
         <input class="qt-inp" id="qtStopLoss" type="number" min="0" step="0.01" placeholder="e.g. 145.00">
       </div>
       <div class="qt-field">
-        <div class="qt-label">Take Profit ($) <span style="color:#8b949e;font-weight:400">optional</span></div>
+        <div class="qt-label">Take Profit ($) <span class="qt-optional">optional</span></div>
         <input class="qt-inp" id="qtTakeProfit" type="number" min="0" step="0.01" placeholder="e.g. 165.00">
       </div>
       <div style="display:flex;gap:8px;margin-bottom:2px">
@@ -13079,6 +13119,7 @@ document.addEventListener('mousedown', function(e) {
 
 // ── Quick Trade panel ──────────────────────────────────────────────────────
 let _qtType = 'market';
+let _qtTif  = 'day';
 let _qtPrice = null;
 
 function toggleQuickTrade() {
@@ -13108,9 +13149,42 @@ function qtCheckTime() {
 
 function qtSetType(type) {
   _qtType = type;
-  document.getElementById('qtTypeMkt').className = type === 'market' ? 'qt-active-mkt' : '';
-  document.getElementById('qtTypeLmt').className = type === 'limit'  ? 'qt-active-mkt' : '';
-  document.getElementById('qtLimitField').style.display = type === 'limit' ? '' : 'none';
+  // Highlight active button
+  ['qtTypeMkt','qtTypeLmt','qtTypeStop','qtTypeStopLmt','qtTypeTrail'].forEach(id => {
+    document.getElementById(id)?.classList.remove('qt-active-mkt');
+  });
+  const activeId = { market:'qtTypeMkt', limit:'qtTypeLmt', stop:'qtTypeStop', stop_limit:'qtTypeStopLmt', trailing_stop:'qtTypeTrail' }[type];
+  if (activeId) document.getElementById(activeId)?.classList.add('qt-active-mkt');
+
+  // Show/hide price input fields
+  const show = id => { const el = document.getElementById(id); if(el) el.style.display = ''; };
+  const hide = id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; };
+  hide('qtLimitField'); hide('qtStopPriceField'); hide('qtTrailAmtField'); hide('qtTrailPctField');
+  if (type === 'limit')         show('qtLimitField');
+  if (type === 'stop')          show('qtStopPriceField');
+  if (type === 'stop_limit')  { show('qtStopPriceField'); show('qtLimitField'); }
+  if (type === 'trailing_stop'){ show('qtTrailAmtField'); show('qtTrailPctField'); }
+
+  // Bracket legs (stop loss / take profit) only make sense for market/limit entries
+  const bracketRow = document.getElementById('qtBracketRow');
+  if (bracketRow) bracketRow.style.opacity = (type === 'market' || type === 'limit') ? '1' : '0.35';
+
+  // MOO/MOC TIF only valid for market/limit
+  const tifOpg = document.getElementById('qtTifOpg');
+  const tifCls = document.getElementById('qtTifCls');
+  const isBasic = type === 'market' || type === 'limit';
+  if (tifOpg) tifOpg.disabled = !isBasic;
+  if (tifCls) tifCls.disabled = !isBasic;
+  if (!isBasic && (_qtTif === 'opg' || _qtTif === 'cls')) qtSetTif('day');
+}
+
+function qtSetTif(tif) {
+  _qtTif = tif;
+  ['qtTifDay','qtTifGtc','qtTifOpg','qtTifCls'].forEach(id => {
+    document.getElementById(id)?.classList.remove('qt-active-mkt');
+  });
+  const idMap = { day:'qtTifDay', gtc:'qtTifGtc', opg:'qtTifOpg', cls:'qtTifCls' };
+  if (idMap[tif]) document.getElementById(idMap[tif])?.classList.add('qt-active-mkt');
 }
 
 async function qtRefreshPrice() {
@@ -13134,33 +13208,54 @@ function qtUpdateCost() {
 async function qtSubmit(side) {
   const sym    = (document.getElementById('explorerSymbol')?.value || '').trim().toUpperCase();
   const shares = parseInt(document.getElementById('qtShares')?.value);
-  const res    = document.getElementById('qtResult');
 
-  if (!sym)        { qtShowResult('error', 'Enter a stock symbol first'); return; }
+  if (!sym)               { qtShowResult('error', 'Enter a stock symbol first'); return; }
   if (!shares || shares < 1) { qtShowResult('error', 'Enter number of shares (≥ 1)'); return; }
 
+  // Validate type-specific required fields
+  const limitPrice  = parseFloat(document.getElementById('qtLimitPrice')?.value)  || null;
+  const stopPrice   = parseFloat(document.getElementById('qtStopPrice')?.value)   || null;
+  const trailPrice  = parseFloat(document.getElementById('qtTrailPrice')?.value)  || null;
+  const trailPct    = parseFloat(document.getElementById('qtTrailPercent')?.value) || null;
+
+  if (_qtType === 'limit' && !limitPrice)                                { qtShowResult('error', 'Limit order requires a Limit Price'); return; }
+  if (_qtType === 'stop' && !stopPrice)                                  { qtShowResult('error', 'Stop order requires a Stop Price (trigger)'); return; }
+  if (_qtType === 'stop_limit' && (!stopPrice || !limitPrice))           { qtShowResult('error', 'Stop Limit requires both Stop Price and Limit Price'); return; }
+  if (_qtType === 'trailing_stop' && !trailPrice && !trailPct)           { qtShowResult('error', 'Trailing Stop requires Trail Amount ($) or Trail %'); return; }
+
   const body = {
-    symbol:      sym,
+    symbol:         sym,
     side,
-    qty:         shares,
-    order_type:  _qtType,
-    limit_price: _qtType === 'limit' ? (document.getElementById('qtLimitPrice')?.value || null) : null,
-    stop_loss:   document.getElementById('qtStopLoss')?.value   || null,
-    take_profit: document.getElementById('qtTakeProfit')?.value || null,
+    qty:            shares,
+    order_type:     _qtType,
+    time_in_force:  _qtTif,
+    limit_price:    (['limit','stop_limit'].includes(_qtType)) ? limitPrice : null,
+    stop_price:     (['stop','stop_limit'].includes(_qtType))  ? stopPrice  : null,
+    trail_price:    _qtType === 'trailing_stop' ? trailPrice : null,
+    trail_percent:  _qtType === 'trailing_stop' ? trailPct   : null,
+    stop_loss:      (['market','limit'].includes(_qtType)) ? (parseFloat(document.getElementById('qtStopLoss')?.value) || null)   : null,
+    take_profit:    (['market','limit'].includes(_qtType)) ? (parseFloat(document.getElementById('qtTakeProfit')?.value) || null)  : null,
   };
 
-  // Disable both buttons during request
   document.getElementById('qtBuyBtn').disabled  = true;
   document.getElementById('qtSellBtn').disabled = true;
   qtShowResult('ok', '⏳ Placing order…');
 
   try {
-    const r    = await fetch('/api/trade/quick', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const r    = await fetch('/api/trade/quick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Order failed');
     const emoji = side === 'buy' ? '🟢' : '🔴';
-    qtShowResult('ok', `${emoji} ${side.toUpperCase()} ${data.qty} ${sym} @ ${_qtType === 'market' ? 'market' : '$'+body.limit_price} | Est. $${data.estimated_cost?.toLocaleString()} | Status: ${data.status}`);
-    // Immediately refresh positions, then full dashboard (so Recent Trades updates too)
+    // Human-readable price summary per type
+    const priceDesc = {
+      market:        'market price',
+      limit:         `limit $${limitPrice?.toFixed(2)}`,
+      stop:          `stop $${stopPrice?.toFixed(2)}`,
+      stop_limit:    `stop $${stopPrice?.toFixed(2)} → limit $${limitPrice?.toFixed(2)}`,
+      trailing_stop: trailPrice ? `trail $${trailPrice.toFixed(2)}` : `trail ${trailPct}%`,
+    }[_qtType] ?? _qtType;
+    const tifLabel = { day:'Day', gtc:'GTC', opg:'MOO', cls:'MOC' }[_qtTif] ?? _qtTif.toUpperCase();
+    qtShowResult('ok', `${emoji} ${side.toUpperCase()} ${data.qty} ${sym} · ${priceDesc} · ${tifLabel} · Est. $${data.estimated_cost?.toLocaleString()} · ${data.status}`);
     setTimeout(refreshPositions, 600);
     setTimeout(loadDashboard,    2500);
   } catch(e) {
