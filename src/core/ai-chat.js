@@ -773,10 +773,16 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const dbU = await getDbUser(username).catch(() => null);
           if (!dbU?.tiger_id) return { status: 'error', reason: 'Tiger account not configured for this user.' };
           const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
-          // Get live price from Tiger for sizing
-          const q = await getTigerQuote(creds, input.symbol).catch(() => ({ ask: null, last: null }));
-          const price = q.ask ?? q.last;
-          if (!price) return { status: 'error', reason: `Could not get live price for ${input.symbol} from Tiger.` };
+          // Get live price for position sizing — Tiger first, Yahoo Finance fallback
+          const tigerQ = await getTigerQuote(creds, input.symbol).catch(() => ({ ask: null, last: null }));
+          let price = tigerQ.ask ?? tigerQ.last ?? null;
+          let priceSource = 'tiger';
+          if (!price) {
+            const yq = await getLiveQuote(input.symbol);
+            price = yq.price ?? null;
+            priceSource = 'yahoo';
+          }
+          if (!price) return { status: 'error', reason: `Could not get live price for ${input.symbol} from Tiger or Yahoo Finance.` };
           const sizing = userCfg?.position_sizing || {};
           const targetProfit = sizing.target_profit_per_trade ?? 150;
           const minDol = sizing.min_dollars ?? 1500;
@@ -786,16 +792,22 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const result = await placeTigerOrder(creds, { symbol: input.symbol, side: input.side, qty });
           recordTrade({ username, order_id: String(result.order_id), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown }).catch(() => {});
           if (onTrade) onTrade(result);
-          return { status: 'executed', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price, order_id: result.order_id, conviction_score: convictionScore };
+          return { status: 'executed', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price, price_source: priceSource, order_id: result.order_id, conviction_score: convictionScore };
         }
 
         if (tradeSource === 'moomoo') {
           const dbU = await getDbUser(username).catch(() => null);
           if (!dbU?.moomoo_acc_id && userCfg?.role !== 'admin')
             return { status: 'error', reason: 'Moomoo is not configured for your account.' };
-          const q = await moomooGetQuote(input.symbol).catch(() => null);
-          const price = q?.ask ?? q?.last_price;
-          if (!price) return { status: 'error', reason: `Could not get live price for ${input.symbol} from Moomoo.` };
+          const mq = await moomooGetQuote(input.symbol).catch(() => null);
+          let price = mq?.ask ?? mq?.last_price ?? null;
+          let priceSource = 'moomoo';
+          if (!price) {
+            const yq = await getLiveQuote(input.symbol);
+            price = yq.price ?? null;
+            priceSource = 'yahoo';
+          }
+          if (!price) return { status: 'error', reason: `Could not get live price for ${input.symbol} from Moomoo or Yahoo Finance.` };
           const sizing = userCfg?.position_sizing || {};
           const dollars = Math.min(sizing.max_dollars ?? 5000, Math.max(sizing.min_dollars ?? 1500, Math.round((sizing.target_profit_per_trade ?? 150) / 0.05)));
           const qty = Math.max(1, Math.floor(dollars / price));
