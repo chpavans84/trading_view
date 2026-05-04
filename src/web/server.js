@@ -1983,25 +1983,40 @@ async function fetchRVOL(symbol) {
 }
 
 async function fetchCurrentPrice(symbol) {
-  // Tier 1: Moomoo (real-time)
+  // Tier 1: Moomoo (real-time, includes pre/after-hours)
   try {
     const q = await getMoomooQuote(symbol);
-    if (q?.success && q.price != null) return { price: +q.price.toFixed(2), change_pct: q.change_pct ?? null };
+    if (q?.success && q.price != null) return { price: +q.price.toFixed(2), change_pct: q.change_pct ?? null, change: q.change ?? null, session: 'regular' };
   } catch { /* fall through */ }
-  // Tier 2: Yahoo Finance fallback
+  // Tier 2: Yahoo Finance quoteSummary — covers pre-market, regular, after-hours
   try {
-    const r = await fetch(
-      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`,
-      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(6000) }
-    );
-    if (!r.ok) return null;
-    const d = await r.json();
-    const q = d?.chart?.result?.[0];
-    const closes = q?.indicators?.quote?.[0]?.close?.filter(v => v != null) ?? [];
-    if (closes.length < 2) return { price: closes[0] ?? null, change_pct: null };
-    const prev    = closes[closes.length - 2];
-    const current = closes[closes.length - 1];
-    return { price: +current.toFixed(2), change_pct: +((current - prev) / prev * 100).toFixed(2) };
+    const data = await _yf.quoteSummary(symbol, { modules: ['price'] });
+    const p = data?.price;
+    if (!p) throw new Error('no price module');
+    // Pick the most current session price
+    const now = new Date();
+    const etHour = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).getHours();
+    let price, change, change_pct, session;
+    if (etHour < 9 || (etHour === 9 && new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).getMinutes() < 30)) {
+      // Pre-market (before 9:30 AM ET)
+      price      = p.preMarketPrice      ?? p.regularMarketPrice;
+      change     = p.preMarketChange     ?? p.regularMarketChange;
+      change_pct = p.preMarketChangePercent != null ? +(p.preMarketChangePercent * 100).toFixed(2) : null;
+      session    = p.preMarketPrice != null ? 'pre' : 'regular';
+    } else if (etHour >= 16) {
+      // After-hours (4 PM ET onwards)
+      price      = p.postMarketPrice     ?? p.regularMarketPrice;
+      change     = p.postMarketChange    ?? p.regularMarketChange;
+      change_pct = p.postMarketChangePercent != null ? +(p.postMarketChangePercent * 100).toFixed(2) : null;
+      session    = p.postMarketPrice != null ? 'post' : 'regular';
+    } else {
+      price      = p.regularMarketPrice;
+      change     = p.regularMarketChange;
+      change_pct = p.regularMarketChangePercent != null ? +(p.regularMarketChangePercent * 100).toFixed(2) : null;
+      session    = 'regular';
+    }
+    if (price == null) throw new Error('no price');
+    return { price: +price.toFixed(2), change: change != null ? +change.toFixed(2) : null, change_pct, session };
   } catch { return null; }
 }
 
@@ -2741,15 +2756,32 @@ app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
 app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase().trim();
-    // fetchCurrentPrice returns { price, change_pct } using Moomoo→Yahoo fallback
     const q = await fetchCurrentPrice(symbol);
-    if (q) return res.json({ symbol, mid: q.price, price: q.price, change_pct: q.change_pct ?? null,
-      change: q.price && q.change_pct != null ? +(q.price / (1 + q.change_pct / 100) * (q.change_pct / 100)).toFixed(2) : null });
-    // Last resort: Alpaca mid price (no change data)
+    if (q) return res.json({ symbol, mid: q.price, price: q.price, change: q.change ?? null, change_pct: q.change_pct ?? null, session: q.session ?? 'regular' });
     const alpaca = await getLatestPrice(symbol);
     res.json(alpaca);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+// Batch quotes — fetches multiple symbols in parallel, returns { quotes: { SYM: { price, change, change_pct, session } } }
+app.get('/api/quotes/batch', requireAuth, async (req, res) => {
+  try {
+    const raw = (req.query.symbols || '').toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+    const symbols = [...new Set(raw)].slice(0, 40); // cap at 40 symbols
+    if (!symbols.length) return res.json({ quotes: {} });
+    const results = await Promise.allSettled(symbols.map(sym => fetchCurrentPrice(sym)));
+    const quotes = {};
+    symbols.forEach((sym, i) => {
+      const r = results[i];
+      quotes[sym] = r.status === 'fulfilled' && r.value
+        ? { price: r.value.price, change: r.value.change ?? null, change_pct: r.value.change_pct ?? null, session: r.value.session ?? 'regular' }
+        : null;
+    });
+    res.json({ quotes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
