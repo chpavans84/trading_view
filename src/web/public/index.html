@@ -7201,6 +7201,50 @@ async function loadDashboardWatchlist() {
   });
 }
 
+// ── Live price refresh for watchlist (runs every 5s, skips when tab hidden) ──
+let _wlRefreshPending = false;
+async function refreshWatchlistPrices() {
+  const panel = document.getElementById('widget-panel-watchlist');
+  if (!panel?.classList.contains('active')) return;
+  const tbody = document.getElementById('wlBody');
+  if (!tbody) return;
+  const symbols = [..._watchlistSet];
+  if (!symbols.length || _wlRefreshPending) return;
+  _wlRefreshPending = true;
+  try {
+    const d = await fetch(`/api/quotes/batch?symbols=${symbols.join(',')}`).then(r => r.ok ? r.json() : null);
+    if (!d?.quotes) return;
+    symbols.forEach(sym => {
+      const q = d.quotes[sym];
+      if (!q) return;
+      const row = tbody.querySelector(`tr[data-wl="${sym}"]`);
+      if (!row) return;
+      // Price cell
+      const priceEl = row.querySelector('.wl-price');
+      if (priceEl && q.price != null) {
+        const newTxt = `$${parseFloat(q.price).toFixed(2)}`;
+        if (priceEl.textContent !== newTxt) { priceEl.textContent = newTxt; _wlFlash(priceEl); }
+      }
+      // Change cell
+      const chgEl = row.querySelector('.wl-chg');
+      if (chgEl && q.change_pct != null) {
+        const n = parseFloat(q.change_pct);
+        const chg = q.change != null ? parseFloat(q.change) : null;
+        const sessionLabel = q.session === 'pre' ? ' <span style="font-size:0.65rem;color:#8b949e">pre</span>'
+                           : q.session === 'post' ? ' <span style="font-size:0.65rem;color:#8b949e">post</span>' : '';
+        const newHtml = `<span style="color:${n>=0?'#3fb950':'#f85149'};font-weight:600">${n>=0?'+':''}${n.toFixed(2)}%${sessionLabel}</span>` +
+          (chg != null ? `<div style="font-size:0.72rem;color:#8b949e">${chg>=0?'+':''}$${Math.abs(chg).toFixed(2)}</div>` : '');
+        chgEl.innerHTML = newHtml;
+      }
+    });
+  } catch { /* silent */ } finally { _wlRefreshPending = false; }
+}
+function _wlFlash(el) {
+  el.style.transition = 'background 0.1s';
+  el.style.background = '#1f3d26';
+  setTimeout(() => { el.style.background = ''; }, 600);
+}
+
 function _wlRow(item) {
   const sym = item.symbol;
   const { name, price, change, change_pct, score, grade, horizon,
@@ -9443,6 +9487,7 @@ setInterval(loadIntradayPicks, 10 * 60_000); // intraday picks every 10 min
 setInterval(updateStatus, 60_000);
 setInterval(initTicker, 5 * 60_000);   // refresh ticker headlines every 5 min
 setInterval(loadMarket, 5 * 60_000);   // refresh hero market stats every 5 min
+setInterval(refreshWatchlistPrices, 5_000); // watchlist live prices every 5s (skips when tab hidden)
 
 // ── Dual Clock: SGT + US ET ───────────────────────────
 // Cache previous values — only write to DOM when something actually changed
