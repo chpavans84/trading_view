@@ -323,7 +323,7 @@ When a position crosses 50% of its target profit, proactively say:
 Before calling propose_trade, confirm ALL of these — if any fail, do not trade:
 □ Market is OPEN (get_market_status)
 □ VIX regime is not "crisis" (get_market_regime)
-□ Daily P&L within limits — not hit $${target} target or -$${lossLim} loss limit (get_daily_pnl)
+□ Daily P&L within limits — CALL get_daily_pnl NOW (do NOT use any P&L value from earlier in conversation — always fetch fresh)
 □ Open positions < ${maxPos} AND buying power sufficient (get_portfolio)
 □ No existing position in this symbol already (get_portfolio)
 □ Conviction score >= ${minConv} (from scan_for_trades or get_conviction_score)
@@ -499,7 +499,7 @@ export const TOOLS = [
     input_schema: { type: 'object', properties: { status: { type: 'string', enum: ['open','closed'], description: 'Filter: open trades or closed trades. Omit for all.' }, limit: { type: 'number', description: 'Number of trades to return (default 20)' } } } },
   { name: 'move_stop_to_breakeven', description: 'Move the stop-loss order for an open position to the entry price (breakeven). Locks in a zero-loss floor — use when a position is up more than 50% of its take-profit target. Requires an active stop order (not trailing stop).',
     input_schema: { type: 'object', properties: { symbol: { type: 'string', description: 'The stock ticker whose stop to move' } }, required: ['symbol'] } },
-  { name: 'get_daily_pnl',       description: `Check today's P&L against the $${DAILY_PROFIT_TARGET} target and -$${DAILY_LOSS_LIMIT} loss limit.`, input_schema: { type: 'object', properties: {} } },
+  { name: 'get_daily_pnl',       description: `ALWAYS call this live — never use a cached value from earlier in conversation. Returns today's realized P&L from this user's own trade history (not global Alpaca account). Checks against their daily_profit_target and daily_loss_limit from bot config.`, input_schema: { type: 'object', properties: {} } },
   { name: 'get_live_quote',       description: 'Get current price, change%, volume, and day range for any stock via Yahoo Finance — always works, no TradingView needed. Use this first when you need a current price.',
                                                 input_schema: { type: 'object', properties: { symbol: { type: 'string', description: 'Ticker, e.g. BAND' } }, required: ['symbol'] } },
   { name: 'get_chart_technicals', description: 'Read RSI, MACD, EMAs, Bollinger Bands from TradingView. If it returns available:false, fall back to get_live_quote for price.',
@@ -926,42 +926,48 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       }
       case 'move_stop_to_breakeven': return await moveStopToBreakeven(input.symbol);
       case 'get_daily_pnl': {
-        // Use source-aware P&L so Tiger/Moomoo users aren't blocked by Alpaca losses
-        const _pnlSource = userCfg?.trade_source ?? 'paper';
-        const _pnlLimit  = userCfg?.daily_loss_limit ?? DAILY_LOSS_LIMIT;
+        const _pnlLimit  = userCfg?.daily_loss_limit  ?? DAILY_LOSS_LIMIT;
         const _pnlTarget = userCfg?.daily_profit_target ?? DAILY_PROFIT_TARGET;
+        const _pnlSource = userCfg?.trade_source ?? 'paper';
 
-        if (_pnlSource === 'tiger' || _pnlSource === 'moomoo') {
-          // Compute today's realized P&L from our own trades DB for this user
+        // When a user is identified, always compute P&L from their own trades DB.
+        // This keeps Tiger/Moomoo/paper users isolated — Alpaca paper losses on one
+        // account must never block trades on a different account.
+        if (username) {
           try {
-            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD ET
-            const closedToday = await getTrades({ username, status: 'closed', limit: 200 });
+            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+            const closedToday = await getTrades({ username, status: 'closed', limit: 500 });
             const pnl = (closedToday ?? [])
-              .filter(t => t.closed_at && new Date(t.closed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === todayStr)
+              .filter(t => t.closed_at &&
+                new Date(t.closed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === todayStr)
               .reduce((sum, t) => sum + (parseFloat(t.pnl_usd) || 0), 0);
             return {
-              pnl:                +pnl.toFixed(2),
-              pnl_pct:            0,
-              available:          true,
-              source:             _pnlSource,
-              daily_target:       _pnlTarget,
-              daily_loss_limit:   -_pnlLimit,
-              target_reached:     pnl >= _pnlTarget,
-              loss_limit_reached: pnl <= -_pnlLimit,
+              pnl:                 +pnl.toFixed(2),
+              pnl_pct:             0,
+              available:           true,
+              source:              _pnlSource,
+              daily_target:        _pnlTarget,
+              daily_loss_limit:    -_pnlLimit,
+              target_reached:      pnl >= _pnlTarget,
+              loss_limit_reached:  pnl <= -_pnlLimit,
               remaining_to_target: +Math.max(0, _pnlTarget - pnl).toFixed(2),
             };
           } catch {
-            return { pnl: 0, available: false, source: _pnlSource };
+            // DB unavailable — return safe default (don't block on error)
+            return { pnl: 0, available: false, source: _pnlSource,
+              daily_target: _pnlTarget, daily_loss_limit: -_pnlLimit,
+              target_reached: false, loss_limit_reached: false };
           }
         }
-        // Paper / Alpaca live — use Alpaca portfolio history
+
+        // No username (admin/bot autonomous run) — use Alpaca portfolio history
         const _apnl = await getDailyPnL();
         return {
           ..._apnl,
-          daily_loss_limit:   -_pnlLimit,
-          daily_target:       _pnlTarget,
-          target_reached:     _apnl.pnl >= _pnlTarget,
-          loss_limit_reached: _apnl.pnl <= -_pnlLimit,
+          daily_loss_limit:    -_pnlLimit,
+          daily_target:        _pnlTarget,
+          target_reached:      _apnl.pnl >= _pnlTarget,
+          loss_limit_reached:  _apnl.pnl <= -_pnlLimit,
         };
       }
       case 'get_live_quote':          return await getLiveQuote(input.symbol);
