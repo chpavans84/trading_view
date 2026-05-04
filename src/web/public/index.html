@@ -7175,7 +7175,7 @@ async function loadDashboardWatchlist() {
   } catch {}
 
   if (!enriched) {
-    // Fallback: /api/explorer/extras exists without restart — fetch in parallel
+    // Fallback: /api/explorer/extras — fetch in parallel for all symbols
     const results = await Promise.allSettled(symbols.map(async sym => {
       const d = await fetch(`/api/explorer/extras?symbol=${sym}`).then(r => r.ok ? r.json() : null);
       return {
@@ -7185,6 +7185,13 @@ async function loadDashboardWatchlist() {
         analyst_consensus:  d?.analyst?.consensus   ?? null,
         analyst_target:     d?.analyst?.target      ?? null,
         analyst_upside_pct: d?.analyst?.upside_pct  ?? null,
+        rsi:                d?.signals?.rsi          ?? null,
+        rvol:               d?.signals?.rvol         ?? null,
+        weekly_trend:       d?.signals?.weekly_trend ?? null,
+        short_float:        d?.signals?.short_float  ?? null,
+        macd_signal:        d?.signals?.macd_signal  ?? null,
+        ema_trend:          d?.signals?.ema_trend    ?? null,
+        horizon:            d?.signals?.horizon      ?? null,
       };
     }));
     enriched = results.map(r => r.status === 'fulfilled' ? r.value : { symbol: r.reason });

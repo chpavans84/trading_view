@@ -2741,8 +2741,13 @@ app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
 app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase().trim();
-    const quote  = await getLatestPrice(symbol);
-    res.json(quote);
+    // fetchCurrentPrice returns { price, change_pct } using Moomoo→Yahoo fallback
+    const q = await fetchCurrentPrice(symbol);
+    if (q) return res.json({ symbol, mid: q.price, price: q.price, change_pct: q.change_pct ?? null,
+      change: q.price && q.change_pct != null ? +(q.price / (1 + q.change_pct / 100) * (q.change_pct / 100)).toFixed(2) : null });
+    // Last resort: Alpaca mid price (no change data)
+    const alpaca = await getLatestPrice(symbol);
+    res.json(alpaca);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -3213,33 +3218,55 @@ app.get('/api/watchlist/detail', requireAuth, async (req, res) => {
   try {
     const symbols = await getUserWatchlistSymbols(req.session.username);
     const results = await Promise.allSettled(symbols.map(async sym => {
-      const [quoteResult, scoreResult] = await Promise.allSettled([
-        getLatestPrice(sym),
+      const [quoteResult, scoreResult, calResult] = await Promise.allSettled([
+        fetchCurrentPrice(sym),
         getConvictionScore({ symbol: sym, positions: [] }),
+        _yf.quoteSummary(sym, { modules: ['calendarEvents'] }).catch(() => null),
       ]);
       const quote   = quoteResult.status === 'fulfilled' ? quoteResult.value   : null;
-      const scoring = scoreResult.status === 'fulfilled' ? scoreResult.value : null;
+      const scoring = scoreResult.status === 'fulfilled' ? scoreResult.value   : null;
+      const cal     = calResult.status   === 'fulfilled' ? calResult.value     : null;
       const sig     = scoring?.signals ?? {};
+
+      // Compute earnings date from Yahoo calendarEvents
+      const today = new Date(); today.setHours(0,0,0,0);
+      const rawDates = cal?.calendarEvents?.earnings?.earningsDate ?? [];
+      const nextEarnings = rawDates
+        .map(d => (d instanceof Date ? d : new Date(d)))
+        .filter(d => !isNaN(d) && d >= today)
+        .sort((a, b) => a - b)[0] ?? null;
+      const earningsDate = nextEarnings ? nextEarnings.toISOString().split('T')[0] : null;
+
+      // Derive EMA trend from price vs ema20/ema50
+      const cp = sig.current_price, e20 = sig.ema20, e50 = sig.ema50;
+      const emaTrend = cp && e20 && e50
+        ? (cp > e20 && cp > e50 ? 'above' : cp < e20 && cp < e50 ? 'below' : 'mixed')
+        : null;
+
+      const price = quote?.price ?? null;
+      const chgPct = quote?.change_pct ?? null;
+      const change = price != null && chgPct != null ? +(price / (1 + chgPct / 100) * (chgPct / 100)).toFixed(2) : null;
+
       return {
         symbol:             sym,
-        name:               sig.name ?? null,
-        price:              quote?.mid ?? quote?.ask ?? quote?.bid ?? null,
-        change:             quote?.change ?? null,
-        change_pct:         quote?.change_pct ?? null,
-        score:              scoring?.score ?? null,
-        grade:              scoring?.grade ?? null,
-        horizon:            scoring?.horizon ?? null,
-        reasoning:          scoring?.reasoning ?? null,
-        analyst_consensus:  sig.analyst_consensus  ?? null,
-        analyst_target:     sig.analyst_target     ?? null,
-        analyst_upside_pct: sig.analyst_upside_pct ?? null,
-        rvol:               sig.rvol               ?? null,
-        rsi:                sig.rsi                ?? null,
-        weekly_trend:       sig.weekly_trend       ?? null,
-        short_float:        sig.short_float        ?? null,
-        earnings_date:      sig.next_earnings_date ?? null,
-        macd_signal:        sig.macd_bullish != null ? (sig.macd_bullish ? 'bullish' : 'bearish') : null,
-        ema_trend:          sig.ema_trend           ?? null,
+        name:               scoring?.name          ?? null,
+        price,
+        change,
+        change_pct:         chgPct,
+        score:              scoring?.score          ?? null,
+        grade:              scoring?.grade          ?? null,
+        horizon:            scoring?.horizon        ?? null,
+        reasoning:          scoring?.reasoning      ?? null,
+        analyst_consensus:  sig.analyst_consensus   ?? null,
+        analyst_target:     sig.analyst_target      ?? null,
+        analyst_upside_pct: sig.analyst_upside_pct  ?? null,
+        rvol:               sig.rvol                ?? null,
+        rsi:                sig.rsi                 ?? null,
+        weekly_trend:       sig.weekly_trend        ?? null,
+        short_float:        sig.short_float_pct     ?? null,
+        earnings_date:      earningsDate,
+        macd_signal:        sig.macd_hist != null ? (sig.macd_hist > 0 ? 'bullish' : 'bearish') : null,
+        ema_trend:          emaTrend,
       };
     }));
     const items = results.map((r, i) =>
@@ -4043,15 +4070,30 @@ app.get('/api/explorer/extras', requireAuth, async (req, res) => {
     const news    = newsResult.status    === 'fulfilled' ? newsResult.value    : null;
     const scoring = scoreResult.status === 'fulfilled' ? scoreResult.value : null;
 
+    const sig = scoring?.signals ?? {};
     const analyst = scoring ? {
-      consensus:  scoring.signals?.analyst_consensus  ?? null,
-      target:     scoring.signals?.analyst_target     ?? null,
-      upside_pct: scoring.signals?.analyst_upside_pct ?? null,
-      score:      scoring.score ?? null,
-      grade:      scoring.grade ?? null,
+      consensus:  sig.analyst_consensus  ?? null,
+      target:     sig.analyst_target     ?? null,
+      upside_pct: sig.analyst_upside_pct ?? null,
+      score:      scoring.score          ?? null,
+      grade:      scoring.grade          ?? null,
     } : null;
 
-    res.json({ symbol, news: news?.articles ?? [], analyst });
+    // Full signals exposed for watchlist fallback enrichment
+    const signals = scoring ? {
+      rsi:          sig.rsi              ?? null,
+      rvol:         sig.rvol             ?? null,
+      weekly_trend: sig.weekly_trend     ?? null,
+      short_float:  sig.short_float_pct  ?? null,
+      macd_signal:  sig.macd_hist != null ? (sig.macd_hist > 0 ? 'bullish' : 'bearish') : null,
+      ema_trend:    (() => {
+        const cp = sig.current_price, e20 = sig.ema20, e50 = sig.ema50;
+        return cp && e20 && e50 ? (cp > e20 && cp > e50 ? 'above' : cp < e20 && cp < e50 ? 'below' : 'mixed') : null;
+      })(),
+      horizon:      scoring.horizon      ?? null,
+    } : null;
+
+    res.json({ symbol, news: news?.articles ?? [], analyst, signals });
   } catch (err) {
     console.error('[explorer/extras]', err.message);
     res.status(500).json({ error: err.message });
