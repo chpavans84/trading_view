@@ -1426,7 +1426,6 @@
     <div class="widget-panel" id="widget-panel-watchlist">
       <div id="wlTableWrap">
         <table><thead><tr>
-          <th></th>
           <th>Symbol</th>
           <th>Price</th>
           <th>Change</th>
@@ -1440,6 +1439,7 @@
           <th>Short %</th>
           <th>Earnings</th>
           <th>Horizon</th>
+          <th></th>
         </tr></thead>
         <tbody id="wlBody"><tr><td colspan="14" class="loading" style="text-align:center;padding:20px">Loading…</td></tr></tbody>
         </table>
@@ -7166,19 +7166,34 @@ async function loadDashboardWatchlist() {
     } catch {}
   });
 
-  // Phase 2: fetch scores (slow — one call for all, 60s timeout)
+  // Phase 2: enrich rows with scores
+  // Try batch endpoint first (needs server restart); fall back to per-symbol extras
+  let enriched = null;
   try {
     const d = await fetch('/api/watchlist/detail').then(r => r.ok ? r.json() : null);
-    if (!d?.items?.length) return;
-    _watchlistSet = new Set(d.items.map(i => i.symbol));
-    _wlSaveLocal();
-    updateHearts();
-    // Replace full rows with enriched data
-    d.items.forEach(item => {
-      const row = tbody.querySelector(`tr[data-wl="${item.symbol}"]`);
-      if (row) row.outerHTML = _wlRow(item);
-    });
+    if (d?.items?.length) enriched = d.items;
   } catch {}
+
+  if (!enriched) {
+    // Fallback: /api/explorer/extras exists without restart — fetch in parallel
+    const results = await Promise.allSettled(symbols.map(async sym => {
+      const d = await fetch(`/api/explorer/extras?symbol=${sym}`).then(r => r.ok ? r.json() : null);
+      return {
+        symbol:             sym,
+        score:              d?.analyst?.score       ?? null,
+        grade:              d?.analyst?.grade       ?? null,
+        analyst_consensus:  d?.analyst?.consensus   ?? null,
+        analyst_target:     d?.analyst?.target      ?? null,
+        analyst_upside_pct: d?.analyst?.upside_pct  ?? null,
+      };
+    }));
+    enriched = results.map(r => r.status === 'fulfilled' ? r.value : { symbol: r.reason });
+  }
+
+  enriched.forEach(item => {
+    const row = tbody.querySelector(`tr[data-wl="${item.symbol}"]`);
+    if (row) row.outerHTML = _wlRow(item);
+  });
 }
 
 function _wlRow(item) {
@@ -7250,7 +7265,6 @@ function _wlRow(item) {
     : '<span style="color:#484f58">—</span>';
 
   return `<tr data-wl="${sym}">
-    <td><button class="wl-heart wl-active" data-wl-sym="${sym}" onclick="toggleWatchlist(event,'${sym}')" title="Remove from Watchlist" style="opacity:1;font-size:1rem">❤️</button></td>
     <td>
       <div style="display:flex;align-items:center;gap:6px">
         <span style="width:8px;height:8px;border-radius:50%;background:${gColor};flex-shrink:0;display:inline-block"></span>
@@ -7272,6 +7286,7 @@ function _wlRow(item) {
     <td style="font-size:0.85rem">${sfHtml}</td>
     <td style="font-size:0.82rem">${earnHtml}</td>
     <td>${horizHtml}</td>
+    <td><button onclick="toggleWatchlist(event,'${sym}')" title="Remove from Watchlist" style="background:none;border:none;color:#6e7681;cursor:pointer;font-size:0.9rem;padding:2px 6px" onmouseover="this.style.color='#f85149'" onmouseout="this.style.color='#6e7681'">✕</button></td>
   </tr>`;
 }
 
