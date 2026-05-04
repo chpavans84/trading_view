@@ -2787,10 +2787,14 @@ app.get('/api/quotes/batch', requireAuth, async (req, res) => {
 
 app.post('/api/trade/quick', requireAuth, async (req, res) => {
   try {
-    const { symbol, side = 'buy', qty, order_type = 'market', limit_price, stop_loss, take_profit } = req.body;
+    const { symbol, side = 'buy', qty, order_type = 'market',
+            limit_price, stop_price, trail_price, trail_percent,
+            stop_loss, take_profit, time_in_force = 'day' } = req.body;
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
     if (!qty || qty < 1) return res.status(400).json({ error: 'qty must be ≥ 1' });
-    const result = await placeQuickTrade({ symbol, side, qty: Number(qty), order_type, limit_price, stop_loss, take_profit });
+    const result = await placeQuickTrade({ symbol, side, qty: Number(qty), order_type,
+      limit_price, stop_price, trail_price, trail_percent,
+      stop_loss, take_profit, time_in_force });
     logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${qty} ${symbol.toUpperCase()} @ ${order_type}`, req.ip);
     clearPnlCache();
 

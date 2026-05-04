@@ -693,7 +693,14 @@ export async function closePosition(symbol) {
 
 // ─── Quick Trade (manual qty, explicit stop/target prices) ───────────────────
 
-export async function placeQuickTrade({ symbol, side = 'buy', qty, order_type = 'market', limit_price, stop_loss, take_profit }) {
+export async function placeQuickTrade({
+  symbol, side = 'buy', qty,
+  order_type = 'market',
+  limit_price, stop_price,
+  trail_price, trail_percent,
+  stop_loss, take_profit,
+  time_in_force = 'day',
+}) {
   const ticker = symbol.toUpperCase().trim();
   const shares = Math.floor(qty);
   if (shares < 1) throw new Error('qty must be at least 1');
@@ -702,21 +709,48 @@ export async function placeQuickTrade({ symbol, side = 'buy', qty, order_type = 
   const price = side === 'buy' ? (quote.ask || quote.mid) : (quote.bid || quote.mid);
   if (!price) throw new Error(`No price available for ${ticker}`);
 
+  // Map order_type to Alpaca type field
+  const typeMap = {
+    market:        'market',
+    limit:         'limit',
+    stop:          'stop',
+    stop_limit:    'stop_limit',
+    trailing_stop: 'trailing_stop',
+  };
+  const alpacaType = typeMap[order_type] ?? 'market';
+
+  // Trailing stops only support day TIF on Alpaca
+  const tif = order_type === 'trailing_stop' ? 'day' : (time_in_force || 'day');
+
   const body = {
     symbol:        ticker,
     qty:           shares,
     side,
-    type:          order_type === 'limit' ? 'limit' : 'market',
-    time_in_force: 'day',
+    type:          alpacaType,
+    time_in_force: tif,
   };
-  if (order_type === 'limit' && limit_price) body.limit_price = +limit_price;
-  if (stop_loss && take_profit) {
-    body.order_class = 'bracket';
-    body.stop_loss   = { stop_price:  +stop_loss   };
-    body.take_profit = { limit_price: +take_profit };
-  } else if (stop_loss) {
-    body.order_class = 'oto';
-    body.stop_loss   = { stop_price: +stop_loss };
+
+  // Type-specific price fields
+  if (order_type === 'limit' && limit_price)                    body.limit_price  = +limit_price;
+  if ((order_type === 'stop' || order_type === 'stop_limit') && stop_price)
+                                                                 body.stop_price   = +stop_price;
+  if (order_type === 'stop_limit' && limit_price)               body.limit_price  = +limit_price;
+  if (order_type === 'trailing_stop') {
+    if (trail_price)   body.trail_price   = +trail_price;
+    else if (trail_percent) body.trail_percent = +trail_percent;
+    else throw new Error('Trailing stop requires trail_price or trail_percent');
+  }
+
+  // Bracket / OTO stop-loss + take-profit (only meaningful for market/limit entries)
+  if (order_type === 'market' || order_type === 'limit') {
+    if (stop_loss && take_profit) {
+      body.order_class = 'bracket';
+      body.stop_loss   = { stop_price:  +stop_loss   };
+      body.take_profit = { limit_price: +take_profit };
+    } else if (stop_loss) {
+      body.order_class = 'oto';
+      body.stop_loss   = { stop_price: +stop_loss };
+    }
   }
 
   const order = await alpaca('POST', '/v2/orders', body);
@@ -727,10 +761,15 @@ export async function placeQuickTrade({ symbol, side = 'buy', qty, order_type = 
     side,
     qty:             shares,
     order_type,
+    time_in_force:   tif,
     estimated_price: +price.toFixed(2),
     estimated_cost:  +(price * shares).toFixed(2),
-    stop_loss:       stop_loss   ? +stop_loss   : null,
-    take_profit:     take_profit ? +take_profit : null,
+    stop_price:      stop_price   ? +stop_price   : null,
+    limit_price:     limit_price  ? +limit_price  : null,
+    trail_price:     trail_price  ? +trail_price  : null,
+    trail_percent:   trail_percent ? +trail_percent : null,
+    stop_loss:       stop_loss    ? +stop_loss    : null,
+    take_profit:     take_profit  ? +take_profit  : null,
     status:          order.status,
   };
 }
