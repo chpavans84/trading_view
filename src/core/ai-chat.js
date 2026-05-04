@@ -925,7 +925,45 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         return { trades, count: trades.length };
       }
       case 'move_stop_to_breakeven': return await moveStopToBreakeven(input.symbol);
-      case 'get_daily_pnl':          return await getDailyPnL();
+      case 'get_daily_pnl': {
+        // Use source-aware P&L so Tiger/Moomoo users aren't blocked by Alpaca losses
+        const _pnlSource = userCfg?.trade_source ?? 'paper';
+        const _pnlLimit  = userCfg?.daily_loss_limit ?? DAILY_LOSS_LIMIT;
+        const _pnlTarget = userCfg?.daily_profit_target ?? DAILY_PROFIT_TARGET;
+
+        if (_pnlSource === 'tiger' || _pnlSource === 'moomoo') {
+          // Compute today's realized P&L from our own trades DB for this user
+          try {
+            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD ET
+            const closedToday = await getTrades({ username, status: 'closed', limit: 200 });
+            const pnl = (closedToday ?? [])
+              .filter(t => t.closed_at && new Date(t.closed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === todayStr)
+              .reduce((sum, t) => sum + (parseFloat(t.pnl_usd) || 0), 0);
+            return {
+              pnl:                +pnl.toFixed(2),
+              pnl_pct:            0,
+              available:          true,
+              source:             _pnlSource,
+              daily_target:       _pnlTarget,
+              daily_loss_limit:   -_pnlLimit,
+              target_reached:     pnl >= _pnlTarget,
+              loss_limit_reached: pnl <= -_pnlLimit,
+              remaining_to_target: +Math.max(0, _pnlTarget - pnl).toFixed(2),
+            };
+          } catch {
+            return { pnl: 0, available: false, source: _pnlSource };
+          }
+        }
+        // Paper / Alpaca live — use Alpaca portfolio history
+        const _apnl = await getDailyPnL();
+        return {
+          ..._apnl,
+          daily_loss_limit:   -_pnlLimit,
+          daily_target:       _pnlTarget,
+          target_reached:     _apnl.pnl >= _pnlTarget,
+          loss_limit_reached: _apnl.pnl <= -_pnlLimit,
+        };
+      }
       case 'get_live_quote':          return await getLiveQuote(input.symbol);
       case 'get_chart_technicals':   return await getChartTechnicals({ symbol: input.symbol });
       case 'get_price_levels':       return await getPriceLevels({ symbol: input.symbol, study_filter: input.study_filter });
