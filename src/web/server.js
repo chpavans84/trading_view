@@ -20,7 +20,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, saveUserMoomoo, clearUserMoomoo, saveUserTiger, clearUserTiger, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache, upsertPrediction, fillActualPrice, getPredictionsForWeek, getPredictionHistory, setDisabledSources, upsertAccountSnapshot, getAccountSnapshots, getUserWatchlistSymbols, addUserWatchlistSymbol, removeUserWatchlistSymbol } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
@@ -30,10 +30,14 @@ import { SP500, NASDAQ100 } from '../research/sp500.js';
 import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades, clearPnlCache } from '../core/trader.js';
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
-import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews } from '../core/news.js';
-import { getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
+import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews, getEarnings } from '../core/news.js';
+import { getAccounts, getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
+import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders } from '../core/tiger.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
+import { getStockPrediction } from '../core/predictor.js';
+import YahooFinance from 'yahoo-finance2';
+const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
 import { getMarketContext } from '../core/market-context.js';
@@ -166,12 +170,12 @@ async function migrateUsersToDb() {
 
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
-const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules'];
-const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'force_trade', 'chat', 'stock_explorer'];
+const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist'];
+const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer'];
 
 const DEFAULT_PERMISSIONS = {
   admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules'], widgets: ['chat', 'stock_explorer'] },
+  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist'], widgets: ['alpaca_live', 'chat', 'stock_explorer'] },
 };
 
 function getPermissions(user) {
@@ -299,6 +303,9 @@ app.use(express.static(join(__dirname, 'public'), {
     }
   },
 }));
+
+// Serve project-level images folder (e.g. /images/background.png)
+app.use('/images', express.static(join(__dirname, '../../images')));
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -479,21 +486,32 @@ app.get('/auth/check', async (req, res) => {
   if (!req.session?.authenticated) return res.json({ authenticated: false });
   const user    = await getUser(req.session.username) || {};
   const dbUser  = isDbAvailable() ? await getDbUser(req.session.username) : null;
-  const isAdmin = user.role === 'admin';
-  // Admin sees the bot's shared paper account; regular users need their own keys
+  const isAdmin   = user.role === 'admin';
   const hasAlpaca = isAdmin || !!(dbUser?.alpaca_api_key && dbUser?.alpaca_secret_key);
+  const hasMoomoo = isAdmin ? !!(process.env.MOOMOO_OPEND_HOST) : !!(dbUser?.moomoo_acc_id && process.env.MOOMOO_OPEND_HOST);
+  const hasTiger  = !!(dbUser?.tiger_id && dbUser?.tiger_account && dbUser?.tiger_private_key);
+  const perms = getPermissions(user);
+  if (hasMoomoo && !perms.widgets.includes('moomoo')) perms.widgets.push('moomoo');
+  if (hasTiger  && !perms.widgets.includes('tiger'))  perms.widgets.push('tiger');
+  const disabledSources = Array.isArray(dbUser?.disabled_sources) ? dbUser.disabled_sources : [];
   res.json({
-    authenticated:  true,
-    username:       req.session.username,
-    role:           user.role || 'viewer',
-    plan:           user.plan || 'free',
-    credits:        user.credits,
-    permissions:    getPermissions(user),
-    has_alpaca:     hasAlpaca,
+    authenticated:    true,
+    username:         req.session.username,
+    role:             user.role || 'viewer',
+    plan:             user.plan || 'free',
+    credits:          user.credits,
+    permissions:      perms,
+    has_alpaca:       hasAlpaca,
+    has_moomoo:       hasMoomoo,
+    has_tiger:        hasTiger,
+    moomoo_acc_id:    dbUser?.moomoo_acc_id || null,
+    tiger_account:    dbUser?.tiger_account || null,
+    disabled_sources: disabledSources,
     sources: {
-      alpaca_paper: isAdmin ? true : !!(dbUser?.alpaca_api_key),
-      alpaca_live:  !!(dbUser?.alpaca_live_api_key) || (isAdmin && hasLiveAccount()),
-      moomoo:       !!(process.env.MOOMOO_OPEND_HOST),
+      alpaca_paper: (isAdmin ? true : !!(dbUser?.alpaca_api_key)) && !disabledSources.includes('alpaca'),
+      alpaca_live:  (!!(dbUser?.alpaca_live_api_key) || (isAdmin && hasLiveAccount())) && !disabledSources.includes('alpaca_live'),
+      moomoo:       hasMoomoo && !disabledSources.includes('moomoo'),
+      tiger:        hasTiger  && !disabledSources.includes('tiger'),
     },
   });
 });
@@ -669,14 +687,15 @@ app.get('/api/users/list', requireAdmin, async (req, res) => {
   if (isDbAvailable()) {
     const rows = await listDbUsers() ?? [];
     return res.json(rows.map(u => ({
-      username:    u.username,
-      email:       u.email,
-      role:        u.role,
-      plan:        u.plan,
-      credits:     u.credits,
-      permissions: getPermissions({ role: u.role, permissions: u.permissions }),
-      created_at:  u.created_at,
-      last_login:  u.last_login,
+      username:         u.username,
+      email:            u.email,
+      role:             u.role,
+      plan:             u.plan,
+      credits:          u.credits,
+      permissions:      getPermissions({ role: u.role, permissions: u.permissions }),
+      disabled_sources: Array.isArray(u.disabled_sources) ? u.disabled_sources : [],
+      created_at:       u.created_at,
+      last_login:       u.last_login,
     })));
   }
   const users = loadUsers();
@@ -725,6 +744,22 @@ app.post('/api/users/permissions/reset', requireAdmin, async (req, res) => {
   }
   logActivity(req.session.username, 'permissions_reset', `reset ${key} to role defaults`, req.ip);
   res.json({ ok: true, username: key, permissions: DEFAULT_PERMISSIONS[role] || DEFAULT_PERMISSIONS.viewer });
+});
+
+const VALID_SOURCES = ['alpaca', 'alpaca_live', 'moomoo', 'tiger'];
+
+app.post('/api/users/sources/disable', requireAdmin, async (req, res) => {
+  const { username, disabled_sources } = req.body;
+  if (!username) return res.status(400).json({ error: 'username is required' });
+  if (!Array.isArray(disabled_sources)) return res.status(400).json({ error: 'disabled_sources must be an array' });
+  const key = username.toLowerCase();
+  const safe = disabled_sources.filter(s => VALID_SOURCES.includes(s));
+  if (!isDbAvailable()) return res.status(503).json({ error: 'Database not available' });
+  const existing = await getDbUser(key);
+  if (!existing) return res.status(404).json({ error: 'User not found' });
+  await setDisabledSources(key, safe);
+  logActivity(req.session.username, 'broker_access_changed', `set disabled_sources=[${safe}] for ${key}`, req.ip);
+  res.json({ ok: true, username: key, disabled_sources: safe });
 });
 
 app.post('/api/users/credits', requireAdmin, async (req, res) => {
@@ -866,12 +901,61 @@ app.post('/api/alpaca/disconnect-live', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Moomoo per-user account connect/disconnect
+app.get('/api/moomoo/accounts', requireAuth, async (req, res) => {
+  try {
+    const accs = await getAccounts();
+    res.json({ ok: true, accounts: accs.accounts || [] });
+  } catch (e) {
+    res.json({ ok: false, accounts: [], error: e.message });
+  }
+});
+
+app.post('/api/moomoo/connect', requireAuth, async (req, res) => {
+  const { acc_id } = req.body;
+  if (!acc_id) return res.status(400).json({ error: 'acc_id is required' });
+  await saveUserMoomoo(req.session.username, acc_id);
+  logActivity(req.session.username, 'moomoo_connected', `Moomoo account ${acc_id} connected`, req.ip);
+  res.json({ ok: true, acc_id });
+});
+
+app.post('/api/moomoo/disconnect', requireAuth, async (req, res) => {
+  await clearUserMoomoo(req.session.username);
+  logActivity(req.session.username, 'moomoo_disconnected', 'Moomoo account disconnected', req.ip);
+  res.json({ ok: true });
+});
+
+// Tiger Brokers per-user connect/disconnect
+app.post('/api/tiger/connect', requireAuth, async (req, res) => {
+  const { tiger_id, account, private_key } = req.body;
+  if (!tiger_id || !account || !private_key) return res.status(400).json({ error: 'tiger_id, account and private_key are required' });
+  const creds = { tiger_id, account, private_key };
+  const valid = await validateTigerCreds(creds);
+  if (!valid) return res.status(401).json({ error: 'Invalid Tiger credentials — check your Tiger ID, account number and private key.' });
+  await saveUserTiger(req.session.username, { tigerId: tiger_id, account, privateKey: private_key });
+  logActivity(req.session.username, 'tiger_connected', `Tiger account ${account} connected`, req.ip);
+  res.json({ ok: true, account });
+});
+
+
+app.post('/api/tiger/disconnect', requireAuth, async (req, res) => {
+  await clearUserTiger(req.session.username);
+  logActivity(req.session.username, 'tiger_disconnected', 'Tiger account disconnected', req.ip);
+  res.json({ ok: true });
+});
+
 // Helper: fetch account + positions from the selected source
 const isPaperUrl = url => !url || url.includes('paper');
 
 async function getAccountData(source, username) {
+  // Enforce admin-imposed source locks
+  if (isDbAvailable()) {
+    const lock = await getDbUser(username);
+    const disabled = Array.isArray(lock?.disabled_sources) ? lock.disabled_sources : [];
+    if (disabled.includes(source)) return { account: null, positions: [], source_disabled: true };
+  }
   // Non-admin users use their own Alpaca credentials, matched to the requested source
-  if (source !== 'moomoo' && source !== 'alpaca_live') {
+  if (source !== 'moomoo' && source !== 'alpaca_live' && source !== 'tiger') {
     const sessionUser = await getUser(username);
     if (sessionUser?.role !== 'admin' && isDbAvailable()) {
       const dbUser = await getDbUser(username);
@@ -889,7 +973,15 @@ async function getAccountData(source, username) {
     }
   }
   if (source === 'moomoo') {
-    const [funds, pos] = await Promise.allSettled([getFunds(), getMoomooPositions()]);
+    const sessionUser = await getUser(username);
+    const isAdmin = sessionUser?.role === 'admin';
+    if (!isAdmin && isDbAvailable()) {
+      const dbUser = await getDbUser(username);
+      if (!dbUser?.moomoo_acc_id) return { account: null, positions: [], needs_moomoo_setup: true };
+    }
+    const dbUser = isDbAvailable() ? await getDbUser(username) : null;
+    const accId = dbUser?.moomoo_acc_id || undefined;
+    const [funds, pos] = await Promise.allSettled([getFunds({ acc_id: accId }), getMoomooPositions({ acc_id: accId })]);
     const f = funds.status === 'fulfilled' ? funds.value : null;
     const p = pos.status  === 'fulfilled' ? pos.value  : null;
     const account = f ? {
@@ -938,6 +1030,38 @@ async function getAccountData(source, username) {
       };
     }
     return { account: null, positions: [], needs_live_setup: true };
+  }
+  // Tiger Brokers
+  if (source === 'tiger') {
+    const dbUser = isDbAvailable() ? await getDbUser(username) : null;
+    if (!dbUser?.tiger_id) return { account: null, positions: [], needs_tiger_setup: true };
+    const creds = { tiger_id: dbUser.tiger_id, account: dbUser.tiger_account, private_key: dbUser.tiger_private_key };
+    const [funds, pos] = await Promise.allSettled([getTigerFunds(creds), getTigerPositions(creds)]);
+    if (funds.status === 'rejected') console.error('[tiger] getTigerFunds failed:', funds.reason?.message);
+    if (pos.status   === 'rejected') console.error('[tiger] getTigerPositions failed:', pos.reason?.message);
+    const f = funds.status === 'fulfilled' ? funds.value : null;
+    const p = pos.status  === 'fulfilled' ? pos.value  : [];
+    const account = f ? {
+      source:          'tiger',
+      account_number:  dbUser.tiger_account,
+      portfolio_value: f.net_liquidation_value ?? f.gross_position_value,
+      buying_power:    f.buying_power,
+      cash:            f.cash,
+      market_value:    f.gross_position_value,
+      unrealized_pl:   p.reduce((s, x) => s + (x.unrealizedPnl ?? x.pnl ?? 0), 0),
+      paper:           false,
+    } : null;
+    const positions = p.map(pos => ({
+      symbol:          pos.symbol ?? pos.contract?.symbol,
+      qty:             pos.quantity ?? pos.qty ?? pos.position,
+      avg_entry_price: pos.averageCost ?? pos.average_cost ?? pos.avg_cost,
+      current_price:   pos.latestPrice ?? pos.market_price ?? pos.current_price,
+      market_value:    pos.marketValue ?? pos.market_value,
+      unrealized_pl:   pos.unrealizedPnl ?? pos.pnl ?? pos.unrealized_pl,
+      unrealized_plpc: pos.unrealizedPnlRate ?? pos.pnl_rate ?? pos.pnl_percentage,
+      side:            ((pos.side ?? pos.direction ?? 'long') + '').toLowerCase() === 'short' ? 'short' : 'long',
+    })).filter(pos => pos.symbol);
+    return { account, positions };
   }
   // Alpaca paper (default — bot trades here)
   const [account, positions] = await Promise.allSettled([getAccount(), getPositions()]);
@@ -1006,6 +1130,284 @@ app.get('/api/earnings-trend', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// Earnings calendar — next 30 days via Yahoo Finance per-symbol (batched)
+const EARNINGS_MONTH_WATCHLIST = [
+  'NVDA','AMD','AAPL','MSFT','GOOGL','META','AMZN','TSLA','NFLX','INTC',
+  'QCOM','MU','AVGO','TSM','SMCI','RTX','LMT','XOM','JPM','MRVL',
+  'CRM','ORCL','ADBE','UBER','LYFT','SNAP','SPOT','COIN','SQ','HOOD',
+  'PLTR','ARM','ANET','PANW','CRWD','ZS','NET','DDOG','MDB','SNOW',
+];
+
+app.get('/api/earnings-month', requireAuth, async (req, res) => {
+  try {
+    const cacheKey = 'earnings:month:' + new Date().toISOString().slice(0, 10);
+    const result = await ttlCache(cacheKey, 60 * 60 * 1000, async () => {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const cutoff = new Date(today.getTime() + 30 * 86400000);
+
+      // Fetch calendarEvents only (no SEC data) in batches of 8 to avoid rate limiting
+      const byDate = {};
+      const BATCH = 8;
+      for (let i = 0; i < EARNINGS_MONTH_WATCHLIST.length; i += BATCH) {
+        const batch = EARNINGS_MONTH_WATCHLIST.slice(i, i + BATCH);
+        const results = await Promise.allSettled(
+          batch.map(sym =>
+            _yf.quoteSummary(sym, { modules: ['calendarEvents', 'price'] }).catch(() => null)
+          )
+        );
+        for (let j = 0; j < batch.length; j++) {
+          const sym = batch[j];
+          const r = results[j];
+          if (r.status !== 'fulfilled' || !r.value) continue;
+          const rawDates = r.value.calendarEvents?.earnings?.earningsDate ?? [];
+          const future = rawDates
+            .map(d => (d instanceof Date ? d : new Date(d)))
+            .filter(d => !isNaN(d) && d >= today && d <= cutoff)
+            .sort((a, b) => a - b);
+          if (!future.length) continue;
+          const dateStr = future[0].toISOString().split('T')[0];
+          if (!byDate[dateStr]) byDate[dateStr] = [];
+          byDate[dateStr].push({
+            symbol: sym,
+            company: r.value.price?.longName || r.value.price?.shortName || sym,
+            call_time: '?',
+            eps_estimate: null,
+            source: 'yahoo',
+          });
+        }
+      }
+
+      const all = [];
+      for (const [date, entries] of Object.entries(byDate).sort()) {
+        for (const e of entries) all.push({ date, ...e });
+      }
+      return { success: true, generated_at: new Date().toISOString(), days_covered: 30, total: all.length, earnings: all };
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[earnings-month]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Forecast / Prediction Engine ────────────────────────────────────────────
+
+const DEFAULT_WATCHLIST_SB = [
+  'MRVL','NVDA','AMD','AAPL','MSFT','GOOGL','META','AMZN','TSLA','NFLX',
+  'INTC','QCOM','MU','AVGO','TSM','SMCI','RTX','LMT','XOM','JPM',
+  'CRWD','PANW','NET','DDOG','PLTR','COIN','UBER','ARM','ASML','ADBE',
+];
+
+// All SP500 + NASDAQ100 + strong-buys watchlist, deduped
+const FORECAST_SYMBOLS = [...new Set([...SP500, ...NASDAQ100, ...DEFAULT_WATCHLIST_SB])];
+
+function getMondayStr(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay(); // local day-of-week
+  // Sunday (0) → next Monday (+1); Mon (1) → stay; Tue-Sat → back to this Mon
+  const diff = day === 0 ? 1 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  // Use local date parts, not toISOString() which returns UTC and can give wrong date
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+function getTradingDaysOfWeek(weekStartStr) {
+  const mon = new Date(weekStartStr + 'T12:00:00Z');
+  return [0,1,2,3,4].map(i => {
+    const d = new Date(mon.getTime() + i * 86400000);
+    return d.toISOString().split('T')[0];
+  });
+}
+
+// Progress tracker for background generation
+let _forecastProgress = null; // { total, done, errors, weekStart, startedAt, finished }
+
+async function generateWeekPredictions(weekStart) {
+  const days = getTradingDaysOfWeek(weekStart);
+  const weekEnd = days[4];
+  const total = FORECAST_SYMBOLS.length;
+  let done = 0, errors = 0;
+
+  _forecastProgress = { total, done: 0, errors: 0, week_start: weekStart, started_at: new Date().toISOString(), finished: false };
+
+  // Fetch earnings dates in batches of 20 to avoid rate limiting
+  const earningsMap = {};
+  const EARN_BATCH = 20;
+  for (let i = 0; i < FORECAST_SYMBOLS.length; i += EARN_BATCH) {
+    const batch = FORECAST_SYMBOLS.slice(i, i + EARN_BATCH);
+    const results = await Promise.allSettled(
+      batch.map(sym => _yf.quoteSummary(sym, { modules: ['calendarEvents'] }).catch(() => null))
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const r = results[j];
+      if (r.status !== 'fulfilled' || !r.value) continue;
+      const rawDates = r.value.calendarEvents?.earnings?.earningsDate ?? [];
+      const inWindow = rawDates
+        .map(d => (d instanceof Date ? d : new Date(d)))
+        .filter(d => !isNaN(d))
+        .map(d => { const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; })
+        .find(ds => ds >= weekStart && ds <= weekEnd);
+      if (inWindow) earningsMap[batch[j]] = inWindow;
+    }
+  }
+
+  // Generate predictions in batches of 10
+  const BATCH = 10;
+  for (let i = 0; i < FORECAST_SYMBOLS.length; i += BATCH) {
+    const batch = FORECAST_SYMBOLS.slice(i, i + BATCH);
+    await Promise.allSettled(batch.map(async sym => {
+      try {
+        const pred = await getStockPrediction(sym);
+        const base  = pred.current_price;
+        if (!base) throw new Error('no price');
+        const slope = pred.trend?.slope_per_day ?? 0;
+        const rSq   = pred.trend?.r_squared     ?? 0;
+        const sig   = pred.overall_signal;
+        const earningsDate = earningsMap[sym] ?? null;
+
+        for (let d = 0; d < days.length; d++) {
+          const projPrice     = +(base + slope * (d + 1)).toFixed(4);
+          const projChangePct = +((projPrice - base) / base * 100).toFixed(4);
+          await upsertPrediction({
+            symbol: sym, week_start: weekStart, target_date: days[d],
+            predicted_price: projPrice, predicted_change_pct: projChangePct,
+            base_price: base, algorithm_signal: sig,
+            slope_per_day: slope, r_squared: rSq,
+            has_earnings: !!earningsDate, earnings_date: earningsDate,
+          });
+        }
+        done++;
+      } catch (e) {
+        errors++;
+      }
+      _forecastProgress = { ..._forecastProgress, done, errors };
+    }));
+  }
+
+  _forecastProgress = { total, done, errors, week_start: weekStart, started_at: _forecastProgress.started_at, finished: true, finished_at: new Date().toISOString() };
+  console.log(`[forecast] generated ${done}/${total} symbols for week ${weekStart} (${errors} errors)`);
+  return { generated: done, errors, week_start: weekStart };
+}
+
+async function fillTodayActuals(dateStr) {
+  // Fetch closing prices for all symbols in batches
+  let filled = 0;
+  const BATCH = 10;
+  for (let i = 0; i < FORECAST_SYMBOLS.length; i += BATCH) {
+    const batch = FORECAST_SYMBOLS.slice(i, i + BATCH);
+    await Promise.allSettled(batch.map(async sym => {
+      try {
+        const data = await _yf.quoteSummary(sym, { modules: ['price'] });
+        const close = data?.price?.regularMarketPrice;
+        if (!close) return;
+        await fillActualPrice(sym, dateStr, close);
+        filled++;
+      } catch {}
+    }));
+  }
+  console.log(`[forecast] filled actuals for ${dateStr}: ${filled} symbols`);
+  return filled;
+}
+
+// GET /api/forecast — current week predictions + actuals
+app.get('/api/forecast', requireAuth, async (req, res) => {
+  try {
+    const weekStart = req.query.week || getMondayStr();
+    const rows = await getPredictionsForWeek(weekStart);
+    const history = await getPredictionHistory({ limit: 8 });
+
+    // pg returns NUMERIC columns as strings — coerce everything to numbers
+    const n = v => v == null ? null : +v;
+
+    // Pivot rows into per-symbol objects
+    const bySymbol = {};
+    for (const r of rows) {
+      if (!bySymbol[r.symbol]) {
+        bySymbol[r.symbol] = {
+          symbol: r.symbol, week_start: r.week_start,
+          base_price:        n(r.base_price),
+          algorithm_signal:  n(r.algorithm_signal),
+          r_squared:         n(r.r_squared),
+          slope_per_day:     n(r.slope_per_day),
+          has_earnings: r.has_earnings, earnings_date: r.earnings_date,
+          days: {},
+        };
+      }
+      bySymbol[r.symbol].days[r.target_date] = {
+        date:                 r.target_date,
+        predicted_price:      n(r.predicted_price),
+        predicted_change_pct: n(r.predicted_change_pct),
+        actual_price:         n(r.actual_price),
+        actual_change_pct:    n(r.actual_change_pct),
+        error_pct:            n(r.error_pct),
+      };
+    }
+
+    const symbols = Object.values(bySymbol).sort((a, b) => a.symbol.localeCompare(b.symbol));
+    const days = getTradingDaysOfWeek(weekStart);
+
+    // Overall accuracy stats for this week
+    const filled   = rows.filter(r => r.actual_price != null);
+    const avgError = filled.length
+      ? +(filled.reduce((s, r) => s + Math.abs(n(r.error_pct) ?? 0), 0) / filled.length).toFixed(2)
+      : null;
+    const directionHits = filled.filter(r =>
+      r.predicted_change_pct != null && r.actual_change_pct != null &&
+      ((n(r.predicted_change_pct) > 0 && n(r.actual_change_pct) > 0) ||
+       (n(r.predicted_change_pct) < 0 && n(r.actual_change_pct) < 0))
+    ).length;
+    const directionAcc = filled.length ? +(directionHits / filled.length * 100).toFixed(1) : null;
+
+    // Today's movers from Strong Buys cache that aren't in the forecast universe
+    const forecastSet = new Set(symbols.map(s => s.symbol));
+    const movers = (_sbCache?.picks || [])
+      .filter(p => !forecastSet.has(p.symbol))
+      .map(p => ({ symbol: p.symbol, name: p.name, score: p.score, grade: p.grade, horizon: p.horizon }));
+
+    res.json({
+      success: true,
+      week_start: weekStart,
+      days,
+      symbols,
+      movers,
+      stats: { total_predictions: rows.length, filled: filled.length, avg_abs_error_pct: avgError, direction_accuracy_pct: directionAcc },
+      history,
+    });
+  } catch (err) {
+    console.error('[forecast]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/forecast/generate — fire-and-forget, returns immediately
+app.post('/api/forecast/generate', requireAuth, (req, res) => {
+  if (_forecastProgress && !_forecastProgress.finished) {
+    return res.json({ success: true, status: 'already_running', progress: _forecastProgress });
+  }
+  const weekStart = getMondayStr();
+  generateWeekPredictions(weekStart).catch(err => console.error('[forecast] generate error:', err.message));
+  res.json({ success: true, status: 'started', week_start: weekStart, total: FORECAST_SYMBOLS.length });
+});
+
+// GET /api/forecast/progress — poll generation progress
+app.get('/api/forecast/progress', requireAuth, (req, res) => {
+  res.json(_forecastProgress || { finished: true, done: 0, total: 0 });
+});
+
+// POST /api/forecast/fill-actuals — manually trigger EOD fill
+app.post('/api/forecast/fill-actuals', requireAuth, async (req, res) => {
+  try {
+    const dateStr = req.query.date || new Date().toISOString().split('T')[0];
+    const filled = await fillTodayActuals(dateStr);
+    res.json({ success: true, filled, date: dateStr });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Throttled on-demand sync: fire-and-forget, max once per 45s
 let _lastSyncMs = 0;
 function triggerSyncIfDue() {
@@ -1021,7 +1423,7 @@ function triggerSyncIfDue() {
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     const rawSource = req.query.source;
-    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : 'alpaca';
+    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
     const sessionUser = await getUser(req.session.username);
     const isAdmin     = sessionUser?.role === 'admin';
     const dbUser      = isDbAvailable() ? await getDbUser(req.session.username) : null;
@@ -1032,9 +1434,9 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     // Keep DB in sync with Alpaca on every dashboard load (throttled to once per 45s)
     if (source === 'alpaca' || isAdmin) triggerSyncIfDue();
 
-    // P&L: admin→bot's paper account, regular user→their own paper account, live→null
+    // P&L: admin→bot's paper account, regular user→their own paper account, live/real→null
     const getPnl = () => {
-      if (source === 'alpaca_live' || source === 'moomoo') return Promise.resolve(null);
+      if (source === 'alpaca_live' || source === 'moomoo' || source === 'tiger') return Promise.resolve(null);
       if (isAdmin) return getDailyPnL();
       // Only use user's creds if they match the selected source (paper creds for paper source)
       if (userCreds && isPaperUrl(userCreds.baseUrl)) return getUserDailyPnL(userCreds);
@@ -1055,6 +1457,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     ]);
     const acctData   = acctRes.status === 'fulfilled' ? acctRes.value : { account: null, positions: [] };
     if (acctData.needs_alpaca_setup) return res.json({ needs_alpaca_setup: true });
+    if (acctData.needs_tiger_setup)  return res.json({ needs_tiger_setup: true });
     const { account, positions } = acctData;
     const pnl        = pnlRes.status       === 'fulfilled' ? pnlRes.value       : null;
     const sentiment  = sentRes.status      === 'fulfilled' ? sentRes.value      : null;
@@ -1062,7 +1465,24 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 
     // Recent trades — scoped to the logged-in user's own account
     let trades = [];
-    if (source === 'moomoo') {
+    if (source === 'tiger') {
+      try {
+        const dbUser2 = isDbAvailable() ? await getDbUser(req.session.username) : null;
+        if (dbUser2?.tiger_id) {
+          const creds = { tiger_id: dbUser2.tiger_id, account: dbUser2.tiger_account, private_key: dbUser2.tiger_private_key };
+          const orders = await getTigerOrders(creds, { days: 30 });
+          trades = orders.slice(0, 10).map(o => ({
+            symbol:      o.symbol,
+            side:        (o.action || o.side || '').toLowerCase(),
+            qty:         o.filledQuantity ?? o.quantity ?? o.qty ?? 0,
+            entry_price: o.avgFillPrice   ?? o.filledPrice ?? o.price ?? 0,
+            status:      o.status,
+            opened_at:   o.openTime ? new Date(o.openTime).toISOString() : null,
+            source:      'tiger',
+          }));
+        }
+      } catch { trades = []; }
+    } else if (source === 'moomoo') {
       try {
         const res = await getMoomooOrders({ status: 'history' });
         trades = (res.orders || []).slice(0, 10).map(o => ({
@@ -1155,7 +1575,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 app.get('/api/trades', requireAuth, async (req, res) => {
   try {
     const rawSource = req.query.source || 'alpaca';
-    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : 'alpaca';
+    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
     const status = req.query.status || null;
     const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
     const tradesUser = await getUser(req.session.username);
@@ -1225,6 +1645,24 @@ app.get('/api/trades', requireAuth, async (req, res) => {
         .sort((a, b) => new Date(b.opened_at) - new Date(a.opened_at))
         .slice(0, limit);
       return res.json({ source: 'db', trades: merged });
+    }
+
+    // Tiger source — fetch user's Tiger orders
+    if (source === 'tiger') {
+      const dbUserT = isDbAvailable() ? await getDbUser(req.session.username) : null;
+      if (!dbUserT?.tiger_id) return res.json({ source: 'tiger', trades: [] });
+      const creds = { tiger_id: dbUserT.tiger_id, account: dbUserT.tiger_account, private_key: dbUserT.tiger_private_key };
+      const orders = await getTigerOrders(creds, { days: 90 });
+      const trades = orders.slice(0, limit).map(o => ({
+        symbol:      o.symbol,
+        side:        (o.action || o.side || '').toLowerCase(),
+        qty:         o.filledQuantity ?? o.quantity ?? 0,
+        entry_price: o.avgFillPrice ?? o.filledPrice ?? o.price ?? 0,
+        status:      o.status,
+        opened_at:   o.createTime ? new Date(o.createTime).toISOString() : null,
+        source:      'tiger',
+      }));
+      return res.json({ source: 'tiger', trades });
     }
 
     // Paper source — regular user with their own paper credentials
@@ -1324,11 +1762,6 @@ app.post('/api/scores/scan', requireAdmin, async (req, res) => {
 });
 
 // Strong Buys Today — scan watchlist + movers, return grade A/B with reasoning
-const DEFAULT_WATCHLIST_SB = [
-  'MRVL','NVDA','AMD','AAPL','MSFT','GOOGL','META','AMZN','TSLA','NFLX',
-  'INTC','QCOM','MU','AVGO','TSM','SMCI','RTX','LMT','XOM','JPM',
-  'CRWD','PANW','NET','DDOG','PLTR','COIN','UBER','ARM','ASML','ADBE',
-];
 
 let _sbCache = null;
 let _sbCacheTs = 0;
@@ -1781,9 +2214,50 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
     const pnlUser = await getUser(req.session.username);
     const pnlAdmin = pnlUser?.role === 'admin';
 
-    // Live account has no P&L history view
-    if (source === 'alpaca_live' || source === 'moomoo') {
-      return res.json({ today: { pnl: 0, available: false }, history: [] });
+    // Real-money accounts (moomoo, tiger, alpaca_live) — live snapshot + DB-stored daily history
+    if (source === 'moomoo' || source === 'tiger' || source === 'alpaca_live') {
+      const { account } = await getAccountData(source, req.session.username);
+
+      // Persist today's snapshot so history accumulates over time
+      if (account && isDbAvailable()) {
+        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+        upsertAccountSnapshot({
+          date:            todayStr,
+          source,
+          username:        req.session.username,
+          portfolio_value: account.portfolio_value ?? null,
+          realized_pl:     account.realized_pl    ?? null,
+          unrealized_pl:   account.unrealized_pl  ?? null,
+        }).catch(() => {});
+      }
+
+      // Build daily P&L history from stored snapshots (day-over-day realized_pl change)
+      const snapshots = isDbAvailable()
+        ? await getAccountSnapshots({ source, username: req.session.username, days })
+        : [];
+
+      const history = [];
+      for (let i = 1; i < snapshots.length; i++) {
+        const prev = snapshots[i - 1];
+        const curr = snapshots[i];
+        const pnl = curr.realized_pl != null && prev.realized_pl != null
+          ? +( parseFloat(curr.realized_pl) - parseFloat(prev.realized_pl) ).toFixed(2)
+          : null;
+        history.push({
+          date:           curr.date instanceof Date
+            ? curr.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+            : String(curr.date).slice(0, 10),
+          pnl:            pnl ?? 0,
+          equity:         curr.portfolio_value != null ? parseFloat(curr.portfolio_value) : null,
+          unrealized_pl:  curr.unrealized_pl  != null ? parseFloat(curr.unrealized_pl)  : null,
+        });
+      }
+
+      return res.json({
+        today:   { pnl: account?.unrealized_pl ?? 0, available: !!account, live: true },
+        account: account ?? null,
+        history,
+      });
     }
 
     const pnlDbUser = isDbAvailable() ? await getDbUser(req.session.username) : null;
@@ -2001,7 +2475,7 @@ app.get('/api/sources', requireAuth, async (req, res) => {
 app.get('/api/positions', requireAuth, async (req, res) => {
   try {
     const rawSource = req.query.source;
-    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : 'alpaca';
+    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
     const { positions } = await getAccountData(source, req.session.username);
     res.json({ source, positions });
   } catch (err) {
@@ -2376,7 +2850,7 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
 
   const send = (obj) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
 
-  const userConfig = await getUserBotConfig(username);
+  const userConfig = { ...(await getUserBotConfig(username)), role: user.role };
   try {
     const chatResult = await chat({
       chatId:     userChatId(username),
@@ -2708,6 +3182,74 @@ app.post('/api/scanner/watchlist/remove', requireAdmin, async (req, res) => {
   await saveWatchlist(list);
   logActivity(req.session.username, 'watchlist_remove', sym, req.ip);
   res.json({ ok: true, watchlist: list });
+});
+
+// ─── User Watchlist ───────────────────────────────────────────────────────────
+
+app.get('/api/watchlist', requireAuth, async (req, res) => {
+  const symbols = await getUserWatchlistSymbols(req.session.username);
+  res.json({ symbols });
+});
+
+app.post('/api/watchlist/add', requireAuth, async (req, res) => {
+  const sym = (req.body.symbol ?? '').toUpperCase().trim();
+  if (!sym || !/^[A-Z]{1,10}$/.test(sym)) return res.status(400).json({ error: 'Invalid symbol' });
+  await addUserWatchlistSymbol(req.session.username, sym);
+  logActivity(req.session.username, 'watchlist_add', sym, req.ip);
+  const symbols = await getUserWatchlistSymbols(req.session.username);
+  res.json({ ok: true, symbols });
+});
+
+app.post('/api/watchlist/remove', requireAuth, async (req, res) => {
+  const sym = (req.body.symbol ?? '').toUpperCase().trim();
+  if (!sym) return res.status(400).json({ error: 'symbol required' });
+  await removeUserWatchlistSymbol(req.session.username, sym);
+  logActivity(req.session.username, 'watchlist_remove', sym, req.ip);
+  const symbols = await getUserWatchlistSymbols(req.session.username);
+  res.json({ ok: true, symbols });
+});
+
+app.get('/api/watchlist/detail', requireAuth, async (req, res) => {
+  try {
+    const symbols = await getUserWatchlistSymbols(req.session.username);
+    const results = await Promise.allSettled(symbols.map(async sym => {
+      const [quoteResult, scoreResult] = await Promise.allSettled([
+        getLatestPrice(sym),
+        getConvictionScore({ symbol: sym, positions: [] }),
+      ]);
+      const quote   = quoteResult.status === 'fulfilled' ? quoteResult.value   : null;
+      const scoring = scoreResult.status === 'fulfilled' ? scoreResult.value : null;
+      const sig     = scoring?.signals ?? {};
+      return {
+        symbol:             sym,
+        name:               sig.name ?? null,
+        price:              quote?.mid ?? quote?.ask ?? quote?.bid ?? null,
+        change:             quote?.change ?? null,
+        change_pct:         quote?.change_pct ?? null,
+        score:              scoring?.score ?? null,
+        grade:              scoring?.grade ?? null,
+        horizon:            scoring?.horizon ?? null,
+        reasoning:          scoring?.reasoning ?? null,
+        analyst_consensus:  sig.analyst_consensus  ?? null,
+        analyst_target:     sig.analyst_target     ?? null,
+        analyst_upside_pct: sig.analyst_upside_pct ?? null,
+        rvol:               sig.rvol               ?? null,
+        rsi:                sig.rsi                ?? null,
+        weekly_trend:       sig.weekly_trend       ?? null,
+        short_float:        sig.short_float        ?? null,
+        earnings_date:      sig.next_earnings_date ?? null,
+        macd_signal:        sig.macd_bullish != null ? (sig.macd_bullish ? 'bullish' : 'bearish') : null,
+        ema_trend:          sig.ema_trend           ?? null,
+      };
+    }));
+    const items = results.map((r, i) =>
+      r.status === 'fulfilled' ? r.value : { symbol: symbols[i], price: null, score: null, grade: null }
+    );
+    res.json({ items });
+  } catch (err) {
+    console.error('[watchlist/detail]', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Autonomous Push Notifications ───────────────────────────────────────────
@@ -3184,8 +3726,8 @@ app.put('/api/bot/config', requireAuth, async (req, res) => {
 
   // Whitelist allowed fields — reject unknown keys
   const allowed = ['profile', 'daily_profit_target', 'daily_loss_limit', 'max_open_positions',
-    'min_conviction_score', 'auto_execute', 'max_vix_for_scan', 'position_sizing',
-    'vix_thresholds', 'sectors_blocklist'];
+    'min_conviction_score', 'auto_execute', 'max_vix_for_scan', 'trade_source', 'position_sizing',
+    'vix_thresholds', 'sectors_blocklist', 'kb_enabled'];
   const config = {};
   for (const key of allowed) {
     if (body[key] !== undefined) config[key] = body[key];
@@ -3203,6 +3745,8 @@ app.put('/api/bot/config', requireAuth, async (req, res) => {
     n('max_open_positions',  1,  10);
     n('min_conviction_score', 0, 100);
     n('max_vix_for_scan',    10, 100);
+    if (config.trade_source !== undefined && !['paper','tiger','moomoo'].includes(config.trade_source))
+      throw Object.assign(new Error('trade_source must be paper, tiger, or moomoo'), { status: 400 });
     if (config.position_sizing) {
       const ps = config.position_sizing;
       if (ps.min_dollars    !== undefined && (ps.min_dollars < 100 || ps.min_dollars > 50000))
@@ -4250,6 +4794,27 @@ cron.schedule('*/5 2 * * 0', async () => {
   } catch (err) {
     console.error('[ollama-update] cron error:', err.message);
   }
+});
+
+// ─── Forecast Crons ──────────────────────────────────────────────────────────
+// Monday 8:30 AM ET — generate week predictions before market open
+cron.schedule('*/5 8-9 * * 1', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 8 * 60 + 30 || mins >= 8 * 60 + 35) return;
+  try { await generateWeekPredictions(getMondayStr()); }
+  catch (err) { console.error('[forecast] Monday cron error:', err.message); }
+});
+
+// Daily 4:15 PM ET (Mon-Fri) — fill actual close prices
+cron.schedule('*/5 16-17 * * 1-5', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 16 * 60 + 15 || mins >= 16 * 60 + 20) return;
+  try {
+    const dateStr = et.toISOString().split('T')[0];
+    await fillTodayActuals(dateStr);
+  } catch (err) { console.error('[forecast] EOD fill cron error:', err.message); }
 });
 
 // ─── Admin API: manual trigger (per-step or all) ──────────────────────────────

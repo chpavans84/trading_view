@@ -94,17 +94,157 @@
     background-image: var(--body-grad);
     background-attachment: fixed;
   }
+  /* Subtle full-page background image — opacity kept very low so widgets stay readable */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url('/images/background.png');
+    background-size: cover;
+    background-position: center center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    opacity: 0.10;
+    z-index: 0;
+    pointer-events: none;
+  }
+  /* Ensure all page content sits above the background layer */
+  body > * { position: relative; z-index: 1; }
   nav {
     background: var(--nav-bg);
     border-bottom: 1px solid var(--border);
-    display: flex; align-items: stretch; justify-content: space-between;
-    padding: 0 20px; height: 56px; position: sticky; top: 0; z-index: 100;
+    display: flex; align-items: stretch; justify-content: flex-start;
+    padding: 0 16px; height: 42px; position: sticky; top: 0; z-index: 100;
     overflow: visible;
+  }
+
+  /* ── Market Hero Banner ─────────────────────────────────────────────────── */
+  #market-hero {
+    width: 100%;
+    height: 112px;
+    position: relative;
+    overflow: visible;
+    z-index: 200;
+    background-image:
+      linear-gradient(rgba(7,13,24,0.78), rgba(7,13,24,0.78)),
+      url('/images/background.png');
+    background-size: cover;
+    background-position: center center;
+    background-attachment: fixed;
+    display: flex;
+    align-items: center;
+    padding: 0 28px;
+    gap: 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  #market-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(0,0,0,0.08) 3px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+  .hero-brand {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    z-index: 1;
+  }
+  .hero-title {
+    font-size: 1.65rem;
+    font-weight: 900;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: #e6edf3;
+    line-height: 1;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.7);
+  }
+  .hero-title span { color: var(--accent-l); }
+  .hero-subtitle {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(139,148,158,0.85);
+  }
+  .hero-divider {
+    width: 1px;
+    height: 48px;
+    background: rgba(255,255,255,0.12);
+    z-index: 1;
+    flex-shrink: 0;
+  }
+  .hero-markets {
+    display: flex;
+    gap: 20px;
+    z-index: 1;
+  }
+  .hero-market-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .hero-market-label {
+    font-size: 0.60rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: rgba(139,148,158,0.75);
+  }
+  .hero-market-val {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #e6edf3;
+    font-variant-numeric: tabular-nums;
+  }
+  .hero-market-val.up { color: var(--green); }
+  .hero-market-val.down { color: var(--red); }
+  /* Controls block pushed to the right of the hero */
+  .hero-controls {
+    margin-left: auto;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  /* Override nav-clocks/nav-right sizing for hero context */
+  .hero-controls .nav-clocks { gap: 0; }
+  .hero-controls .nav-clock { padding: 4px 10px; }
+  .hero-controls .nav-clock-label { font-size: 0.58rem; }
+  .hero-controls .nav-clock-time  { font-size: 0.9rem; }
+  .hero-controls .nav-clock-sub   { font-size: 0.6rem; }
+  .hero-controls .nav-clock-divider { height: 32px; }
+  .hero-controls .source-select-wrap { margin: 0; }
+  .hero-controls .user-menu { position: relative; }
+  /* Dropdown opens downward from hero into the nav area */
+  .hero-controls .user-dropdown {
+    top: calc(100% + 8px);
+    right: 0;
+  }
+  @media (max-width: 900px) {
+    .hero-controls .nav-clocks { display: none; }
+  }
+  @media (max-width: 768px) {
+    #market-hero { height: 80px; padding: 0 16px; gap: 12px; }
+    .hero-title { font-size: 1.15rem; }
+    .hero-markets { gap: 12px; }
+    .hero-market-val { font-size: 0.78rem; }
+    .hero-divider { display: none; }
+    .hero-controls .nav-clocks { display: none; }
   }
 
   /* News ticker bar under nav */
   #newsTicker {
-    position: sticky; top: 56px; z-index: 99;
+    position: sticky; top: 42px; z-index: 99;
     background: var(--ticker-bg); border-bottom: 1px solid var(--surface);
     display: flex; align-items: center; height: 36px; overflow: hidden;
     padding: 0 16px; gap: 10px;
@@ -164,7 +304,7 @@
   .nav-tabs { display: flex; align-items: stretch; }
   .tab {
     display: inline-flex; align-items: center;
-    padding: 0 14px; height: 56px;
+    padding: 0 14px; height: 42px;
     cursor: pointer; font-size: 0.8rem; font-weight: 500;
     color: var(--muted);
     border: none; border-bottom: 2px solid transparent;
@@ -410,6 +550,20 @@
     transition: opacity 0.1s;
   }
   #symExploreTip:hover { background: rgba(31,111,235,0.2); }
+  /* ── Watchlist hearts ── */
+  .wl-heart {
+    background: none; border: none; cursor: pointer;
+    font-size: 0.85rem; line-height: 1; padding: 0 0 0 3px;
+    opacity: 0.5; transition: opacity 0.15s, transform 0.1s;
+    vertical-align: middle;
+  }
+  .wl-heart:hover { opacity: 1; transform: scale(1.2); }
+  .wl-heart.wl-active { opacity: 1; }
+  /* ── Watchlist table ── */
+  .wl-empty { text-align: center; padding: 60px 20px; color: var(--text2); }
+  .wl-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  #wlBody tr td { vertical-align: middle; }
+  .wl-horizon { display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.72rem;font-weight:600;white-space:nowrap; }
 
   /* Floating Stock Explorer */
   .float-explorer {
@@ -417,11 +571,10 @@
     top: 60px; right: 16px;
     width: min(960px, calc(100vw - 32px));
     max-height: calc(100vh - 76px);
-    background: linear-gradient(160deg, rgba(22,27,34,0.97) 0%, rgba(13,17,23,0.95) 100%);
+    background: var(--table-bg);
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border: 1px solid rgba(48,54,61,0.8);
-    border-top: 1px solid rgba(255,255,255,0.07);
+    border: 1px solid var(--border);
     border-radius: 14px;
     box-shadow: 0 28px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(88,166,255,0.06);
     z-index: 1500;
@@ -433,35 +586,35 @@
   .float-explorer-header {
     display: flex; align-items: center; gap: 10px;
     padding: 11px 16px;
-    border-bottom: 1px solid rgba(48,54,61,0.5);
+    border-bottom: 1px solid var(--border);
     cursor: grab; user-select: none; flex-shrink: 0;
-    background: rgba(33,38,45,0.4);
+    background: var(--bg2);
   }
   .float-explorer-header:active { cursor: grabbing; }
-  .float-explorer-title { font-size: 0.9rem; font-weight: 600; color: #e6edf3; flex: 1; }
+  .float-explorer-title { font-size: 0.9rem; font-weight: 600; color: var(--text); flex: 1; }
   .float-explorer-close {
     background: none; border: none; cursor: pointer;
-    color: #8b949e; font-size: 1rem; padding: 2px 6px; border-radius: 4px;
+    color: var(--text2); font-size: 1rem; padding: 2px 6px; border-radius: 4px;
     transition: color 0.15s, background 0.15s;
     line-height: 1;
   }
-  .float-explorer-close:hover { color: #e6edf3; background: rgba(248,81,73,0.15); }
+  .float-explorer-close:hover { color: var(--text); background: rgba(248,81,73,0.15); }
   .float-explorer-body { overflow-y: auto; flex: 1; }
   /* Explorer — News & Analyst extras */
-  .exnews-section { padding:0 16px 16px;border-top:1px solid rgba(48,54,61,0.5); }
+  .exnews-section { padding:0 16px 16px;border-top:1px solid var(--border); }
   .exnews-toggle  { display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0 6px; }
-  .exnews-toggle h4 { font-size:0.85rem;color:#8b949e;margin:0;font-weight:600; }
-  .exnews-chevron { font-size:0.7rem;color:#8b949e;transition:transform 0.2s; }
-  .exnews-item    { display:flex;flex-direction:column;gap:3px;padding:8px 0;border-bottom:1px solid rgba(48,54,61,0.4); }
+  .exnews-toggle h4 { font-size:0.85rem;color:var(--text2);margin:0;font-weight:600; }
+  .exnews-chevron { font-size:0.7rem;color:var(--text2);transition:transform 0.2s; }
+  .exnews-item    { display:flex;flex-direction:column;gap:3px;padding:8px 0;border-bottom:1px solid var(--border); }
   .exnews-item:last-child { border-bottom:none; }
-  .exnews-title   { font-size:0.82rem;color:#e6edf3;line-height:1.4; }
-  .exnews-title a { color:#58a6ff;text-decoration:none; }
+  .exnews-title   { font-size:0.82rem;color:var(--text);line-height:1.4; }
+  .exnews-title a { color:var(--accent-l);text-decoration:none; }
   .exnews-title a:hover { text-decoration:underline; }
-  .exnews-meta    { font-size:0.72rem;color:#484f58; }
+  .exnews-meta    { font-size:0.72rem;color:var(--muted); }
   .exnews-sentiment { font-size:0.7rem;padding:1px 6px;border-radius:4px;font-weight:600;margin-left:6px; }
-  .exnews-sentiment.pos { background:rgba(63,185,80,0.15);color:#3fb950; }
-  .exnews-sentiment.neg { background:rgba(248,81,73,0.15);color:#f85149; }
-  .exnews-sentiment.neu { background:rgba(139,148,158,0.1);color:#8b949e; }
+  .exnews-sentiment.pos { background:rgba(16,185,129,0.15);color:var(--green); }
+  .exnews-sentiment.neg { background:rgba(244,63,94,0.15); color:var(--red); }
+  .exnews-sentiment.neu { background:rgba(139,148,158,0.1);color:var(--text2); }
   .ex-analyst-bar { display:flex;gap:12px;flex-wrap:wrap;padding:10px 0 4px;align-items:center; }
   .ex-analyst-pill { padding:4px 10px;border-radius:20px;font-size:0.78rem;font-weight:600;border:1px solid; }
   .ex-analyst-pill.strong_buy  { background:rgba(63,185,80,0.15);border-color:#3fb950;color:#3fb950; }
@@ -475,14 +628,14 @@
   .explorer-search-wrap {
     position: relative;
     display: flex; align-items: center;
-    background: rgba(13,17,23,0.8);
-    border: 1px solid rgba(48,54,61,0.9);
+    background: var(--bg);
+    border: 1px solid var(--faint);
     border-radius: 8px;
     width: 340px;
     transition: border-color 0.2s, box-shadow 0.2s;
   }
   .explorer-search-wrap:focus-within {
-    border-color: #58a6ff;
+    border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(88,166,255,0.15);
   }
   .explorer-search-icon {
@@ -490,23 +643,22 @@
   }
   .explorer-search-input {
     flex: 1; background: none; border: none; outline: none;
-    color: #e6edf3; font-size: 0.88rem; padding: 7px 6px;
+    color: var(--text); font-size: 0.88rem; padding: 7px 6px;
     min-width: 0;
   }
-  .explorer-search-input::placeholder { color: #484f58; }
+  .explorer-search-input::placeholder { color: var(--muted); }
   .explorer-clear-btn {
-    background: none; border: none; color: #6e7681; cursor: pointer;
+    background: none; border: none; color: var(--muted); cursor: pointer;
     font-size: 0.75rem; padding: 4px 10px; line-height: 1;
     transition: color 0.15s;
   }
-  .explorer-clear-btn:hover { color: #e6edf3; }
+  .explorer-clear-btn:hover { color: var(--text); }
   .explorer-dropdown {
     position: absolute; top: calc(100% + 6px); left: 0; right: 0;
-    background: linear-gradient(160deg, rgba(22,27,34,0.98) 0%, rgba(13,17,23,0.96) 100%);
+    background: var(--surface);
     backdrop-filter: blur(16px) saturate(180%);
     -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border: 1px solid rgba(48,54,61,0.8);
-    border-top: 1px solid rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
     border-radius: 10px;
     box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(88,166,255,0.06);
     z-index: 400; overflow: hidden;
@@ -518,18 +670,18 @@
     display: flex; align-items: center; gap: 10px;
     padding: 9px 14px; cursor: pointer;
     transition: background 0.12s;
-    border-bottom: 1px solid rgba(33,38,45,0.5);
+    border-bottom: 1px solid var(--border);
   }
   .explorer-drop-item:last-child { border-bottom: none; }
   .explorer-drop-item:hover, .explorer-drop-item.active {
     background: rgba(88,166,255,0.1);
   }
   .explorer-drop-sym {
-    font-weight: 700; font-size: 0.88rem; color: #e6edf3;
+    font-weight: 700; font-size: 0.88rem; color: var(--text);
     min-width: 56px; flex-shrink: 0;
   }
   .explorer-drop-name {
-    font-size: 0.8rem; color: #8b949e;
+    font-size: 0.8rem; color: var(--text2);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .explorer-drop-match { color: #58a6ff; }
@@ -756,6 +908,30 @@
   }
   .voice-tts-btn:hover { color: #e6edf3; background: #21262d; }
   .voice-tts-btn.active { color: #3fb950; }
+  /* Interactive Voice Session */
+  .voice-session-btn {
+    background: none; border: none; font-size: 0.82rem; cursor: pointer;
+    color: #8b949e; padding: 2px 8px; border-radius: 4px; transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .voice-session-btn:hover { color: #e6edf3; background: #21262d; }
+  .voice-session-btn.active { color: #f85149; background: rgba(248,81,73,0.12); }
+  #voiceSessionBar {
+    display: none; align-items: center; gap: 8px; padding: 5px 12px;
+    border-bottom: 1px solid var(--border); font-size: 0.78rem;
+    background: rgba(20,26,34,0.97);
+  }
+  .vs-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .vs-dot.listening { background: #58a6ff; animation: vsListenPulse 1.2s ease-in-out infinite; }
+  .vs-dot.thinking  { background: #e3b341; animation: vsListenPulse 0.7s ease-in-out infinite; }
+  .vs-dot.speaking  { background: #3fb950; animation: vsSpeakPulse 0.6s ease-in-out infinite; }
+  @keyframes vsListenPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.35;transform:scale(0.65)} }
+  @keyframes vsSpeakPulse  { 0%,100%{opacity:1;transform:scale(1.35)} 50%{opacity:0.5;transform:scale(0.85)} }
+  .vs-label { color: #c9d1d9; }
+  .vs-timer { color: #8b949e; font-size: 0.72rem; margin-left: 2px; }
+  .vs-stop  { margin-left: auto; cursor: pointer; color: #8b949e; font-size: 0.72rem;
+              border: none; background: none; padding: 1px 6px; border-radius: 3px; }
+  .vs-stop:hover { color: #f85149; background: rgba(248,81,73,0.1); }
   @keyframes micPulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(248,81,73,0.5); }
     50%       { box-shadow: 0 0 0 7px rgba(248,81,73,0); }
@@ -790,6 +966,15 @@
   .pos-expand-btn { font-size:0.75rem; color:#58a6ff; cursor:pointer; transition:transform .2s; display:inline-block; user-select:none; }
   tr.pos-main-row { cursor:pointer; }
   tr.pos-main-row:hover td { background:rgba(88,166,255,0.04); }
+  /* Live cell flash on value change */
+  @keyframes posFlash { 0%{background:rgba(88,166,255,0.18)} 100%{background:transparent} }
+  td.pos-flash { animation: posFlash 0.7s ease-out; }
+  /* New position row slides in */
+  @keyframes posRowIn { from{opacity:0;transform:translateX(-12px)} to{opacity:1;transform:none} }
+  tr.pos-row-new td { animation: posRowIn 0.35s ease-out; }
+  /* Closing position fades out */
+  @keyframes posRowOut { to{opacity:0;transform:translateX(12px)} }
+  tr.pos-row-removing td { animation: posRowOut 0.3s ease-in forwards; pointer-events:none; }
   .pos-detail-panel {
     padding:14px 18px 16px 22px;
     background:linear-gradient(135deg,rgba(22,27,34,0.7) 0%,rgba(13,17,23,0.6) 100%);
@@ -842,6 +1027,8 @@
   .src-alpaca       { background: #0d1f38; color: #58a6ff; }
   .src-yahoo        { background: #2d1f00; color: #f0883e; }
   .src-financialjuice { background: #1f1038; color: #bc8cff; }
+  .src-cna          { background: #0d2218; color: #3fb950; }
+  .src-reuters      { background: #1a0d0d; color: #f85149; }
 
   /* Category dot */
   .cat-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; flex-shrink: 0; }
@@ -1056,22 +1243,32 @@
 </head>
 <body>
 
-<nav>
-  <div class="nav-brand" style="display:flex;align-items:center;gap:8px;font-size:0.95rem;letter-spacing:0.06em;font-weight:800;text-transform:uppercase;color:var(--text)"><span style="color:var(--accent-l)">▲</span> TradingBot</div>
-  <div class="nav-tabs">
-    <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">Dashboard</button>
-    <button class="tab" onclick="showPage('trades',this)">Trades</button>
-    <button class="tab" onclick="showPage('scores',this)">Scores</button>
-    <button class="tab" onclick="showPage('market',this)">Market</button>
-    <button class="tab" onclick="showPage('research',this)">Research</button>
-    <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
-    <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
-    <button class="tab" id="tab-stats" onclick="showPage('stats',this)" style="display:none">Stats</button>
-    <button class="tab" id="tab-users" onclick="showPage('users',this)" style="display:none">Users</button>
-    <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">🔐 Admin</button>
+<div id="market-hero">
+  <div class="hero-brand">
+    <div class="hero-title"><span>▲</span> TradingBot</div>
+    <div class="hero-subtitle">AI-Powered Stock Intelligence</div>
   </div>
-  <div class="nav-right">
-    <!-- Dual clock: SGT + US Market (ET) -->
+  <div class="hero-divider"></div>
+  <div class="hero-markets" id="heroMarkets">
+    <div class="hero-market-item">
+      <div class="hero-market-label">S&amp;P 500</div>
+      <div class="hero-market-val" id="heroSpy">—</div>
+    </div>
+    <div class="hero-market-item">
+      <div class="hero-market-label">NASDAQ</div>
+      <div class="hero-market-val" id="heroQqq">—</div>
+    </div>
+    <div class="hero-market-item">
+      <div class="hero-market-label">VIX</div>
+      <div class="hero-market-val" id="heroVix">—</div>
+    </div>
+    <div class="hero-market-item">
+      <div class="hero-market-label">BTC</div>
+      <div class="hero-market-val" id="heroBtc">—</div>
+    </div>
+  </div>
+  <!-- Controls: clocks, broker selector, status, user menu — pushed to right -->
+  <div class="hero-controls">
     <div class="nav-clocks" id="navClocks">
       <div class="nav-clock" id="clockSGT">
         <span class="nav-clock-label">SGT</span>
@@ -1096,8 +1293,6 @@
     <span id="creditsDisplay" style="display:none;font-size:0.78rem;color:#8b949e;white-space:nowrap"></span>
     <div class="status-dot" id="statusDot"></div>
     <span id="statusText" style="font-size:0.8rem;color:#8b949e"></span>
-
-    <!-- User dropdown -->
     <div class="user-menu" id="userMenu">
       <div class="user-chip">
         <div class="user-avatar" id="userAvatar">?</div>
@@ -1138,7 +1333,22 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
 
+<nav>
+  <div class="nav-tabs">
+    <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">Dashboard</button>
+    <button class="tab" onclick="showPage('trades',this)">Trades</button>
+    <button class="tab" onclick="showPage('scores',this)">Scores</button>
+    <button class="tab" onclick="showPage('market',this)">Market</button>
+    <button class="tab" onclick="showPage('research',this)">Research</button>
+    <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
+    <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
+    <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
+    <button class="tab" id="tab-stats" onclick="showPage('stats',this)" style="display:none">Stats</button>
+    <button class="tab" id="tab-users" onclick="showPage('users',this)" style="display:none">Users</button>
+    <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">🔐 Admin</button>
   </div>
 </nav>
 
@@ -1164,6 +1374,9 @@
     <span style="color:#8b949e;font-size:0.85rem" id="dashSourceLabel">📄 Alpaca Paper Trading</span>
     <button class="force-btn" onclick="openTradeModal()">⚡ Force Trade</button>
   </div>
+  <!-- Broker fee strip — hidden for paper, shown for real brokers -->
+  <div id="brokerFeeStrip" style="display:none;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:0.78rem;color:#8b949e;align-items:center;gap:10px;flex-wrap:wrap"></div>
+
   <div class="cards" id="dashCards" style="margin-bottom:0">
     <div class="loading">Loading...</div>
   </div>
@@ -1175,6 +1388,7 @@
       <button class="widget-tab" onclick="switchWidgetTab('trades')">Recent Trades</button>
       <button class="widget-tab" onclick="switchWidgetTab('strong-buys')">Strong Buys Today</button>
       <button class="widget-tab" onclick="switchWidgetTab('intraday')">Intraday Picks</button>
+      <button class="widget-tab" onclick="switchWidgetTab('watchlist')">❤️ Watchlist</button>
       <div style="flex:1;min-width:8px"></div>
       <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
         <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
@@ -1191,6 +1405,10 @@
         <button class="refresh-btn" onclick="loadIntradayPicks(true)">↻ Refresh</button>
         <button class="doc-btn" onclick="openResearchDoc('intraday_picks')" title="How this works">?</button>
       </div>
+      <div class="wta" id="wta-watchlist" style="display:none;align-items:center;gap:10px">
+        <span style="font-size:0.76rem;color:var(--muted)">Open Stock Explorer → 🤍 to add</span>
+        <button class="refresh-btn" onclick="loadDashboardWatchlist()">↻ Refresh</button>
+      </div>
     </div>
 
     <div class="widget-panel active" id="widget-panel-positions">
@@ -1204,6 +1422,28 @@
     </div>
     <div class="widget-panel" id="widget-panel-intraday">
       <div id="idBody"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="widget-panel" id="widget-panel-watchlist">
+      <div id="wlTableWrap">
+        <table><thead><tr>
+          <th></th>
+          <th>Symbol</th>
+          <th>Price</th>
+          <th>Change</th>
+          <th>Score</th>
+          <th>Analyst</th>
+          <th>PT / Upside</th>
+          <th>RSI</th>
+          <th>RVOL</th>
+          <th>Trend</th>
+          <th>MACD</th>
+          <th>Short %</th>
+          <th>Earnings</th>
+          <th>Horizon</th>
+        </tr></thead>
+        <tbody id="wlBody"><tr><td colspan="14" class="loading" style="text-align:center;padding:20px">Loading…</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -1392,6 +1632,54 @@
       </div>
       <!-- Prev / Next navigation -->
       <div id="docsPager" style="display:flex;justify-content:space-between;margin-top:12px"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════ EARNINGS CALENDAR PAGE ═══════════════════════ -->
+<div class="page" id="page-calendar">
+  <div style="max-width:1300px">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">Forecast Lab <button class="doc-btn" onclick="openResearchDoc('forecast_lab')" title="How this works">?</button></h2>
+        <div style="font-size:0.78rem;color:#6e7681" id="fcMeta">Loading…</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="fcSearch" type="text" placeholder="Symbol…"
+          style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#e6edf3;font-size:0.82rem;width:100px;outline:none"
+          oninput="renderForecast()">
+        <select id="fcFilter" onchange="renderForecast()"
+          style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#e6edf3;font-size:0.82rem;cursor:pointer">
+          <option value="all">All stocks</option>
+          <option value="earnings">Earnings week</option>
+        </select>
+        <button onclick="generateForecast()"
+          style="background:#1f6feb;border:1px solid #388bfd;border-radius:6px;padding:5px 12px;color:#fff;font-size:0.82rem;cursor:pointer" id="fcGenBtn">Generate week</button>
+        <button onclick="fillActuals()"
+          style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 12px;color:#e6edf3;font-size:0.82rem;cursor:pointer">Fill actuals</button>
+        <button onclick="loadForecast(true)"
+          style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 12px;color:#e6edf3;font-size:0.82rem;cursor:pointer">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Stats bar -->
+    <div id="fcStats" style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap"></div>
+
+    <!-- Today's movers (not in forecast universe) -->
+    <div id="fcMovers" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px 16px;margin-bottom:16px"></div>
+
+    <!-- Forecast table -->
+    <div id="fcBody" style="overflow-x:auto">
+      <div class="loading" style="padding:40px;text-align:center">Loading forecast…</div>
+    </div>
+
+    <!-- History -->
+    <div style="margin-top:28px">
+      <h3 style="font-size:0.95rem;font-weight:600;color:#8b949e;margin-bottom:10px;letter-spacing:.05em">HISTORICAL ACCURACY</h3>
+      <div id="fcHistory" style="overflow-x:auto"></div>
     </div>
 
   </div>
@@ -1736,8 +2024,9 @@
             <thead>
               <tr style="border-bottom:1px solid #30363d">
                 <th style="padding:10px 16px;text-align:left;color:#8b949e;font-weight:500;min-width:110px">USER</th>
-                <th style="padding:10px 8px;text-align:center;color:#58a6ff;font-weight:500;font-size:0.75rem" colspan="8">── TABS ──</th>
+                <th style="padding:10px 8px;text-align:center;color:#58a6ff;font-weight:500;font-size:0.75rem" colspan="6">── TABS ──</th>
                 <th style="padding:10px 8px;text-align:center;color:#3fb950;font-weight:500;font-size:0.75rem" colspan="4">── WIDGETS ──</th>
+                <th style="padding:10px 8px;text-align:center;color:#f0883e;font-weight:500;font-size:0.75rem">── BROKER ACCESS ──</th>
                 <th style="padding:10px 8px;text-align:center;color:#8b949e;font-weight:500;font-size:0.75rem">ACTION</th>
               </tr>
               <tr style="border-bottom:1px solid #21262d;background:#0d1117">
@@ -1746,24 +2035,23 @@
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Trades</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Scores</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Market</th>
-                <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">News</th>
-                <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Stats</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Docs</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Research</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Moomoo</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Live Acct</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Trade</th>
                 <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Chat</th>
+                <th style="padding:6px 6px;text-align:center;color:#8b949e;font-weight:400;font-size:0.73rem">Live / Moomoo / Tiger</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="usersTableBody">
-              <tr><td colspan="14" style="padding:20px;text-align:center;color:#8b949e">Loading…</td></tr>
+              <tr><td colspan="13" style="padding:20px;text-align:center;color:#8b949e">Loading…</td></tr>
             </tbody>
           </table>
         </div>
         <div style="padding:10px 16px;font-size:0.75rem;color:#8b949e;border-top:1px solid #21262d">
-          ✅ = access granted &nbsp;|&nbsp; Admin always has full access (not editable).
+          ✅ = access granted &nbsp;|&nbsp; 🔒 = broker disabled by admin (user sees only Paper) &nbsp;|&nbsp; Admin always has full access (not editable).
         </div>
       </div>
     </div>
@@ -1918,6 +2206,36 @@
           <div class="br-toggle" id="br-auto_execute">
             <button onclick="brSetToggle('auto_execute', true)"  id="br-ae-yes">Yes</button>
             <button onclick="brSetToggle('auto_execute', false)" id="br-ae-no">No</button>
+          </div>
+        </div>
+        <div class="br-row">
+          <div>
+            <span class="lbl">Trading Coach (Knowledge Base)</span>
+            <div style="font-size:0.74rem;color:#8b949e;margin-top:2px">When On, chat routes education questions to local KB. Turn Off to always use Claude.</div>
+          </div>
+          <div class="br-toggle" id="br-kb_enabled">
+            <button onclick="brSetToggle('kb_enabled', true)"  id="br-kb-yes">On</button>
+            <button onclick="brSetToggle('kb_enabled', false)" id="br-kb-no">Off</button>
+          </div>
+        </div>
+        <div class="br-row" style="align-items:flex-start;padding-top:10px;border-top:1px solid #21262d;margin-top:4px">
+          <div>
+            <span class="lbl" style="font-weight:600;color:#e6edf3">Bot Trade Execution</span>
+            <div style="font-size:0.75rem;color:#8b949e;margin-top:3px">Where bot trades are sent. Real account uses real money.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;min-width:180px">
+            <label id="br-ts-paper"   style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:5px 10px;border-radius:6px;border:1px solid #30363d;transition:all 0.15s">
+              <input type="radio" name="br-trade-source" value="paper"  onchange="brMarkModified(this);brHighlightTradeSource()" style="accent-color:#58a6ff">
+              <span style="font-size:0.82rem">📄 Alpaca Paper <span style="color:#6e7681;font-size:0.72rem">(simulated)</span></span>
+            </label>
+            <label id="br-ts-tiger"  style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:5px 10px;border-radius:6px;border:1px solid #30363d;transition:all 0.15s">
+              <input type="radio" name="br-trade-source" value="tiger" onchange="brMarkModified(this);brHighlightTradeSource()" style="accent-color:#f0883e">
+              <span style="font-size:0.82rem">🐯 Tiger Brokers <span style="color:#f85149;font-size:0.72rem">REAL MONEY</span></span>
+            </label>
+            <label id="br-ts-moomoo" style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:5px 10px;border-radius:6px;border:1px solid #30363d;transition:all 0.15s">
+              <input type="radio" name="br-trade-source" value="moomoo" onchange="brMarkModified(this);brHighlightTradeSource()" style="accent-color:#3fb950">
+              <span style="font-size:0.82rem">💰 Moomoo <span style="color:#f85149;font-size:0.72rem">REAL MONEY</span></span>
+            </label>
           </div>
         </div>
       </div>
@@ -2199,6 +2517,7 @@
         <button class="arch-tab-btn" data-av="models" onclick="showArch('models')">🧠 AI Models</button>
         <button class="arch-tab-btn" data-av="db"    onclick="showArch('db')">🗄️ DB Schema</button>
         <button class="arch-tab-btn" data-av="chat"  onclick="showArch('chat')">💬 Chat Flow</button>
+        <button class="arch-tab-btn" data-av="pred"  onclick="showArch('pred')">🔮 Predictor</button>
         <button class="arch-tab-btn" data-av="scan"  onclick="showArch('scan')">🔍 Scan Engine</button>
         <button class="arch-tab-btn" data-av="score" onclick="showArch('score')">🎯 Conviction Score</button>
         <button class="arch-tab-btn" data-av="data"  onclick="showArch('data')">📡 Data Sources</button>
@@ -2257,7 +2576,7 @@
             <div class="amap-node" style="--nc:#58a6ff">
               <span class="amap-node-icon">🤖</span>
               <strong>AI Chat Engine</strong>
-              <span>ai-chat.js · Pre-routes: knowledge → Ollama · fundamentals screen → local DB (zero API cost) · Falls through to <span style="color:#f78166;font-weight:600">Claude Haiku 4.5</span> · 20-msg history · 18 tools</span>
+              <span>ai-chat.js · Pre-routes: keyword/vector KB → local DB · trade history → Ollama llama3.2:3b · fundamentals screen → PostgreSQL · Falls through to <span style="color:#f78166;font-weight:600">Claude Sonnet 4.6</span> · 20-msg history · 19 tools · SSE streaming</span>
             </div>
             <div class="amap-node" style="--nc:#388bfd">
               <span class="amap-node-icon">🔐</span>
@@ -2299,6 +2618,11 @@
               <span class="amap-node-icon">📊</span>
               <strong>Fundamental Screener</strong>
               <span>fundamental-screener.js · screenFundamentals() · CTE SQL with Q0/Q1/Q4 window functions · S&amp;P 500 + NASDAQ-100 · &lt;100ms · zero Claude API cost · Ollama 2-sentence insight</span>
+            </div>
+            <div class="amap-node" style="--nc:#bc8cff">
+              <span class="amap-node-icon">🔮</span>
+              <strong>5-Algorithm Predictor</strong>
+              <span>predictor.js · Promise.allSettled (all 5 run in parallel) · 15-min cache per symbol · Zero LLM cost · (1) Linear Regression: slope, R², day-5/10 projections · (2) ATR Expected Move: Wilder ATR-14, ±ranges for 1/5/10 days · (3) Momentum Score 0–100: RSI + EMA9/20/50 + MACD + volume trend · (4) Personal Edge: your win rate &amp; profit factor from trades table · (5) Earnings Catalyst: revenue growth, EPS momentum, next earnings date via yahoo-finance2 · Combined → overall_signal 0–100</span>
             </div>
           </div>
         </div>
@@ -2421,8 +2745,8 @@
             <div style="font-size:1.4rem;color:#6e7681;text-align:center">→</div>
             <div style="background:rgba(31,111,235,0.08);border:1px solid rgba(31,111,235,0.25);border-radius:10px;padding:12px;text-align:center">
               <div style="display:inline-block;background:#1f6feb;color:#fff;font-size:0.62rem;font-weight:800;letter-spacing:.08em;padding:3px 10px;border-radius:4px;margin-bottom:8px">CLAUDE API</div>
-              <div style="font-size:0.82rem;font-weight:700;color:#58a6ff;margin-bottom:4px">ALWAYS Claude Haiku 4.5</div>
-              <div style="font-size:0.74rem;color:#8b949e">Ollama (llama3.1) does not support tool-calling — period</div>
+              <div style="font-size:0.82rem;font-weight:700;color:#58a6ff;margin-bottom:4px">Claude Sonnet 4.6 (user chat) · Haiku 4.5 (admin / scan)</div>
+              <div style="font-size:0.74rem;color:#8b949e">Ollama does not support tool-calling — all interactive queries use Claude API</div>
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;margin-top:10px">
@@ -2448,8 +2772,8 @@
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
               <div style="width:40px;height:40px;background:linear-gradient(135deg,#1f6feb,#388bfd);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-weight:900;color:#fff;font-family:Georgia,serif;flex-shrink:0;letter-spacing:-1px">Cl</div>
               <div>
-                <div style="font-size:0.9rem;font-weight:700;color:#58a6ff">Claude Haiku 4.5</div>
-                <div style="font-size:0.7rem;color:#6e7681">claude-haiku-4-5-20251001 · Anthropic API</div>
+                <div style="font-size:0.9rem;font-weight:700;color:#58a6ff">Claude Sonnet 4.6</div>
+                <div style="font-size:0.7rem;color:#6e7681">claude-sonnet-4-6 · Anthropic API · SSE streaming</div>
               </div>
             </div>
             <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Used for</div>
@@ -2496,8 +2820,8 @@
             </div>
             <div style="margin-top:10px;background:#0d1117;border-radius:8px;padding:10px">
               <div style="font-size:0.7rem;color:#6e7681;margin-bottom:4px">Pricing per operation</div>
-              <div style="font-size:0.76rem;color:#8b949e">Input: <span style="color:#58a6ff">$0.80/M tokens</span> · Output: <span style="color:#58a6ff">$4.00/M tokens</span></div>
-              <div style="font-size:0.76rem;color:#8b949e;margin-top:2px">~$0.001/chat message · ~$2–8/month total</div>
+              <div style="font-size:0.76rem;color:#8b949e">Input: <span style="color:#58a6ff">$3.00/M tokens</span> · Output: <span style="color:#58a6ff">$15.00/M tokens</span></div>
+              <div style="font-size:0.76rem;color:#8b949e;margin-top:2px">~$0.003–0.005/chat message · ~$5–15/month typical</div>
             </div>
           </div>
 
@@ -2506,8 +2830,8 @@
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
               <div style="width:40px;height:40px;background:linear-gradient(135deg,#238636,#2ea043);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:900;color:#fff;font-family:monospace;flex-shrink:0;letter-spacing:-0.5px;text-align:center;line-height:1.1">LLM<br>local</div>
               <div>
-                <div style="font-size:0.9rem;font-weight:700;color:#39d353">Ollama · llama3.1:8b</div>
-                <div style="font-size:0.7rem;color:#6e7681">Runs locally on your Mac · FREE · No API key</div>
+                <div style="font-size:0.9rem;font-weight:700;color:#39d353">Ollama · llama3.2:3b</div>
+                <div style="font-size:0.7rem;color:#6e7681">Runs locally on your Mac · FREE · No API key · nomic-embed-text for KB embeddings</div>
               </div>
             </div>
             <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Used for</div>
@@ -2535,13 +2859,13 @@
               </div>
             </div>
             <div style="border-top:1px solid #21262d;padding-top:10px">
-              <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Why NOT used for chat</div>
-              <div style="font-size:0.76rem;color:#8b949e;line-height:1.5">llama3.1:8b has <strong style="color:#f85149">no tool-calling</strong>. If you asked it "what is NVDA's price?" it would hallucinate an answer rather than actually fetching it. It can only generate text from its training data — no real-time lookups possible.</div>
+              <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Why NOT used for general Q&amp;A</div>
+              <div style="font-size:0.76rem;color:#8b949e;line-height:1.5">Ollama has <strong style="color:#f85149">no tool-calling</strong> and is too slow for interactive chat on Intel Macs (~0.6 tok/s on 8B models). Knowledge questions go to the local <code>knowledge_chunks</code> DB first (instant). All other questions go directly to Claude Sonnet.</div>
             </div>
             <div style="margin-top:10px;background:#0d1117;border-radius:8px;padding:10px">
               <div style="font-size:0.7rem;color:#6e7681;margin-bottom:4px">Setup</div>
-              <div style="font-size:0.76rem;color:#8b949e"><code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">brew install ollama</code> then <code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">ollama pull llama3.1:8b</code></div>
-              <div style="font-size:0.72rem;color:#6e7681;margin-top:4px">If Ollama is not running, all 3 tasks automatically fall back to Claude with no error to you.</div>
+              <div style="font-size:0.76rem;color:#8b949e"><code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">brew install ollama</code> · <code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">ollama pull llama3.2:3b</code> · <code style="background:#21262d;padding:1px 4px;border-radius:3px;font-size:0.72rem;color:#79c0ff">ollama pull nomic-embed-text</code></div>
+              <div style="font-size:0.72rem;color:#6e7681;margin-top:4px">If Ollama is not running, trade history questions fall back to Claude. Knowledge questions still answered from local DB.</div>
             </div>
           </div>
 
@@ -2647,19 +2971,18 @@
           <div class="aflow-step">
             <div class="aflow-num" style="background:#39d353">1b</div>
             <div class="aflow-card" style="border-color:#39d35333">
-              <div class="aflow-title">Pre-routing checks (zero Claude API cost)</div>
+              <div class="aflow-title">Pre-routing — 4 zero-cost paths run before Claude is called</div>
               <div class="aflow-body">
-                Two short-circuit paths run <strong>before</strong> Claude is ever called:<br><br>
-                <strong style="color:#39d353">① Knowledge question?</strong> — 20 regex patterns (e.g. "what is RSI", "explain MACD") →
-                  <code>answerKnowledgeQuestion()</code> → Ollama llama3.1:8b → answer returned immediately. If Ollama offline, falls through.<br><br>
-                <strong style="color:#e3b341">② Fundamental screening?</strong> — 18 regex patterns (e.g. "revenue grew QoQ", "screen stocks", "which stocks pass") →
-                  <code>screenFundamentals(conditions)</code> → local PostgreSQL CTE query → markdown table + Ollama 2-sentence insight.
-                  Parses QoQ/YoY conditions from natural language. Falls through to Claude if DB unavailable.
+                <strong style="color:#39d353">① Keyword fast-path</strong> — <code>searchKnowledgeByKeyword()</code> scores words ≥ 5 chars against <code>knowledge_chunks</code> titles/topics. Score ≥ 2 → instant answer from local DB. &lt;10ms, $0.<br><br>
+                <strong style="color:#39d353">② Vector similarity</strong> — if keyword score &lt; 2, embeds query via <code>nomic-embed-text</code> (Ollama) and runs cosine similarity against all chunk embeddings. Similarity &gt; 0.55 → answer from local DB. ~200ms, $0.<br><br>
+                <strong style="color:#d29922">③ Trade history question?</strong> — <code>isTradeHistoryQuestion()</code> detects "my trades", "my NVDA history", "how did I do" → queries <code>trades</code> table for last 30 closed trades → <code>llama3.2:3b</code> writes the analysis. $0.<br><br>
+                <strong style="color:#e3b341">④ Fundamental screening?</strong> — 18 regex patterns (e.g. "revenue grew QoQ", "screen stocks") → <code>screenFundamentals()</code> → PostgreSQL CTE → markdown table. Falls through to Claude if DB unavailable. $0.
               </div>
               <div class="aflow-tags">
-                <span class="atag" style="--tc:#39d353">Ollama localhost:11434 (knowledge)</span>
-                <span class="atag" style="--tc:#e3b341">PostgreSQL fundamentals table (screen)</span>
-                <span class="atag" style="--tc:#6e7681">~5ms response · $0 API cost</span>
+                <span class="atag" style="--tc:#39d353">knowledge_chunks (keyword + vector)</span>
+                <span class="atag" style="--tc:#d29922">Ollama llama3.2:3b (trade history)</span>
+                <span class="atag" style="--tc:#e3b341">PostgreSQL fundamentals (screener)</span>
+                <span class="atag" style="--tc:#6e7681">$0 API cost · instant or &lt;10s</span>
               </div>
             </div>
           </div>
@@ -2686,19 +3009,25 @@
           <div class="aflow-step">
             <div class="aflow-num" style="background:#e3b341">3</div>
             <div class="aflow-card" style="border-color:#e3b34133">
-              <div class="aflow-title">Build the system prompt</div>
+              <div class="aflow-title">Build the system prompt (3 blocks assembled in parallel)</div>
               <div class="aflow-body">
-                <code>buildSystemPrompt(userCfg, username)</code> assembles a ~320-token instruction block:<br>
-                &nbsp;&nbsp;• Current ET date + time → selects time-of-day strategy (morning / midday / afternoon / EOD)<br>
+                <code>buildSystemPrompt(userCfg, username)</code> — static instruction block (~320 tokens):<br>
+                &nbsp;&nbsp;• Current ET date + time → time-of-day strategy (morning / midday / afternoon / EOD)<br>
                 &nbsp;&nbsp;• Your profile: profit target · loss limit · max positions · conviction threshold · VIX max · blocked sectors<br>
-                &nbsp;&nbsp;• Last 15 trading lessons from your closed trades (5-min cache from PostgreSQL)<br>
-                &nbsp;&nbsp;• Historical win rates by regime (e.g. "trending: 68% win rate over 12 trades")<br>
-                &nbsp;&nbsp;• Full trading rulebook: 11 sections covering scan workflow, position monitoring, re-entry blocks, closing protocol, news analysis
+                &nbsp;&nbsp;• Full trading rulebook: 11 sections (scan workflow, position monitoring, re-entry blocks, closing protocol, news analysis)<br><br>
+                <code>buildLessonsBlock(username)</code> — dynamic, 5-min cache:<br>
+                &nbsp;&nbsp;• Last 15 trading lessons extracted from your closed trades<br>
+                &nbsp;&nbsp;• Historical win rates by market regime (e.g. "trending: 68% win rate over 12 trades")<br><br>
+                <code>buildPositionEarningsBlock()</code> — fetched live, 30-min cache per symbol:<br>
+                &nbsp;&nbsp;• Calls <code>getMoomooPositions()</code> to get all held symbols<br>
+                &nbsp;&nbsp;• For each symbol: <code>getEarnings()</code> → Yahoo Finance calendarEvents → next confirmed earnings date<br>
+                &nbsp;&nbsp;• Injected as: <em>"NVDA: 2026-05-20 (confirmed) — use this, do not guess from training data"</em><br>
+                &nbsp;&nbsp;• Prevents Claude from answering earnings questions from stale training data
               </div>
               <div class="aflow-tags">
                 <span class="atag" style="--tc:#d29922">User config (bot_config table)</span>
                 <span class="atag" style="--tc:#bc8cff">Trade lessons (5-min cache)</span>
-                <span class="atag" style="--tc:#6e7681">Time-of-day logic</span>
+                <span class="atag" style="--tc:#3fb950">Earnings dates (30-min cache · Yahoo Finance)</span>
               </div>
             </div>
           </div>
@@ -2707,18 +3036,18 @@
           <div class="aflow-step">
             <div class="aflow-num" style="background:#58a6ff">4</div>
             <div class="aflow-card" style="border-color:#58a6ff33">
-              <div class="aflow-title">Claude Haiku 4.5 processes your message</div>
+              <div class="aflow-title">Claude Sonnet 4.6 processes your message</div>
               <div class="aflow-body">
-                Claude sees: system prompt + conversation history + your message + 18 tool definitions<br>
+                Claude sees: system prompt + conversation history + your message + 19 tool definitions<br>
                 Claude reasons: "Should I answer directly, or do I need to call a tool first?"<br>
                 If tool needed → returns a <code>tool_use</code> block with the tool name and arguments<br>
-                If answering directly → returns text immediately<br>
-                <strong>Pricing:</strong> $0.80/M input tokens · $4.00/M output tokens · ~$0.001 per message average<br>
-                <strong>Latency:</strong> 1–3 seconds to first token
+                If answering directly → streams text tokens via SSE immediately<br>
+                <strong>Pricing:</strong> $3.00/M input tokens · $15.00/M output tokens · ~$0.003–0.005 per message average<br>
+                <strong>Latency:</strong> 1–3 seconds to first token · full response streams in 2–6 seconds
               </div>
               <div class="aflow-tags">
-                <span class="atag" style="--tc:#58a6ff">Anthropic API (HTTPS)</span>
-                <span class="atag" style="--tc:#6e7681">claude-haiku-4-5-20251001</span>
+                <span class="atag" style="--tc:#58a6ff">Anthropic API (HTTPS · SSE streaming)</span>
+                <span class="atag" style="--tc:#6e7681">claude-sonnet-4-6</span>
               </div>
             </div>
           </div>
@@ -2731,14 +3060,18 @@
               <div class="aflow-body">
                 <code>executeTool(name, input)</code> dispatches to the correct module. Most common tool calls:
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-top:8px;font-size:0.76rem">
+                  <div>🔮 <code>get_stock_prediction</code> → predictor.js (5 algos)</div>
                   <div>🟢 <code>get_live_quote</code> → Moomoo → Yahoo</div>
                   <div>📊 <code>get_chart_technicals</code> → TV → Moomoo → Yahoo</div>
                   <div>📰 <code>get_news</code> → Yahoo/FinancialJuice</div>
-                  <div>💼 <code>get_portfolio</code> → Moomoo TCP</div>
+                  <div>💼 <code>get_portfolio</code> → Alpaca paper account</div>
+                  <div>💼 <code>moomoo_portfolio</code> → Moomoo OpenD TCP</div>
                   <div>🔍 <code>scan_for_trades</code> → Stock Selector pipeline</div>
                   <div>📈 <code>get_conviction_score</code> → Scoring Engine</div>
-                  <div>🚀 <code>propose_trade</code> → Moomoo TCP → Exchange</div>
+                  <div>🚀 <code>propose_trade</code> → Alpaca paper order</div>
+                  <div>🚀 <code>moomoo_place_trade</code> → Moomoo TCP → Exchange</div>
                   <div>⚖️ <code>get_market_regime</code> → Market Context</div>
+                  <div>📅 <code>get_earnings</code> → SEC EDGAR + Yahoo Finance</div>
                 </div>
                 Tool result fed back to Claude → Claude may call another tool → repeat until done
               </div>
@@ -2810,6 +3143,120 @@
       </div><!-- /av-chat -->
 
       <!-- ══════════ SCAN ENGINE VIEW ══════════ -->
+      <!-- ══════════ PREDICTOR VIEW ══════════ -->
+      <div id="av-pred" class="arch-view" style="display:none">
+        <div class="arch-header">🔮 5-Algorithm Stock Predictor</div>
+        <div class="arch-subhead">Pure JavaScript, zero LLM cost. All 5 algorithms run in parallel via <code>Promise.allSettled</code>, results cached 15 minutes per symbol. Triggered when Claude calls the <code>get_stock_prediction</code> tool.</div>
+
+        <!-- Algorithm cards -->
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+
+          <div style="background:rgba(88,166,255,0.06);border:1px solid rgba(88,166,255,0.25);border-radius:12px;padding:14px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <div style="background:#1f6feb;color:#fff;font-size:0.68rem;font-weight:800;padding:3px 10px;border-radius:4px;flex-shrink:0">ALGO 1</div>
+              <strong style="color:#58a6ff;font-size:0.88rem">Linear Regression Trend</strong>
+            </div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              Uses last 50 daily bars from Yahoo Finance. Computes least-squares slope, intercept, R² (coefficient of determination), and standard error of residuals.<br>
+              Projects the regression line forward: <strong style="color:#c9d1d9">day-5</strong> and <strong style="color:#c9d1d9">day-10</strong> price targets.<br>
+              Confidence band = ±1.5 × std error of residuals (as % of price).<br>
+              <span style="color:#39d353">R² &gt; 0.7</span> = high reliability &nbsp;·&nbsp; <span style="color:#e3b341">R² 0.4–0.7</span> = medium &nbsp;·&nbsp; <span style="color:#f85149">R² &lt; 0.4</span> = choppy/unreliable
+            </div>
+          </div>
+
+          <div style="background:rgba(210,153,34,0.06);border:1px solid rgba(210,153,34,0.25);border-radius:12px;padding:14px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <div style="background:#d29922;color:#fff;font-size:0.68rem;font-weight:800;padding:3px 10px;border-radius:4px;flex-shrink:0">ALGO 2</div>
+              <strong style="color:#e3b341;font-size:0.88rem">ATR Expected Move</strong>
+            </div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              14-period Wilder ATR from same OHLCV bars (True Range = max of H-L, |H-PrevClose|, |L-PrevClose|).<br>
+              Probability ranges: <strong style="color:#c9d1d9">±1.0×ATR</strong> (1 day) · <strong style="color:#c9d1d9">±2.2×ATR</strong> (5 days, ≈√5) · <strong style="color:#c9d1d9">±3.2×ATR</strong> (10 days, ≈√10).<br>
+              ATR% = ATR ÷ price. <span style="color:#f85149">ATR% &gt; 3%</span> = high volatility warning.
+            </div>
+          </div>
+
+          <div style="background:rgba(57,211,83,0.06);border:1px solid rgba(57,211,83,0.25);border-radius:12px;padding:14px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <div style="background:#238636;color:#fff;font-size:0.68rem;font-weight:800;padding:3px 10px;border-radius:4px;flex-shrink:0">ALGO 3</div>
+              <strong style="color:#39d353;font-size:0.88rem">Momentum Score (0–100)</strong>
+            </div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              Five sub-signals summed (−10 to +10 raw), then normalized to 0–100:<br>
+              &nbsp;&nbsp;• <strong style="color:#c9d1d9">RSI(14):</strong> 50–70 = +2 (bullish) · &gt;70 = −1 (overbought) · 30–50 = −2 (bearish) · &lt;30 = +1 (oversold)<br>
+              &nbsp;&nbsp;• <strong style="color:#c9d1d9">EMA9/20/50 alignment:</strong> price&gt;EMA9&gt;EMA20&gt;EMA50 = +3 (fully bullish) · reverse = −3 · partial = ±1 per aligned EMA<br>
+              &nbsp;&nbsp;• <strong style="color:#c9d1d9">MACD(12,26,9):</strong> line &gt; signal AND histogram growing = +2 · below and shrinking = −2<br>
+              &nbsp;&nbsp;• <strong style="color:#c9d1d9">Volume trend:</strong> 5-day avg &gt; 20-day avg (accumulation) = +1 · else −1 (distribution)<br>
+              &nbsp;&nbsp;• <strong style="color:#c9d1d9">Price vs 20-day SMA</strong> (VWAP proxy): above = +1 · below = −1<br>
+              Labels: <span style="color:#39d353">Strong Bullish ≥70</span> · <span style="color:#3fb950">Bullish ≥55</span> · Neutral ≥45 · <span style="color:#e3b341">Bearish ≥30</span> · <span style="color:#f85149">Strong Bearish &lt;30</span>
+            </div>
+          </div>
+
+          <div style="background:rgba(188,140,255,0.06);border:1px solid rgba(188,140,255,0.25);border-radius:12px;padding:14px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <div style="background:#8957e5;color:#fff;font-size:0.68rem;font-weight:800;padding:3px 10px;border-radius:4px;flex-shrink:0">ALGO 4</div>
+              <strong style="color:#bc8cff;font-size:0.88rem">Personal Trade Edge</strong>
+            </div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              Queries the <code>trades</code> table for all closed trades on this symbol.<br>
+              Computes: win rate · avg win/loss P&L · profit factor (sum wins ÷ sum losses) · avg hold time · best hour of day · best day of week · last 3 trades.<br>
+              Edge label: <span style="color:#39d353">Strong Edge</span> (win rate &gt; 60% AND profit factor &gt; 1.5) · <span style="color:#e3b341">Slight Edge</span> (win rate &gt; 50%) · No Edge / Need More Data.<br>
+              Requires ≥ 3 closed trades on this symbol. Returns <code>insufficient_data: true</code> otherwise.
+            </div>
+          </div>
+
+          <div style="background:rgba(247,129,102,0.06);border:1px solid rgba(247,129,102,0.25);border-radius:12px;padding:14px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <div style="background:#b34b28;color:#fff;font-size:0.68rem;font-weight:800;padding:3px 10px;border-radius:4px;flex-shrink:0">ALGO 5</div>
+              <strong style="color:#f78166;font-size:0.88rem">Earnings Catalyst Model</strong>
+            </div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              Reads last 8 quarters from the <code>fundamentals</code> table (revenue, net income, EPS).<br>
+              Revenue growth trend: QoQ deltas → <em>accelerating / decelerating / flat</em>.<br>
+              Earnings momentum score (0–100): revenue accelerating (+2) · net income positive &amp; growing (+2) · EPS grew in 3+ of 4 quarters (+3) · normalized 0–100.<br>
+              Next earnings date: <code>yahoo-finance2</code> → <code>calendarEvents.earnings.earningsDate</code> (handles crumb auth).<br>
+              Pre-earnings setup flags: <em>"Pre-earnings long candidate"</em> (≤14 days + momentum ≥60) · <em>"Earnings imminent — high risk"</em> (≤3 days).
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Combined signal formula -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px">
+          <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Combined Signal Formula</div>
+          <pre style="font-size:0.78rem;color:#e6edf3;margin:0;line-height:1.8;font-family:monospace">overall_signal = 50
+  + (momentum_score − 50) × 0.30   <span style="color:#6e7681">// momentum weight 30%</span>
+  + (trend_direction == "up" ? +15 : −15) <span style="color:#6e7681">// trend direction 15%</span>
+  + (R² × 10)                      <span style="color:#6e7681">// trend reliability bonus</span>
+  + (earnings_momentum − 50) × 0.20 <span style="color:#6e7681">// earnings weight 20%</span>
+  + (personal_win_rate &gt; 0.5 ? +10 : −5) <span style="color:#6e7681">// personal edge</span>
+  clamped 0–100</pre>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:12px;text-align:center">
+            <div style="background:rgba(57,211,83,0.1);border:1px solid #39d35340;border-radius:8px;padding:8px">
+              <div style="font-size:0.68rem;color:#39d353;font-weight:700">≥ 75</div>
+              <div style="font-size:0.72rem;color:#e6edf3">Strong Buy Setup</div>
+            </div>
+            <div style="background:rgba(57,211,83,0.06);border:1px solid #3fb95040;border-radius:8px;padding:8px">
+              <div style="font-size:0.68rem;color:#3fb950;font-weight:700">≥ 60</div>
+              <div style="font-size:0.72rem;color:#e6edf3">Buy Setup</div>
+            </div>
+            <div style="background:rgba(110,118,129,0.08);border:1px solid #6e768140;border-radius:8px;padding:8px">
+              <div style="font-size:0.68rem;color:#8b949e;font-weight:700">≥ 45</div>
+              <div style="font-size:0.72rem;color:#e6edf3">Neutral / Wait</div>
+            </div>
+            <div style="background:rgba(210,153,34,0.06);border:1px solid #d2992240;border-radius:8px;padding:8px">
+              <div style="font-size:0.68rem;color:#e3b341;font-weight:700">≥ 30</div>
+              <div style="font-size:0.72rem;color:#e6edf3">Caution</div>
+            </div>
+            <div style="background:rgba(248,81,73,0.06);border:1px solid #f8514940;border-radius:8px;padding:8px">
+              <div style="font-size:0.68rem;color:#f85149;font-weight:700">&lt; 30</div>
+              <div style="font-size:0.72rem;color:#e6edf3">Avoid</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /av-pred -->
+
       <div id="av-scan" class="arch-view" style="display:none">
         <div class="arch-header">🔍 How the Scanner Finds and Executes Trades</div>
         <div class="arch-subhead">Every 10 minutes during market hours this 7-step pipeline runs automatically — or manually from the Scanner tab. Here's exactly what happens inside each step.</div>
@@ -3338,8 +3785,8 @@
           <div class="datasrc-card" style="--dc:#58a6ff">
             <div class="dsc-header">
               <div class="dsc-badge" style="background:#58a6ff">PAID · ALWAYS-ON FOR CHAT</div>
-              <div class="dsc-name" style="display:flex;align-items:center;gap:8px"><span style="background:linear-gradient(135deg,#1f6feb,#388bfd);color:#fff;font-size:0.6rem;font-weight:800;padding:2px 7px;border-radius:4px;letter-spacing:.04em;white-space:nowrap">CLAUDE API</span> Anthropic Claude Haiku 4.5</div>
-              <div class="dsc-conn">HTTPS · api.anthropic.com · claude-haiku-4-5-20251001</div>
+              <div class="dsc-name" style="display:flex;align-items:center;gap:8px"><span style="background:linear-gradient(135deg,#1f6feb,#388bfd);color:#fff;font-size:0.6rem;font-weight:800;padding:2px 7px;border-radius:4px;letter-spacing:.04em;white-space:nowrap">CLAUDE API</span> Anthropic Claude Sonnet 4.6 (chat) · Haiku 4.5 (admin/scan)</div>
+              <div class="dsc-conn">HTTPS · api.anthropic.com · claude-sonnet-4-6 / claude-haiku-4-5-20251001</div>
             </div>
             <div class="dsc-body">
               <div class="dsc-provides">
@@ -3960,6 +4407,63 @@ erDiagram
   opacity: 0.8;
 }
 
+/* ── Earnings Calendar ───────────────────────────────────────── */
+/* ── Forecast Lab ─────────────────────────────────────────────── */
+.fc-stat-card {
+  background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+  padding: 10px 16px; min-width: 140px;
+}
+.fc-stat-label { font-size: 0.68rem; color: #6e7681; text-transform: uppercase; letter-spacing: .06em; }
+.fc-stat-val   { font-size: 1.1rem; font-weight: 700; color: #e6edf3; margin-top: 2px; }
+.fc-stat-sub   { font-size: 0.7rem; color: #8b949e; margin-top: 1px; }
+.fc-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.fc-table th {
+  text-align: center; padding: 6px 8px; font-size: 0.68rem; font-weight: 700;
+  color: #6e7681; text-transform: uppercase; letter-spacing: .06em;
+  border-bottom: 1px solid #30363d; white-space: nowrap;
+}
+.fc-table thead tr:first-child th { border-bottom: none; }
+.fc-table thead tr:last-child th  { border-top: none; padding-top: 2px; }
+.fc-table th:first-child { text-align: left; }
+.fc-table td {
+  padding: 6px 8px; border-bottom: 1px solid #21262d;
+  vertical-align: middle; text-align: center;
+}
+.fc-table td:first-child { text-align: left; }
+.fc-table tr:hover td { background: #161b2244; }
+.fc-table tr.fc-earnings-row td { background: rgba(188,140,255,0.05); }
+.fc-table tr.fc-earnings-row td:first-child { border-left: 3px solid #bc8cff; }
+.fc-sym  { font-weight: 700; color: #e6edf3; font-size: 0.82rem; }
+.fc-base { color: #8b949e; font-size: 0.72rem; }
+.fc-day-cell { min-width: 68px; vertical-align: middle; padding: 5px 8px !important; }
+.fc-pred-row td { border-bottom: none !important; padding-bottom: 3px !important; }
+.fc-actual-row td { border-top: none !important; padding-top: 3px !important; padding-bottom: 7px !important; }
+.fc-actual-row td:first-child { border-left: none; }
+.fc-row-label { font-size: 0.55rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #58a6ff; margin-bottom: 1px; }
+.fc-row-label.fc-actual-label { color: #6e7681; }
+.fc-pred  { color: #58a6ff; font-size: 0.8rem; font-weight: 600; }
+.fc-pred-chg { font-size: 0.66rem; color: #6e7681; }
+.fc-actual { font-size: 0.8rem; font-weight: 600; }
+.fc-error  { font-size: 0.64rem; margin-top: 1px; }
+.fc-empty-cell { color: #30363d; font-size: 0.72rem; }
+.fc-signal-bar {
+  display: inline-block; height: 6px; border-radius: 3px;
+  background: linear-gradient(90deg, #f85149 0%, #f0883e 40%, #3fb950 100%);
+  width: 60px; vertical-align: middle; position: relative;
+}
+.fc-signal-dot {
+  position: absolute; top: -2px; width: 10px; height: 10px;
+  border-radius: 50%; background: #e6edf3; border: 2px solid #0d1117;
+  transform: translateX(-50%);
+}
+.fc-earnings-tag { font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: rgba(188,140,255,0.2); color: #bc8cff; }
+.fc-hist-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.fc-hist-table th { text-align: left; padding: 6px 10px; font-size: 0.68rem; color: #6e7681; text-transform: uppercase; border-bottom: 1px solid #30363d; }
+.fc-hist-table td { padding: 7px 10px; border-bottom: 1px solid #21262d; }
+.fc-acc-bar { display: inline-flex; gap: 2px; align-items: center; }
+.fc-acc-fill { height: 8px; border-radius: 2px; background: #1f6feb; }
+.fc-today-col { background: rgba(31,111,235,0.07) !important; }
+
 /* ── Architecture Panel ──────────────────────────────────────── */
 .arch-tab-btn {
   background: none; border: none; color: #8b949e;
@@ -4187,6 +4691,7 @@ erDiagram
         <button class="chat-size-btn" onclick="setChatSize('xl')"  title="Full">⛶</button>
       </div>
       <button id="voiceTTSBtn" class="voice-tts-btn" onclick="toggleTTS()" title="Read responses aloud">🔇</button>
+      <button id="voiceSessionBtn" class="voice-session-btn" onclick="toggleVoiceSession()" title="Start interactive voice conversation">🎙 Voice Chat</button>
       <button class="chat-report-btn" onclick="openReportModal()" title="Report an issue with the bot">🚩</button>
       <button onclick="clearChat()" title="Clear chat">🗑</button>
       <button onclick="toggleChat()" title="Close">✕</button>
@@ -4194,6 +4699,12 @@ erDiagram
   </div>
   <div id="analystStateBar" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:6px 10px 4px;border-bottom:1px solid var(--border);font-size:0.72rem;color:var(--text-muted);background:var(--bg-card);min-height:28px">
     <span>⏸ Loading…</span>
+  </div>
+  <div id="voiceSessionBar">
+    <span class="vs-dot" id="vsDot"></span>
+    <span class="vs-label" id="vsLabel">Listening…</span>
+    <span class="vs-timer" id="vsTimer"></span>
+    <button class="vs-stop" onclick="endVoiceSession('user')">■ End</button>
   </div>
   <div class="chat-messages" id="chatMessages">
     <div class="chat-msg assistant">👋 Hi! Ask me anything:
@@ -4283,7 +4794,7 @@ erDiagram
 const TAB_PAGE_MAP = {
   dashboard: 'dashboard', trades: 'trades', scores: 'scores',
   market: 'market', stats: 'stats', research: 'research',
-  bot_rules: 'bot', admin_bot: 'admin',
+  bot_rules: 'bot', admin_bot: 'admin', calendar: 'calendar',
 };
 
 function applyPermissions(perms) {
@@ -4305,14 +4816,22 @@ function applyPermissions(perms) {
     if (firstBtn) showPage(firstPage, firstBtn);
   }
 
-  // Rebuild source dropdown — Live always shown (keys are the real gate), Moomoo gated by permission
+  // Rebuild source dropdown — gated by widget permissions AND admin-imposed source locks
+  const _disabled = Array.isArray(_currentUser?.disabled_sources) ? _currentUser.disabled_sources : [];
   const sel = document.getElementById('sourceSelect');
   if (sel) {
-    const current = sel.value;
-    sel.innerHTML = '<option value="alpaca">📄 Paper</option><option value="alpaca_live">🔴 Live</option>';
-    if (widgets.includes('moomoo')) sel.innerHTML += '<option value="moomoo">💰 Moomoo</option>';
-    sel.value = [...sel.options].find(o => o.value === current) ? current : 'alpaca';
-    if (current === 'moomoo' && !widgets.includes('moomoo')) setSource('alpaca');
+    sel.innerHTML = '';
+    if (!_disabled.includes('alpaca'))      sel.innerHTML += '<option value="alpaca">📄 Paper</option>';
+    if (!_disabled.includes('alpaca_live')) sel.innerHTML += '<option value="alpaca_live">🔴 Live</option>';
+    if (widgets.includes('tiger')  && !_disabled.includes('tiger'))  sel.innerHTML += '<option value="tiger">🐯 Tiger</option>';
+    if (widgets.includes('moomoo') && !_disabled.includes('moomoo')) sel.innerHTML += '<option value="moomoo">💰 Moomoo</option>';
+    const preferred = localStorage.getItem(_srcKey(_currentUser?.username)) || currentSource;
+    const firstAvail = sel.options[0]?.value || 'alpaca';
+    sel.value = [...sel.options].find(o => o.value === preferred) ? preferred : firstAvail;
+    // Force away from any now-disabled source
+    if (_disabled.includes(currentSource) || !sel.querySelector(`option[value="${currentSource}"]`)) {
+      setSource(firstAvail);
+    }
   }
 
   // Force Trade button
@@ -4340,13 +4859,45 @@ let _currentUser = null;
 fetch('/auth/check').then(r => r.json()).then(d => {
   if (!d.authenticated) { window.location.href = '/login.html'; return; }
   _currentUser = d;
+  // Remember this username so next page load can read the right per-user source key instantly
+  localStorage.setItem('lastUsername', d.username);
   if (d.role === 'admin') {
     document.getElementById('tab-users').style.display = '';
     document.getElementById('tab-admin').style.display = '';
   }
   applyPermissions(d.permissions);
   updateCreditsDisplay(d.credits, d.role);
-  if (!d.has_alpaca) showAlpacaSetup();
+  loadUserWatchlist();
+
+  // Restore per-user saved source, validate it's still available for this user
+  // Migrate from old shared key on first login with new key scheme
+  const _userSrcKey = _srcKey(d.username);
+  let savedSource = localStorage.getItem(_userSrcKey);
+  if (!savedSource) {
+    const _oldVal = localStorage.getItem('dashSource');
+    if (_oldVal) { savedSource = _oldVal; localStorage.setItem(_userSrcKey, _oldVal); }
+    localStorage.removeItem('dashSource');
+  }
+  const disabledSources = Array.isArray(d.disabled_sources) ? d.disabled_sources : [];
+  const isValidSource = src => {
+    if (disabledSources.includes(src)) return false;
+    if (src === 'alpaca') return !disabledSources.includes('alpaca');
+    if (src === 'alpaca_live') return !!d.sources?.alpaca_live;
+    // For moomoo/tiger use the dropdown as source of truth — applyPermissions already ran
+    // and gated options by widget permissions (admin always gets both)
+    const sel2 = document.getElementById('sourceSelect');
+    if (src === 'moomoo') return !!sel2?.querySelector('option[value="moomoo"]') || !!d.has_moomoo;
+    if (src === 'tiger')  return !!sel2?.querySelector('option[value="tiger"]')  || !!d.has_tiger;
+    return false;
+  };
+  const wantedSource = (savedSource && isValidSource(savedSource)) ? savedSource : 'alpaca';
+  if (wantedSource !== currentSource) setSource(wantedSource);
+  else {
+    // Sync dropdown (applyPermissions may have reset it)
+    const sel = document.getElementById('sourceSelect');
+    if (sel && sel.value !== currentSource) sel.value = currentSource;
+  }
+  if (!d.has_alpaca && !d.has_tiger) showAlpacaSetup();
   // Update broker settings badge in user menu
   const badge = document.getElementById('brokerSettingsBadge');
   if (badge) {
@@ -4560,15 +5111,35 @@ function renderPermissions(data) {
   }
   const TABS    = ['dashboard','trades','scores','market','docs','research'];
   const WIDGETS = ['moomoo','alpaca_live','force_trade','chat'];
+  const BROKER_SOURCES = [
+    { key: 'alpaca',      label: 'Paper' },
+    { key: 'alpaca_live', label: 'Live' },
+    { key: 'moomoo',      label: 'Moomoo' },
+    { key: 'tiger',       label: 'Tiger' },
+  ];
   tbody.innerHTML = data.map(u => {
     const perms   = u.permissions || {};
     const tabs    = perms.tabs    || [];
     const widgets = perms.widgets || [];
+    const disabled = Array.isArray(u.disabled_sources) ? u.disabled_sources : [];
     const locked  = u.role === 'admin';
     const isSelf  = u.username === _currentUser?.username;
     const roleTag = `<span style="background:${locked ? '#1f3a1f' : '#1a2332'};color:${locked ? '#3fb950' : '#58a6ff'};border-radius:4px;padding:1px 6px;font-size:0.72rem;font-weight:600;text-transform:uppercase;margin-left:6px">${u.role}</span>`;
     const tabCells    = TABS.map(t    => `<td style="padding:8px 4px;text-align:center"><input type="checkbox" data-user="${u.username}" data-type="tab"    data-key="${t}" ${tabs.includes(t)    ? 'checked' : ''} ${locked ? 'disabled' : ''} style="width:15px;height:15px;cursor:${locked?'not-allowed':'pointer'}"></td>`).join('');
     const widgetCells = WIDGETS.map(w => `<td style="padding:8px 4px;text-align:center"><input type="checkbox" data-user="${u.username}" data-type="widget" data-key="${w}" ${widgets.includes(w) ? 'checked' : ''} ${locked ? 'disabled' : ''} style="width:15px;height:15px;cursor:${locked?'not-allowed':'pointer'}"></td>`).join('');
+    // Broker access lock toggles — one pill per source, click to toggle disabled state
+    const brokerCell = locked
+      ? `<td style="padding:8px 6px;text-align:center"><span style="color:#8b949e;font-size:0.72rem">unrestricted</span></td>`
+      : `<td style="padding:8px 6px;white-space:nowrap">
+          ${BROKER_SOURCES.map(s => {
+            const isDisabled = disabled.includes(s.key);
+            return `<button onclick="toggleBrokerAccess('${u.username}','${s.key}',${!isDisabled})"
+              title="${isDisabled ? 'Click to re-enable' : 'Click to disable'} ${s.label} for ${u.username}"
+              style="background:${isDisabled ? '#2d1a1a' : '#1a2d1a'};border:1px solid ${isDisabled ? '#f8514944' : '#3fb95044'};border-radius:12px;padding:2px 8px;color:${isDisabled ? '#f85149' : '#3fb950'};font-size:0.72rem;cursor:pointer;margin-right:3px;transition:all 0.2s">
+              ${isDisabled ? '🔒' : '✓'} ${s.label}
+            </button>`;
+          }).join('')}
+        </td>`;
     const creditsCell = u.credits != null ? `<span style="font-size:0.72rem;color:${u.credits<=10?'#f85149':'#8b949e'};margin-left:6px">${u.credits}cr</span>` : '';
     const actionCell  = locked
       ? `<td style="padding:8px 8px;text-align:center"><span style="color:#8b949e;font-size:0.75rem">full access</span></td>`
@@ -4580,9 +5151,29 @@ function renderPermissions(data) {
         </td>`;
     return `<tr style="border-top:1px solid #21262d">
       <td style="padding:8px 16px;font-weight:600;white-space:nowrap" title="${u.email||''}">${u.username}${roleTag}${creditsCell}</td>
-      ${tabCells}${widgetCells}${actionCell}
+      ${tabCells}${widgetCells}${brokerCell}${actionCell}
     </tr>`;
   }).join('');
+}
+
+async function toggleBrokerAccess(username, source, disable) {
+  // disable=true means we are disabling the source; disable=false means re-enabling
+  const row = await api('/api/users/list').catch(() => null);
+  const user = Array.isArray(row) ? row.find(u => u.username === username) : null;
+  const current = Array.isArray(user?.disabled_sources) ? user.disabled_sources : [];
+  const updated = disable
+    ? [...new Set([...current, source])]
+    : current.filter(s => s !== source);
+  try {
+    const r = await fetch('/api/users/sources/disable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, disabled_sources: updated }),
+    });
+    const d = await r.json();
+    if (r.ok) { loadUsers(); }
+    else { alert(d.error || 'Failed to update broker access.'); }
+  } catch { alert('Network error.'); }
 }
 
 const ACTION_STYLE = {
@@ -5227,6 +5818,41 @@ const WIDGET_DOCS = {
       </ul>
     `,
   },
+  forecast_lab: {
+    title: 'Forecast Lab — How It Works',
+    body: `
+      <p>Forecast Lab predicts where each stock will close each day of the week, then tracks how accurate those predictions were once the market closes.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">How Predictions Are Made</h4>
+      <p>Every Monday at 8:30 AM ET, the 5-algorithm predictor runs for all 40 tracked stocks:</p>
+      <ul style="color:#8b949e;padding-left:20px;margin:0 0 12px;display:flex;flex-direction:column;gap:5px">
+        <li><strong style="color:#e6edf3">Linear Regression</strong> — fits a line to the last 50 daily closes, extracts the slope ($/day) and R² reliability score</li>
+        <li><strong style="color:#e6edf3">ATR Expected Move</strong> — uses Wilder ATR-14 to compute realistic daily price ranges</li>
+        <li><strong style="color:#e6edf3">Momentum Score</strong> — RSI + EMA alignment + MACD + volume trend → 0–100 signal</li>
+        <li><strong style="color:#e6edf3">Personal Edge</strong> — your own win rate and profit factor on past trades in that symbol</li>
+        <li><strong style="color:#e6edf3">Earnings Catalyst</strong> — revenue trend, EPS momentum, proximity to next earnings</li>
+      </ul>
+      <p>The <strong style="color:#e6edf3">daily prediction</strong> uses the regression slope: <code style="background:#21262d;padding:2px 6px;border-radius:4px">predicted = base_price + slope × day_number</code> where day 1 = Monday, day 5 = Friday.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">How Actuals Are Filled</h4>
+      <p>Every weekday at 4:15 PM ET (after market close), a cron job fetches the official closing price from Yahoo Finance and writes it into the <code style="background:#21262d;padding:2px 6px;border-radius:4px">stock_predictions</code> table. The <strong style="color:#39d353">Actual</strong> row in each cell turns green if the close was higher than the base price, red if lower.</p>
+      <p>You can also click <strong style="color:#e6edf3">Fill actuals</strong> manually at any time to pull the latest prices immediately.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Reading the Table</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#58a6ff;font-weight:600;width:130px">Pred $XXX</td><td style="padding:8px 0;color:#8b949e">Model's projected closing price for that day</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#8b949e">+1.2%</td><td style="padding:8px 0;color:#8b949e">Predicted % change from the base price (last Friday close)</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 0;color:#39d353;font-weight:600">Act $XXX</td><td style="padding:8px 0;color:#8b949e">Actual closing price once the market closes — green = up, red = down</td></tr>
+        <tr><td style="padding:8px 0;color:#6e7681">Err ±X%</td><td style="padding:8px 0;color:#8b949e">How far off the prediction was: green &lt;1%, orange &lt;3%, red ≥3%</td></tr>
+      </table>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Signal Bar (0–100)</h4>
+      <p>The overall signal combines all 5 algorithms: <span style="color:#39d353">≥65 = bullish setup</span>, <span style="color:#f0883e">45–64 = neutral</span>, <span style="color:#f85149">&lt;45 = bearish</span>. Purple row highlight means the company reports earnings this week.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Historical Accuracy</h4>
+      <p>The table at the bottom tracks per-week accuracy over time. Direction accuracy (did we get up/down right?) is more meaningful than absolute error for trading decisions.</p>
+    `,
+  },
 };
 
 function openResearchDoc(key) {
@@ -5754,6 +6380,8 @@ function explorerClear() {
   if (input) { input.value = ''; input.focus(); }
   const clearBtn = document.getElementById('explorerClearBtn');
   if (clearBtn) clearBtn.style.display = 'none';
+  const wlBtn = document.getElementById('explorerWlBtn');
+  if (wlBtn) wlBtn.style.display = 'none';
   explorerCloseDropdown();
 }
 
@@ -5787,6 +6415,25 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#explorerSearchWrap')) explorerCloseDropdown();
 });
 
+function _explorerUpdateWlBtn(symbol) {
+  const btn = document.getElementById('explorerWlBtn');
+  if (!btn || !symbol) return;
+  btn.dataset.wlSym = symbol;
+  btn.style.display = '';
+  const active = _watchlistSet.has(symbol);
+  btn.textContent = active ? '❤️' : '🤍';
+  btn.title       = active ? 'Remove from Watchlist' : 'Add to Watchlist';
+  btn.classList.toggle('wl-active', active);
+}
+
+async function explorerToggleWatchlist() {
+  const btn = document.getElementById('explorerWlBtn');
+  const sym = btn?.dataset.wlSym;
+  if (!sym) return;
+  await toggleWatchlist(null, sym);
+  _explorerUpdateWlBtn(sym);
+}
+
 async function loadStockExplorer() {
   const raw = document.getElementById('explorerSymbol').value.trim();
   const symbol = raw.toUpperCase();
@@ -5797,6 +6444,7 @@ async function loadStockExplorer() {
     document.getElementById('qtPrice').textContent = '—';
     qtRefreshPrice();
   }
+  _explorerUpdateWlBtn(symbol);
   document.getElementById('explorerEmpty').style.display     = 'none';
   document.getElementById('explorerStats').style.display     = 'none';
   document.getElementById('explorerChartWrap').style.display = 'none';
@@ -6402,6 +7050,233 @@ const KNOWN_NAMES = {
   SAP:'SAP',SNY:'Sanofi',E:'Eni',
 };
 
+// ── User Watchlist ────────────────────────────────────────────────────────────
+// localStorage is the primary store (instant, always works).
+// Server DB is synced in background — failures don't revert the UI.
+const _WL_KEY = () => 'watchlist_' + (localStorage.getItem('lastUsername') || 'default');
+
+function _wlSaveLocal() {
+  localStorage.setItem(_WL_KEY(), JSON.stringify([..._watchlistSet]));
+}
+function _wlLoadLocal() {
+  try { return new Set(JSON.parse(localStorage.getItem(_WL_KEY()) || '[]')); }
+  catch { return new Set(); }
+}
+
+let _watchlistSet = _wlLoadLocal();
+
+function updateHearts() {
+  document.querySelectorAll('.wl-heart[data-wl-sym]').forEach(btn => {
+    const sym = btn.dataset.wlSym;
+    const active = _watchlistSet.has(sym);
+    btn.textContent = active ? '❤️' : '🤍';
+    btn.title       = active ? 'Remove from Watchlist' : 'Add to Watchlist';
+    btn.classList.toggle('wl-active', active);
+  });
+}
+
+async function loadUserWatchlist() {
+  // Seed from localStorage immediately so hearts render before server responds
+  _watchlistSet = _wlLoadLocal();
+  updateHearts();
+  // Then sync from server (merge: server wins when it has data)
+  try {
+    const d = await api('/api/watchlist');
+    if (d?.symbols?.length) {
+      _watchlistSet = new Set(d.symbols);
+      _wlSaveLocal();
+      updateHearts();
+    }
+  } catch {}
+}
+
+function toggleWatchlist(event, symbol) {
+  if (event) event.stopPropagation();
+  const inList = _watchlistSet.has(symbol);
+  // Flip in memory + localStorage immediately — no waiting, no reverting
+  if (inList) _watchlistSet.delete(symbol); else _watchlistSet.add(symbol);
+  _wlSaveLocal();
+  updateHearts();
+  _explorerUpdateWlBtn(symbol);
+  _wlToast(inList ? `${symbol} removed` : `${symbol} added to watchlist ❤️`);
+  // Refresh watchlist panel if it's currently open
+  const wlPanel = document.getElementById('widget-panel-watchlist');
+  if (wlPanel?.classList.contains('active')) loadDashboardWatchlist();
+  // Sync to server in background — fire and forget
+  fetch(`/api/watchlist/${inList ? 'remove' : 'add'}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol }),
+  }).then(r => r.ok && r.json()).then(d => {
+    // If server returns an authoritative list, sync it
+    if (d?.symbols) { _watchlistSet = new Set(d.symbols); _wlSaveLocal(); updateHearts(); _explorerUpdateWlBtn(symbol); }
+  }).catch(() => {});  // silent — localStorage already has it
+}
+
+function _wlToast(msg, isError = false) {
+  let t = document.getElementById('wlToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'wlToast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;padding:8px 18px;border-radius:8px;font-size:0.82rem;font-weight:600;z-index:9999;transition:opacity 0.3s;pointer-events:none';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = isError ? '#b91c1c' : '#238636';
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2500);
+}
+
+async function loadDashboardWatchlist() {
+  const tbody = document.getElementById('wlBody');
+  if (!tbody) return;
+
+  const symbols = [..._watchlistSet];
+  if (!symbols.length) {
+    tbody.innerHTML = `<tr><td colspan="14">
+      <div class="wl-empty">
+        <div class="wl-empty-icon">🤍</div>
+        <div style="font-size:1rem;font-weight:600;color:#e6edf3;margin-bottom:8px">Your watchlist is empty</div>
+        <div style="font-size:0.85rem;color:#8b949e">Open the 🔍 Stock Explorer, search a stock, then click 🤍 in the Explorer header to add it.</div>
+      </div></td></tr>`;
+    return;
+  }
+
+  // Placeholder rows while data loads
+  tbody.innerHTML = symbols.map(sym => _wlRowPlaceholder(sym)).join('');
+
+  // Fetch live data from server
+  try {
+    const d = await api('/api/watchlist/detail', 30000);
+    if (d?.items?.length) {
+      _watchlistSet = new Set(d.items.map(i => i.symbol));
+      _wlSaveLocal();
+      updateHearts();
+      tbody.innerHTML = d.items.map(item => _wlRow(item)).join('');
+    }
+  } catch {}
+}
+
+function _wlRowPlaceholder(symbol) {
+  const name = KNOWN_NAMES[symbol] || '';
+  return `<tr>
+    <td><button class="wl-heart wl-active" data-wl-sym="${symbol}" onclick="toggleWatchlist(event,'${symbol}')" title="Remove" style="opacity:1;font-size:1rem">❤️</button></td>
+    <td>
+      <strong><span class="sym-link" data-symbol="${symbol}">${symbol}</span></strong>
+      ${name ? `<div style="font-size:0.72rem;color:#8b949e">${name}</div>` : ''}
+    </td>
+    <td colspan="12" style="color:#484f58;font-size:0.8rem">Loading…</td>
+  </tr>`;
+}
+
+function _wlRow(item) {
+  const { symbol, name, price, change, change_pct, score, grade, horizon,
+          analyst_consensus, analyst_target, analyst_upside_pct,
+          rsi, rvol, weekly_trend, short_float, earnings_date, macd_signal, ema_trend } = item;
+
+  const dName    = name || KNOWN_NAMES[symbol] || '';
+  const gColor   = { A:'#3fb950', B:'#58a6ff', C:'#f0883e', F:'#f85149' }[grade] || '#8b949e';
+
+  // Price + change
+  const priceStr = price   != null ? `$${parseFloat(price).toFixed(2)}`  : '—';
+  const chgNum   = change_pct != null ? parseFloat(change_pct) : null;
+  const chgStr   = chgNum != null
+    ? `<span style="color:${chgNum>=0?'#3fb950':'#f85149'};font-weight:600">${chgNum>=0?'+':''}${chgNum.toFixed(2)}%</span>`
+    : '—';
+  const chgDollar = change != null
+    ? `<div style="font-size:0.72rem;color:#8b949e">${parseFloat(change)>=0?'+':''}$${Math.abs(parseFloat(change)).toFixed(2)}</div>`
+    : '';
+
+  // Score badge
+  const scoreBadge = score != null
+    ? `<span class="badge badge-${grade||''}" style="font-size:0.82rem">${parseFloat(score).toFixed(0)} ${grade||''}</span>`
+    : '—';
+
+  // Analyst consensus pill
+  const consHtml = analyst_consensus ? (() => {
+    const lc  = analyst_consensus.toLowerCase().replace(/[^a-z]/g,'');
+    const col  = lc.includes('strongbuy')||lc.includes('buy') ? '#3fb950' : lc.includes('sell') ? '#f85149' : '#d29922';
+    const lbl  = analyst_consensus.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+    return `<span style="background:${col}22;color:${col};border:1px solid ${col}55;border-radius:10px;padding:2px 8px;font-size:0.72rem;font-weight:600;white-space:nowrap">${lbl}</span>`;
+  })() : '—';
+
+  // PT / upside
+  const ptHtml = analyst_target != null
+    ? `$${parseFloat(analyst_target).toFixed(0)}` + (analyst_upside_pct != null
+        ? `<span style="color:${parseFloat(analyst_upside_pct)>=0?'#3fb950':'#f85149'};margin-left:4px;font-size:0.75rem">${parseFloat(analyst_upside_pct)>=0?'+':''}${parseFloat(analyst_upside_pct).toFixed(1)}%</span>`
+        : '')
+    : '—';
+
+  // RSI
+  const rsiNum  = rsi != null ? parseFloat(rsi) : null;
+  const rsiCol  = rsiNum != null ? (rsiNum >= 70 ? '#f85149' : rsiNum <= 30 ? '#3fb950' : '#e6edf3') : null;
+  const rsiHtml = rsiNum != null ? `<span style="color:${rsiCol}">${rsiNum.toFixed(1)}</span>` : '—';
+
+  // RVOL
+  const rvolNum  = rvol != null ? parseFloat(rvol) : null;
+  const rvolHtml = rvolNum != null
+    ? `<span style="color:${rvolNum>=2?'#3fb950':rvolNum>=1.5?'#e3b341':'#8b949e'}">${rvolNum.toFixed(1)}×</span>`
+    : '—';
+
+  // Weekly trend
+  const trendHtml = weekly_trend === 'up'   ? '<span style="color:#3fb950">↑ Up</span>'
+                  : weekly_trend === 'down' ? '<span style="color:#f85149">↓ Down</span>'
+                  : '—';
+
+  // MACD
+  const macdHtml = macd_signal === 'bullish' ? '<span style="color:#3fb950">▲ Bull</span>'
+                 : macd_signal === 'bearish' ? '<span style="color:#f85149">▼ Bear</span>'
+                 : '—';
+
+  // Short float
+  const sfNum   = short_float != null ? parseFloat(short_float) : null;
+  const sfHtml  = sfNum != null
+    ? `<span style="color:${sfNum>=20?'#f85149':sfNum>=10?'#e3b341':'#8b949e'}">${sfNum.toFixed(1)}%</span>`
+    : '—';
+
+  // Earnings date
+  const earnHtml = earnings_date
+    ? (() => {
+        const days = Math.round((new Date(earnings_date) - Date.now()) / 86400000);
+        const col  = days >= 0 && days <= 7 ? '#e3b341' : '#8b949e';
+        return `<span style="color:${col};white-space:nowrap">${earnings_date}${days>=0&&days<=30?`<div style="font-size:0.7rem">${days}d</div>`:''}`;
+      })()
+    : '—';
+
+  // Horizon badge
+  const HCOL = { 'Long-term hold':'#3fb950','Medium-term (weeks)':'#58a6ff','Short-term trade':'#f0883e' };
+  const hCol  = HCOL[horizon] || '#8b949e';
+  const horizHtml = horizon
+    ? `<span class="wl-horizon" style="background:${hCol}22;color:${hCol};border:1px solid ${hCol}44">${horizon}</span>`
+    : '—';
+
+  return `<tr>
+    <td><button class="wl-heart wl-active" data-wl-sym="${symbol}" onclick="toggleWatchlist(event,'${symbol}')" title="Remove from Watchlist" style="opacity:1;font-size:1rem">❤️</button></td>
+    <td>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${gColor};flex-shrink:0;display:inline-block"></span>
+        <div>
+          <strong><span class="sym-link" data-symbol="${symbol}">${symbol}</span></strong>
+          ${dName ? `<div style="font-size:0.72rem;color:#8b949e;white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis">${dName}</div>` : ''}
+        </div>
+      </div>
+    </td>
+    <td style="font-size:0.9rem;font-weight:700">${priceStr}</td>
+    <td>${chgStr}${chgDollar}</td>
+    <td>${scoreBadge}</td>
+    <td>${consHtml}</td>
+    <td style="font-size:0.85rem">${ptHtml}</td>
+    <td style="font-size:0.85rem">${rsiHtml}</td>
+    <td style="font-size:0.85rem">${rvolHtml}</td>
+    <td style="font-size:0.85rem">${trendHtml}</td>
+    <td style="font-size:0.85rem">${macdHtml}</td>
+    <td style="font-size:0.85rem">${sfHtml}</td>
+    <td style="font-size:0.82rem">${earnHtml}</td>
+    <td>${horizHtml}</td>
+  </tr>`;
+}
+
 // Returns a table cell with symbol bold + name in grey underneath
 function symCell(symbol, nameOverride) {
   const name = nameOverride || KNOWN_NAMES[symbol?.toUpperCase()] || '';
@@ -6412,7 +7287,10 @@ function symCell(symbol, nameOverride) {
 }
 
 // ── Source dropdown ────────────────────────────────────
-let currentSource = 'alpaca';
+// Source preference stored per-user; last-used username remembered for instant startup restore
+function _srcKey(u) { return 'dashSource_' + (u || 'default'); }
+const _lastUser   = localStorage.getItem('lastUsername') || 'default';
+let currentSource = localStorage.getItem(_srcKey(_lastUser)) || 'alpaca';
 function setSource(src) {
   // If switching to live and not configured, show setup modal instead
   if (src === 'alpaca_live' && _currentUser && !_currentUser.sources?.alpaca_live) {
@@ -6423,6 +7301,7 @@ function setSource(src) {
     return;
   }
   currentSource = src;
+  localStorage.setItem(_srcKey(_currentUser?.username), src);
   const sel = document.getElementById('sourceSelect');
   if (sel) {
     sel.value = src;
@@ -6433,10 +7312,14 @@ function setSource(src) {
   // Live account warning banner
   const liveWarn = document.getElementById('live-account-warn');
   if (liveWarn) liveWarn.style.display = src === 'alpaca_live' ? '' : 'none';
+  // Broker fee strip
+  _updateBrokerFeeStrip(src);
   _dashSource = null;
+  _posSortState = { col: null, dir: 'asc' };
   loadDashboard();
   loadStrongBuys();
   loadIntradayPicks();
+  loadPnl();
   if (document.getElementById('page-trades')?.classList.contains('active')) loadTrades();
   // Show/hide Moomoo risk panel
   const riskPanel = document.getElementById('moomooRiskPanel');
@@ -6444,6 +7327,55 @@ function setSource(src) {
     if (src === 'moomoo') { riskPanel.style.display = ''; loadMoomooRisk(); }
     else                  { riskPanel.style.display = 'none'; }
   }
+}
+
+// ── Broker Fee Strip ──────────────────────────────────
+const _BROKER_FEES = {
+  alpaca: null,
+  alpaca_live: {
+    name: '🔴 Alpaca Live',
+    items: [
+      { label: 'Commission', value: '$0.00/share', note: 'commission-free' },
+      { label: 'SEC fee (sells)', value: '$8.00/million' },
+      { label: 'FINRA TAF (sells)', value: '$0.000145/share, max $7.27' },
+      { label: 'Typical round-trip (100 shares)', value: '≈ $0.10–0.50', highlight: true },
+    ],
+  },
+  tiger: {
+    name: '🐯 Tiger Brokers',
+    items: [
+      { label: 'Commission', value: '$0.005/share, min $0.99/order' },
+      { label: 'Options', value: '$0.65/contract' },
+      { label: 'SEC fee (sells)', value: '$8.00/million' },
+      { label: 'FINRA TAF (sells)', value: '$0.000145/share, max $7.27' },
+      { label: 'Typical round-trip (100 shares)', value: '≈ $2.00–3.00', highlight: true },
+    ],
+  },
+  moomoo: {
+    name: '💰 Moomoo',
+    items: [
+      { label: 'Commission', value: '$0.0049/share, min $0.99/order' },
+      { label: 'Options', value: '$0.65/contract' },
+      { label: 'SEC fee (sells)', value: '$8.00/million' },
+      { label: 'FINRA TAF (sells)', value: '$0.000145/share, max $7.27' },
+      { label: 'Typical round-trip (100 shares)', value: '≈ $2.00–3.00', highlight: true },
+    ],
+  },
+};
+
+function _updateBrokerFeeStrip(src) {
+  const el = document.getElementById('brokerFeeStrip');
+  if (!el) return;
+  const info = _BROKER_FEES[src];
+  if (!info) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML = `
+    <span style="color:#e6edf3;font-weight:600;white-space:nowrap">${info.name} fees:</span>
+    ${info.items.map(f => `
+      <span style="white-space:nowrap;${f.highlight ? 'color:#e6edf3;font-weight:600' : ''}">
+        ${f.label}: <span style="color:${f.highlight ? '#f0883e' : '#c9d1d9'}">${f.value}</span>
+      </span>`).join('<span style="color:#30363d">|</span>')}
+    <span style="margin-left:auto;font-size:0.72rem;color:#6e7681">verify at broker site</span>`;
 }
 
 // ── Moomoo Portfolio Risk ─────────────────────────────
@@ -6621,8 +7553,8 @@ function togglePosRow(symbol, e) {
   opening ? _expandedPositions.add(symbol) : _expandedPositions.delete(symbol);
 }
 
-function _buildPosTable(positions, isMoomoo) {
-  if (!positions.length) return '<div class="empty">No open positions</div>';
+function _buildPosTable(positions, isMoomoo, skipHeader = false) {
+  if (!positions.length && !skipHeader) return '<div class="empty">No open positions</div>';
 
   const stopOrderMap = {};
   (_cachedOpenOrders ?? []).forEach(o => {
@@ -6630,10 +7562,17 @@ function _buildPosTable(positions, isMoomoo) {
       stopOrderMap[o.symbol] = o;
   });
 
+  const thStyle = 'cursor:pointer;user-select:none';
   const colHdr = `<tr>
-    <th>Symbol</th><th>Side</th><th>Shares</th><th>$ Invested</th>
-    <th>Avg Cost</th><th>Current</th><th>Unrealized P&L</th>
-    ${isMoomoo ? '<th>Today P&L</th>' : ''}<th></th>
+    <th onclick="sortPosTable(0)" style="${thStyle}">Symbol</th>
+    <th onclick="sortPosTable(1)" style="${thStyle}">Side</th>
+    <th onclick="sortPosTable(2)" style="${thStyle}">Shares</th>
+    <th onclick="sortPosTable(3)" style="${thStyle}">$ Invested</th>
+    <th onclick="sortPosTable(4)" style="${thStyle}">Avg Cost</th>
+    <th onclick="sortPosTable(5)" style="${thStyle}">Current</th>
+    <th onclick="sortPosTable(6)" style="${thStyle}">Unrealized P&L</th>
+    ${isMoomoo ? `<th onclick="sortPosTable(7)" style="${thStyle}">Today P&L</th>` : ''}
+    <th></th>
   </tr>`;
 
   const rows = positions.map(p => {
@@ -6687,20 +7626,20 @@ function _buildPosTable(positions, isMoomoo) {
       </td>
     </tr>`;
 
-    return `<tr class="pos-main-row" onclick="togglePosRow('${p.symbol}',event)">
+    return `<tr class="pos-main-row" data-symbol="${p.symbol}" onclick="togglePosRow('${p.symbol}',event)">
       ${symCell(p.symbol, p.name)}
       <td>${sideLabel}</td>
-      <td>${p.qty}</td>
-      <td style="color:#8b949e">${invested != null ? fmtDollar(invested) : '—'}</td>
+      <td id="pos-qty-${p.symbol}">${p.qty}</td>
+      <td id="pos-inv-${p.symbol}" style="color:#8b949e">${invested != null ? fmtDollar(invested) : '—'}</td>
       <td>$${fmt(avgPrice)}</td>
-      <td>$${fmt(p.current_price)}</td>
-      <td class="${colorClass(unrlPL)}">${unrlPL != null ? (unrlPL >= 0 ? '+' : '-') + fmtDollar(unrlPL) : '—'}${unrlPLPct != null ? ` <span style="font-size:0.78rem">(${fmtPct(unrlPLPct)})</span>` : ''}</td>
-      ${isMoomoo ? `<td class="${colorClass(todayPL)}">${todayPL != null ? (todayPL >= 0 ? '+' : '-') + fmtDollar(todayPL) : '—'}</td>` : ''}
+      <td id="pos-cur-${p.symbol}">$${fmt(p.current_price)}</td>
+      <td id="pos-unrl-${p.symbol}" class="${colorClass(unrlPL)}">${unrlPL != null ? (unrlPL >= 0 ? '+' : '-') + fmtDollar(unrlPL) : '—'}${unrlPLPct != null ? ` <span style="font-size:0.78rem">(${fmtPct(unrlPLPct)})</span>` : ''}</td>
+      ${isMoomoo ? `<td id="pos-today-${p.symbol}" class="${colorClass(todayPL)}">${todayPL != null ? (todayPL >= 0 ? '+' : '-') + fmtDollar(todayPL) : '—'}</td>` : ''}
       <td style="text-align:center;padding:0 12px"><span id="pos-toggle-${p.symbol}" class="pos-expand-btn">${isExp ? '▲' : '▼'}</span></td>
     </tr>${detail}`;
   }).join('');
 
-  return `<table>${colHdr}${rows}</table>`;
+  return `<table>${skipHeader ? '' : colHdr}${rows}</table>`;
 }
 
 async function posClose(symbol, btn) {
@@ -6790,7 +7729,7 @@ function showPage(name, btn) {
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: () => { loadMarket(); loadHome(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: () => { loadMarket(); loadHome(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: loadCalendar };
   loaders[name]?.();
 }
 
@@ -6805,6 +7744,7 @@ function switchWidgetTab(name) {
   document.querySelectorAll('.wta').forEach(a => {
     a.style.display = (a.id === `wta-${name}`) ? 'flex' : 'none';
   });
+  if (name === 'watchlist') loadDashboardWatchlist();
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -6812,7 +7752,7 @@ const fmt = (n, d=2) => n == null ? '—' : Number(n).toFixed(d);
 const fmtDollar = n => n == null ? '—' : '$' + Math.abs(Number(n)).toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPct = n => n == null ? '—' : (n >= 0 ? '+' : '') + fmt(n) + '%';
 const colorClass = n => n == null ? 'neu' : n > 0 ? 'pos' : n < 0 ? 'neg' : 'neu';
-const timeAgo = s => { const m = Math.round((Date.now()-new Date(s))/60000); return m < 60 ? m+'m ago' : Math.floor(m/60)+'h ago'; };
+const timeAgo = s => { const m = Math.round((Date.now()-new Date(s))/60000); if (m < 60) return m+'m ago'; const h = Math.floor(m/60); if (h < 48) return h+'h ago'; const d = Math.floor(h/24); if (d < 60) return d+'d ago'; return Math.floor(d/30)+'mo ago'; };
 const gradeClass = g => ({ A:'badge-A', B:'badge-B', C:'badge-C', F:'badge-F' }[g] || '');
 
 // ── Dashboard ─────────────────────────────────────────
@@ -6851,28 +7791,32 @@ async function forceSyncDashboard() {
 async function loadDashboard() {
   const d = await api('/api/dashboard?source=' + currentSource);
   if (!d) return;
+  if (d.needs_tiger_setup) { showTigerSetup(); return; }
 
-  const isMoomoo = currentSource === 'moomoo';
+  const isMoomoo  = currentSource === 'moomoo';
+  const isTiger   = currentSource === 'tiger';
+  const isRealAcct = isMoomoo || isTiger;
   const pnl = d.pnl;
   const pnlPct = pnl ? Math.min(100, Math.max(0, (pnl.pnl / 150) * 100)) : 0;
   const pnlColor = pnl?.pnl >= 0 ? '#3fb950' : '#f85149';
   const portfolioValue = d.account?.portfolio_value;
   const buyingPower    = d.account?.buying_power;
   const unrealizedPL   = d.account?.unrealized_pl;
-  const accountLabel   = isMoomoo ? '💰 Real account (Moomoo)' : '📄 Paper account (Alpaca)';
+  const accountLabel   = isTiger ? '🐯 Real account (Tiger)' : isMoomoo ? '💰 Real account (Moomoo)' : '📄 Paper account (Alpaca)';
 
   const lbl = document.getElementById('dashSourceLabel');
-  if (lbl) lbl.textContent = isMoomoo ? '💰 Moomoo Real Account' : '📄 Alpaca Paper Trading';
+  const tigerAccNum = _currentUser?.tiger_account || '';
+  if (lbl) lbl.textContent = isTiger ? `🐯 Tiger${tigerAccNum ? ' - ' + tigerAccNum : ''}` : isMoomoo ? '💰 Moomoo Real Account' : '📄 Alpaca Paper Trading';
 
   // ── Build skeleton once (or when source changes) ──────────────────────────
   if (_dashSource !== currentSource) {
     _dashSource = currentSource;
     document.getElementById('dashCards').innerHTML = `
       <div class="card">
-        <div class="card-label">${isMoomoo ? 'Unrealized P&L' : "Today's P&L"}</div>
+        <div class="card-label">${isRealAcct ? 'Unrealized P&L' : "Today's P&L"}</div>
         <div class="card-value neu" id="dv-pnl">—</div>
-        <div class="card-sub" id="ds-pnl">${isMoomoo ? accountLabel : 'Target: $150 &nbsp;|&nbsp; Limit: -$200'}</div>
-        ${!isMoomoo ? '<div class="progress"><div class="progress-fill" id="dv-pnl-bar" style="width:0%"></div></div>' : ''}
+        <div class="card-sub" id="ds-pnl">${isRealAcct ? accountLabel : 'Target: $150 &nbsp;|&nbsp; Limit: -$200'}</div>
+        ${!isRealAcct ? '<div class="progress"><div class="progress-fill" id="dv-pnl-bar" style="width:0%"></div></div>' : ''}
       </div>
       <div class="card">
         <div class="card-label">Portfolio Value</div>
@@ -6881,6 +7825,7 @@ async function loadDashboard() {
       </div>
       <div class="card">
         <div class="card-label">Buying Power</div>
+
         <div class="card-value neu" id="dv-buying-power">—</div>
         <div class="card-sub">Available cash</div>
       </div>
@@ -6894,7 +7839,7 @@ async function loadDashboard() {
         <div class="card-value neu" id="dv-vix">—</div>
         <div class="card-sub" id="ds-vix">—</div>
       </div>
-      ${!isMoomoo ? `<div class="card">
+      ${!isRealAcct ? `<div class="card">
         <div class="card-label">Stocks Scored Today</div>
         <div class="card-value neu" id="dv-scores">—</div>
         <div class="card-sub">Conviction scores run</div>
@@ -6916,33 +7861,40 @@ async function loadDashboard() {
   }
 
   // ── Update values in-place (no DOM rebuild = no flicker) ──────────────────
-  if (isMoomoo) {
-    liveVal('dv-pnl', unrealizedPL != null ? (unrealizedPL >= 0 ? '+' : '-') + fmtDollar(unrealizedPL) : '—', colorClass(unrealizedPL));
+  if (isRealAcct) {
+    liveVal('dv-pnl', unrealizedPL != null ? (unrealizedPL >= 0 ? '+' : '-') + fmtDollar(Math.abs(unrealizedPL)) : '—', colorClass(unrealizedPL));
     updateBrandPnl(unrealizedPL);
   } else {
-    liveVal('dv-pnl', pnl ? (pnl.pnl >= 0 ? '+' : '-') + fmtDollar(pnl.pnl) : '—', colorClass(pnl?.pnl));
+    liveVal('dv-pnl', pnl ? (pnl.pnl >= 0 ? '+' : '-') + fmtDollar(Math.abs(pnl.pnl)) : '—', colorClass(pnl?.pnl));
     updateBrandPnl(pnl?.pnl ?? null);
     const bar = document.getElementById('dv-pnl-bar');
     if (bar) { bar.style.width = pnlPct + '%'; bar.style.background = pnlColor; }
   }
-  liveVal('dv-portfolio',    portfolioValue ? '$' + Number(portfolioValue).toLocaleString() : '—');
-  liveVal('dv-buying-power', buyingPower    ? '$' + Number(buyingPower).toLocaleString()    : '—');
+  liveVal('dv-portfolio',    portfolioValue != null ? '$' + Number(portfolioValue).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '—');
+  liveVal('dv-buying-power', buyingPower    != null ? '$' + Number(buyingPower).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})    : '—');
   liveVal('dv-positions',    String(d.positions.length));
-  liveText('ds-positions',   d.positions.map(p => p.symbol).join(', ') || 'None');
+  const _posSyms = d.positions.map(p => p.symbol).filter(Boolean);
+  liveText('ds-positions', _posSyms.length === 0 ? 'None' : _posSyms.slice(0, 4).join(', ') + (_posSyms.length > 4 ? ` +${_posSyms.length - 4} more` : ''));
 
   const vixVal = d.sentiment?.vix?.value;
   liveVal('dv-vix', vixVal ?? '—', vixVal > 25 ? 'neg' : 'pos');
   liveText('ds-vix', (d.sentiment?.fear_greed?.label ?? '—') + ' ' + (d.sentiment?.fear_greed?.emoji ?? ''));
-  if (!isMoomoo) liveVal('dv-scores', String(d.scores_today ?? '—'));
+  if (!isRealAcct) liveVal('dv-scores', String(d.scores_today ?? '—'));
 
   // ── Positions table body only ─────────────────────────────────────────────
   const totalUnrPL = d.account?.unrealized_pl;
   const srcBadge = document.getElementById('pos-source-badge');
-  if (srcBadge) { srcBadge.innerHTML = isMoomoo ? '<span style="color:#3fb950">● Moomoo Real</span>' : '<span style="color:#1f6feb">● Alpaca Paper</span>'; }
+  if (srcBadge) {
+    srcBadge.innerHTML = isTiger
+      ? '<span style="color:#e3a403">● Tiger Real</span>'
+      : isMoomoo
+        ? '<span style="color:#3fb950">● Moomoo Real</span>'
+        : '<span style="color:#1f6feb">● Alpaca Paper</span>';
+  }
   const totalEl = document.getElementById('pos-total-pl');
-  if (totalEl && isMoomoo && totalUnrPL != null) {
+  if (totalEl && isRealAcct && totalUnrPL != null) {
     totalEl.className = colorClass(totalUnrPL);
-    totalEl.textContent = 'Unrealized: ' + (totalUnrPL >= 0 ? '+' : '-') + fmtDollar(totalUnrPL);
+    totalEl.textContent = 'Unrealized: ' + (totalUnrPL >= 0 ? '+' : '-') + fmtDollar(Math.abs(totalUnrPL));
   }
   const totalInvestedDash = d.positions.reduce((s, p) => {
     const ap = p.avg_entry_price ?? p.avg_price ?? p.avg_cost;
@@ -6953,12 +7905,16 @@ async function loadDashboard() {
     investedEl.innerHTML = `Invested: <strong style="color:#e6edf3">${fmtDollar(totalInvestedDash)}</strong>`;
   }
 
+  // Cache positions globally for earnings calendar HELD badge
+  if (isRealAcct) window._moomooPositions = d.positions ?? [];
+
   // Cache for the 3s refreshPositions() to use without a full reload
   _cachedOpenOrders = d.open_orders ?? [];
   _cachedDbTradeMap = {};
   (d.recent_trades ?? []).forEach(t => { if (t.status === 'open') _cachedDbTradeMap[t.symbol] = t; });
 
   document.getElementById('pos-body').innerHTML = _buildPosTable(d.positions, isMoomoo);
+  _applyPosSort();
 
   document.getElementById('trades-body').innerHTML = d.recent_trades.length === 0
     ? '<div class="empty">No trades yet</div>'
@@ -7216,6 +8172,247 @@ async function loadScores() {
 }
 
 // ── Market ────────────────────────────────────────────
+// ─── Earnings Calendar ────────────────────────────────────────────────────────
+// ── Forecast Lab ──────────────────────────────────────────────
+let _fcData = null;
+
+function fcFmt(n) { return n == null ? '—' : '$' + Number(n).toFixed(2); }
+function fcPct(n)  { return n == null ? '' : (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%'; }
+function fcErrColor(e) {
+  if (e == null) return '#6e7681';
+  return Math.abs(e) < 1 ? '#39d353' : Math.abs(e) < 3 ? '#f0883e' : '#f85149';
+}
+
+async function loadForecast(force = false) {
+  if (!force && _fcData) { renderForecast(); return; }
+  document.getElementById('fcBody').innerHTML = '<div class="loading" style="padding:40px;text-align:center">Loading forecast data…</div>';
+  document.getElementById('fcMeta').textContent = 'Loading…';
+  const d = await api('/api/forecast', 30000);
+  if (!d) {
+    document.getElementById('fcBody').innerHTML = '<div style="color:#8b949e;padding:24px;text-align:center">Failed to load. Check server connection.</div>';
+    document.getElementById('fcMeta').textContent = 'Error';
+    return;
+  }
+  _fcData = d;
+  if (!d.symbols || d.symbols.length === 0) {
+    document.getElementById('fcBody').innerHTML = `<div style="color:#8b949e;padding:40px;text-align:center">
+      <div style="font-size:1rem;margin-bottom:12px;color:#e6edf3">No predictions for this week yet.</div>
+      <div style="font-size:0.82rem;margin-bottom:20px">Click <strong style="color:#58a6ff">Generate week</strong> above to run the 5-algorithm predictor for all 40 stocks.</div>
+      <div style="font-size:0.75rem;color:#6e7681">Predictions auto-generate every Monday at 8:30 AM ET via cron.</div>
+    </div>`;
+    document.getElementById('fcMeta').textContent = d.week_start ? `Week of ${d.week_start} · no data` : 'No data';
+    renderFcHistory(d.history);
+    return;
+  }
+  const mon = new Date(_fcData.week_start + 'T12:00:00Z');
+  const fri = new Date(mon.getTime() + 4 * 86400000);
+  const fmt = dt => dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  document.getElementById('fcMeta').textContent =
+    `Week of ${fmt(mon)} – ${fmt(fri)} · ${d.symbols.length} stocks tracked`;
+  renderFcStats(d.stats);
+  renderForecast();
+  renderFcMovers(d.movers || []);
+  renderFcHistory(d.history);
+}
+
+function renderFcMovers(movers) {
+  const el = document.getElementById('fcMovers');
+  if (!el) return;
+  if (!movers.length) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  const gradeColor = { A: '#39d353', B: '#58a6ff', C: '#f0883e', F: '#f85149' };
+  el.innerHTML = `
+    <div style="font-size:0.78rem;font-weight:600;color:#8b949e;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em">
+      📈 Today's Movers — live scan, no weekly forecast yet
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${movers.map(m => `
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 12px;min-width:110px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <a href="#" onclick="event.preventDefault();exploreSymbol('${m.symbol}')" style="color:#58a6ff;font-weight:700;font-size:0.9rem">${m.symbol}</a>
+            <span style="background:${gradeColor[m.grade]||'#6e7681'}22;color:${gradeColor[m.grade]||'#6e7681'};border:1px solid ${gradeColor[m.grade]||'#6e7681'}55;border-radius:4px;padding:1px 5px;font-size:0.7rem;font-weight:700">${m.grade}</span>
+          </div>
+          <div style="font-size:0.72rem;color:#8b949e;margin-top:2px">${m.name||''}</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+            <span style="font-size:0.78rem;color:#e6edf3">Score: <strong>${m.score}</strong></span>
+            <button onclick="exploreSymbol('${m.symbol}')" style="background:#1f2937;border:1px solid #30363d;border-radius:4px;padding:2px 7px;color:#58a6ff;font-size:0.7rem;cursor:pointer">🔍 Explore</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function renderFcStats(s) {
+  const el = document.getElementById('fcStats');
+  if (!el) return;
+  const cards = [
+    { label: 'Predictions', val: s.total_predictions || '—', sub: 'this week' },
+    { label: 'Actuals filled', val: s.filled || '0', sub: `of ${s.total_predictions}` },
+    { label: 'Avg abs error', val: s.avg_abs_error_pct != null ? s.avg_abs_error_pct + '%' : '—', sub: 'lower is better' },
+    { label: 'Direction accuracy', val: s.direction_accuracy_pct != null ? s.direction_accuracy_pct + '%' : '—', sub: 'up/down correct' },
+  ];
+  el.innerHTML = cards.map(c => `
+    <div class="fc-stat-card">
+      <div class="fc-stat-label">${c.label}</div>
+      <div class="fc-stat-val">${c.val}</div>
+      <div class="fc-stat-sub">${c.sub}</div>
+    </div>`).join('');
+}
+
+function renderForecast() {
+  if (!_fcData) return;
+  const q      = (document.getElementById('fcSearch')?.value || '').toUpperCase().trim();
+  const filter = document.getElementById('fcFilter')?.value || 'all';
+  const days   = _fcData.days;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri'];
+
+  let syms = _fcData.symbols.filter(s => {
+    if (q && !s.symbol.includes(q)) return false;
+    if (filter === 'earnings' && !s.has_earnings) return false;
+    return true;
+  });
+
+  if (!syms.length) {
+    document.getElementById('fcBody').innerHTML = `<div style="color:#8b949e;padding:24px;text-align:center">${filter === 'earnings' ? 'No earnings this week for tracked stocks.' : 'No stocks match filter.'}</div>`;
+    return;
+  }
+
+  const heldSymbols = new Set((window._moomooPositions || []).map(p => (p.symbol||'').toUpperCase()));
+
+  let th = `<tr><th rowspan="2">Symbol</th><th rowspan="2">Base</th><th rowspan="2">Signal</th>`;
+  days.forEach((d, i) => {
+    const isToday = d === todayStr;
+    th += `<th colspan="1" class="${isToday ? 'fc-today-col' : ''}">${DAY_LABELS[i]}<br><span style="font-weight:400;color:#6e7681">${d.slice(5)}</span></th>`;
+  });
+  th += `</tr><tr>`;
+  days.forEach((d) => {
+    const isToday = d === todayStr;
+    th += `<th class="${isToday ? 'fc-today-col' : ''}" style="font-size:0.6rem;color:#58a6ff;font-weight:600;padding:2px 8px">Pred</th>`;
+  });
+  th += `</tr>`;
+
+  const rows = syms.map(s => {
+    const isHeld = heldSymbols.has(s.symbol);
+    const earningsTag = s.has_earnings ? `<span class="fc-earnings-tag">${s.earnings_date?.slice(5) || 'ERN'}</span>` : '';
+    const sigPct = Math.round((s.algorithm_signal || 50));
+    const sigLeft = Math.max(0, Math.min(100, sigPct));
+    const sigColor = sigPct >= 65 ? '#39d353' : sigPct >= 45 ? '#f0883e' : '#f85149';
+    const rowBase = s.has_earnings ? 'fc-earnings-row' : '';
+    const heldDot = isHeld ? '<span style="color:#39d353;font-size:0.65rem"> ●</span>' : '';
+
+    // Pred row
+    const predCells = days.map((d) => {
+      const day = s.days?.[d];
+      const colClass = d === todayStr ? 'fc-today-col' : '';
+      if (!day) return `<td class="fc-day-cell ${colClass}"><span class="fc-empty-cell">—</span></td>`;
+      return `<td class="fc-day-cell ${colClass}">
+        <div class="fc-pred">${fcFmt(day.predicted_price)}</div>
+        <div class="fc-pred-chg">${fcPct(day.predicted_change_pct)}</div>
+      </td>`;
+    }).join('');
+
+    // Actual row
+    const actualCells = days.map((d) => {
+      const day = s.days?.[d];
+      const colClass = d === todayStr ? 'fc-today-col' : '';
+      if (!day) return `<td class="fc-day-cell ${colClass}"><span class="fc-empty-cell">—</span></td>`;
+      const hasActual = day.actual_price != null;
+      const ac = day.actual_change_pct;
+      const acColor = hasActual ? (ac >= 0 ? '#39d353' : '#f85149') : '#484f58';
+      if (hasActual) {
+        return `<td class="fc-day-cell ${colClass}">
+          <div class="fc-actual" style="color:${acColor}">${fcFmt(day.actual_price)}</div>
+          <div class="fc-error" style="color:${fcErrColor(day.error_pct)}">err ${fcPct(day.error_pct)}</div>
+        </td>`;
+      }
+      return `<td class="fc-day-cell ${colClass}"><span style="color:#484f58;font-size:0.72rem">—</span></td>`;
+    }).join('');
+
+    return `
+    <tr class="${rowBase} fc-pred-row">
+      <td rowspan="2"><span class="sym-link fc-sym" data-symbol="${s.symbol}" style="cursor:pointer">${s.symbol}${heldDot}</span>${earningsTag}<br>
+        <span class="fc-base" style="font-size:0.63rem">R²=${(s.r_squared||0).toFixed(2)} s=${s.slope_per_day>=0?'+':''}${(s.slope_per_day||0).toFixed(2)}</span></td>
+      <td rowspan="2"><span class="fc-sym">${fcFmt(s.base_price)}</span></td>
+      <td rowspan="2" style="min-width:70px">
+        <div style="position:relative;display:inline-block">
+          <div class="fc-signal-bar"><div class="fc-signal-dot" style="left:${sigLeft}%;background:${sigColor}"></div></div>
+        </div>
+        <div style="font-size:0.68rem;color:${sigColor};font-weight:600">${sigPct}</div>
+      </td>
+      ${predCells}
+    </tr>
+    <tr class="${rowBase} fc-actual-row">
+      ${actualCells}
+    </tr>`;
+  }).join('');
+
+  document.getElementById('fcBody').innerHTML =
+    `<table class="fc-table"><thead>${th}</thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderFcHistory(history) {
+  const el = document.getElementById('fcHistory');
+  if (!el || !history?.length) { if (el) el.innerHTML = '<div style="color:#6e7681;font-size:0.8rem">No historical data yet.</div>'; return; }
+  let html = `<table class="fc-hist-table">
+    <thead><tr><th>Week</th><th>Predictions</th><th>Filled</th><th>Avg abs error</th><th>Direction accuracy</th></tr></thead><tbody>`;
+  for (const r of history) {
+    const filled = +r.filled, total = +r.total, within2 = +r.within_2pct, dirCorr = +r.direction_correct;
+    const pct = filled > 0 ? Math.round(within2 / filled * 100) : 0;
+    const dirPct = filled > 0 ? Math.round(dirCorr / filled * 100) : null;
+    const avgErr = r.avg_abs_error != null ? +r.avg_abs_error : null;
+    const err = avgErr != null ? avgErr.toFixed(2) + '%' : '—';
+    html += `<tr>
+      <td style="color:#e6edf3;font-weight:600">${r.week_start}</td>
+      <td>${r.total}</td>
+      <td>${r.filled}</td>
+      <td style="color:${avgErr != null && avgErr < 2 ? '#39d353' : '#f0883e'}">${err}
+        <span style="color:#6e7681;font-size:0.7rem"> (${pct}% within 2%)</span></td>
+      <td style="color:${dirPct >= 55 ? '#39d353' : '#f0883e'}">${dirPct != null ? dirPct + '%' : '—'}</td>
+    </tr>`;
+  }
+  html += `</tbody></table>`;
+  el.innerHTML = html;
+}
+
+async function generateForecast() {
+  const btn = document.getElementById('fcGenBtn');
+  if (btn) { btn.textContent = 'Starting…'; btn.disabled = true; }
+
+  const r = await api('/api/forecast/generate', 15000, 'POST');
+  if (!r?.success) {
+    if (btn) { btn.textContent = 'Generate week'; btn.disabled = false; }
+    alert('Failed to start: ' + (r?.error || 'unknown'));
+    return;
+  }
+
+  if (r.status === 'already_running') {
+    // already in progress — just start polling
+  }
+
+  // Poll progress every 4 seconds
+  const pollInterval = setInterval(async () => {
+    const p = await api('/api/forecast/progress', 8000);
+    const done = p?.done ?? 0;
+    const total = p?.total ?? r.total ?? '?';
+    if (btn) btn.textContent = `Generating… ${done}/${total}`;
+
+    if (p?.finished) {
+      clearInterval(pollInterval);
+      if (btn) { btn.textContent = 'Generate week'; btn.disabled = false; }
+      _fcData = null;
+      loadForecast(true);
+    }
+  }, 4000);
+}
+
+async function fillActuals() {
+  const r = await api('/api/forecast/fill-actuals', 60000, 'POST');
+  if (r?.success) { _fcData = null; loadForecast(true); }
+}
+
+// ── loadCalendar alias keeps showPage() loader working ────────────
+function loadCalendar(force) { loadForecast(force); }
+
 async function loadMarket() {
   const d = await api('/api/market');
 
@@ -7230,6 +8427,34 @@ async function loadMarket() {
   const s = d.sentiment;
   const offline = !s && !d.sectors && !d.movers;
   const offlineNote = offline ? ' <span style="font-size:0.72rem;color:#8b949e">· offline</span>' : '';
+
+  // ── Hero banner market indicators ──────────────────────────────────────────
+  const spPrice  = s?.indices?.sp500?.price;
+  const spChg    = s?.indices?.sp500?.chg_pct;
+  const nqPrice  = s?.indices?.nasdaq?.price;
+  const nqChg    = s?.indices?.nasdaq?.chg_pct;
+  const vixPrice = s?.vix?.value;
+  const vixChg   = s?.vix?.chg_pct;
+  const btcPrice = s?.indices?.btc?.price ?? s?.crypto?.btc?.price;
+  const btcChg   = s?.indices?.btc?.chg_pct ?? s?.crypto?.btc?.chg_pct;
+
+  const heroFmt = (price, chg, prefix='$', decimals=0) => {
+    if (!price) return '—';
+    const p = Number(price).toLocaleString('en-US', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+    const sign = chg >= 0 ? '▲' : '▼';
+    const pct = chg != null ? ` ${sign}${Math.abs(chg).toFixed(2)}%` : '';
+    return `${prefix}${p}${pct}`;
+  };
+  const setHero = (id, price, chg, prefix, decimals) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = heroFmt(price, chg, prefix, decimals);
+    el.className = 'hero-market-val' + (chg > 0 ? ' up' : chg < 0 ? ' down' : '');
+  };
+  setHero('heroSpy', spPrice, spChg, '$');
+  setHero('heroQqq', nqPrice, nqChg, '$');
+  setHero('heroVix', vixPrice, vixChg, '', 2);
+  setHero('heroBtc', btcPrice, btcChg, '$', 0);
 
   document.getElementById('marketCards').innerHTML = `
     <div class="card">
@@ -7379,16 +8604,125 @@ async function loadPnl() {
   const d = await api(`/api/pnl?days=${days}&source=${currentSource}`);
   if (!d) return;
 
-  // When Moomoo or live is selected, portfolio history is unavailable — show clear message
-  if (currentSource === 'moomoo' || currentSource === 'alpaca_live') {
-    const srcLabel = currentSource === 'moomoo' ? 'Moomoo Real Account' : 'Alpaca Live Account';
-    document.getElementById('pnlCards').innerHTML = '';
-    document.getElementById('pnlChart').innerHTML = `
-      <div class="empty" style="padding:20px;text-align:center">
-        <div style="color:#8b949e;margin-bottom:6px">📊 Daily P&amp;L history is not available for <strong style="color:#e6edf3">${srcLabel}</strong></div>
-        <div style="font-size:0.82rem;color:#6e7681">Switch to <strong style="color:#e6edf3">Alpaca Paper</strong> to view P&amp;L history.</div>
-      </div>`;
-    document.getElementById('pnlTable').innerHTML = '';
+  // Real-money accounts — show live snapshot cards + DB-accumulated daily history
+  if (currentSource === 'moomoo' || currentSource === 'alpaca_live' || currentSource === 'tiger') {
+    const srcLabel = currentSource === 'tiger' ? '🐯 Tiger Brokers' : currentSource === 'moomoo' ? '💰 Moomoo' : '🔴 Alpaca Live';
+    const badge = document.getElementById('pnlSourceBadge');
+    if (badge) badge.textContent = srcLabel;
+    const acct = d.account;
+    const usd = v => (v >= 0 ? '+$' : '-$') + Math.abs(v ?? 0).toFixed(2);
+    const unrealPl  = acct?.unrealized_pl   ?? 0;
+    const realPl    = acct?.realized_pl     ?? null;
+    const portVal   = acct?.portfolio_value ?? null;
+    const buyPow    = acct?.buying_power    ?? null;
+    const hist      = (d.history || []);
+
+    // Summary stats from history
+    const totalRealPnl = hist.reduce((s, r) => s + (r.pnl || 0), 0);
+    const winDaysR  = hist.filter(r => r.pnl > 0).length;
+    const lossDaysR = hist.filter(r => r.pnl < 0).length;
+    const bestDayR  = hist.reduce((m, r) => Math.max(m, r.pnl || 0), 0);
+    const worstDayR = hist.reduce((m, r) => Math.min(m, r.pnl || 0), 0);
+
+    document.getElementById('pnlCards').innerHTML = `
+      <div class="card">
+        <div class="card-label">Unrealized P&amp;L</div>
+        <div class="card-value" style="color:${unrealPl >= 0 ? '#3fb950' : '#f85149'}">${usd(unrealPl)}</div>
+        <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">open positions</div>
+      </div>
+      ${realPl != null ? `<div class="card">
+        <div class="card-label">Realized P&amp;L (total)</div>
+        <div class="card-value" style="color:${realPl >= 0 ? '#3fb950' : '#f85149'}">${usd(realPl)}</div>
+        <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">all-time closed trades</div>
+      </div>` : ''}
+      ${hist.length > 1 ? `<div class="card">
+        <div class="card-label">Period Realized P&amp;L</div>
+        <div class="card-value" style="color:${totalRealPnl >= 0 ? '#3fb950' : '#f85149'}">${usd(totalRealPnl)}</div>
+        <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">${winDaysR}W / ${lossDaysR}L days</div>
+      </div>` : ''}
+      ${portVal != null ? `<div class="card">
+        <div class="card-label">Portfolio Value</div>
+        <div class="card-value">$${portVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      </div>` : ''}
+      ${buyPow != null ? `<div class="card">
+        <div class="card-label">Buying Power</div>
+        <div class="card-value">$${buyPow.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+      </div>` : ''}
+      ${hist.length > 1 && bestDayR > 0 ? `<div class="card">
+        <div class="card-label">Best Day</div>
+        <div class="card-value" style="color:#3fb950">${usd(bestDayR)}</div>
+      </div>` : ''}
+      ${hist.length > 1 && worstDayR < 0 ? `<div class="card">
+        <div class="card-label">Worst Day</div>
+        <div class="card-value" style="color:#f85149">${usd(worstDayR)}</div>
+      </div>` : ''}`;
+
+    // ── Bar chart (same structure as paper, using day-over-day realized P&L change)
+    if (hist.length < 2) {
+      document.getElementById('pnlChart').innerHTML = `
+        <div class="empty" style="padding:16px;text-align:center;color:#8b949e;font-size:0.85rem">
+          Daily history accumulates here each day. Check back tomorrow for your first data point.
+        </div>`;
+      document.getElementById('pnlTable').innerHTML = '';
+      return;
+    }
+
+    const chartDaysR = hist.filter(r => r.pnl !== 0);
+    if (!chartDaysR.length) {
+      document.getElementById('pnlChart').innerHTML = '<div class="empty" style="padding:16px">No realized P&amp;L change in this period.</div>';
+    } else {
+      const maxAbsR = Math.max(1, ...chartDaysR.map(r => Math.abs(r.pnl)));
+      const BAR_H = 90;
+      const BAR_W = Math.max(16, Math.min(44, Math.floor(860 / chartDaysR.length)));
+      document.getElementById('pnlChart').innerHTML = `
+        <div style="display:flex;align-items:flex-end;gap:3px;min-height:${BAR_H * 2 + 32}px;position:relative;padding-bottom:28px">
+          <div style="position:absolute;left:0;right:0;top:${BAR_H}px;height:1px;background:#30363d;z-index:1"></div>
+          ${chartDaysR.map(r => {
+            const pnl   = r.pnl;
+            const h     = Math.max(3, Math.abs(pnl) / maxAbsR * BAR_H);
+            const color = pnl > 0 ? '#56d364' : '#f85149';
+            const label = new Date(r.date + 'T12:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric' });
+            return `<div style="display:flex;flex-direction:column;align-items:center;flex:0 0 ${BAR_W}px"
+                         title="${label}: ${usd(pnl)}">
+              ${pnl >= 0
+                ? `<div style="height:${BAR_H - h}px"></div>
+                   <div style="width:${BAR_W-3}px;height:${h}px;background:${color};border-radius:3px 3px 0 0;cursor:default;transition:opacity 0.15s" onmouseover="this.style.opacity=.7" onmouseout="this.style.opacity=1"></div>
+                   <div style="height:${BAR_H}px"></div>`
+                : `<div style="height:${BAR_H}px"></div>
+                   <div style="width:${BAR_W-3}px;height:${h}px;background:${color};border-radius:0 0 3px 3px;cursor:default;transition:opacity 0.15s" onmouseover="this.style.opacity=.7" onmouseout="this.style.opacity=1"></div>
+                   <div style="height:${BAR_H - h}px"></div>`}
+              <div style="font-size:0.57rem;color:#8b949e;margin-top:4px;transform:rotate(-45deg);transform-origin:top left;white-space:nowrap">${label}</div>
+            </div>`;
+          }).join('')}
+        </div>`;
+    }
+
+    // ── History table
+    const rowsR = [...hist].reverse();
+    document.getElementById('pnlTable').innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Date</th>
+          <th>Day Realized P&amp;L</th>
+          <th>Portfolio Value</th>
+          <th>Unrealized P&amp;L</th>
+        </tr></thead>
+        <tbody>
+          ${rowsR.map(r => {
+            const pnl    = r.pnl ?? 0;
+            const equity = r.equity;
+            const unreal = r.unrealized_pl;
+            const pColor = pnl >= 0 ? '#3fb950' : '#f85149';
+            const dateStr = new Date(r.date + 'T12:00:00Z').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+            return `<tr>
+              <td>${dateStr}</td>
+              <td style="color:${pColor};font-weight:600">${usd(pnl)}</td>
+              <td>${equity != null ? '$' + parseFloat(equity).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
+              <td style="color:${(unreal ?? 0) >= 0 ? '#3fb950' : '#f85149'}">${unreal != null ? usd(unreal) : '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
     return;
   }
 
@@ -7396,7 +8730,7 @@ async function loadPnl() {
 
   // Show which account's data this is
   const badge = document.getElementById('pnlSourceBadge');
-  if (badge) badge.textContent = '📄 Alpaca Paper';
+  if (badge) badge.textContent = currentSource === 'alpaca_live' ? '🔴 Alpaca Live' : '📄 Alpaca Paper';
 
   // history already sorted oldest→newest from server
   const hist = history.filter(r => r.equity != null);
@@ -7732,9 +9066,11 @@ async function loadStats() {
 }
 
 // ── API helper ────────────────────────────────────────
-async function api(url, timeoutMs = 12000) {
+async function api(url, timeoutMs = 12000, method = 'GET', body = undefined) {
   try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const opts = { method, signal: AbortSignal.timeout(timeoutMs) };
+    if (body !== undefined) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
+    const r = await fetch(url, opts);
     if (r.status === 401) { window.location.href = '/login.html'; return null; }
     return r.json();
   } catch { return null; }
@@ -7765,34 +9101,139 @@ document.querySelectorAll('.tab').forEach(btn => {
   });
 });
 
+// Real-account (Moomoo/Tiger) throttle: each TCP connection takes up to 10s — don't flood OpenD.
+// Allow one refresh per 15s for real accounts; paper Alpaca keeps the 3s cadence.
+let _posRefreshPending = false;
+let _lastRealRefresh   = 0;
+const REAL_REFRESH_INTERVAL = 15_000;
+
+function _flashCell(el, newHtml, newClass) {
+  if (!el) return;
+  const changed = el.innerHTML !== newHtml;
+  if (newHtml !== undefined) el.innerHTML = newHtml;
+  if (newClass !== undefined) el.className = newClass;
+  if (changed) {
+    el.classList.remove('pos-flash');
+    void el.offsetWidth; // force reflow to restart animation
+    el.classList.add('pos-flash');
+  }
+}
+
 async function refreshPositions() {
   if (currentPage !== 'dashboard') return;
+  // Real accounts (Moomoo/Tiger) use TCP with a 10s timeout per request.
+  // Flooding them every 3s stacks 6+ concurrent connections → OpenD overload → 10s blank.
+  // Throttle to once per 15s and skip if a call is already in-flight.
+  const isRealSource = currentSource === 'moomoo' || currentSource === 'tiger';
+  if (isRealSource) {
+    if (_posRefreshPending) return;
+    const now = Date.now();
+    if (now - _lastRealRefresh < REAL_REFRESH_INTERVAL) return;
+    _lastRealRefresh = now;
+  }
   try {
+    _posRefreshPending = true;
     const d = await api('/api/positions?source=' + currentSource);
+    _posRefreshPending = false;
     if (!d) return;
-    const isMoomoo = currentSource === 'moomoo';
-    const positions = d.positions ?? [];
+    const isMoomooR   = currentSource === 'moomoo';
+    const isTigerR    = currentSource === 'tiger';
+    const isRealAcctR = isMoomooR || isTigerR;
+    const positions   = d.positions ?? [];
 
-    // Recalculate total unrealized from positions array
-    const totalUnrPL = positions.reduce((s, p) => s + (p.unrealized_pl || 0), 0);
+    // ── Totals row (non-destructive) ────────────────────────────────────────
+    const totalUnrPL    = positions.reduce((s, p) => s + (p.unrealized_pl || 0), 0);
     const totalInvested = positions.reduce((s, p) => {
       const ap = p.avg_entry_price ?? p.avg_cost;
       return s + (p.qty && ap ? p.qty * ap : 0);
     }, 0);
-
-    // Update header stats in-place (don't rebuild the full positionsTable skeleton)
     const srcBadgeR = document.getElementById('pos-source-badge');
-    if (srcBadgeR) srcBadgeR.innerHTML = isMoomoo ? '<span style="color:#3fb950">● Moomoo Real</span>' : '<span style="color:#1f6feb">● Alpaca Paper</span>';
+    if (srcBadgeR) srcBadgeR.innerHTML = isTigerR
+      ? '<span style="color:#e3a403">● Tiger Real</span>'
+      : isMoomooR ? '<span style="color:#3fb950">● Moomoo Real</span>'
+      : '<span style="color:#1f6feb">● Alpaca Paper</span>';
     const investedElR = document.getElementById('pos-total-invested');
-    if (investedElR) investedElR.innerHTML = totalInvested > 0 ? `Invested: <strong style="color:#e6edf3">${fmtDollar(totalInvested)}</strong>` : '';
+    if (investedElR) investedElR.innerHTML = totalInvested > 0
+      ? `Invested: <strong style="color:#e6edf3">${fmtDollar(totalInvested)}</strong>` : '';
     const totalElR = document.getElementById('pos-total-pl');
-    if (totalElR && isMoomoo) {
+    if (totalElR && isRealAcctR) {
       totalElR.className = colorClass(totalUnrPL);
-      totalElR.textContent = totalUnrPL != null ? 'Unrealized: ' + (totalUnrPL >= 0 ? '+' : '-') + fmtDollar(totalUnrPL) : '';
+      totalElR.textContent = totalUnrPL != null
+        ? 'Unrealized: ' + (totalUnrPL >= 0 ? '+' : '-') + fmtDollar(Math.abs(totalUnrPL)) : '';
     }
 
-    document.getElementById('pos-body').innerHTML = _buildPosTable(positions, isMoomoo);
-  } catch { /* silent — don't disrupt the page on transient errors */ }
+    // ── If table doesn't exist yet (first load), fall through to full build ──
+    const container = document.getElementById('pos-body');
+    const tableExists = !!container?.querySelector('table');
+    if (!tableExists) {
+      container.innerHTML = _buildPosTable(positions, isMoomooR);
+      _applyPosSort();
+      return;
+    }
+
+    // ── Diff: existing symbols on screen ─────────────────────────────────────
+    const existingRows = new Map(
+      [...container.querySelectorAll('tr.pos-main-row[data-symbol]')]
+        .map(r => [r.dataset.symbol, r])
+    );
+    const incomingSet = new Set(positions.map(p => p.symbol));
+
+    // Guard: if API returned 0 positions but we have rows, treat as transient failure —
+    // don't wipe the display. The full loadDashboard (every 30s) will reconcile.
+    if (positions.length === 0 && existingRows.size > 0) return;
+
+    // Update or add each position
+    for (const p of positions) {
+      const avgPrice  = p.avg_entry_price ?? p.avg_price ?? p.avg_cost;
+      const unrlPL    = p.unrealized_pl;
+      const unrlPLPct = p.unrealized_plpc ?? p.unrealized_pl_pct;
+      const todayPL   = p.today_pl;
+      const invested  = (p.qty && avgPrice) ? p.qty * avgPrice : null;
+
+      const unrlHtml = (unrlPL != null
+        ? (unrlPL >= 0 ? '+' : '-') + fmtDollar(Math.abs(unrlPL)) : '—') +
+        (unrlPLPct != null ? ` <span style="font-size:0.78rem">(${fmtPct(unrlPLPct)})</span>` : '');
+      const todayHtml = todayPL != null
+        ? (todayPL >= 0 ? '+' : '-') + fmtDollar(Math.abs(todayPL)) : '—';
+
+      if (existingRows.has(p.symbol)) {
+        // ── In-place update of live cells only ──────────────────────────────
+        _flashCell(document.getElementById(`pos-cur-${p.symbol}`),   `$${fmt(p.current_price)}`);
+        _flashCell(document.getElementById(`pos-unrl-${p.symbol}`),  unrlHtml, colorClass(unrlPL));
+        _flashCell(document.getElementById(`pos-today-${p.symbol}`), todayHtml, colorClass(todayPL));
+        // Qty and invested only change when you buy/sell more — update quietly
+        const qtyEl = document.getElementById(`pos-qty-${p.symbol}`);
+        if (qtyEl && qtyEl.textContent !== String(p.qty)) qtyEl.textContent = p.qty;
+        const invEl = document.getElementById(`pos-inv-${p.symbol}`);
+        const invHtml = invested != null ? fmtDollar(invested) : '—';
+        if (invEl && invEl.textContent !== invHtml) invEl.textContent = invHtml;
+      } else {
+        // ── New position: build row and insert into table ────────────────────
+        _cachedDbTradeMap = _cachedDbTradeMap || {};
+        // skipHeader=true prevents inserting a duplicate <th> header row into the existing table
+        const newRowHtml = _buildPosTable([p], isMoomooR, true).replace(/<table>/, '').replace(/<\/table>/, '');
+        const tbody = container.querySelector('table tbody') || container.querySelector('table');
+        tbody.insertAdjacentHTML('beforeend', newRowHtml);
+        const newRow = container.querySelector(`tr.pos-main-row[data-symbol="${p.symbol}"]`);
+        if (newRow) {
+          newRow.classList.add('pos-row-new');
+          setTimeout(() => newRow.classList.remove('pos-row-new'), 400);
+        }
+      }
+    }
+
+    // ── Remove positions that no longer exist ────────────────────────────────
+    for (const [sym, row] of existingRows) {
+      if (!incomingSet.has(sym)) {
+        const detail = document.getElementById(`pos-detail-${sym}`);
+        row.classList.add('pos-row-removing');
+        if (detail) detail.classList.add('pos-row-removing');
+        setTimeout(() => { row.remove(); detail?.remove(); }, 350);
+      }
+    }
+
+    _applyPosSort();
+  } catch { /* silent */ } finally { _posRefreshPending = false; }
 }
 
 // ── News Ticker ───────────────────────────────────────
@@ -7875,8 +9316,58 @@ async function initTicker() {
   } catch { /* silent */ }
 }
 
-// ── Table Sort (double-click any column header) ───────
-// Show tooltip hint on first hover over any th
+// ── Positions table sort ───────────────────────────────
+let _posSortState = { col: null, dir: 'asc' };
+
+function _parseSortVal(text) {
+  const t = (text || '').replace(/[$,%×↑↓:+]/g, '').trim();
+  const n = parseFloat(t);
+  return isNaN(n) ? t.toLowerCase() : n;
+}
+
+function _applyPosSort() {
+  if (_posSortState.col === null) return;
+  const container = document.getElementById('pos-body');
+  if (!container) return;
+  const table = container.querySelector('table');
+  if (!table) return;
+  const { col, dir } = _posSortState;
+  const asc = dir === 'asc';
+
+  // Update header indicators
+  const ths = [...table.querySelectorAll('tr:first-child th')];
+  ths.forEach((h, i) => {
+    h.classList.toggle('sort-active', i === col);
+    let arrow = h.querySelector('.sort-arrow');
+    if (!arrow) { arrow = document.createElement('span'); arrow.className = 'sort-arrow'; h.appendChild(arrow); }
+    arrow.textContent = i === col ? (asc ? ' ▲' : ' ▼') : '';
+  });
+
+  // Only sort pos-main-row rows; keep each paired with its following detail row
+  const tbody = table.querySelector('tbody') || table;
+  const mainRows = [...tbody.querySelectorAll('tr.pos-main-row')];
+  const pairs = mainRows.map(r => ({ main: r, detail: r.nextElementSibling?.classList.contains('pos-main-row') ? null : r.nextElementSibling }));
+
+  pairs.sort((a, b) => {
+    const av = _parseSortVal(a.main.querySelectorAll('td')[col]?.textContent?.trim());
+    const bv = _parseSortVal(b.main.querySelectorAll('td')[col]?.textContent?.trim());
+    if (typeof av === 'number' && typeof bv === 'number') return asc ? av - bv : bv - av;
+    return asc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+  });
+
+  pairs.forEach(({ main, detail }) => { tbody.appendChild(main); if (detail) tbody.appendChild(detail); });
+}
+
+function sortPosTable(colIdx) {
+  if (_posSortState.col === colIdx) {
+    _posSortState.dir = _posSortState.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _posSortState = { col: colIdx, dir: 'asc' };
+  }
+  _applyPosSort();
+}
+
+// ── Table Sort (double-click any OTHER table column header) ───────
 document.addEventListener('mouseover', e => {
   const th = e.target.closest('th');
   if (th && !th.title) th.title = 'Double-click to sort';
@@ -7887,16 +9378,15 @@ document.addEventListener('dblclick', e => {
   if (!th) return;
   const table = th.closest('table');
   if (!table) return;
+  // Positions table uses its own sortPosTable() — skip
+  if (table.closest('#pos-body')) return;
 
   const ths = [...th.closest('tr').querySelectorAll('th')];
   const colIdx = ths.indexOf(th);
-
-  // Toggle direction: same column flips, new column defaults asc
   const asc = table.dataset.sortCol === String(colIdx) && table.dataset.sortDir === 'asc' ? false : true;
   table.dataset.sortCol = colIdx;
   table.dataset.sortDir = asc ? 'asc' : 'desc';
 
-  // Update header indicators
   ths.forEach((h, i) => {
     h.classList.toggle('sort-active', i === colIdx);
     let arrow = h.querySelector('.sort-arrow');
@@ -7904,23 +9394,19 @@ document.addEventListener('dblclick', e => {
     arrow.textContent = i === colIdx ? (asc ? ' ▲' : ' ▼') : '';
   });
 
-  // Parse cell value — handles $1,234  45.6%  2.3×  ↑ Up  etc.
   function parseVal(text) {
     const t = text.replace(/[$,%×↑↓:+]/g, '').trim();
     const n = parseFloat(t);
     return isNaN(n) ? t.toLowerCase() : n;
   }
-
   const tbody = table.querySelector('tbody') || table;
   const rows = [...tbody.querySelectorAll('tr')].filter(r => r.querySelector('td'));
-
   rows.sort((a, b) => {
     const av = parseVal(a.querySelectorAll('td')[colIdx]?.textContent?.trim() ?? '');
     const bv = parseVal(b.querySelectorAll('td')[colIdx]?.textContent?.trim() ?? '');
     if (typeof av === 'number' && typeof bv === 'number') return asc ? av - bv : bv - av;
     return asc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
   });
-
   rows.forEach(r => tbody.appendChild(r));
 });
 
@@ -7930,12 +9416,14 @@ loadStrongBuys();              // initial load (uses 15-min cache on server)
 loadIntradayPicks();           // initial load (uses 10-min cache on server)
 initTicker(); // loads news in background for the ticker strip
 updateStatus();
+loadMarket();                  // populate hero banner market stats on load
 setInterval(refreshPositions, 3_000);   // positions live every 3s
 setInterval(loadDashboard, 30_000);     // full dashboard every 30s
 setInterval(loadStrongBuys, 15 * 60_000); // strong buys every 15 min
 setInterval(loadIntradayPicks, 10 * 60_000); // intraday picks every 10 min
 setInterval(updateStatus, 60_000);
 setInterval(initTicker, 5 * 60_000);   // refresh ticker headlines every 5 min
+setInterval(loadMarket, 5 * 60_000);   // refresh hero market stats every 5 min
 
 // ── Dual Clock: SGT + US ET ───────────────────────────
 // Cache previous values — only write to DOM when something actually changed
@@ -8101,6 +9589,7 @@ async function sendChat() {
   input.value = '';
   input.style.height = '44px';
   _setChatBusy(true);
+  if (_voiceSessionActive) { _vsClearTimers(); _vsSetStatus('thinking'); }
 
   const msgs = document.getElementById('chatMessages');
   msgs.innerHTML += `<div class="chat-msg user">${message.replace(/</g,'&lt;')}</div>`;
@@ -8208,6 +9697,7 @@ async function sendChat() {
               updateCreditsDisplay(d.credits, _currentUser.role);
             }
             // Speak the full response if TTS is on
+            if (_voiceSessionActive) _vsSetStatus('speaking');
             speakText(fullText);
           } else if (d.error) {
             const el2 = document.getElementById(assistantId);
@@ -8236,6 +9726,9 @@ let _ttsEnabled  = false;
 let _micActive   = false;
 let _recognition = null;
 let _ttsUtterance = null;
+let _voiceSessionActive    = false;
+let _voiceSessionCountdown = null;
+let _ttsWasOff             = false;
 
 function _buildRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -8250,6 +9743,7 @@ function _buildRecognition() {
     const btn = document.getElementById('voiceMicBtn');
     if (btn) { btn.classList.add('listening'); btn.title = 'Listening… release to send'; }
     document.getElementById('chatInput').placeholder = '🎤 Listening…';
+    if (_voiceSessionActive) _vsClearTimers();  // pause silence countdown while speaking
   };
 
   r.onresult = e => {
@@ -8265,7 +9759,20 @@ function _buildRecognition() {
     const inp = document.getElementById('chatInput');
     if (inp) {
       inp.placeholder = 'Ask anything… or tap 🎤 to speak';
-      if (inp.value.trim()) sendChat();  // auto-send when speech ends
+      const val = inp.value.trim();
+      if (val) {
+        if (_voiceSessionActive && /^(quit|exit|stop|end|bye|goodbye)(\s.*)?$/i.test(val)) {
+          inp.value = '';
+          endVoiceSession('user');
+          return;
+        }
+        sendChat();  // auto-send when speech ends
+      } else if (_voiceSessionActive) {
+        // No speech detected — restart listening and reset silence timer
+        _vsSetStatus('listening');
+        _vsResetSilenceTimer();
+        setTimeout(() => _vsListen(), 500);
+      }
     }
   };
 
@@ -8277,6 +9784,11 @@ function _buildRecognition() {
     if (inp) inp.placeholder = 'Ask anything… or tap 🎤 to speak';
     if (e.error !== 'no-speech' && e.error !== 'aborted') {
       console.warn('SpeechRecognition error:', e.error);
+    }
+    if (_voiceSessionActive && e.error !== 'aborted') {
+      _vsSetStatus('listening');
+      _vsResetSilenceTimer();
+      setTimeout(() => _vsListen(), 800);
     }
   };
 
@@ -8343,6 +9855,13 @@ function speakText(text) {
     || voices.find(v => v.lang.startsWith('en') && !v.localService === false)
     || voices[0];
   if (preferred) utt.voice = preferred;
+  utt.onend = () => {
+    if (_voiceSessionActive) {
+      _vsSetStatus('listening');
+      _vsResetSilenceTimer();
+      setTimeout(() => _vsListen(), 300);
+    }
+  };
   _ttsUtterance = utt;
   window.speechSynthesis.speak(utt);
 }
@@ -8350,6 +9869,98 @@ function speakText(text) {
 // Initialise: populate voices once they load (Chrome needs this)
 if (window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+}
+
+// ── Interactive Voice Session ─────────────────────────
+function toggleVoiceSession() {
+  if (_voiceSessionActive) endVoiceSession('user');
+  else startVoiceSession();
+}
+
+function startVoiceSession() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Voice input requires Chrome or Edge.'); return; }
+  _voiceSessionActive = true;
+  _ttsWasOff = !_ttsEnabled;
+  if (!_ttsEnabled) toggleTTS();  // force TTS on for the conversation
+  _updateVoiceSessionUI(true);
+  const msgs = document.getElementById('chatMessages');
+  if (msgs) {
+    msgs.innerHTML += '<div class="chat-msg assistant" style="font-size:0.8rem;color:#8b949e">🎙 Voice chat started — speak naturally. Say <em>quit</em> or click ■ End to stop. Auto-ends after 10 s of silence.</div>';
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+  _vsSetStatus('listening');
+  setTimeout(() => _vsListen(), 300);
+}
+
+function endVoiceSession(reason) {
+  if (!_voiceSessionActive) return;
+  _voiceSessionActive = false;
+  _vsClearTimers();
+  window.speechSynthesis?.cancel();
+  _recognition?.stop();
+  if (_ttsWasOff && _ttsEnabled) toggleTTS();  // restore TTS to what it was
+  _updateVoiceSessionUI(false);
+  const msgs = document.getElementById('chatMessages');
+  if (msgs) {
+    const txt = reason === 'timeout'
+      ? '🎙 Voice chat ended — no response for 10 seconds.'
+      : '🎙 Voice chat ended.';
+    msgs.innerHTML += `<div class="chat-msg assistant" style="font-size:0.8rem;color:#8b949e">${txt}</div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+function _vsListen() {
+  if (!_voiceSessionActive || _micActive) return;
+  _recognition = _buildRecognition();
+  _recognition.start();
+}
+
+function _vsSetStatus(state) {
+  const dot = document.getElementById('vsDot');
+  const lbl = document.getElementById('vsLabel');
+  if (!dot || !lbl) return;
+  dot.className = 'vs-dot ' + state;
+  lbl.textContent = state === 'listening' ? '👂 Listening…'
+                  : state === 'thinking'  ? '🤖 Thinking…'
+                  : state === 'speaking'  ? '🔊 Speaking…'
+                  : '⏸ Paused';
+}
+
+function _vsResetSilenceTimer() {
+  _vsClearTimers();
+  if (!_voiceSessionActive) return;
+  let secs = 10;
+  const timerEl = document.getElementById('vsTimer');
+  if (timerEl) timerEl.textContent = `(${secs}s)`;
+  _voiceSessionCountdown = setInterval(() => {
+    secs--;
+    if (timerEl) timerEl.textContent = secs > 0 ? `(${secs}s)` : '';
+    if (secs <= 0) endVoiceSession('timeout');
+  }, 1000);
+}
+
+function _vsClearTimers() {
+  if (_voiceSessionCountdown) { clearInterval(_voiceSessionCountdown); _voiceSessionCountdown = null; }
+  const timerEl = document.getElementById('vsTimer');
+  if (timerEl) timerEl.textContent = '';
+}
+
+function _updateVoiceSessionUI(active) {
+  const btn = document.getElementById('voiceSessionBtn');
+  const bar = document.getElementById('voiceSessionBar');
+  if (btn) {
+    btn.textContent = active ? '⏹ End Voice' : '🎙 Voice Chat';
+    btn.title = active ? 'End voice session' : 'Start interactive voice conversation';
+    btn.classList.toggle('active', active);
+  }
+  if (bar) bar.style.display = active ? 'flex' : 'none';
+  const micBtn = document.getElementById('voiceMicBtn');
+  if (micBtn) {
+    micBtn.disabled = active;
+    micBtn.title = active ? 'Voice session active — use the session to speak' : 'Hold to speak';
+  }
 }
 
 // ── Bot Rules page ────────────────────────────────────
@@ -8407,9 +10018,14 @@ function brSetDirty(dirty) {
 }
 
 function brSetToggle(field, val) {
-  const yes = document.getElementById(`br-ae-yes`);
-  const no  = document.getElementById(`br-ae-no`);
   if (field === 'auto_execute') {
+    const yes = document.getElementById('br-ae-yes');
+    const no  = document.getElementById('br-ae-no');
+    if (yes) { yes.className = val  ? 'active'     : ''; }
+    if (no)  { no.className  = !val ? 'active-off' : ''; }
+  } else if (field === 'kb_enabled') {
+    const yes = document.getElementById('br-kb-yes');
+    const no  = document.getElementById('br-kb-no');
     if (yes) { yes.className = val  ? 'active'     : ''; }
     if (no)  { no.className  = !val ? 'active-off' : ''; }
   }
@@ -8417,10 +10033,21 @@ function brSetToggle(field, val) {
 }
 
 function brGetToggle(field) {
-  if (field === 'auto_execute') {
-    return document.getElementById('br-ae-yes')?.classList.contains('active');
-  }
+  if (field === 'auto_execute') return document.getElementById('br-ae-yes')?.classList.contains('active');
+  if (field === 'kb_enabled')   return document.getElementById('br-kb-yes')?.classList.contains('active');
   return true;
+}
+
+function brHighlightTradeSource() {
+  const sel = document.querySelector('input[name="br-trade-source"]:checked')?.value || 'paper';
+  const colors = { paper: '#58a6ff', tiger: '#f0883e', moomoo: '#3fb950' };
+  document.querySelectorAll('input[name="br-trade-source"]').forEach(r => {
+    const lbl = r.closest('label');
+    if (!lbl) return;
+    const active = r.value === sel;
+    lbl.style.borderColor = active ? colors[r.value] : '#30363d';
+    lbl.style.background  = active ? colors[r.value] + '18' : '';
+  });
 }
 
 function brUpdateVixBar() {
@@ -8464,6 +10091,18 @@ function brPopulateFromCfg(cfg) {
   // Auto-execute toggle
   brSetToggle('auto_execute', cfg.auto_execute ?? true);
 
+  // Knowledge Base (Trading Coach) toggle
+  brSetToggle('kb_enabled', cfg.kb_enabled !== false);
+
+  // Trade source radio
+  const ts = cfg.trade_source || 'paper';
+  document.querySelectorAll('input[name="br-trade-source"]').forEach(r => {
+    r.checked = r.value === ts;
+    const lbl = r.closest('label');
+    if (lbl) lbl.style.borderColor = r.checked ? (ts === 'paper' ? '#58a6ff' : '#f0883e') : '#30363d';
+    if (lbl) lbl.style.background  = r.checked ? (ts === 'paper' ? '#58a6ff15' : '#f0883e15') : '';
+  });
+
   // Profile buttons
   document.querySelectorAll('.br-profile-btn').forEach(b => b.classList.remove('active'));
   const profBtn = document.getElementById(`brProf-${cfg.profile || 'moderate'}`);
@@ -8500,6 +10139,8 @@ function brReadConfig() {
     max_open_positions:   parseInt(brVal('br-max_open_positions'))     || 2,
     min_conviction_score: parseFloat(brVal('br-min_conviction_score')) || 50,
     auto_execute:         brGetToggle('auto_execute'),
+    kb_enabled:           brGetToggle('kb_enabled'),
+    trade_source:         document.querySelector('input[name="br-trade-source"]:checked')?.value || 'paper',
     max_vix_for_scan:     parseFloat(brVal('br-max_vix_for_scan'))     || 30,
     position_sizing: {
       target_profit_per_trade: parseFloat(brVal('br-ps-target_profit_per_trade')) || 150,
@@ -8750,7 +10391,7 @@ function erdInitPan() {
 
 let _erdRendered = false;
 function showArch(view) {
-  ['map','models','db','chat','scan','score','data'].forEach(v => {
+  ['map','models','db','chat','pred','scan','score','data'].forEach(v => {
     const el = document.getElementById('av-' + v);
     if (el) el.style.display = v === view ? 'block' : 'none';
     const btn = document.querySelector(`[data-av="${v}"]`);
@@ -9275,7 +10916,7 @@ function catEmoji(cat) { return CAT_META[cat]?.emoji || '📰'; }
 
 function srcBadge(source) {
   const cls = `src-${(source||'').toLowerCase().replace(/[^a-z]/g,'')}`;
-  const label = source === 'financialjuice' ? 'FJ' : source === 'alpaca' ? 'ALP' : source === 'yahoo' ? 'YF' : (source||'').slice(0,4).toUpperCase();
+  const label = source === 'financialjuice' ? 'FJ' : source === 'alpaca' ? 'ALP' : source === 'yahoo' ? 'YF' : source === 'cna' ? 'CNA' : source === 'reuters' ? 'REU' : (source||'').slice(0,4).toUpperCase();
   return `<span class="src-badge ${cls}">${label}</span>`;
 }
 
@@ -10699,7 +12340,111 @@ function setTermStatus(msg, color) {
       <p style="color:#6e7681;font-size:0.78rem;margin:0">Alpaca live trading · Real money · View only — no auto-trades</p>
     </div>
 
+    <!-- Tiger Brokers Row -->
+    <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <span style="font-size:0.95rem;font-weight:600;color:#e6edf3">🐯 Tiger Brokers</span>
+          <span id="tigerAccountStatus" style="margin-left:8px;font-size:0.75rem;color:#6e7681">—</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="tigerConnectBtn" onclick="showTigerSetup();closeBrokerSettings()" style="padding:5px 12px;background:#e3a403;border:none;border-radius:6px;color:#000;font-size:0.8rem;cursor:pointer;font-weight:600">Connect</button>
+          <button id="tigerDisconnectBtn" onclick="disconnectTiger()" style="display:none;padding:5px 12px;background:#3d1a1a;border:1px solid #6b1a1a;border-radius:6px;color:#f85149;font-size:0.8rem;cursor:pointer">Disconnect</button>
+        </div>
+      </div>
+      <p style="color:#6e7681;font-size:0.78rem;margin:0">Tiger Brokers account · Singapore & global markets · View positions and portfolio</p>
+    </div>
+
+    <!-- Moomoo Account Row -->
+    <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:16px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <span style="font-size:0.95rem;font-weight:600;color:#e6edf3">💰 Moomoo Account</span>
+          <span id="moomooAccountStatus" style="margin-left:8px;font-size:0.75rem;color:#6e7681">—</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="moomooConnectBtn" onclick="showMoomooSetup();closeBrokerSettings()" style="padding:5px 12px;background:#1f6feb;border:none;border-radius:6px;color:#fff;font-size:0.8rem;cursor:pointer">Connect</button>
+          <button id="moomooDisconnectBtn" onclick="disconnectMoomoo()" style="display:none;padding:5px 12px;background:#3d1a1a;border:1px solid #6b1a1a;border-radius:6px;color:#f85149;font-size:0.8rem;cursor:pointer">Disconnect</button>
+        </div>
+      </div>
+      <p style="color:#6e7681;font-size:0.78rem;margin:0">Moomoo real account via Futu OpenD · View positions and portfolio</p>
+    </div>
+
     <p style="color:#6e7681;font-size:0.75rem;margin:0;text-align:center">🔒 Keys are encrypted at rest and never shared.</p>
+  </div>
+</div>
+
+<!-- Moomoo Account Setup Overlay -->
+<!-- Tiger Brokers Setup Overlay -->
+<div id="tigerSetupOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:14px;padding:36px;width:calc(100% - 32px);max-width:460px;margin:16px;position:relative;max-height:90vh;overflow-y:auto">
+    <button onclick="hideTigerSetup()" style="position:absolute;top:14px;right:16px;background:none;border:none;color:#6e7681;font-size:1.2rem;cursor:pointer;line-height:1" title="Close">✕</button>
+    <h2 style="font-size:1.2rem;margin:0 0 16px">🐯 Connect Tiger Brokers account</h2>
+
+    <!-- Step-by-step guide -->
+    <div style="background:#0d1117;border:1px solid #21262d;border-radius:10px;padding:14px 16px;margin-bottom:20px;font-size:0.82rem;line-height:1.7">
+      <div style="color:#e3a403;font-weight:700;margin-bottom:8px">📋 How to get your API credentials</div>
+      <ol style="margin:0;padding-left:18px;color:#8b949e">
+        <li>Open the <strong style="color:#e6edf3">Tiger Trade app</strong> (mobile or desktop) and log in to your account.</li>
+        <li>Go to <strong style="color:#e6edf3">Profile → Settings → Developer</strong> or visit
+          <a href="https://developer.itigerup.com" target="_blank" style="color:#58a6ff;text-decoration:none">developer.itigerup.com</a> and sign in with your Tiger account.</li>
+        <li>Click <strong style="color:#e6edf3">Create Application</strong> (or open your existing app).</li>
+        <li>Download the <strong style="color:#e6edf3">tiger_openapi_config.properties</strong> file.</li>
+        <li>Open the file — you will find:
+          <ul style="margin:4px 0 0 0;padding-left:16px">
+            <li><code style="color:#e3a403">tiger_id</code> → your <strong style="color:#e6edf3">Tiger ID</strong></li>
+            <li><code style="color:#e3a403">account</code> → your <strong style="color:#e6edf3">Account Number</strong></li>
+            <li><code style="color:#e3a403">private_key_pk1</code> → your <strong style="color:#e6edf3">Private Key</strong></li>
+          </ul>
+        </li>
+      </ol>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid #21262d;color:#6e7681;font-size:0.78rem">
+        ⚠️ Use <code style="color:#e6edf3">private_key_pk1</code> (not pk8). Your keys are stored securely and never sent to any third party.
+      </div>
+    </div>
+
+    <label style="display:block;font-size:0.83rem;color:#8b949e;margin-bottom:5px">Tiger ID</label>
+    <input id="tigerIdInput" type="text" placeholder="Your developer Tiger ID"
+      style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:0.92rem;margin-bottom:14px;outline:none;font-family:monospace;box-sizing:border-box">
+
+    <label style="display:block;font-size:0.83rem;color:#8b949e;margin-bottom:5px">Account Number</label>
+    <input id="tigerAccountInput" type="text" placeholder="e.g. 20666XXXX"
+      style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:0.92rem;margin-bottom:14px;outline:none;font-family:monospace;box-sizing:border-box">
+
+    <label style="display:block;font-size:0.83rem;color:#8b949e;margin-bottom:5px">Private Key <span style="color:#6e7681;font-weight:400">(use <code style="color:#e6edf3">private_key_pk1</code> value from your config file)</span></label>
+    <textarea id="tigerKeyInput" placeholder="Paste the private_key_pk1 value from tiger_openapi_config.properties"
+      rows="4"
+      style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:0.78rem;margin-bottom:20px;outline:none;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
+
+    <p id="tigerErr" style="color:#f85149;font-size:0.82rem;margin:0 0 12px;display:none"></p>
+    <p id="tigerOk"  style="color:#3fb950;font-size:0.82rem;margin:0 0 12px;display:none"></p>
+
+    <button onclick="connectTiger()" id="tigerConnectConfirmBtn"
+      style="width:100%;padding:11px;background:#e3a403;border:none;border-radius:8px;color:#000;font-size:1rem;font-weight:700;cursor:pointer">
+      Connect Account
+    </button>
+    <p style="color:#6e7681;font-size:0.75rem;text-align:center;margin-top:12px">🔒 Credentials are stored securely and never shared.</p>
+  </div>
+</div>
+
+<div id="moomooSetupOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:14px;padding:36px;width:calc(100% - 32px);max-width:400px;margin:16px;position:relative">
+    <button onclick="hideMoomooSetup()" style="position:absolute;top:14px;right:16px;background:none;border:none;color:#6e7681;font-size:1.2rem;cursor:pointer;line-height:1" title="Close">✕</button>
+    <h2 style="font-size:1.2rem;margin:0 0 16px">💰 Select your Moomoo account</h2>
+
+    <label style="display:block;font-size:0.83rem;color:#8b949e;margin-bottom:6px">Account</label>
+    <select id="moomooAccSelect"
+      style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:0.95rem;margin-bottom:20px;outline:none">
+      <option value="">Loading…</option>
+    </select>
+
+    <p id="moomooErr" style="color:#f85149;font-size:0.82rem;margin:0 0 12px;display:none"></p>
+    <p id="moomooOk"  style="color:#3fb950;font-size:0.82rem;margin:0 0 12px;display:none"></p>
+
+    <button onclick="connectMoomoo()" id="moomooConnectConfirmBtn"
+      style="width:100%;padding:11px;background:#1f6feb;border:none;border-radius:8px;color:#fff;font-size:1rem;font-weight:600;cursor:pointer">
+      Connect
+    </button>
   </div>
 </div>
 
@@ -10772,10 +12517,10 @@ function hideAlpacaSetup() {
 
 function openBrokerSettings() {
   const overlay = document.getElementById('brokerSettingsOverlay');
-  // Refresh status from _currentUser
   const sources = _currentUser?.sources || {};
-  const hasPaper = sources.alpaca_paper;
-  const hasLive  = sources.alpaca_live;
+  const hasPaper  = sources.alpaca_paper;
+  const hasLive   = sources.alpaca_live;
+  const hasMoomoo = sources.moomoo;
   document.getElementById('paperAccountStatus').textContent = hasPaper ? '✓ Connected' : 'Not configured';
   document.getElementById('paperAccountStatus').style.color = hasPaper ? '#3fb950' : '#6e7681';
   document.getElementById('paperConnectBtn').style.display  = hasPaper ? 'none' : '';
@@ -10784,11 +12529,123 @@ function openBrokerSettings() {
   document.getElementById('liveAccountStatus').style.color = hasLive ? '#3fb950' : '#6e7681';
   document.getElementById('liveConnectBtn').style.display  = hasLive ? 'none' : '';
   document.getElementById('liveDisconnectBtn').style.display = hasLive ? '' : 'none';
+  const hasTiger = sources.tiger;
+  const tigerAcc = _currentUser?.tiger_account;
+  document.getElementById('tigerAccountStatus').textContent = hasTiger ? `✓ Account ${tigerAcc}` : 'Not configured';
+  document.getElementById('tigerAccountStatus').style.color = hasTiger ? '#3fb950' : '#6e7681';
+  document.getElementById('tigerConnectBtn').style.display    = hasTiger ? 'none' : '';
+  document.getElementById('tigerDisconnectBtn').style.display = hasTiger ? '' : 'none';
+  const moomooAccId = _currentUser?.moomoo_acc_id;
+  document.getElementById('moomooAccountStatus').textContent = hasMoomoo ? `✓ Account ${moomooAccId}` : 'Not configured';
+  document.getElementById('moomooAccountStatus').style.color = hasMoomoo ? '#3fb950' : '#6e7681';
+  document.getElementById('moomooConnectBtn').style.display    = hasMoomoo ? 'none' : '';
+  document.getElementById('moomooDisconnectBtn').style.display = hasMoomoo ? '' : 'none';
   overlay.style.display = 'flex';
 }
 
 function closeBrokerSettings() {
   document.getElementById('brokerSettingsOverlay').style.display = 'none';
+}
+
+async function showMoomooSetup() {
+  document.getElementById('moomooSetupOverlay').style.display = 'flex';
+  document.getElementById('moomooErr').style.display = 'none';
+  document.getElementById('moomooOk').style.display  = 'none';
+  const sel = document.getElementById('moomooAccSelect');
+  sel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const r = await fetch('/api/moomoo/accounts').then(r => r.json());
+    if (r.ok && r.accounts.length) {
+      sel.innerHTML = '<option value="">— select your account —</option>' +
+        r.accounts.map(a => `<option value="${a.acc_id}">${a.acc_id} (${a.trd_env})</option>`).join('');
+    } else {
+      sel.innerHTML = '<option value="">No accounts available — contact admin</option>';
+    }
+  } catch {
+    sel.innerHTML = '<option value="">Failed to load — contact admin</option>';
+  }
+}
+
+function hideMoomooSetup() {
+  document.getElementById('moomooSetupOverlay').style.display = 'none';
+}
+
+async function connectMoomoo() {
+  const accId = document.getElementById('moomooAccSelect').value;
+  const err = document.getElementById('moomooErr');
+  const ok  = document.getElementById('moomooOk');
+  err.style.display = 'none'; ok.style.display = 'none';
+  if (!accId) { err.textContent = 'Please select an account.'; err.style.display = ''; return; }
+  const btn = document.getElementById('moomooConnectConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Connecting…';
+  try {
+    const r = await fetch('/api/moomoo/connect', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ acc_id: accId }) }).then(r => r.json());
+    if (r.ok) {
+      ok.textContent = `Connected — account ${accId} linked to your profile.`; ok.style.display = '';
+      setTimeout(() => { hideMoomooSetup(); window.location.reload(); }, 1200);
+    } else {
+      err.textContent = r.error || 'Connection failed'; err.style.display = '';
+    }
+  } catch {
+    err.textContent = 'Network error'; err.style.display = '';
+  }
+  btn.disabled = false; btn.textContent = 'Connect';
+}
+
+function showTigerSetup() {
+  document.getElementById('tigerSetupOverlay').style.display = 'flex';
+  document.getElementById('tigerErr').style.display = 'none';
+  document.getElementById('tigerOk').style.display  = 'none';
+  document.getElementById('tigerIdInput').value      = '';
+  document.getElementById('tigerAccountInput').value = '';
+  document.getElementById('tigerKeyInput').value     = '';
+}
+
+function hideTigerSetup() {
+  document.getElementById('tigerSetupOverlay').style.display = 'none';
+}
+
+async function connectTiger() {
+  const tiger_id   = document.getElementById('tigerIdInput').value.trim();
+  const account    = document.getElementById('tigerAccountInput').value.trim();
+  const private_key = document.getElementById('tigerKeyInput').value.trim();
+  const err = document.getElementById('tigerErr');
+  const ok  = document.getElementById('tigerOk');
+  err.style.display = 'none'; ok.style.display = 'none';
+  if (!tiger_id || !account || !private_key) {
+    err.textContent = 'All three fields are required.'; err.style.display = ''; return;
+  }
+  const btn = document.getElementById('tigerConnectConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Verifying…';
+  try {
+    const r = await fetch('/api/tiger/connect', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ tiger_id, account, private_key })
+    }).then(r => r.json());
+    if (r.ok) {
+      ok.textContent = `Connected — Tiger account ${account} linked.`; ok.style.display = '';
+      setTimeout(() => { hideTigerSetup(); window.location.reload(); }, 1200);
+    } else {
+      err.textContent = r.error || 'Connection failed'; err.style.display = '';
+    }
+  } catch {
+    err.textContent = 'Network error'; err.style.display = '';
+  }
+  btn.disabled = false; btn.textContent = 'Connect Account';
+}
+
+async function disconnectTiger() {
+  if (!confirm('Disconnect your Tiger Brokers account?')) return;
+  await fetch('/api/tiger/disconnect', { method: 'POST' });
+  window.location.reload();
+}
+
+async function disconnectMoomoo() {
+  if (!confirm('Disconnect your Moomoo account?')) return;
+  await fetch('/api/moomoo/disconnect', { method: 'POST' });
+  if (_currentUser?.sources) _currentUser.sources.moomoo = false;
+  if (_currentUser) _currentUser.moomoo_acc_id = null;
+  window.location.reload();
 }
 
 async function disconnectPaper() {
@@ -10929,32 +12786,33 @@ function exploreSymbol(sym) {
       <div class="explorer-dropdown" id="explorerDropdown"></div>
     </div>
     <button onclick="loadStockExplorer()" style="background:#238636;border:none;border-radius:6px;padding:6px 14px;color:#fff;cursor:pointer;font-size:0.82rem;font-weight:600;white-space:nowrap;flex-shrink:0">Explore →</button>
+    <button id="explorerWlBtn" class="wl-heart" data-wl-sym="" onclick="explorerToggleWatchlist()" title="Add to Watchlist" style="font-size:1.2rem;padding:4px 6px;display:none;flex-shrink:0;opacity:1">🤍</button>
     <button id="qtToggleBtn" onclick="toggleQuickTrade()" title="Quick Trade" style="background:#1a1f3a;border:1px solid #58a6ff;border-radius:6px;padding:6px 12px;color:#58a6ff;cursor:pointer;font-size:0.82rem;font-weight:600;white-space:nowrap;flex-shrink:0">⚡ Trade</button>
     <button class="float-explorer-close" onclick="closeFloatExplorer()" title="Close">✕</button>
   </div>
 
   <!-- Quick Trade Panel -->
-  <div id="qtPanel" style="display:none;padding:14px 16px;border-bottom:1px solid #30363d;background:linear-gradient(135deg,rgba(26,31,58,0.6),rgba(13,17,23,0.8))">
+  <div id="qtPanel" style="display:none;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card-bg)">
     <style>
       .qt-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px; }
       .qt-field { display:flex; flex-direction:column; gap:4px; }
-      .qt-label { font-size:0.72rem; color:#8b949e; text-transform:uppercase; letter-spacing:.05em; }
-      .qt-inp { background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#e6edf3; font-size:0.85rem; padding:6px 10px; width:100px; transition:border-color .15s; }
-      .qt-inp:focus { outline:none; border-color:#58a6ff; }
+      .qt-label { font-size:0.72rem; color:var(--text2); text-transform:uppercase; letter-spacing:.05em; }
+      .qt-inp { background:var(--bg); border:1px solid var(--faint); border-radius:6px; color:var(--text); font-size:0.85rem; padding:6px 10px; width:100px; transition:border-color .15s; }
+      .qt-inp:focus { outline:none; border-color:var(--accent); }
       .qt-inp.wide { width:130px; }
-      .qt-seg { display:flex; border:1px solid #30363d; border-radius:6px; overflow:hidden; }
-      .qt-seg button { background:#0d1117; border:none; color:#8b949e; font-size:0.78rem; padding:6px 12px; cursor:pointer; transition:all .15s; }
-      .qt-seg button.qt-active-buy  { background:#0d2b1a; color:#3fb950; font-weight:700; }
-      .qt-seg button.qt-active-sell { background:#2b0a0a; color:#f85149; font-weight:700; }
-      .qt-seg button.qt-active-mkt  { background:#1a1f3a; color:#58a6ff; font-weight:700; }
-      .qt-price-badge { font-size:0.9rem; font-weight:700; color:#e6edf3; background:#21262d; border-radius:6px; padding:6px 10px; white-space:nowrap; }
-      .qt-cost { font-size:0.78rem; color:#8b949e; margin-top:2px; }
+      .qt-seg { display:flex; border:1px solid var(--faint); border-radius:6px; overflow:hidden; }
+      .qt-seg button { background:var(--bg); border:none; color:var(--text2); font-size:0.78rem; padding:6px 12px; cursor:pointer; transition:all .15s; }
+      .qt-seg button.qt-active-buy  { background:rgba(16,185,129,0.15); color:var(--green); font-weight:700; }
+      .qt-seg button.qt-active-sell { background:rgba(244,63,94,0.15);  color:var(--red);   font-weight:700; }
+      .qt-seg button.qt-active-mkt  { background:rgba(14,165,233,0.15); color:var(--accent);font-weight:700; }
+      .qt-price-badge { font-size:0.9rem; font-weight:700; color:var(--text); background:var(--surface); border-radius:6px; padding:6px 10px; white-space:nowrap; }
+      .qt-cost { font-size:0.78rem; color:var(--text2); margin-top:2px; }
       .qt-buy-btn  { background:#238636; border:none; border-radius:6px; padding:7px 20px; color:#fff; font-size:0.85rem; font-weight:700; cursor:pointer; white-space:nowrap; }
       .qt-sell-btn { background:#b91c1c; border:none; border-radius:6px; padding:7px 20px; color:#fff; font-size:0.85rem; font-weight:700; cursor:pointer; white-space:nowrap; }
       .qt-buy-btn:disabled, .qt-sell-btn:disabled { opacity:.5; cursor:default; }
       .qt-result { font-size:0.82rem; margin-top:8px; padding:8px 12px; border-radius:6px; display:none; }
-      .qt-result.ok  { background:#0d2b1a; border:1px solid #3fb950; color:#3fb950; }
-      .qt-result.err { background:#2b0a0a; border:1px solid #f85149; color:#f85149; }
+      .qt-result.ok  { background:rgba(16,185,129,0.12); border:1px solid var(--green); color:var(--green); }
+      .qt-result.err { background:rgba(244,63,94,0.12);  border:1px solid var(--red);   color:var(--red); }
     </style>
 
     <!-- Trading-time warning (shown during bad windows) -->

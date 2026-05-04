@@ -33,9 +33,11 @@ import {
   cancelOrder, cancelAllOrders, moveStopToBreakeven,
   DAILY_PROFIT_TARGET, DAILY_LOSS_LIMIT,
 } from './trader.js';
-import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns } from './db.js';
+import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns, getDbUser, getDbUserByEmail, setDisabledSources, logActivity } from './db.js';
 import { getFunds, getPositions as getMoomooPositions, getQuote as moomooGetQuote, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
+import { placeTigerOrder, closeTigerPosition, cancelAllTigerOrders, getTigerPositions, getTigerFunds, getTigerQuote } from './tiger.js';
 import { isKnowledgeQuestion, answerKnowledgeQuestion, isTradeHistoryQuestion, answerTradeHistoryQuestion } from './knowledge.js';
+import { getStockPrediction } from './predictor.js';
 import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswer } from './fundamental-screener.js';
 
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
@@ -101,6 +103,50 @@ function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e
 // ─── Lessons cache (5-min TTL, per-user) ─────────────────────────────────────
 const _lessonsCache = new Map(); // username (or '__system__') → { block, ts }
 const LESSONS_TTL = 5 * 60 * 1000;
+
+// ─── Earnings cache for held positions (30-min TTL per symbol) ───────────────
+const _posEarningsCache = new Map(); // symbol → { date, confirmed, ts }
+const POS_EARNINGS_TTL = 30 * 60 * 1000;
+
+async function buildPositionEarningsBlock() {
+  try {
+    const posRes = await getMoomooPositions().catch(() => null);
+    const positions = posRes?.positions ?? [];
+    if (!positions.length) return '';
+
+    const symbols = [...new Set(positions.map(p => p.symbol).filter(Boolean))];
+
+    const results = await Promise.allSettled(
+      symbols.map(async sym => {
+        const cached = _posEarningsCache.get(sym);
+        if (cached && Date.now() - cached.ts < POS_EARNINGS_TTL) return { sym, ...cached };
+        const e = await getEarnings({ symbol: sym }).catch(() => null);
+        const dates = e?.next_earnings_dates ?? [];
+        const date = dates[0] ?? null;
+        // Yahoo Finance calendarEvents dates are confirmed when present
+        const confirmed = date !== null;
+        _posEarningsCache.set(sym, { date, confirmed, ts: Date.now() });
+        return { sym, date, confirmed };
+      })
+    );
+
+    const lines = results
+      .filter(r => r.status === 'fulfilled' && r.value?.date)
+      .map(r => {
+        const { sym, date, confirmed } = r.value;
+        return `• ${sym}: ${date} (${confirmed ? 'confirmed' : 'estimated'})`;
+      });
+
+    if (!lines.length) return '';
+    return (
+      '\n\n━━━ HELD POSITIONS — NEXT EARNINGS (fetched live right now) ━━━\n' +
+      lines.join('\n') +
+      '\nIMPORTANT: These dates are authoritative. Do NOT contradict them with training-data guesses. State them exactly as shown.\n'
+    );
+  } catch {
+    return '';
+  }
+}
 
 async function buildLessonsBlock(username = null) {
   const key = username ?? '__system__';
@@ -309,11 +355,21 @@ Macro catalyst → ticker mapping:
 - update_my_config → apply changes, confirm what changed and the effect
 
 Natural language → config:
-  "be conservative" → profile='conservative'
-  "go aggressive"   → profile='aggressive'
-  "raise threshold" → min_conviction_score: N
-  "block energy"    → sectors_blocklist: ['XLE']
-  "bigger targets"  → daily_profit_target: N
+  "be conservative"               → profile='conservative'
+  "go aggressive"                 → profile='aggressive'
+  "raise threshold"               → min_conviction_score: N
+  "block energy"                  → sectors_blocklist: ['XLE']
+  "bigger targets"                → daily_profit_target: N
+  "trade with Tiger / real account" → trade_source='tiger'
+  "trade with Moomoo"             → trade_source='moomoo'
+  "switch back to paper"          → trade_source='paper'
+
+trade_source controls where the bot EXECUTES trades:
+  paper  = Alpaca paper account (safe, simulated)
+  tiger  = Tiger Brokers real account (REAL MONEY — confirm with user before switching)
+  moomoo = Moomoo real account (REAL MONEY — confirm with user before switching)
+
+When switching to tiger or moomoo: ALWAYS warn the user this uses real money and ask them to confirm.
 
 ━━━ HOW THE SCANNER WORKS (be accurate when asked) ━━━
 When a user asks "how do you pick trades?", "what did you use?",
@@ -388,7 +444,31 @@ For everything else — analysis, market color, explanations, casual questions �
 
 ━━━ SESSION IDENTITY ━━━
 Trading on behalf of: ${username ?? 'unknown'}
-Your lessons, win-rate patterns, and trade history are specific to this user.`;
+Your lessons, win-rate patterns, and trade history are specific to this user.${userCfg?.role === 'admin' ? `
+
+━━━ ADMIN TOOLS (you are logged in as admin) ━━━
+You have two extra tools for managing user broker access:
+
+get_user_info — look up any user by username OR email address.
+  Use this first whenever the request mentions an email address — it returns the username you need.
+
+set_broker_access — enable or disable specific broker accounts for a user.
+  Valid sources: alpaca (paper), alpaca_live, moomoo, tiger.
+  "disable" = sources to turn off. "enable" = sources to turn back on.
+  You CAN disable paper (alpaca) — no forced fallback. Admin has full control.
+
+Example flows:
+  "disable paper, keep Tiger for pavan_acct2" →
+    set_broker_access(username="pavan_acct2", disable=["alpaca","alpaca_live","moomoo"])
+
+  "only allow Tiger for pavanch.bmw@gmail.com" →
+    1. get_user_info(identifier="pavanch.bmw@gmail.com")  → get username
+    2. set_broker_access(username=<result>, disable=["alpaca","alpaca_live","moomoo"])
+
+  "re-enable Alpaca for pavan_acct2" →
+    set_broker_access(username="pavan_acct2", enable=["alpaca","alpaca_live"])
+
+NEVER say you cannot manage broker access — you have set_broker_access for this.` : ''}`;
 }
 
 export const SYSTEM_PROMPT = buildSystemPrompt();
@@ -435,6 +515,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         profile:              { type: 'string',  enum: ['conservative','moderate','aggressive','custom'], description: 'Apply a risk profile preset' },
+        trade_source:         { type: 'string',  enum: ['paper','tiger','moomoo'], description: 'Which broker to execute bot trades on: paper (Alpaca), tiger (Tiger Brokers real account), moomoo (Moomoo real account)' },
         daily_profit_target:  { type: 'number',  description: 'Stop trading when daily P&L reaches this (dollars)' },
         daily_loss_limit:     { type: 'number',  description: 'Stop trading when daily loss reaches this (dollars)' },
         max_open_positions:   { type: 'integer', description: 'Maximum simultaneous open positions (1–10)' },
@@ -461,6 +542,18 @@ export const TOOLS = [
         },
         sectors_blocklist: { type: 'array', items: { type: 'string' }, description: 'ETF sector codes to never trade, e.g. ["XLE","XLF"]' },
       },
+    },
+  },
+
+  {
+    name: 'get_stock_prediction',
+    description: 'Run all 5 prediction algorithms for a stock: (1) linear regression trend with day5/day10 price projections, (2) ATR-based expected move ranges for 1/5/10 days, (3) momentum score 0-100 from RSI/EMA/MACD/volume, (4) personal trade pattern analysis from your own trade history for this symbol, (5) earnings catalyst model with next earnings date and momentum. Returns an overall signal score 0-100. Use this when the user asks for a price prediction, price target, outlook, or "where is X headed".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Stock ticker e.g. NVDA, AAPL, TSLA' },
+      },
+      required: ['symbol'],
     },
   },
 
@@ -500,6 +593,32 @@ export const TOOLS = [
     description: 'Cancel ALL open/pending Moomoo orders (stop-loss and take-profit bracket legs). Call this before closing a position if it has pending orders that may block the fill.',
     input_schema: { type: 'object', properties: {} },
   },
+
+  // ── Admin: broker access control ─────────────────────────────────────────
+  {
+    name: 'set_broker_access',
+    description: 'Admin only. Enable or disable specific broker accounts for a user. Use this to restrict a user to certain brokers (e.g. Tiger only). ALL sources including paper (alpaca) can be disabled. Find the username from email if needed using get_user_info first.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        username:    { type: 'string', description: 'Username to modify (e.g. pavan_acct2). If you only have an email, call get_user_info first.' },
+        disable:     { type: 'array',  items: { type: 'string', enum: ['alpaca','alpaca_live','moomoo','tiger'] }, description: 'Broker sources to disable for this user. Use "alpaca" for paper trading.' },
+        enable:      { type: 'array',  items: { type: 'string', enum: ['alpaca','alpaca_live','moomoo','tiger'] }, description: 'Broker sources to re-enable (remove from disabled list).' },
+      },
+      required: ['username'],
+    },
+  },
+  {
+    name: 'get_user_info',
+    description: 'Admin only. Look up a user by username or email address. Returns username, email, role, and current broker access settings.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        identifier: { type: 'string', description: 'Username or email address to look up.' },
+      },
+      required: ['identifier'],
+    },
+  },
 ];
 
 const _CHAT_PROFILE_PRESETS = {
@@ -508,8 +627,38 @@ const _CHAT_PROFILE_PRESETS = {
   aggressive:   { profile:'aggressive',   daily_profit_target:300, daily_loss_limit:500, max_open_positions:3, min_conviction_score:35, auto_execute:true,  max_vix_for_scan:40, position_sizing:{ target_profit_per_trade:300, min_dollars:3000, max_dollars:10000, stop_multiplier:1.5, target_multiplier:3.0, min_atr_pct:0.8 }, vix_thresholds:{ defensive:30, crisis:45 }, sectors_blocklist:[] },
 };
 
+// Map each tool to the broker source it accesses
+const _TOOL_SOURCE_MAP = {
+  moomoo_portfolio:       'moomoo',
+  moomoo_place_trade:     'moomoo',
+  moomoo_close_position:  'moomoo',
+  moomoo_cancel_all_orders: 'moomoo',
+};
+
+// Maps trade_source config values → disabled_sources DB keys (they use different naming)
+const _TRADE_SOURCE_TO_DISABLED_KEY = { paper: 'alpaca', alpaca_live: 'alpaca_live', tiger: 'tiger', moomoo: 'moomoo' };
+
+// Returns the effective trade source for a user, routing around disabled sources.
+// Preference order when blocked: tiger → moomoo → paper (Alpaca always last resort).
+function _resolveTradeSource(rawSrc, disabledSources) {
+  const dis = Array.isArray(disabledSources) ? disabledSources : [];
+  const isDisabled = src => dis.includes(_TRADE_SOURCE_TO_DISABLED_KEY[src] ?? src);
+  if (!isDisabled(rawSrc)) return rawSrc;
+  return ['tiger', 'moomoo', 'paper'].find(s => !isDisabled(s)) ?? 'paper';
+}
+
 export async function executeTool(name, input, { onTrade, userCfg, username } = {}) {
   try {
+    // ── Broker access enforcement ──────────────────────────────────────────
+    // disabled_sources is set by admin per-user and must be respected by the bot,
+    // just as it is by the dashboard UI. Never let a tool bypass this gate.
+    if (username && _TOOL_SOURCE_MAP[name]) {
+      const _dbU = await getDbUser(username).catch(() => null);
+      const _dis = Array.isArray(_dbU?.disabled_sources) ? _dbU.disabled_sources : [];
+      if (_dis.includes(_TOOL_SOURCE_MAP[name])) {
+        return { error: `Access denied: the ${_TOOL_SOURCE_MAP[name]} broker is not enabled for your account. Contact the admin.` };
+      }
+    }
     switch (name) {
       case 'get_news': {
         const addAge = items => items.map(a => {
@@ -549,18 +698,69 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       case 'get_day_trading_dashboard': return await getDayTradingDashboard();
       case 'get_market_movers':      return await getMarketMovers({ limit: input.limit || 20 });
       case 'get_portfolio': {
+        // Check disabled_sources — route around any source the admin has disabled
+        const _pDbU  = username ? await getDbUser(username).catch(() => null) : null;
+        const _pDis  = Array.isArray(_pDbU?.disabled_sources) ? _pDbU.disabled_sources : [];
+        const _rawTs = userCfg?.trade_source ?? 'paper';
+        const tradeSource = _resolveTradeSource(_rawTs, _pDis);
+        if (tradeSource === 'tiger' && username) {
+          const dbU = await getDbUser(username).catch(() => null);
+          if (dbU?.tiger_id && dbU?.tiger_account && dbU?.tiger_private_key) {
+            const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+            const [funds, positions] = await Promise.allSettled([getTigerFunds(creds), getTigerPositions(creds)]);
+            const f = funds.status === 'fulfilled' ? funds.value : null;
+            const p = positions.status === 'fulfilled' ? positions.value : [];
+            return {
+              account: f ? { source: 'tiger', portfolio_value: f.net_liquidation_value, buying_power: f.buying_power, cash: f.cash, unrealized_pl: f.unrealized_pl } : null,
+              positions: p.map(pos => ({
+                symbol: pos.symbol ?? pos.contract?.symbol, qty: pos.quantity ?? pos.qty,
+                avg_entry_price: pos.averageCost ?? pos.avg_cost, current_price: pos.latestPrice ?? pos.market_price,
+                unrealized_pl: pos.unrealizedPnl ?? pos.unrealized_pl,
+              })),
+              open_orders: [], trade_source: 'tiger',
+            };
+          }
+        }
+        if (tradeSource === 'moomoo') {
+          const dbU = await getDbUser(username).catch(() => null);
+          const [funds, positions] = await Promise.allSettled([getFunds({ acc_id: dbU?.moomoo_acc_id }), getMoomooPositions({ acc_id: dbU?.moomoo_acc_id })]);
+          const f = funds.status === 'fulfilled' ? funds.value : null;
+          const p = positions.status === 'fulfilled' ? positions.value : null;
+          return {
+            account: f ? { source: 'moomoo', portfolio_value: f.total_assets, buying_power: f.buying_power, cash: f.cash, unrealized_pl: p?.total_unrealized_pl ?? 0 } : null,
+            positions: (p?.positions || []).map(pos => ({ symbol: pos.symbol, qty: pos.qty, avg_entry_price: pos.avg_cost, current_price: pos.current_price, unrealized_pl: pos.unrealized_pl })),
+            open_orders: [], trade_source: 'moomoo',
+          };
+        }
         const [account, positions, orders] = await Promise.all([getAccount(), getPositions(), getOrders()]);
-        return { account, positions, open_orders: orders };
+        return { account, positions, open_orders: orders, trade_source: 'paper' };
       }
       case 'propose_trade': {
-        // Fix 3: pre-fetch conviction score before placing — hard-enforced in placeTrade too
-        const positions = await getPositions().catch(() => []);
-        const convictionResult = await getConvictionScore({ symbol: input.symbol, positions }).catch(() => null);
-        const convictionScore    = convictionResult?.score    ?? null;
-        const convictionGrade    = convictionResult?.grade    ?? null;
+        const _tDbU = username ? await getDbUser(username).catch(() => null) : null;
+        const _tDis = Array.isArray(_tDbU?.disabled_sources) ? _tDbU.disabled_sources : [];
+        const tradeSource = _resolveTradeSource(userCfg?.trade_source ?? 'paper', _tDis);
+
+        // Fetch current positions from the right broker for duplicate check
+        let curPositions = [];
+        if (tradeSource === 'tiger' && username) {
+          const dbU = await getDbUser(username).catch(() => null);
+          if (dbU?.tiger_id) {
+            const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+            curPositions = await getTigerPositions(creds).catch(() => []);
+          }
+        } else if (tradeSource === 'moomoo') {
+          const dbU = await getDbUser(username).catch(() => null);
+          const p = await getMoomooPositions({ acc_id: dbU?.moomoo_acc_id }).catch(() => null);
+          curPositions = p?.positions ?? [];
+        } else {
+          curPositions = await getPositions().catch(() => []);
+        }
+
+        const convictionResult = await getConvictionScore({ symbol: input.symbol, positions: curPositions }).catch(() => null);
+        const convictionScore     = convictionResult?.score    ?? null;
+        const convictionGrade     = convictionResult?.grade    ?? null;
         const convictionBreakdown = convictionResult?.breakdown ?? null;
 
-        // Early return with clear message (placeTrade also enforces this, but this gives better UX)
         const minConv = userCfg?.min_conviction_score ?? 45;
         if (convictionScore !== null && convictionScore < minConv) {
           const reason = `Conviction score ${convictionScore}/100 is below your minimum of ${minConv} (grade: ${convictionGrade})`;
@@ -568,54 +768,137 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           return { status: 'rejected', reason, conviction_score: convictionScore, conviction_grade: convictionGrade };
         }
 
+        // Route execution to the user's chosen broker
+        if (tradeSource === 'tiger' && username) {
+          const dbU = await getDbUser(username).catch(() => null);
+          if (!dbU?.tiger_id) return { status: 'error', reason: 'Tiger account not configured for this user.' };
+          const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+          // Get live price from Tiger for sizing
+          const q = await getTigerQuote(creds, input.symbol).catch(() => ({ ask: null, last: null }));
+          const price = q.ask ?? q.last;
+          if (!price) return { status: 'error', reason: `Could not get live price for ${input.symbol} from Tiger.` };
+          const sizing = userCfg?.position_sizing || {};
+          const targetProfit = sizing.target_profit_per_trade ?? 150;
+          const minDol = sizing.min_dollars ?? 1500;
+          const maxDol = sizing.max_dollars ?? 5000;
+          const dollars = Math.min(maxDol, Math.max(minDol, Math.round(targetProfit / 0.05)));
+          const qty = Math.max(1, Math.floor(dollars / price));
+          const result = await placeTigerOrder(creds, { symbol: input.symbol, side: input.side, qty });
+          recordTrade({ username, order_id: String(result.order_id), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown }).catch(() => {});
+          if (onTrade) onTrade(result);
+          return { status: 'executed', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price, order_id: result.order_id, conviction_score: convictionScore };
+        }
+
+        if (tradeSource === 'moomoo') {
+          const dbU = await getDbUser(username).catch(() => null);
+          if (!dbU?.moomoo_acc_id && userCfg?.role !== 'admin')
+            return { status: 'error', reason: 'Moomoo is not configured for your account.' };
+          const q = await moomooGetQuote(input.symbol).catch(() => null);
+          const price = q?.ask ?? q?.last_price;
+          if (!price) return { status: 'error', reason: `Could not get live price for ${input.symbol} from Moomoo.` };
+          const sizing = userCfg?.position_sizing || {};
+          const dollars = Math.min(sizing.max_dollars ?? 5000, Math.max(sizing.min_dollars ?? 1500, Math.round((sizing.target_profit_per_trade ?? 150) / 0.05)));
+          const qty = Math.max(1, Math.floor(dollars / price));
+          const result = await placeMoomooTrade({ symbol: input.symbol, side: input.side, qty, acc_id: dbU?.moomoo_acc_id }).catch(e => { throw e; });
+          recordTrade({ username, order_id: String(result.order_id ?? ''), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown }).catch(() => {});
+          if (onTrade) onTrade(result);
+          return { status: 'executed', broker: 'moomoo', symbol: input.symbol, side: input.side, qty, estimated_price: price, conviction_score: convictionScore };
+        }
+
+        // Default: Alpaca paper
         const result = await placeTrade({
-          symbol:          input.symbol,
-          side:            input.side,
-          use_atr:         true,
-          trailing_stop:   input.trailing_stop ?? false,
-          note:            input.reasoning,
-          userCfg:         userCfg ?? null,
-          conviction_score:    convictionScore,
-          conviction_grade:    convictionGrade,
-          conviction_breakdown: convictionBreakdown,
+          symbol: input.symbol, side: input.side, use_atr: true,
+          trailing_stop: input.trailing_stop ?? false, note: input.reasoning,
+          userCfg: userCfg ?? null, conviction_score: convictionScore,
+          conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown,
         });
         recordTrade({
+          username,
           order_id: result.order_id, symbol: result.symbol, side: result.side,
           qty: result.qty, entry_price: result.estimated_price,
           stop_loss: result.stop_loss, take_profit: result.take_profit,
           dollars_invested: result.dollars_invested,
           stop_loss_pct: result.stop_loss_pct, take_profit_pct: result.take_profit_pct,
-          atr_pct: result.atr_pct,
-          conviction_score:     convictionScore,
-          conviction_grade:     convictionGrade,
-          conviction_breakdown: convictionBreakdown,
+          atr_pct: result.atr_pct, conviction_score: convictionScore,
+          conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown,
         }).catch(() => {});
         if (onTrade) onTrade(result);
-        return { status: 'executed', ...result };
+        return { status: 'executed', broker: 'paper', ...result };
       }
-      case 'close_position':         return await closePosition(input.symbol);
+      case 'close_position': {
+        const tradeSource = userCfg?.trade_source ?? 'paper';
+        if (tradeSource === 'tiger' && username) {
+          const dbU = await getDbUser(username).catch(() => null);
+          if (dbU?.tiger_id) {
+            const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+            return await closeTigerPosition(creds, input.symbol);
+          }
+        }
+        if (tradeSource === 'moomoo') {
+          return await closeMoomooPosition(input.symbol);
+        }
+        return await closePosition(input.symbol);
+      }
       case 'get_market_status':      return await getMarketStatus();
       case 'get_market_regime':      return await getMarketRegime({ defensive_vix: userCfg?.vix_thresholds?.defensive ?? 25, crisis_vix: userCfg?.vix_thresholds?.crisis ?? 35 });
       case 'close_stale_positions':  return await closeStalePositions({ maxDays: input.max_days || 3, threshold_pct: input.threshold_pct ?? -1 });
-      case 'get_open_orders':        return await getOrders();
+      case 'get_open_orders': {
+        const tradeSource = userCfg?.trade_source ?? 'paper';
+        if (tradeSource === 'tiger' && username) {
+          const dbU = await getDbUser(username).catch(() => null);
+          if (dbU?.tiger_id) {
+            const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+            const { getTigerOrders } = await import('./tiger.js');
+            return await getTigerOrders(creds, { days: 1 });
+          }
+        }
+        return await getOrders();
+      }
       case 'cancel_order':           return await cancelOrder(input.order_id);
-      case 'cancel_all_orders':      return await cancelAllOrders();
+      case 'cancel_all_orders': {
+        const tradeSource = userCfg?.trade_source ?? 'paper';
+        if (tradeSource === 'tiger' && username) {
+          const dbU = await getDbUser(username).catch(() => null);
+          if (dbU?.tiger_id) {
+            const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+            return await cancelAllTigerOrders(creds);
+          }
+        }
+        if (tradeSource === 'moomoo') return await cancelAllMoomooOrders();
+        return await cancelAllOrders();
+      }
       case 'scan_for_trades': {
         const maxCandidates = Math.min(input.max_candidates || 5, 8);
-        const [movers, positions] = await Promise.all([
-          getMarketMovers({ limit: 30 }),
-          getPositions(),
-        ]);
-        const heldSymbols = new Set(positions.map(p => p.symbol));
+        // Get current positions from the user's active broker (not always system paper)
+        let scanPositions = [];
+        const _sDbU   = username ? await getDbUser(username).catch(() => null) : null;
+        const _sDis   = Array.isArray(_sDbU?.disabled_sources) ? _sDbU.disabled_sources : [];
+        const _rawSrc = userCfg?.trade_source ?? 'paper';
+        const scanSource = _resolveTradeSource(_rawSrc, _sDis);
+        if (scanSource === 'tiger' && username) {
+          const _dbU = await getDbUser(username).catch(() => null);
+          if (_dbU?.tiger_id) {
+            const _creds = { tiger_id: _dbU.tiger_id, account: _dbU.tiger_account, private_key: _dbU.tiger_private_key };
+            scanPositions = await getTigerPositions(_creds).catch(() => []);
+          }
+        } else if (scanSource === 'moomoo' && username) {
+          const _dbU = await getDbUser(username).catch(() => null);
+          const _p = await getMoomooPositions({ acc_id: _dbU?.moomoo_acc_id }).catch(() => null);
+          scanPositions = _p?.positions ?? [];
+        } else {
+          scanPositions = await getPositions().catch(() => []);
+        }
+        const [movers] = await Promise.all([getMarketMovers({ limit: 30 })]);
+        const heldSymbols = new Set(scanPositions.map(p => (p.symbol ?? p.contract?.symbol ?? '').toUpperCase()));
         const symbols = [
           ...(movers?.gainers?.map(m => m.symbol) ?? []),
           ...(movers?.actives?.map(m => m.symbol) ?? []),
-        ].filter((s, i, arr) => arr.indexOf(s) === i)  // deduplicate
-         .filter(s => !heldSymbols.has(s))             // skip already-held
+        ].filter((s, i, arr) => arr.indexOf(s) === i)
+         .filter(s => !heldSymbols.has(s.toUpperCase()))
          .slice(0, maxCandidates);
         if (!symbols.length) return { no_candidates: true, reason: 'No movers found or all top movers already in portfolio' };
         const scored = await Promise.allSettled(
-          symbols.map(sym => getConvictionScore({ symbol: sym, positions }))
+          symbols.map(sym => getConvictionScore({ symbol: sym, positions: scanPositions }))
         );
         const results = scored
           .filter(r => r.status === 'fulfilled' && r.value?.score != null)
@@ -624,7 +907,8 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         return { scanned: symbols.length, positions_held: [...heldSymbols], candidates: results };
       }
       case 'get_trade_history': {
-        const trades = await getTrades({ status: input.status, limit: input.limit || 20 });
+        // Always scoped to the calling user — never show another user's trades
+        const trades = await getTrades({ status: input.status, limit: input.limit || 20, username });
         if (!trades) return { error: 'Trade history unavailable — database not connected' };
         return { trades, count: trades.length };
       }
@@ -636,6 +920,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       case 'get_ohlcv_summary':      return await getOHLCVSummary({ symbol: input.symbol });
       case 'get_conviction_score':   return await getConvictionScore({ symbol: input.symbol, positions: input.positions || [] });
       case 'get_earnings_surprise':  return await getEarningsSurprise({ symbol: input.symbol });
+      case 'get_stock_prediction':   return await getStockPrediction(input.symbol);
       case 'get_my_config': {
         const cfg = userCfg ?? { ...BOT_CONFIG_DEFAULTS };
         return { current_config: cfg, note: 'Use update_my_config to change any of these values.' };
@@ -650,7 +935,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           updated = { ..._CHAT_PROFILE_PRESETS[input.profile] };
         } else {
           // Merge individual fields
-          const topLevel = ['daily_profit_target','daily_loss_limit','max_open_positions','min_conviction_score','auto_execute','max_vix_for_scan','sectors_blocklist'];
+          const topLevel = ['daily_profit_target','daily_loss_limit','max_open_positions','min_conviction_score','auto_execute','max_vix_for_scan','sectors_blocklist','trade_source','kb_enabled'];
           for (const k of topLevel) { if (input[k] !== undefined) updated[k] = input[k]; }
           if (input.position_sizing) updated.position_sizing = { ...updated.position_sizing, ...input.position_sizing };
           if (input.vix_thresholds)  updated.vix_thresholds  = { ...updated.vix_thresholds,  ...input.vix_thresholds };
@@ -661,7 +946,13 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       }
       // ── Moomoo tools ──────────────────────────────────────────────────────
       case 'moomoo_portfolio': {
-        const [fundsRes, posRes] = await Promise.allSettled([getFunds(), getMoomooPositions()]);
+        // Strict user scoping — never show another user's Moomoo account
+        const _mmDbU = await getDbUser(username).catch(() => null);
+        const _mmIsAdmin = userCfg?.role === 'admin';
+        if (!_mmIsAdmin && !_mmDbU?.moomoo_acc_id)
+          return { error: 'Moomoo is not configured for your account. Contact the admin to link your Moomoo account.' };
+        const _mmAccId = _mmDbU?.moomoo_acc_id || undefined;
+        const [fundsRes, posRes] = await Promise.allSettled([getFunds({ acc_id: _mmAccId }), getMoomooPositions({ acc_id: _mmAccId })]);
         const funds = fundsRes.status === 'fulfilled' ? fundsRes.value : null;
         const pos   = posRes.status   === 'fulfilled' ? posRes.value  : null;
         if (!funds && !pos) return { error: 'Moomoo OpenD not reachable — make sure OpenD is running.' };
@@ -676,6 +967,11 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         };
       }
       case 'moomoo_place_trade': {
+        const _mmDbU = await getDbUser(username).catch(() => null);
+        const _mmIsAdmin = userCfg?.role === 'admin';
+        if (!_mmIsAdmin && !_mmDbU?.moomoo_acc_id)
+          return { error: 'Moomoo is not configured for your account.' };
+        const _mmAccId = _mmDbU?.moomoo_acc_id || undefined;
         const mode = MOOMOO_IS_SIMULATE ? 'PAPER' : 'LIVE';
         const result = await placeMoomooTrade({
           symbol:            input.symbol,
@@ -684,11 +980,59 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           stop_price:        input.stop_price        ?? null,
           take_profit_price: input.take_profit_price ?? null,
           trailing_pct:      input.trailing_pct      ?? null,
+          acc_id:            _mmAccId,
         });
         return { ...result, mode, note: MOOMOO_IS_SIMULATE ? 'Paper trade — no real money used.' : 'LIVE TRADE — real money was spent.' };
       }
-      case 'moomoo_close_position':    return await closeMoomooPosition({ symbol: input.symbol });
-      case 'moomoo_cancel_all_orders': return await cancelAllMoomooOrders();
+      case 'moomoo_close_position': {
+        const _mmDbU = await getDbUser(username).catch(() => null);
+        const _mmIsAdmin = userCfg?.role === 'admin';
+        if (!_mmIsAdmin && !_mmDbU?.moomoo_acc_id)
+          return { error: 'Moomoo is not configured for your account.' };
+        return await closeMoomooPosition({ symbol: input.symbol, acc_id: _mmDbU?.moomoo_acc_id || undefined });
+      }
+      case 'moomoo_cancel_all_orders': {
+        const _mmDbU = await getDbUser(username).catch(() => null);
+        const _mmIsAdmin = userCfg?.role === 'admin';
+        if (!_mmIsAdmin && !_mmDbU?.moomoo_acc_id)
+          return { error: 'Moomoo is not configured for your account.' };
+        return await cancelAllMoomooOrders({ acc_id: _mmDbU?.moomoo_acc_id || undefined });
+      }
+
+      case 'get_user_info': {
+        if (userCfg?.role !== 'admin') return { error: 'Admin only.' };
+        const id = (input.identifier || '').trim().toLowerCase();
+        const byEmail = id.includes('@') ? await getDbUserByEmail(id) : null;
+        const byName  = byEmail ? null : await getDbUser(id);
+        const u = byEmail || byName;
+        if (!u) return { error: `No user found for "${input.identifier}"` };
+        return {
+          username:         u.username,
+          email:            u.email || null,
+          role:             u.role,
+          disabled_sources: Array.isArray(u.disabled_sources) ? u.disabled_sources : [],
+          has_moomoo:       !!u.moomoo_acc_id,
+          has_tiger:        !!(u.tiger_id && u.tiger_account),
+          has_alpaca:       !!u.alpaca_api_key,
+        };
+      }
+
+      case 'set_broker_access': {
+        if (userCfg?.role !== 'admin') return { error: 'Admin only.' };
+        const target = (input.username || '').trim().toLowerCase();
+        const u = await getDbUser(target);
+        if (!u) return { error: `User "${input.username}" not found.` };
+        let current = Array.isArray(u.disabled_sources) ? [...u.disabled_sources] : [];
+        const toDisable = Array.isArray(input.disable) ? input.disable : [];
+        const toEnable  = Array.isArray(input.enable)  ? input.enable  : [];
+        current = [...new Set([...current, ...toDisable])];
+        current = current.filter(s => !toEnable.includes(s));
+        await setDisabledSources(target, current);
+        logActivity(username, 'broker_access_changed', `AI: set disabled_sources=[${current}] for ${target}`, null);
+        const enabled = ['alpaca', ...['alpaca_live','moomoo','tiger'].filter(s => !current.includes(s))];
+        return { ok: true, username: target, disabled_sources: current, enabled_sources: enabled };
+      }
+
       default:                         return { error: `Unknown tool: ${name}` };
     }
   } catch (err) {
@@ -705,7 +1049,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
 export async function chat({ chatId, message, onChunk, onTool, signal, userConfig = null, username = null, voiceMode = false }) {
   // Route knowledge/education questions to Ollama (no Claude API cost).
   // Fall through to Claude if Ollama is offline so the user always gets an answer.
-  if (await isKnowledgeQuestion(message)) {
+  if (userConfig?.kb_enabled !== false && await isKnowledgeQuestion(message)) {
     const result = await answerKnowledgeQuestion(message, { onChunk });
     if (result.source !== 'error') {
       return {
@@ -787,9 +1131,12 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
   let messages = [...chatHistory.get(chatId)];
   let fullText = '';
 
-  const lessonsBlock = await buildLessonsBlock(username);
+  const [lessonsBlock, earningsBlock] = await Promise.all([
+    buildLessonsBlock(username),
+    buildPositionEarningsBlock(),
+  ]);
   const voiceHint    = voiceMode ? '\n\n━━━ VOICE MODE ━━━\nUser is listening via audio — keep this reply under 3 sentences. No bullet lists, no tables, no markdown. Speak like a person, not a report.' : '';
-  const fullSystem   = buildSystemPrompt(userConfig, username) + lessonsBlock + voiceHint;
+  const fullSystem   = buildSystemPrompt(userConfig, username) + lessonsBlock + earningsBlock + voiceHint;
 
   while (true) {
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
