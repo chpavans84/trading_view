@@ -4,7 +4,9 @@
  */
 
 import pg from 'pg';
-const { Pool } = pg;
+const { Pool, types } = pg;
+// Return DATE columns as 'YYYY-MM-DD' strings, not Date objects (avoids timezone-mangled keys)
+types.setTypeParser(1082, v => v);
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -105,6 +107,25 @@ CREATE TABLE IF NOT EXISTS daily_pnl (
   updated_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS account_daily_snapshots (
+  date           DATE        NOT NULL,
+  source         TEXT        NOT NULL,
+  username       TEXT        NOT NULL,
+  portfolio_value NUMERIC(14,2),
+  realized_pl    NUMERIC(14,2),
+  unrealized_pl  NUMERIC(14,2),
+  updated_at     TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (date, source, username)
+);
+
+CREATE TABLE IF NOT EXISTS user_watchlist (
+  username   TEXT        NOT NULL,
+  symbol     TEXT        NOT NULL,
+  added_at   TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (username, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_user_watchlist_username ON user_watchlist(username);
+
 CREATE TABLE IF NOT EXISTS doc_queries (
   id           SERIAL PRIMARY KEY,
   query        TEXT NOT NULL,
@@ -184,6 +205,26 @@ END $$;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='bot_config') THEN
     ALTER TABLE users ADD COLUMN bot_config JSONB DEFAULT NULL;
+  END IF;
+END $$;
+-- Add per-user Moomoo account ID (acc_id from Futu OpenD)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='moomoo_acc_id') THEN
+    ALTER TABLE users ADD COLUMN moomoo_acc_id VARCHAR(64);
+  END IF;
+END $$;
+-- Add per-user Tiger Brokers credentials
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='tiger_id') THEN
+    ALTER TABLE users ADD COLUMN tiger_id          VARCHAR(64);
+    ALTER TABLE users ADD COLUMN tiger_account     VARCHAR(64);
+    ALTER TABLE users ADD COLUMN tiger_private_key TEXT;
+  END IF;
+END $$;
+-- Admin-controlled per-user broker source locks (JSONB array of disabled source strings)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='disabled_sources') THEN
+    ALTER TABLE users ADD COLUMN disabled_sources JSONB DEFAULT '[]'::jsonb;
   END IF;
 END $$;
 -- Add username to trades for per-user trade history
@@ -366,6 +407,31 @@ CREATE TABLE IF NOT EXISTS fundamentals (
 
 CREATE INDEX IF NOT EXISTS fundamentals_symbol_idx ON fundamentals(symbol);
 CREATE INDEX IF NOT EXISTS fundamentals_period_idx ON fundamentals(period_end DESC);
+
+CREATE TABLE IF NOT EXISTS stock_predictions (
+  id                  SERIAL PRIMARY KEY,
+  symbol              VARCHAR(20) NOT NULL,
+  week_start          DATE NOT NULL,          -- Monday of the prediction week
+  target_date         DATE NOT NULL,          -- specific trading day being predicted
+  predicted_price     NUMERIC(12,4),          -- model's projected close price
+  predicted_change_pct NUMERIC(8,4),          -- % change from base price at prediction time
+  base_price          NUMERIC(12,4),          -- last close when prediction was made
+  actual_price        NUMERIC(12,4),          -- actual close (filled by EOD cron)
+  actual_change_pct   NUMERIC(8,4),           -- actual % change vs base_price
+  error_pct           NUMERIC(8,4),           -- (actual - predicted) / predicted * 100
+  algorithm_signal    INTEGER,                -- 0-100 overall signal
+  slope_per_day       NUMERIC(10,6),          -- linear regression slope used
+  r_squared           NUMERIC(6,4),           -- regression quality
+  has_earnings        BOOLEAN DEFAULT false,  -- earnings fall within this week
+  earnings_date       DATE,                   -- next earnings date if within 30 days
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(symbol, week_start, target_date)
+);
+
+CREATE INDEX IF NOT EXISTS stock_predictions_symbol_idx  ON stock_predictions(symbol);
+CREATE INDEX IF NOT EXISTS stock_predictions_week_idx    ON stock_predictions(week_start DESC);
+CREATE INDEX IF NOT EXISTS stock_predictions_target_idx  ON stock_predictions(target_date DESC);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -1034,6 +1100,15 @@ export async function addCredits(username, amount) {
   }
 }
 
+export async function setDisabledSources(username, sources) {
+  if (!dbAvailable) return;
+  try {
+    await query(`UPDATE users SET disabled_sources = $2::jsonb WHERE username = $1`, [username.toLowerCase(), JSON.stringify(sources)]);
+  } catch (err) {
+    console.error('setDisabledSources error:', err.message);
+  }
+}
+
 export async function suspendUser(username) {
   if (!dbAvailable) return;
   try {
@@ -1131,6 +1206,32 @@ export async function clearUserLiveAlpaca(username) {
   if (!dbAvailable) return;
   await query(
     `UPDATE users SET alpaca_live_api_key=NULL, alpaca_live_secret_key=NULL WHERE username=$1`,
+    [username.toLowerCase()]
+  );
+}
+
+export async function saveUserMoomoo(username, accId) {
+  if (!dbAvailable) throw new Error('Database not available');
+  await query(`UPDATE users SET moomoo_acc_id=$2 WHERE username=$1`, [username.toLowerCase(), accId]);
+}
+
+export async function clearUserMoomoo(username) {
+  if (!dbAvailable) return;
+  await query(`UPDATE users SET moomoo_acc_id=NULL WHERE username=$1`, [username.toLowerCase()]);
+}
+
+export async function saveUserTiger(username, { tigerId, account, privateKey }) {
+  if (!dbAvailable) throw new Error('Database not available');
+  await query(
+    `UPDATE users SET tiger_id=$2, tiger_account=$3, tiger_private_key=$4 WHERE username=$1`,
+    [username.toLowerCase(), tigerId, account, privateKey]
+  );
+}
+
+export async function clearUserTiger(username) {
+  if (!dbAvailable) return;
+  await query(
+    `UPDATE users SET tiger_id=NULL, tiger_account=NULL, tiger_private_key=NULL WHERE username=$1`,
     [username.toLowerCase()]
   );
 }
@@ -1247,6 +1348,7 @@ export const BOT_CONFIG_DEFAULTS = {
   min_conviction_score: 50,
   auto_execute:         true,
   max_vix_for_scan:     30,
+  trade_source:         'paper', // 'paper' | 'tiger' | 'moomoo'
   position_sizing: {
     min_dollars:             1500,
     max_dollars:             5000,
@@ -1260,6 +1362,7 @@ export const BOT_CONFIG_DEFAULTS = {
     crisis:    35,
   },
   sectors_blocklist: [],
+  kb_enabled: true,   // Trading Coach / local knowledge-base routing
 };
 
 function _deepMerge(defaults, overrides) {
@@ -1550,3 +1653,155 @@ export async function countKnowledgeChunksByTopic(category) {
   const { rows } = await query(`SELECT COUNT(*) AS total FROM knowledge_chunks WHERE category = $1`, [category]);
   return parseInt(rows[0]?.total ?? 0);
 }
+
+// ─── Stock Predictions ────────────────────────────────────────────────────────
+
+export async function upsertPrediction(row) {
+  if (!isDbAvailable()) return;
+  await query(
+    `INSERT INTO stock_predictions
+       (symbol, week_start, target_date, predicted_price, predicted_change_pct,
+        base_price, algorithm_signal, slope_per_day, r_squared, has_earnings, earnings_date)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     ON CONFLICT (symbol, week_start, target_date) DO UPDATE SET
+       predicted_price      = EXCLUDED.predicted_price,
+       predicted_change_pct = EXCLUDED.predicted_change_pct,
+       base_price           = EXCLUDED.base_price,
+       algorithm_signal     = EXCLUDED.algorithm_signal,
+       slope_per_day        = EXCLUDED.slope_per_day,
+       r_squared            = EXCLUDED.r_squared,
+       has_earnings         = EXCLUDED.has_earnings,
+       earnings_date        = EXCLUDED.earnings_date,
+       updated_at           = NOW()`,
+    [row.symbol, row.week_start, row.target_date, row.predicted_price,
+     row.predicted_change_pct, row.base_price, row.algorithm_signal,
+     row.slope_per_day, row.r_squared, row.has_earnings, row.earnings_date ?? null]
+  );
+}
+
+export async function fillActualPrice(symbol, targetDate, actualPrice, basePriceOverride) {
+  if (!isDbAvailable()) return;
+  const { rows } = await query(
+    `SELECT base_price, predicted_price FROM stock_predictions WHERE symbol=$1 AND target_date=$2`,
+    [symbol, targetDate]
+  );
+  if (!rows.length) return;
+  const base      = basePriceOverride ?? rows[0].base_price;
+  const predicted = rows[0].predicted_price;
+  const actualChangePct  = base  ? +((actualPrice - base)      / base * 100).toFixed(4)      : null;
+  const errorPct         = predicted ? +((actualPrice - predicted) / predicted * 100).toFixed(4) : null;
+  await query(
+    `UPDATE stock_predictions
+     SET actual_price=\$3, actual_change_pct=\$4, error_pct=\$5, updated_at=NOW()
+     WHERE symbol=\$1 AND target_date=\$2`,
+    [symbol, targetDate, actualPrice, actualChangePct, errorPct]
+  );
+}
+
+export async function getPredictionsForWeek(weekStart) {
+  if (!isDbAvailable()) return [];
+  const { rows } = await query(
+    `SELECT * FROM stock_predictions WHERE week_start=$1 ORDER BY symbol, target_date`,
+    [weekStart]
+  );
+  return rows;
+}
+
+export async function getPredictionHistory({ limit = 8 } = {}) {
+  if (!isDbAvailable()) return [];
+  const { rows } = await query(
+    `SELECT week_start,
+            COUNT(*) FILTER (WHERE actual_price IS NOT NULL) AS filled,
+            COUNT(*) AS total,
+            AVG(ABS(error_pct)) FILTER (WHERE error_pct IS NOT NULL) AS avg_abs_error,
+            COUNT(*) FILTER (WHERE error_pct IS NOT NULL AND ABS(error_pct) < 2) AS within_2pct,
+            COUNT(*) FILTER (WHERE error_pct IS NOT NULL AND
+              ((predicted_change_pct > 0 AND actual_change_pct > 0) OR
+               (predicted_change_pct < 0 AND actual_change_pct < 0))) AS direction_correct
+     FROM stock_predictions
+     GROUP BY week_start
+     ORDER BY week_start DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+// ─── Account Daily Snapshots (Moomoo / Tiger daily P&L history) ──────────────
+
+export async function upsertAccountSnapshot({ date, source, username, portfolio_value, realized_pl, unrealized_pl }) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(
+      `INSERT INTO account_daily_snapshots (date, source, username, portfolio_value, realized_pl, unrealized_pl, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       ON CONFLICT (date, source, username) DO UPDATE SET
+         portfolio_value = EXCLUDED.portfolio_value,
+         realized_pl     = EXCLUDED.realized_pl,
+         unrealized_pl   = EXCLUDED.unrealized_pl,
+         updated_at      = NOW()`,
+      [date, source, username, portfolio_value ?? null, realized_pl ?? null, unrealized_pl ?? null]
+    );
+  } catch (err) {
+    console.error('upsertAccountSnapshot error:', err.message);
+  }
+}
+
+export async function getAccountSnapshots({ source, username, days = 30 } = {}) {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows } = await query(
+      `SELECT date, portfolio_value, realized_pl, unrealized_pl
+       FROM account_daily_snapshots
+       WHERE source = $1 AND username = $2
+         AND date >= CURRENT_DATE - ($3 || ' days')::INTERVAL
+       ORDER BY date ASC`,
+      [source, username, days]
+    );
+    return rows;
+  } catch (err) {
+    console.error('getAccountSnapshots error:', err.message);
+    return [];
+  }
+}
+
+// ─── User Watchlist ───────────────────────────────────────────────────────────
+
+export async function getUserWatchlistSymbols(username) {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows } = await query(
+      `SELECT symbol FROM user_watchlist WHERE username = $1 ORDER BY added_at ASC`,
+      [username]
+    );
+    return rows.map(r => r.symbol);
+  } catch (err) {
+    console.error('getUserWatchlistSymbols error:', err.message);
+    return [];
+  }
+}
+
+export async function addUserWatchlistSymbol(username, symbol) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(
+      `INSERT INTO user_watchlist (username, symbol) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      [username, symbol.toUpperCase()]
+    );
+  } catch (err) {
+    console.error('addUserWatchlistSymbol error:', err.message);
+  }
+}
+
+export async function removeUserWatchlistSymbol(username, symbol) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(
+      `DELETE FROM user_watchlist WHERE username = $1 AND symbol = $2`,
+      [username, symbol.toUpperCase()]
+    );
+  } catch (err) {
+    console.error('removeUserWatchlistSymbol error:', err.message);
+  }
+}
+

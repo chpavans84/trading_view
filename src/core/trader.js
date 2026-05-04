@@ -118,7 +118,12 @@ export async function getUserDailyPnL(creds) {
   } catch { return { pnl: 0, available: false }; }
 }
 
+const _userPortfolioHistCache = new Map(); // apiKey:days → { result, ts }
+
 export async function getUserPortfolioHistory(creds, { days = 30 } = {}) {
+  const cacheKey = `${creds.apiKey}:${days}`;
+  const cached = _userPortfolioHistCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < PORTFOLIO_HIST_TTL) return cached.result;
   try {
     const data = await alpacaUser('GET', `/v2/account/portfolio/history?period=${days}D&timeframe=1D&intraday_reporting=market_hours`, creds);
     if (!data.timestamp?.length) return [];
@@ -141,6 +146,7 @@ export async function getUserPortfolioHistory(creds, { days = 30 } = {}) {
         pnl:    parseFloat((data.profit_loss?.[i] ?? 0).toFixed(2)),
       });
     }
+    _userPortfolioHistCache.set(cacheKey, { result: rows, ts: Date.now() });
     return rows;
   } catch { return []; }
 }
@@ -212,8 +218,8 @@ export async function getLivePositions() {
 
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
-export async function getOrders({ status = 'open' } = {}) {
-  return alpaca('GET', `/v2/orders?status=${status}&limit=20`);
+export async function getOrders({ status = 'open', limit = 50 } = {}) {
+  return alpaca('GET', `/v2/orders?status=${status}&limit=${limit}`);
 }
 
 export async function getLiveOrders({ status = 'open' } = {}) {
@@ -277,6 +283,13 @@ export const DAILY_LOSS_LIMIT    = 200;  // stop trading when we lose $200
 const _pnlCache = { admin: null, ts: 0 };
 const _userPnlCache = new Map(); // username → { result, ts }
 const PNL_CACHE_TTL = 90_000; // 90 seconds
+const PORTFOLIO_HIST_TTL = 300_000; // 5 minutes
+
+// Bust both PnL caches — call after any trade so next dashboard load reflects reality
+export function clearPnlCache() {
+  _pnlCache.ts = 0;
+  _userPnlCache.clear();
+}
 
 export async function getDailyPnL() {
   const now = Date.now();
@@ -314,7 +327,12 @@ export async function getDailyPnL() {
 
 // ─── Portfolio History (daily P&L for the past N days) ───────────────────────
 
+const _portfolioHistCache = new Map(); // key → { result, ts }
+
 export async function getPortfolioHistory({ days = 30 } = {}) {
+  const cacheKey = `admin:${days}`;
+  const cached = _portfolioHistCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < PORTFOLIO_HIST_TTL) return cached.result;
   try {
     // Alpaca supports: period=1M (calendar month), 3M, 6M, 1A, or use date_start
     const period = days <= 30 ? '1M' : days <= 90 ? '3M' : '6M';
@@ -342,7 +360,9 @@ export async function getPortfolioHistory({ days = 30 } = {}) {
     // Trim to requested window
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    return rows.filter(r => new Date(r.date) >= cutoff);
+    const result = rows.filter(r => new Date(r.date) >= cutoff);
+    _portfolioHistCache.set(cacheKey, { result, ts: Date.now() });
+    return result;
   } catch {
     return [];
   }
