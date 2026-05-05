@@ -235,6 +235,26 @@ DO $$ BEGIN
   END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS idx_trades_username ON trades(username);
+-- Add username to daily_pnl for per-user P&L history
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name='daily_pnl' AND column_name='username') THEN
+    ALTER TABLE daily_pnl ADD COLUMN username TEXT NOT NULL DEFAULT 'admin';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'daily_pnl_date_username_key') THEN
+    BEGIN
+      ALTER TABLE daily_pnl DROP CONSTRAINT IF EXISTS daily_pnl_date_key;
+    EXCEPTION WHEN others THEN NULL; END;
+    ALTER TABLE daily_pnl ADD CONSTRAINT daily_pnl_date_username_key UNIQUE (date, username);
+  END IF;
+END $$;
+-- Migrate conversation_history.chat_id from BIGINT to TEXT for username-keyed isolation
+DO $$ BEGIN
+  IF (SELECT data_type FROM information_schema.columns
+      WHERE table_name='conversation_history' AND column_name='chat_id') = 'bigint' THEN
+    ALTER TABLE conversation_history ALTER COLUMN chat_id TYPE TEXT USING chat_id::TEXT;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS bug_reports (
   id          SERIAL PRIMARY KEY,
@@ -587,9 +607,10 @@ export async function recordApiCall({ source, inputTokens, outputTokens, toolCal
   }
 }
 
-export async function getApiCallStats({ days = 30 } = {}) {
+export async function getApiCallStats({ days = 30, username } = {}) {
   if (!dbAvailable) return null;
   try {
+    const userFilter = username ? ` AND username = '${username.replace(/'/g, "''")}'` : '';
     const { rows: daily } = await query(
       `SELECT
          TO_CHAR(called_at::date, 'YYYY-MM-DD')  AS date,
@@ -604,7 +625,7 @@ export async function getApiCallStats({ days = 30 } = {}) {
          ROUND(AVG(input_tokens))                 AS avg_input_tokens,
          ROUND(AVG(output_tokens))                AS avg_output_tokens
        FROM api_calls
-       WHERE called_at >= NOW() - ($1 || ' days')::INTERVAL
+       WHERE called_at >= NOW() - ($1 || ' days')::INTERVAL${userFilter}
        GROUP BY date, source
        ORDER BY date DESC, source`,
       [days]
@@ -620,7 +641,7 @@ export async function getApiCallStats({ days = 30 } = {}) {
          MIN(called_at)    AS first_call,
          MAX(called_at)    AS last_call
        FROM api_calls
-       WHERE called_at >= NOW() - ($1 || ' days')::INTERVAL
+       WHERE called_at >= NOW() - ($1 || ' days')::INTERVAL${userFilter}
        GROUP BY source
        ORDER BY total_cost DESC`,
       [days]
@@ -628,6 +649,7 @@ export async function getApiCallStats({ days = 30 } = {}) {
     const { rows: recent } = await query(
       `SELECT source, input_tokens, output_tokens, tool_calls, cost_usd, duration_ms, model, called_at
        FROM api_calls
+       WHERE 1=1${userFilter}
        ORDER BY called_at DESC LIMIT 50`
     );
     return { daily, totals, recent };
@@ -953,33 +975,34 @@ export async function markDocQueryNotified(id) {
 
 // ─── Daily P&L ────────────────────────────────────────────────────────────────
 
-export async function upsertDailyPnl({ date, realized_pnl, unrealized_pnl, total_trades, winning_trades }) {
+export async function upsertDailyPnl({ date, realized_pnl, unrealized_pnl, total_trades, winning_trades, username = 'admin' }) {
   if (!dbAvailable) return;
   try {
     await query(
-      `INSERT INTO daily_pnl (date, realized_pnl, unrealized_pnl, total_trades, winning_trades, updated_at)
-       VALUES ($1,$2,$3,$4,$5,NOW())
-       ON CONFLICT (date) DO UPDATE SET
-         realized_pnl   = $2,
-         unrealized_pnl = $3,
-         total_trades   = $4,
-         winning_trades = $5,
+      `INSERT INTO daily_pnl (date, username, realized_pnl, unrealized_pnl, total_trades, winning_trades, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       ON CONFLICT (date, username) DO UPDATE SET
+         realized_pnl   = $3,
+         unrealized_pnl = $4,
+         total_trades   = $5,
+         winning_trades = $6,
          updated_at     = NOW()`,
-      [date, realized_pnl ?? 0, unrealized_pnl ?? 0, total_trades ?? 0, winning_trades ?? 0]
+      [date, username, realized_pnl ?? 0, unrealized_pnl ?? 0, total_trades ?? 0, winning_trades ?? 0]
     );
   } catch (err) {
     console.error('upsertDailyPnl error:', err.message);
   }
 }
 
-export async function getDailyPnlHistory({ days = 30 } = {}) {
+export async function getDailyPnlHistory({ days = 30, username = 'admin' } = {}) {
   if (!dbAvailable) return null;
   try {
     const { rows } = await query(
       `SELECT * FROM daily_pnl
        WHERE date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
+         AND username = $2
        ORDER BY date DESC`,
-      [days]
+      [days, username]
     );
     return rows;
   } catch (err) {

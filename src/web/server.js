@@ -45,11 +45,10 @@ import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 
 // Generate a stable numeric chat ID per user so each user has their own
-// conversation history. 12 hex chars → max 2^48 fits safely in JS Number
-// and PostgreSQL BIGINT with no schema change.
+// Use username string directly as chat key — no hash collision possible.
+// The DB migration converts chat_id column from BIGINT to TEXT.
 function userChatId(username) {
-  const hex = crypto.createHash('sha256').update(username.toLowerCase()).digest('hex');
-  return parseInt(hex.slice(0, 12), 16);
+  return username.toLowerCase().trim();
 }
 
 // ─── Resend email client ──────────────────────────────────────────────────────
@@ -1753,15 +1752,30 @@ app.get('/api/trades', requireAuth, async (req, res) => {
       return res.json({ source: 'tiger', trades });
     }
 
-    // Paper source — regular user with their own paper credentials
+    // Paper source — regular user: Alpaca API orders + their own DB-recorded bot trades
     const dbUser = isDbAvailable() ? await getDbUser(req.session.username) : null;
     if (!dbUser?.alpaca_api_key || !isPaperUrl(dbUser.alpaca_base_url)) {
-      return res.json({ source: 'alpaca_user', trades: [], message: 'No paper Alpaca account connected' });
+      // No Alpaca creds — return only their DB trades (bot trades placed on their behalf)
+      const dbTrades = await getTrades({ status, limit, username: req.session.username }) ?? [];
+      return res.json({ source: 'alpaca_user', trades: dbTrades.map(t => ({ ...t, source: 'force' })) });
     }
     const creds  = { apiKey: dbUser.alpaca_api_key, secretKey: dbUser.alpaca_secret_key, baseUrl: dbUser.alpaca_base_url };
     const alpacaStatus = status === 'open' ? 'open' : 'all';
-    const orders = await getUserOrders(creds, { status: alpacaStatus, limit });
-    res.json({ source: 'alpaca_user', trades: orders });
+    const [orders, dbTrades] = await Promise.allSettled([
+      getUserOrders(creds, { status: alpacaStatus, limit }),
+      getTrades({ status, limit, username: req.session.username }),
+    ]);
+    const alpacaOrders = orders.status === 'fulfilled' ? (orders.value ?? []) : [];
+    const userDbTrades = dbTrades.status === 'fulfilled' ? (dbTrades.value ?? []) : [];
+    // Merge, deduplicating by order_id
+    const alpacaIds = new Set(alpacaOrders.map(o => o.id).filter(Boolean));
+    const extraDb = userDbTrades
+      .filter(t => !t.order_id || !alpacaIds.has(t.order_id))
+      .map(t => ({ ...t, source: 'force' }));
+    const merged = [...alpacaOrders, ...extraDb]
+      .sort((a, b) => new Date(b.opened_at ?? b.created_at ?? 0) - new Date(a.opened_at ?? a.created_at ?? 0))
+      .slice(0, limit);
+    res.json({ source: 'alpaca_user', trades: merged });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
   }
@@ -2468,6 +2482,7 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
           unrealized_pnl: 0,
           total_trades:   row.total_trades,
           winning_trades: row.winning_trades,
+          username:       req.session.username,
         }).catch(() => {});
       }
     }
@@ -3621,9 +3636,26 @@ async function checkRegimeChange() {
 // ─── Analyst State Endpoint ───────────────────────────────────────────────────
 
 app.get('/api/analyst/state', requireAuth, async (req, res) => {
+  const isAdmin = (await getUser(req.session.username))?.role === 'admin';
+  // For non-admin users, use their own broker credentials instead of the global admin account
+  let userPosFn  = getPositions;
+  let userPnlFn  = getDailyPnL;
+  if (!isAdmin) {
+    const dbU = isDbAvailable() ? await getDbUser(req.session.username) : null;
+    const userCreds = dbU?.alpaca_api_key
+      ? { apiKey: dbU.alpaca_api_key, secretKey: dbU.alpaca_secret_key, baseUrl: dbU.alpaca_base_url }
+      : null;
+    if (userCreds) {
+      userPosFn = () => getUserPositions(userCreds);
+      userPnlFn = () => getUserDailyPnL(userCreds);
+    } else {
+      userPosFn = () => Promise.resolve([]);
+      userPnlFn = () => Promise.resolve({ pnl: 0, available: false });
+    }
+  }
   const [posResult, pnlResult, statusResult, monitorResult, ollamaResult, todayCostResult, monthStatsResult] = await Promise.allSettled([
-    getPositions(),
-    getDailyPnL(),
+    userPosFn(),
+    userPnlFn(),
     getMarketStatus(),
     getAllPositionMonitoring(),
     isOllamaAvailable(),
@@ -3989,7 +4021,9 @@ setInterval(notifyUnansweredQueries, 30 * 60 * 1000); // every 30 min
 app.get('/api/stats/detail', requireAuth, async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days) || 30, 90);
-    const detail = await getApiCallStats({ days });
+    const statsUser = await getUser(req.session.username);
+    const statsUsername = statsUser?.role === 'admin' ? null : req.session.username;
+    const detail = await getApiCallStats({ days, username: statsUsername });
     const summary = await getUsageStats({ days });
     res.json({ detail, summary: summary ?? [] });
   } catch (err) {
