@@ -788,8 +788,8 @@ app.post('/api/reports', requireAuth, async (req, res) => {
     if (!id) return res.status(500).json({ error: 'Database unavailable — report not saved' });
     res.json({ ok: true, id });
   } catch (err) {
-    console.error('POST /api/reports:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('POST /api/reports:', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -1231,8 +1231,8 @@ app.get('/api/earnings-month', requireAuth, async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    console.error('[earnings-month]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[earnings-month]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -1443,8 +1443,8 @@ app.get('/api/forecast', requireAuth, async (req, res) => {
       history,
     });
   } catch (err) {
-    console.error('[forecast]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[forecast]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -1470,7 +1470,8 @@ app.post('/api/forecast/fill-actuals', requireAuth, async (req, res) => {
     const filled = await fillTodayActuals(dateStr);
     res.json({ success: true, filled, date: dateStr });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[forecast/fill-actuals]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -1480,8 +1481,8 @@ app.get('/api/forecast/failure-analysis', requireAuth, async (req, res) => {
     const data = await getFailureAnalysis({ limit: 6 });
     res.json({ success: true, ...data });
   } catch (err) {
-    console.error('[failure-analysis]', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[failure-analysis]', err);
+    res.status(500).json({ success: false, error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -1491,7 +1492,8 @@ app.post('/api/forecast/train-calibration', requireAuth, async (req, res) => {
     const result = await trainCalibration();
     res.json({ success: true, ...result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[forecast/train-calibration]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2320,7 +2322,10 @@ app.get('/api/pnl-debug', requireAuth, async (req, res) => {
       first_5: slice(raw.timestamp, 0, 5).map((ts, i) => fmt(ts, i, raw.equity || [], raw.profit_loss || [])),
       last_5:  slice(raw.timestamp, Math.max(0, n - 5)).map((ts, i) => fmt(ts, Math.max(0, n - 5) + i, raw.equity || [], raw.profit_loss || [])),
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('[portfolio-history]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 // Daily P&L history
@@ -2584,7 +2589,7 @@ app.get('/api/market/top-stocks', async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error('[top-stocks] error:', err.message);
-    res.status(503).json({ error: 'Moomoo not available: ' + err.message });
+    res.status(503).json({ error: 'Moomoo data unavailable. Please try again.' });
   }
 });
 
@@ -2673,7 +2678,7 @@ app.get('/api/moomoo/risk', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('Moomoo risk error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2704,7 +2709,8 @@ app.post('/api/moomoo/trade', requireAuth, async (req, res) => {
     logActivity(req.session.username, 'moomoo_trade', symbol.toUpperCase(), req.ip);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[moomoo/trade]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2715,7 +2721,8 @@ app.post('/api/moomoo/cancel', requireAuth, async (req, res) => {
     const result = await cancelMoomooOrder({ order_id });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[moomoo/cancel]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2725,7 +2732,8 @@ app.post('/api/moomoo/cancel-all', requireAuth, async (req, res) => {
     logActivity(req.session.username, 'moomoo_cancel_all', null, req.ip);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[moomoo/cancel-all]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2737,13 +2745,15 @@ app.post('/api/moomoo/close', requireAuth, async (req, res) => {
     logActivity(req.session.username, 'moomoo_close', symbol.toUpperCase(), req.ip);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[moomoo/close]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
 // Force-execute a paper trade (Alpaca only — never touches real money)
 app.post('/api/trade/force', requireAuth, async (req, res, next) => {
   const user  = await getUser(req.session.username) || {};
+  if (user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
   const perms = getPermissions(user);
   if (!perms.widgets.includes('force_trade')) return res.status(403).json({ error: 'Forbidden' });
   next();
@@ -2781,7 +2791,8 @@ app.post('/api/trade/force', requireAuth, async (req, res, next) => {
     }).catch(e => console.error('[trade/force] recordTrade:', e.message));
     res.json(result);
   } catch (err) {
-    console.error(err); res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error('[trade/force]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2797,9 +2808,24 @@ app.post('/api/trade/close', requireAuth, async (req, res, next) => {
     if (!symbol) return res.status(400).json({ error: 'symbol is required' });
     const ticker2 = symbol.toUpperCase().trim();
 
-    // Capture position data BEFORE closing so we have entry/current prices for PnL
-    const positions = await getPositions().catch(() => []);
-    const pos = Array.isArray(positions) ? positions.find(p => p.symbol === ticker2) : null;
+    // Ownership check — verify the session user actually holds this position
+    const sessionUser = await getUser(req.session.username) || {};
+    const isAdmin = sessionUser.role === 'admin';
+    let positions;
+    if (isAdmin) {
+      positions = await getPositions().catch(() => []);
+    } else {
+      const dbU = isDbAvailable() ? await getDbUser(req.session.username) : null;
+      const userCreds = dbU?.alpaca_api_key ? {
+        key: dbU.alpaca_api_key, secret: dbU.alpaca_secret_key,
+        baseUrl: dbU.alpaca_base_url || 'https://paper-api.alpaca.markets',
+      } : null;
+      positions = userCreds ? await getUserPositions(userCreds).catch(() => []) : [];
+    }
+    const holds = Array.isArray(positions) ? positions.find(p => p.symbol?.toUpperCase() === ticker2) : null;
+    if (!holds) return res.status(403).json({ error: `You do not have an open position in ${ticker2}` });
+
+    const pos = holds;
 
     const result = await closePosition(ticker2);
     logActivity(req.session.username, 'position_closed', ticker2, req.ip);
@@ -2861,7 +2887,8 @@ app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
     logActivity(req.session.username, 'stop_moved', `${ticker} stop → BE $${result.new_stop}`, req.ip);
     res.json(result);
   } catch (err) {
-    console.error(err); res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error('[trade/move-stop]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2875,7 +2902,8 @@ app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
     const alpaca = await getLatestPrice(symbol);
     res.json(alpaca);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    console.error('[quote]', err);
+    res.status(400).json({ error: 'Unable to fetch quote. Check the symbol and try again.' });
   }
 });
 
@@ -2895,7 +2923,8 @@ app.get('/api/quotes/batch', requireAuth, async (req, res) => {
     });
     res.json({ quotes });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[quotes/batch]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2954,8 +2983,8 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error('Quick trade error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[trade/quick]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -2967,8 +2996,8 @@ app.post('/api/sync', requireAuth, async (req, res) => {
     const result = await syncClosedTrades();
     res.json({ ok: true, synced: result.synced, trades: result.trades });
   } catch (err) {
-    console.error('[sync] manual error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[sync] manual error:', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -3287,7 +3316,8 @@ app.post('/api/scanner/run', requireAdmin, async (req, res) => {
     const result = await runAiScan({ autoExecute, triggeredBy: req.session.username, username: req.session.username });
     res.json({ ok: true, result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[scanner/run]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -3432,8 +3462,8 @@ app.get('/api/watchlist/detail', requireAuth, async (req, res) => {
     );
     res.json({ items });
   } catch (err) {
-    console.error('[watchlist/detail]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[watchlist/detail]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -4272,8 +4302,8 @@ app.get('/api/explorer/extras', requireAuth, async (req, res) => {
 
     res.json({ symbol, news: news?.articles ?? [], analyst, signals });
   } catch (err) {
-    console.error('[explorer/extras]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[explorer/extras]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -4518,7 +4548,8 @@ app.get('/api/research/screen', requireAuth, async (req, res) => {
     const data = await screenFundamentals(conditions);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[research/screen]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -4537,7 +4568,8 @@ app.get('/api/research/fundamentals/:symbol', requireAuth, async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: `No fundamentals data for ${symbol}` });
     res.json({ symbol, quarters: rows });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[research/fundamentals]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -4800,7 +4832,8 @@ app.post('/api/reflection/run', requireAdmin, async (req, res) => {
     const result = await runReflection();
     res.json({ ok: true, result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[reflection/run]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -5092,7 +5125,8 @@ app.get('/api/reflection/lessons', requireAuth, async (req, res) => {
     const lessons = await getRecentLessons({ limit: 50 });
     res.json({ ok: true, lessons });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[reflection/lessons]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -5113,7 +5147,8 @@ app.post('/api/knowledge/add', requireAuth, async (req, res) => {
     const total = await countKnowledgeChunks();
     res.json({ success: true, total });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[knowledge/add]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
@@ -5123,7 +5158,8 @@ app.get('/api/knowledge/count', requireAuth, async (req, res) => {
     const total = await countKnowledgeChunks();
     res.json({ total });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[knowledge/count]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
 
