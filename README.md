@@ -1,306 +1,270 @@
-# AI Trading Bot
+# AI Trading Bot Dashboard
 
-An autonomous trading system that monitors market news, earnings results, and sentiment to execute trades automatically. Built on top of TradingView Desktop integration with a Telegram-based AI analyst powered by Claude.
-
----
-
-## Local AI (Free, Optional)
-
-Install Ollama to run morning briefings and EOD summaries locally at zero API cost:
-
-```bash
-# Mac
-brew install ollama
-ollama serve
-ollama pull llama3.1:8b
-
-# Windows
-# Download from ollama.com/download
-# Then: ollama pull llama3.1:8b
-```
-
-Add to `.env`:
-```
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:8b
-```
-
-When Ollama is running, morning briefings and EOD summaries use the local model automatically. Falls back to Anthropic if Ollama is not running. The dashboard status bar shows `🟢 Local AI` or `☁️ Cloud AI`.
-
-Recommended models:
-- `llama3.1:8b` — fast, 5 GB RAM, good for analysis
-- `qwen2.5:14b` — better quality, 9 GB RAM
-- `mistral:7b`  — fast alternative, 5 GB RAM
+A personal AI-powered trading dashboard that combines a web UI, Claude AI analyst, local knowledge base, 5-algorithm stock predictor, Moomoo portfolio integration, Alpaca paper trading, and a 3-year backtested ML conviction engine.
 
 ---
 
 ## What It Does
 
-- **Reads earnings data** from SEC EDGAR and Nasdaq — no paid data feed needed
-- **Analyses market sentiment** using VIX, sector ETF rotation, and trending stocks
-- **Monitors news** from Alpaca (real-time) and Yahoo Finance — merged, most recent first
-- **Scores every trade** using a multi-factor conviction engine before executing
-- **Sizes stops dynamically** using ATR-14 — adapts to each stock's volatility
-- **Connects to your Moomoo portfolio** to read positions and P&L
-- **Executes trades automatically** via Alpaca with ATR-based stop loss and take profit
-- **Sends alerts and analysis** to your Telegram — interactive AI analyst available 24/7
+- **AI Trading Analyst** — Ask anything in plain English via the web chat. Claude answers with live market data, your portfolio, news, and technical indicators.
+- **5-Algorithm Stock Predictor** — Linear regression projection, ATR expected move ranges, momentum score, personal trade pattern analysis, and an earnings catalyst model — all run in parallel, no LLM cost.
+- **Local Knowledge Base** — Instant answers to trading education questions (RSI, options strategies, candlestick patterns, etc.) without hitting the Claude API.
+- **3-Layer ML Conviction Scoring** — Every trade candidate is scored 0–100 using RSI, MACD, EMA, Bollinger Bands, relative volume, pre-earnings drift, and a 3-year backtested logistic regression model.
+- **Voice Chat** — Hands-free interactive voice session with 10-second auto-quit on silence. Say "exit" to end the session.
+- **Moomoo Portfolio** — Reads live positions, P&L, and buying power from your real Moomoo account via Futu OpenD.
+- **Alpaca Paper Trading** — ATR-sized bracket orders (stop + target placed simultaneously) via Alpaca paper account.
+- **Earnings Date Accuracy** — Next earnings dates for all your held positions are fetched live from Yahoo Finance and injected into every Claude prompt — Claude never guesses.
 
 ---
 
 ## Architecture
 
 ```
-Telegram (you) ←→ Claude AI Brain ←→ Live Market Data
-                        ↓
-              Conviction Scoring Engine
-              (earnings + drift + RS + insider)
-                        ↓
-              Alpaca Trading Engine
-                (paper / live)
-                        ↓
-              Moomoo Portfolio Reader
-                (OpenD TCP API)
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              OFFLINE ML RESEARCH PIPELINE                               │
+│                    (weekend cron Sat 10 PM ET + nightly 2 AM ET)                       │
+│                                                                                         │
+│  Yahoo Finance API                                                                      │
+│       │                                                                                 │
+│       ▼                                                                                 │
+│  download-prices.js  ──► backtest_prices   (3yr OHLCV, S&P500/NASDAQ100/VIX/SPY)      │
+│       │                                                                                 │
+│       ▼                                                                                 │
+│  compute-scores.js   ──► backtest_scores   (RSI, EMA, MACD, BB, RVOL per date)        │
+│       │                                                                                 │
+│       ▼                                                                                 │
+│  backtest.js         ──► backtest_returns  (fwd returns 1d/1w/1m/3m, dip flags)       │
+│       │                                                                                 │
+│       ▼                                                                                 │
+│  train-model.js      ──► model_results     (logistic regression weights, AUC/F1)      │
+└─────────────────────────────────┬───────────────────────────────────────────────────────┘
+                                  │  getFactorWeights() — 24h cache
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              LIVE SCORING & TRADING                                     │
+│                                                                                         │
+│  scoring.js  ◄── ML grade adjustments (A/B/C/F weights from model_results)            │
+│      │            + Yahoo Finance (RSI, EMA, MACD, BB, RVOL, earnings, insider)       │
+│      │            + news.js (sentiment, earnings surprise)                             │
+│      │            + sentiment.js (relative strength vs SPY, VIX regime)               │
+│      │            + tradingview-bridge.js (Pine levels from chart)                    │
+│      │                                                                                  │
+│      ▼  conviction score 0–100                                                         │
+│  AI Scanner Bot (cron) ──► stock-selector.js ──► trader.js ──► Alpaca Paper API      │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 WEB DASHBOARD (port 3000)                               │
+│                                                                                         │
+│  Browser ─────────────────────────────────────────────────────────────────────────     │
+│  ├── AI Chat (SSE streaming)                                                            │
+│  │     │                                                                                │
+│  │     ▼  Question routing (knowledge.js)                                              │
+│  │     ├─ FAST PATH: keyword match → local knowledge_chunks (instant, $0)             │
+│  │     ├─ VECTOR PATH: nomic-embed-text similarity search → knowledge_chunks ($0)     │
+│  │     ├─ TRADE HISTORY: isTradeHistoryQuestion() → DB query + Ollama analysis ($0)  │
+│  │     ├─ FUNDAMENTALS: isFundamentalScreeningQuestion() → PostgreSQL query ($0)      │
+│  │     └─ CLAUDE SONNET: all prediction/analysis questions → Claude API ($0.001/msg) │
+│  │           └─ Tools: get_stock_prediction, get_earnings, get_news, get_portfolio,   │
+│  │                      scan_for_trades, moomoo_portfolio, moomoo_place_trade, ...     │
+│  │                                                                                      │
+│  │     System prompt includes:                                                          │
+│  │       • Held positions' next earnings dates (fetched live, Yahoo Finance)           │
+│  │       • Recent trading lessons from closed trades                                   │
+│  │       • Win-rate patterns by market regime                                          │
+│  │                                                                                      │
+│  ├── Voice Chat                                                                         │
+│  │     Web Speech API: mic → transcript → AI → TTS → mic (loop)                       │
+│  │     10-second silence → auto-quit. Say "exit/quit/stop" → end session.             │
+│  │                                                                                      │
+│  ├── Portfolio (Moomoo positions, Alpaca paper account)                                │
+│  ├── Trade History (closed trades, P&L chart)                                          │
+│  ├── Conviction Scanner (live scoring with ML model)                                   │
+│  ├── Knowledge Base (search/manage trading education entries)                          │
+│  ├── ERD (entity-relationship diagram with zoom/pan)                                   │
+│  └── Settings / Permissions                                                             │
+│                                                                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              5-ALGORITHM PREDICTOR (predictor.js)                       │
+│                              Runs in parallel, zero LLM cost                           │
+│                                                                                         │
+│  1. Linear Regression Trend  — slope, R², day-5 and day-10 price projections           │
+│  2. ATR Expected Move        — Wilder ATR-14 → probability ranges for 1/5/10 days      │
+│  3. Momentum Score (0–100)   — RSI + EMA9/20/50 alignment + MACD + volume trend       │
+│  4. Personal Trade Edge      — your own win rate, profit factor, best hour/day         │
+│  5. Earnings Catalyst        — revenue growth trend, EPS momentum, next earnings date  │
+│                                                                                         │
+│  Combined → overall_signal 0–100, overall_label (Strong Buy / Buy / Neutral / Avoid)  │
+│  Cached 15 min per symbol. Exposed to Claude as: get_stock_prediction tool.            │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                     PostgreSQL                                          │
+│  trades              ← every buy/sell from all UI paths (force/quick/close/bot)        │
+│  conviction_scores   ← live scoring history                                            │
+│  trade_rejections    ← guard-block audit log                                           │
+│  knowledge_chunks    ← trading education KB (keyword + vector search)                  │
+│  fundamentals        ← quarterly revenue, EPS, net income per symbol                  │
+│  backtest_prices     ← 3yr OHLCV for S&P500 + NASDAQ100                               │
+│  backtest_scores     ← historical indicator snapshots                                  │
+│  backtest_returns    ← forward return labels for ML training                          │
+│  model_results       ← trained model weights + AUC/accuracy/F1                        │
+│  user_activity       ← all UI actions                                                  │
+│  conversation_history← chat context per user                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
 ```
 
 ---
 
-## Integrations
+## AI Chat — Question Routing
 
-### Telegram Bot
-- Interactive AI analyst — ask anything in plain English
-- Automatic morning briefing at 9 AM ET / 9 PM SGT (Mon–Fri)
-- Hourly auto-scan during market hours (10 AM–3 PM ET / 10 PM–3 AM SGT)
-- Trade notifications with entry price, ATR-sized stop loss, take profit, and SGT timestamp
-- Commands: `/calendar`, `/watchlist`, `/scan`, `/earnings`, `/news`, `/financials`, `/stats`
+Every message is routed through four layers before hitting the Claude API:
 
-### Claude AI (Anthropic)
-- Brain of the system — reasons about news, earnings, and sentiment
-- Connects geopolitical events to specific stocks and sectors
-- Runs conviction scoring before every trade — only executes grade B or higher
-- Remembers conversation context across messages
-- Model: Claude Haiku (fast, cheap — ~$0.001 per message)
+| Layer | Trigger | Cost | Latency |
+|-------|---------|------|---------|
+| Keyword fast path | Trading education terms (RSI, options, etc.) with score ≥ 2 | $0 | <10ms |
+| Vector similarity | Embedding match > 0.55 in knowledge_chunks | $0 (Ollama embed) | ~200ms |
+| Trade history | "my NVDA trades", "how did I do", "my win rate" | $0 (Ollama analysis) | 2–10s |
+| Fundamental screener | "stocks with growing revenue", "EPS growth" | $0 (PostgreSQL) | <100ms |
+| Claude Sonnet | Everything else — predictions, analysis, trading decisions | ~$0.001/msg | 2–5s |
 
-### Conviction Scoring Engine (`src/core/scoring.js`)
+Prediction questions ("where is NVDA headed?", "forecast", "price target") always go to Claude Sonnet, which calls `get_stock_prediction` for live algorithm output.
+
+---
+
+## Local AI (Ollama — Optional)
+
+Ollama is used for:
+1. **Knowledge Base embeddings** — `nomic-embed-text` for semantic search in `knowledge_chunks`
+2. **Trade history analysis** — smaller model (llama3.2:3b default) for answering questions about your closed trades
+
+Ollama is **not** used for general Q&A anymore. All knowledge questions go to the local DB first, then Claude Sonnet as fallback.
+
+```bash
+# Install
+brew install ollama
+ollama serve
+ollama pull nomic-embed-text      # for KB embeddings (274MB)
+ollama pull llama3.2:3b           # for trade history analysis (2GB)
+```
+
+Add to `.env`:
+```
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2:3b
+```
+
+> **Intel Mac note:** CPU-only inference is ~0.6 tok/s on llama3.1:8b and ~8-10 tok/s on llama3.2:3b. The knowledge routing avoids Ollama for most answers.
+
+---
+
+## Custom Ollama Model from Trade Data
+
+To bake your real trade history into a fine-tuned Ollama model:
+
+```bash
+npm run ollama:build     # generates trading-coach.Modelfile from your DB
+ollama create trading-coach -f trading-coach.Modelfile
+```
+
+Set `OLLAMA_MODEL=trading-coach` in `.env` to use it for trade history questions.
+
+---
+
+## Stock Predictor — 5 Algorithms
+
+Triggered by Claude via the `get_stock_prediction` tool. Runs all 5 in parallel (Promise.all), cached 15 min per symbol.
+
+### Algorithm 1 — Linear Regression Trend
+- Last 50 daily bars from Yahoo Finance
+- Computes slope, intercept, R² (coefficient of determination)
+- Projects regression line forward → `projected_day5`, `projected_day10`
+- Confidence band = ±1.5 × standard error of residuals
+- R² > 0.7 = high reliability, < 0.4 = choppy/unreliable
+
+### Algorithm 2 — ATR Expected Move
+- 14-period Wilder ATR from daily OHLCV
+- 1-day range: ±1.0 × ATR14
+- 5-day range: ±2.2 × ATR14 (√5 scaling)
+- 10-day range: ±3.2 × ATR14 (√10 scaling)
+- ATR > 3% of price = high volatility warning
+
+### Algorithm 3 — Momentum Score (0–100)
+- RSI(14): bullish 50-70 (+2), overbought >70 (-1), bearish 30-50 (-2), oversold <30 (+1)
+- EMA9/20/50 alignment: fully bullish (+3) to fully bearish (-3)
+- MACD(12,26,9): bullish cross with growing histogram (+2) or bearish (-2)
+- Volume trend: 5-day vs 20-day avg (+1 accumulation, -1 distribution)
+- Price vs 20-day SMA proxy (+1 above, -1 below)
+- Normalized 0–100. Labels: Strong Bullish ≥70, Bullish ≥55, Neutral ≥45, Bearish ≥30, Strong Bearish <30
+
+### Algorithm 4 — Personal Trade Pattern Analysis
+- Queries your `trades` table for closed trades on this symbol
+- Win rate, avg win/loss, profit factor
+- Best time of day and day of week (by historical win rate)
+- Last 3 trades with P&L
+- Edge label: Strong Edge (win rate > 60% AND profit factor > 1.5), Slight Edge, or No Edge
+- Requires ≥ 3 closed trades on this symbol
+
+### Algorithm 5 — Earnings Catalyst Model
+- Revenue growth trend from `fundamentals` table (accelerating / decelerating / flat)
+- EPS growth streak (QoQ) → earnings momentum score 0–100
+- Net income positive and growing bonus
+- Next earnings date via yahoo-finance2 (handles crumb auth)
+- Pre-earnings setup flags: "Pre-earnings long candidate" (≤14 days + momentum ≥60), "Earnings imminent" (≤3 days)
+
+### Combined Signal
+```
+overall_signal = 50
+  + (momentum_score − 50) × 0.30   // momentum weight 30%
+  + (trend up ? +15 : −15)          // trend direction 15%
+  + (R² × 10)                       // trend reliability
+  + (earnings_momentum − 50) × 0.20 // earnings weight 20%
+  + (personal win_rate > 0.5 ? +10 : −5)
+  clamped 0–100
+```
+
+---
+
+## Earnings Date Accuracy
+
+A common LLM failure is answering "when are NVDA earnings?" from training data (stale). This is fixed by:
+
+1. At the start of **every** chat request, `buildPositionEarningsBlock()` fetches next earnings dates for all Moomoo-held symbols via Yahoo Finance (`calendarEvents` module)
+2. These dates are injected directly into the Claude system prompt:
+
+```
+━━━ HELD POSITIONS — NEXT EARNINGS (fetched live right now) ━━━
+• NVDA: 2026-05-20 (confirmed)
+IMPORTANT: These dates are authoritative. Do NOT contradict them with training-data guesses.
+```
+
+Cached 30 min per symbol.
+
+---
+
+## Conviction Scoring Engine (`src/core/scoring.js`)
+
 Every trade candidate is scored 0–100 before execution:
 
-| Factor | Points |
-|---|---|
-| 3+ consecutive quarters of EPS growth | +25 |
-| EPS AND revenue both grew YoY (strong quality) | +20 |
-| "Raises guidance" in recent news | +15 |
-| Stock drifting up in last 5 days | +15 |
-| Outperforming its sector ETF (5-day RS) | +15 |
-| 2+ insider Form 4 filings in 60 days | +10 |
-| VIX > 25 | −20 |
-| "Lowers guidance" in recent news | −15 |
-| Opening volatility / lunch chop window | −10 |
-| Stock lagging sector ETF | −10 |
-| Stock drifting down | −10 |
+| Factor | Weight |
+|--------|--------|
+| RSI, MACD, EMA, Bollinger Bands (local compute) | Base score |
+| 3yr backtest ML adjustment (grade A/B/C/F) | ±3–9 pts |
+| Performance pattern boost (regime win rate) | ±8–10 pts |
+| Pre-earnings drift (5-day momentum) | +15 |
+| Relative strength vs sector ETF | +15 |
+| 2+ insider Form 4 filings (60d window) | +10 |
+| "Raises guidance" in news | +15 |
+| VIX > 25 (defensive) | half size |
+| VIX > 35 (crisis) | no new longs |
+| "Lowers guidance" in news | −15 |
 
-- **Score < 60** → skip, explain why
-- **Score 60–79 (grade B/C)** → trade $200
-- **Score ≥ 80 (grade A)** → trade $400
-
-### Alpaca (Trade Execution + News)
-- Paper trading by default — $100,000 virtual account for testing
-- Bracket orders: entry + stop loss + take profit placed simultaneously
-- **ATR-14 dynamic sizing**: stop = 1.5× ATR%, target = 3× ATR% (adapts to volatility)
-- Max 3 open positions at once
-- **News API**: ~1-2 minute latency via Benzinga feed (much faster than Yahoo)
-- Switch to live trading by changing one URL in `.env`
-
-### News Sources (merged, most recent first)
-| Source | Latency | Used for |
-|---|---|---|
-| Alpaca / Benzinga | ~1-2 min | Primary — real-time headlines |
-| Yahoo Finance | 15-30 min | Fallback + fills gaps |
-
-Both sources are fetched in parallel. Results are deduplicated and sorted newest first.
-
-### Moomoo (Portfolio Reading)
-- Connects via Futu OpenD TCP API (local port 11111)
-- Reads real account positions, P&L, and buying power
-- Supports US stocks market (margin account)
-- Requires OpenD API access enabled in Moomoo app
-
-### SEC EDGAR (Earnings & Financials)
-- Free, authoritative financial data — same source as Bloomberg
-- EPS history (last 8 quarters), revenue, net income, profit margins
-- YoY earnings quality scoring (strong / moderate / weak) per quarter
-- Insider activity via Form 4 filing count (60-day window)
-- No API key required
-
-### Nasdaq Earnings Calendar
-- Daily earnings calendar — all companies reporting on any given date
-- EPS estimates, last year's EPS, call time (BMO/AMC)
-- Used for upcoming earnings date + forward EPS estimate in surprise scoring
-- No API key required
-
-### Yahoo Finance
-- VIX, S&P 500, Nasdaq, Dow Jones, ES/NQ futures
-- Sector ETF performance (XLK, XLF, XLE, etc.) with rotation signal
-- 5-day relative strength vs sector ETF per stock
-- Pre-earnings price drift (5-day momentum)
-- Trending stocks
-- No API key required
-
-### TradingView Desktop (via Chrome DevTools Protocol)
-- Read live chart state: symbol, timeframe, indicators
-- Read Pine Script indicator output (lines, labels, tables, boxes)
-- Control chart: change symbol, timeframe, add/remove indicators
-- Take screenshots, manage alerts, control replay mode
-
----
-
-## Trade Logic
-
-### Entry Signal
-1. Market is open
-2. Fewer than 3 open positions
-3. VIX < 30 (not extreme fear)
-4. Not in opening volatility (9:30–10:00 AM ET) or lunch chop (12–2 PM ET)
-5. **Conviction score ≥ 60** across: earnings quality, pre-earnings drift, relative strength, insider activity, news sentiment
-
-### Stop Loss & Take Profit (ATR-based, automatic)
-- Calculated from 14-day Average True Range of the stock
-- Stop loss = 1.5 × ATR% (min 1.5%, max 8%)
-- Take profit = 3.0 × ATR% (min 3%, max 20%)
-- Low-volatility stock example: ATR 1.5% → stop −2.25%, target +4.5%
-- High-volatility stock example: ATR 4% → stop −6%, target +12%
-
-### Early exit
-- `/close_SYMBOL` command in Telegram closes position immediately
-
-### Risk per trade
-- $200 per trade (conviction B) or $400 (conviction A)
-- Risk/reward ratio always ~1:2 (enforced by ATR sizing)
-
----
-
-## Setup
-
-### 1. Install dependencies
-```bash
-npm install
-```
-
-### 2. Create `.env` file
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-TELEGRAM_CHAT_ID=your_chat_id
-ANTHROPIC_API_KEY=sk-ant-...
-ALPACA_API_KEY=PK...
-ALPACA_SECRET_KEY=...
-ALPACA_BASE_URL=https://paper-api.alpaca.markets
-```
-
-### 3. Get API keys
-
-#### Telegram (free — 5 minutes)
-
-**Step 1 — Create your bot and get the token:**
-1. Open Telegram and search for **@BotFather**
-2. Send `/newbot`
-3. Choose a name (e.g. `My Trading Bot`)
-4. Choose a username ending in `bot` (e.g. `mytradingbot`)
-5. BotFather replies with your token — looks like:
-   ```
-   8782535341:AAGDfhpl7FBXfLEHmmoECCvBHeHncUIYfCk
-   ```
-6. Copy this into `TELEGRAM_BOT_TOKEN` in your `.env`
-
-**Step 2 — Get your Chat ID:**
-1. Search for **@userinfobot** on Telegram
-2. Send `/start`
-3. It replies with your user ID — looks like `8341283742`
-4. Copy this into `TELEGRAM_CHAT_ID` in your `.env`
-
-> The Chat ID tells the bot which account to send alerts to. Only messages from this ID will be accepted.
-
----
-
-#### Anthropic / Claude AI (~$0.001 per message)
-1. Go to [console.anthropic.com](https://console.anthropic.com)
-2. Sign up and add $5 credit (enough for thousands of messages)
-3. Go to **API Keys** → **Create Key**
-4. Copy the key (starts with `sk-ant-`) into `ANTHROPIC_API_KEY`
-
----
-
-#### Alpaca — Paper Trading (free, no real money)
-1. Go to [alpaca.markets](https://alpaca.markets) and create a free account
-2. In the dashboard, go to **Paper Trading** (top-left toggle)
-3. Click **API Keys** → **Generate New Key**
-4. Copy the API Key (`PK...`) into `ALPACA_API_KEY`
-5. Copy the Secret Key into `ALPACA_SECRET_KEY`
-6. Leave `ALPACA_BASE_URL=https://paper-api.alpaca.markets` as-is for paper trading
-
-> To switch to live trading later, generate Live API keys and change the URL to `https://api.alpaca.markets`
-
----
-
-| Service | Cost |
-|---|---|
-| Telegram Bot | Free |
-| Anthropic API | ~$0.001/message (Claude Haiku) |
-| Alpaca Paper Trading | Free, $100K virtual account |
-| Alpaca Live Trading | Free account, $0 commission |
-| Alpaca News API | Free with Alpaca account |
-| All other market data (SEC, Nasdaq, Yahoo) | Free, no API key needed |
-
-### 4. Start the AI bot
-```bash
-npm run bot:ai
-```
-
-### 5. Start the MCP server (for TradingView integration)
-```bash
-npm start
-```
-
----
-
-## Usage
-
-### Automated (no input needed)
-The bot runs on its own schedule:
-- **9:00 AM ET (9:00 PM SGT)** — Morning briefing: today's earnings + watchlist scan
-- **10 AM–3 PM ET (10 PM–3 AM SGT), hourly** — Auto-scan: scores candidates, executes if conviction ≥ 60
-
-### Interactive (Telegram chat)
-Just type naturally:
-
-```
-"What's the impact of the US-China trade war on semiconductors?"
-"Should I buy MRVL before earnings?"
-"What defense stocks benefit from current geopolitical tensions?"
-"Scan my watchlist for this week"
-"What's the market sentiment today?"
-"Show my portfolio"
-"What's the conviction score for NVDA?"
-```
-
-### Commands
-```
-/calendar            — today's full earnings calendar
-/calendar 2026-05-01 — earnings on a specific date
-/watchlist           — scan all 20 watchlist stocks
-/scan AAPL NVDA      — scan specific tickers
-/earnings MRVL       — last 4 quarters EPS + revenue + quality score
-/news TSLA           — latest headlines (Alpaca + Yahoo merged)
-/financials NVDA     — income statement
-/stats               — API usage and cost dashboard
-/close_SYMBOL        — exit a position early
-/clear               — reset conversation history
-```
-
----
-
-## Watchlist (default)
-
-`MRVL NVDA AMD AAPL MSFT GOOGL META AMZN TSLA NFLX INTC QCOM MU AVGO TSM SMCI RTX LMT XOM JPM`
-
-Edit `DEFAULT_WATCHLIST` in `src/bot/telegram-ai.js` to customise.
+**Score < min_conviction** → skip (default 50, configurable per user)
+**Score ≥ min_conviction** → propose trade with ATR-sized stop and target
 
 ---
 
@@ -308,59 +272,188 @@ Edit `DEFAULT_WATCHLIST` in `src/bot/telegram-ai.js` to customise.
 
 ```
 src/
-├── bot/
-│   ├── telegram-ai.js     # AI analyst bot (Claude + Telegram + Alpaca)
-│   └── telegram.js        # Basic data bot (no AI)
 ├── core/
-│   ├── news.js            # SEC EDGAR, Nasdaq, Alpaca + Yahoo news
-│   ├── sentiment.js       # VIX, sectors, relative strength, trending stocks
-│   ├── trader.js          # Alpaca trade execution + ATR sizing + time filter
-│   ├── scoring.js         # Multi-factor conviction scoring engine
-│   ├── moomoo-tcp.js      # Moomoo OpenD TCP client
-│   └── moomoo.js          # Moomoo high-level API
-├── tools/                 # MCP tool registrations (for Claude Code)
-│   ├── news.js
-│   ├── moomoo.js
-│   └── analysis.js
-├── cli/                   # CLI commands
-│   └── commands/
-│       ├── news.js
-│       └── moomoo.js
-└── server.js              # MCP server entry point
+│   ├── ai-chat.js           # Claude chat engine, tools, routing, system prompt builder
+│   ├── knowledge.js         # 3-layer KB routing: keyword → vector → error
+│   ├── predictor.js         # 5 prediction algorithms (linear regression, ATR, momentum,
+│   │                        #   personal edge, earnings catalyst) — pure JS, no LLM
+│   ├── market-context.js    # Market regime, VIX, sector performance (deterministic)
+│   ├── scoring.js           # ML conviction scoring engine (0–100)
+│   ├── trader.js            # Alpaca trade execution, ATR sizing, bracket orders
+│   ├── news.js              # SEC EDGAR, Yahoo Finance, Alpaca news, earnings calendar
+│   ├── sentiment.js         # VIX, sector ETFs, trending stocks, market movers
+│   ├── db.js                # PostgreSQL client, all table schemas, query helpers
+│   ├── moomoo-tcp.js        # Moomoo OpenD TCP client (positions, orders, trades)
+│   ├── fundamental-screener.js # PostgreSQL screener ("stocks with growing EPS")
+│   ├── stock-selector.js    # Cron-driven scanner (movers → score → propose)
+│   └── ...                  # drawing, chart, pine, replay, alerts, indicators
+├── research/
+│   ├── download-prices.js   # Fetch 3yr OHLCV from Yahoo Finance → PostgreSQL
+│   ├── compute-scores.js    # Compute RSI/EMA/MACD/BB/RVOL per bar → PostgreSQL
+│   ├── backtest.js          # Forward return labelling (1d/1w/1m/3m)
+│   ├── train-model.js       # Logistic regression training → model_results table
+│   ├── download-fundamentals.js # SEC EDGAR fundamentals → PostgreSQL
+│   └── create-modelfile.js  # Generate Ollama Modelfile from real trade data
+├── web/
+│   ├── server.js            # Express server (port 3000), all /api/* routes
+│   └── public/
+│       └── index.html       # Single-page dashboard (all JS/CSS inline)
+├── bot/
+│   ├── telegram-ai.js       # Telegram AI analyst (uses same ai-chat.js engine)
+│   └── telegram.js          # Basic Telegram data bot
+└── tools/                   # MCP tool registrations (for Claude Code TradingView control)
 ```
 
 ---
 
-## Switching to Live Trading
+## npm Scripts
 
-1. Fund your Alpaca account at alpaca.markets
-2. Generate Live API keys (separate from paper keys)
-3. Update `.env`:
-   ```env
-   ALPACA_API_KEY=your_live_key
-   ALPACA_SECRET_KEY=your_live_secret
-   ALPACA_BASE_URL=https://api.alpaca.markets
-   ```
-4. Restart the bot — everything else is identical
+```bash
+npm run dashboard         # Start web dashboard on port 3000
+npm run bot:ai            # Start Telegram AI bot
+npm start                 # Start MCP server (for Claude Code TradingView tools)
+
+# ML research pipeline (run in order)
+npm run research:download   # Download 3yr price history
+npm run research:scores     # Compute technical indicators
+npm run research:backtest   # Label forward returns
+npm run research:train      # Train logistic regression model
+
+# Utilities
+npm run ollama:build        # Generate trading-coach Modelfile from your trade DB
+```
+
+---
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Create `.env`
+
+```env
+# Required
+DATABASE_URL=postgresql://localhost:5432/tradingbot
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Alpaca paper trading
+ALPACA_API_KEY=PK...
+ALPACA_SECRET_KEY=...
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+
+# Optional — Moomoo OpenD (for real portfolio reading)
+MOOMOO_HOST=127.0.0.1
+MOOMOO_PORT=11111
+
+# Optional — Telegram bot
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+
+# Optional — Ollama local AI
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2:3b
+```
+
+### 3. Start the dashboard
+
+```bash
+npm run dashboard
+# Open http://localhost:3000
+```
+
+### 4. (Optional) Run the ML pipeline
+
+```bash
+npm run research:download
+npm run research:scores
+npm run research:backtest
+npm run research:train
+```
+
+### 5. (Optional) Start TradingView with CDP for chart tools
+
+```bash
+# Mac
+/Applications/TradingView.app/Contents/MacOS/TradingView --remote-debugging-port=9222
+```
+
+---
+
+## Claude Tools Available in Chat
+
+| Tool | What it does |
+|------|-------------|
+| `get_stock_prediction` | All 5 prediction algorithms for a symbol |
+| `scan_for_trades` | Score top market movers with conviction engine |
+| `get_conviction_score` | Score a specific symbol 0–100 |
+| `get_portfolio` | Alpaca paper account: balance, positions, orders |
+| `moomoo_portfolio` | Moomoo real account: positions, P&L, buying power |
+| `moomoo_place_trade` | Place order on Moomoo (paper or live) |
+| `propose_trade` | Execute Alpaca paper trade with ATR bracket |
+| `get_live_quote` | Real-time price via Moomoo or Yahoo Finance |
+| `get_earnings` | Last 4 quarters EPS + next earnings date |
+| `get_news` | Stock-specific or macro keyword news |
+| `get_market_sentiment` | VIX, S&P, Nasdaq, fear/greed |
+| `get_market_regime` | VIX-based regime (normal / defensive / crisis) |
+| `get_trade_history` | Your closed/open trades from PostgreSQL |
+| `get_my_config` | Read bot risk config |
+| `update_my_config` | Change risk profile, limits, thresholds |
+| `get_chart_technicals` | RSI, MACD, EMAs from TradingView chart |
+| `get_price_levels` | Support/resistance levels from Pine indicators |
+
+---
+
+## Voice Chat
+
+Click the microphone icon in the AI Chat panel to start an interactive voice session:
+
+- **Listening** — pulsing mic, 10-second silence countdown
+- **Thinking** — countdown paused while AI processes
+- **Speaking** — AI responds via text-to-speech, mic restarts after
+- **Auto-quit** — 10 seconds of silence ends the session automatically
+- **Manual exit** — say "exit", "quit", "stop", "bye", or click Stop
+
+Toggle TTS on/off independently of voice session. Voice mode compresses AI responses to ≤3 sentences, no markdown.
+
+---
+
+## Data Sources (All Free, No Paid Feed)
+
+| Source | Used for |
+|--------|---------|
+| Yahoo Finance | OHLCV, VIX, sector ETFs, earnings dates, trending stocks, predictor |
+| SEC EDGAR XBRL | EPS actuals, revenue, net income (authoritative) |
+| Alpaca / Benzinga | Real-time news (~1–2 min latency), paper trading |
+| Moomoo OpenD | Live portfolio, positions, P&L, real trade execution |
+| PostgreSQL | Trade history, fundamentals, ML model, knowledge base |
 
 ---
 
 ## Important Notes
 
-- **Paper trading by default** — no real money at risk during testing
-- **PDT Rule**: US accounts under $25K are limited to 3 day trades per 5 business days
-- **Moomoo OpenD** must be running locally on port 11111 for portfolio reading
-- **TradingView Desktop** must be running with `--remote-debugging-port=9222` for chart tools
+- **Paper trading by default** — `ALPACA_BASE_URL=https://paper-api.alpaca.markets`
+- **Moomoo trade mode** — set `MOOMOO_TRADE_ENV=1` in `.env` to switch from simulate to live
+- **PDT Rule** — US accounts under $25K: 3 day trades per 5 business days
+- **Moomoo OpenD** must be running on port 11111 for portfolio reading
+- **TradingView Desktop** must run with `--remote-debugging-port=9222` for chart tools
 - This is an experimental personal project — not financial advice
 
 ---
 
 ## Roadmap
 
-- [ ] Moomoo OpenD API access for Margin Account (enable in app or call 1-888-782-1299)
-- [ ] Moomoo live trade execution once OpenD enabled
+- [x] Web dashboard with AI chat and SSE streaming
+- [x] 3-layer knowledge routing (keyword → vector → Claude)
+- [x] 5-algorithm stock predictor (no LLM cost)
+- [x] Voice chat with auto-quit
+- [x] Moomoo trade execution (paper/live)
+- [x] ML conviction engine with 3-year backtest
+- [x] Live earnings date injection into Claude system prompt
 - [ ] Moomoo real-time news via OpenD quote API
 - [ ] Post-earnings 8-K auto-detection (buy signal within minutes of SEC filing)
-- [ ] Backtesting engine for strategy validation
-- [ ] Cloud deployment (DigitalOcean) — remove dependency on Mac staying on
-- [ ] Web dashboard for trade history and performance metrics
+- [ ] Mobile-responsive dashboard
+- [ ] Cloud deployment (remove dependency on Mac staying on)

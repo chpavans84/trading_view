@@ -64,6 +64,32 @@ The compile → error → fix loop is where agent assistance provides the most v
 
 When streaming data changes faster than the agent can respond, the agent's reasoning becomes stale. This is a fundamental limitation of request-response LLM architectures operating on real-time data. The practical solution is using streaming for human monitoring (piped to dashboards) rather than agent consumption.
 
+### LLMs Use Training Data When Tool Data Is Available
+
+A subtle but important failure mode: even when a tool exists that would return accurate data, Claude will sometimes answer from training data if the question feels like a recall question rather than a lookup question. "When are NVDA earnings?" sounds like a memory question, so Claude recalls "late May" from training data rather than calling `get_earnings`.
+
+The fix is to pre-inject the data into the system prompt so it's present before Claude starts reasoning. For held positions' earnings dates, `buildPositionEarningsBlock()` fetches them at chat start and writes them directly into the system prompt with an explicit override instruction. This eliminates the class of errors entirely — Claude can't "choose" to use training data when the correct answer is already in the prompt.
+
+### Question Routing Architecture Converged on Three Layers
+
+Early iterations used Ollama for all knowledge questions (RSI, options, etc.). This failed because:
+1. Intel i9 (CPU-only) runs at ~0.6 tok/s on 8B models — 30+ seconds per response
+2. When multiple models are loaded simultaneously (trading-coach 20.5GB + llama3.1 4.9GB + nomic 0.6GB), 32GB RAM exhausts and Ollama hangs
+
+The final routing chain is: keyword fast-path (milliseconds) → vector similarity (200ms, requires Ollama running) → return error (Claude handles it via its own tools). The knowledge base provides instant answers for 80%+ of education questions; Claude gets the rest with actual live data.
+
+### Deterministic Prediction Algorithms Complement LLM Judgment
+
+Five deterministic algorithms (linear regression, ATR, momentum, personal edge, earnings catalyst) running in pure JavaScript produce structured numerical output that Claude can reason about better than text-based answers. Instead of asking Claude "where is NVDA headed?" (which triggers hallucination), calling `get_stock_prediction` gives Claude: slope=+0.44/day, R²=0.30 (low reliability), RSI=53, 5-day range $184–$212. Claude then provides a calibrated probabilistic statement rather than a directional prediction.
+
+The personal trade edge component (Algorithm 4) is particularly interesting — it turns the user's own PostgreSQL trade history into a signal. A 60% win rate on past NVDA trades is information that no external data source can provide.
+
+### Voice Chat Requires Tighter Response Length Contracts
+
+The Web Speech API's `SpeechSynthesis` works well for short responses but degrades significantly for multi-paragraph text. TTS reads markdown symbols aloud ("asterisk asterisk"), tables sound like noise, and responses longer than ~3 sentences lose the listener's attention before the microphone restarts.
+
+The fix is a `voiceMode` flag in the system prompt that explicitly contracts response length: "under 3 sentences, no markdown, no tables, speak like a person." This is injected at the system-prompt level rather than post-processing the response, so Claude constructs the right output format from the start.
+
 ## Limitations
 
 - Depends on undocumented internal APIs subject to change without notice

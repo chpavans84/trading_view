@@ -67,7 +67,11 @@ async function request(creds, method, bizExtra = {}) {
 
   if (!res.ok) throw new Error(`Tiger API HTTP ${res.status}`);
   const json = await res.json();
-  if (json.code !== 0) throw new Error(json.message || `Tiger error code ${json.code}`);
+  if (json.code !== 0) {
+    const msg = json.message || json.msg || 'unknown error';
+    console.error(`[tiger] API error code=${json.code} method=${method} msg=${msg}`, JSON.stringify(json).slice(0, 400));
+    throw new Error(`Tiger error ${json.code}: ${msg}`);
+  }
   return json.data;
 }
 
@@ -117,20 +121,22 @@ export async function getTigerOrders(creds, { days = 30 } = {}) {
 
 // Place a market or limit order on Tiger.
 // Returns { order_id, symbol, action, qty, order_type, status }
-export async function placeTigerOrder(creds, { symbol, side, qty, limitPrice = null }) {
+export async function placeTigerOrder(creds, { symbol, side, qty, limitPrice = null, outsideRth = true }) {
   const action     = side.toUpperCase() === 'BUY' ? 'BUY' : 'SELL';
   const order_type = limitPrice ? 'LMT' : 'MKT';
   const biz = {
     symbol,
     market:         'US',
     sec_type:       'STK',
+    currency:       'USD',
     action,
     order_type,
     total_quantity: qty,
     ...(limitPrice ? { limit_price: limitPrice } : {}),
     time_in_force:  'DAY',
-    outside_rth:    false,
+    outside_rth:    outsideRth,
   };
+  console.log(`[tiger] placing order: ${action} ${qty} ${symbol} @ ${order_type}${limitPrice ? ' $'+limitPrice : ''}`);
   const raw  = await request(creds, 'order', biz);
   const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
   const id   = data?.id ?? data?.order_id ?? data?.orderId;

@@ -192,6 +192,24 @@ export async function getMarketNews({ limit = 30, keywords = null } = {}) {
         published: a.published, summary: a.summary || null,
         url: a.url, source: 'thehill', tickers: [],
       }))).catch(() => []),
+      // Channel NewsAsia — Business & Economy (Singapore / Asia-Pacific)
+      fetch('https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6511', {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/rss+xml, text/xml, */*' },
+        signal: AbortSignal.timeout(4000),
+      }).then(r => r.text()).then(xml => parseRSS(xml).slice(0, 20).map(a => ({
+        title: a.title, publisher: 'CNA Business',
+        published: a.published, summary: a.summary || null,
+        url: a.url, source: 'cna', tickers: [],
+      }))).catch(() => []),
+      // Reuters — Asia market news
+      fetch('https://feeds.reuters.com/reuters/businessNews', {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/rss+xml, text/xml, */*' },
+        signal: AbortSignal.timeout(4000),
+      }).then(r => r.text()).then(xml => parseRSS(xml).slice(0, 20).map(a => ({
+        title: a.title, publisher: 'Reuters Business',
+        published: a.published, summary: a.summary || null,
+        url: a.url, source: 'reuters', tickers: [],
+      }))).catch(() => []),
     ];
 
     // When a keyword is given, also search Google News directly — covers all major outlets
@@ -200,12 +218,12 @@ export async function getMarketNews({ limit = 30, keywords = null } = {}) {
     }
 
     const results = await Promise.all(fetches);
-    const [alpaca, yahoo, fj, nyt, hill, ...rest] = results;
+    const [alpaca, yahoo, fj, nyt, hill, cna, reuters, ...rest] = results;
     const google = rest[0] ?? [];
 
     const seen = new Set();
-    // Priority: Google News keyword results first (most relevant), then FinancialJuice (real-time), then political, then market
-    return [...google, ...fj, ...nyt, ...hill, ...alpaca, ...yahoo]
+    // Priority: Google News keyword results first, then real-time sources, then Asia/global, then US market
+    return [...google, ...fj, ...cna, ...reuters, ...nyt, ...hill, ...alpaca, ...yahoo]
       .filter(a => { if (!a.title || seen.has(a.title)) return false; seen.add(a.title); return true; })
       .sort((a, b) => new Date(b.published) - new Date(a.published))
       .slice(0, limit);
