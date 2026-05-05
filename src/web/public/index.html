@@ -809,7 +809,7 @@
   .chat-fab { position: fixed; bottom: 28px; right: 28px; width: 56px; height: 56px; border-radius: 50%; background: #238636; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 300; transition: transform 0.2s; display: flex; align-items: center; justify-content: center; }
   .chat-fab:hover { transform: scale(1.1); background: #2ea043; }
   .chat-fab .chat-fab-badge { position: absolute; top: -4px; right: -4px; background: #f85149; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; display: none; align-items: center; justify-content: center; }
-  .chat-widget { position: fixed; bottom: 96px; right: 28px; width: min(380px, calc(100vw - 32px)); height: 560px; background: #161b22; border: 1px solid rgba(48,54,61,0.8); border-top: 1px solid rgba(255,255,255,0.06); border-radius: 16px; box-shadow: 0 16px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(88,166,255,0.05); z-index: 300; display: none; flex-direction: column; overflow: hidden; min-width: 300px; min-height: 300px; max-width: calc(100vw - 32px); max-height: calc(100vh - 120px); contain: layout style; will-change: transform; }
+  .chat-widget { position: fixed; bottom: 96px; right: 28px; width: min(380px, calc(100vw - 32px)); height: 560px; background: #161b22; border: 1px solid rgba(48,54,61,0.8); border-top: 1px solid rgba(255,255,255,0.06); border-radius: 16px; box-shadow: 0 16px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(88,166,255,0.05); z-index: 300; display: none; flex-direction: column; overflow: hidden; min-width: 300px; min-height: 300px; max-width: calc(100vw - 32px); max-height: calc(100vh - 120px); }
   .chat-widget.open { display: flex; }
   .chat-resize-handle { position: absolute; top: 0; left: 0; width: 18px; height: 18px; cursor: nw-resize; z-index: 10; }
   .chat-resize-handle::after { content:''; position:absolute; top:4px; left:4px; width:8px; height:8px; border-top:2px solid #30363d; border-left:2px solid #30363d; border-radius:1px; }
@@ -2529,6 +2529,7 @@
         <button class="arch-tab-btn" data-av="scan"  onclick="showArch('scan')">🔍 Scan Engine</button>
         <button class="arch-tab-btn" data-av="score" onclick="showArch('score')">🎯 Conviction Score</button>
         <button class="arch-tab-btn" data-av="data"  onclick="showArch('data')">📡 Data Sources</button>
+        <button class="arch-tab-btn" data-av="mcp"   onclick="showArch('mcp')">🔌 MCP &amp; Tools</button>
       </div>
 
       <!-- ══════════ MAP VIEW ══════════ -->
@@ -4497,6 +4498,254 @@ erDiagram
         </div>
 
       </div><!-- /av-db -->
+
+      <!-- ══════════ MCP & TOOLS ══════════ -->
+      <div id="av-mcp" class="arch-view" style="display:none">
+        <div class="arch-header">🔌 MCP Connection &amp; Tool Inventory</div>
+        <div class="arch-subhead">How Claude Code CLI controls TradingView Desktop via the Model Context Protocol — 79 tools across 8 categories.</div>
+
+        <!-- Connection flow diagram -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:20px 24px;margin-bottom:20px">
+          <div style="font-size:0.72rem;font-weight:700;color:#6e7681;letter-spacing:.08em;text-transform:uppercase;margin-bottom:16px">Connection Path</div>
+          <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;justify-content:center">
+
+            <!-- Claude Code CLI -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px;min-width:110px">
+              <div style="width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,#1f6feb,#388bfd);display:flex;align-items:center;justify-content:center;font-size:1.6rem;box-shadow:0 0 0 1px #388bfd40">🤖</div>
+              <div style="font-size:0.78rem;font-weight:700;color:#e6edf3;text-align:center">Claude Code CLI</div>
+              <div style="font-size:0.64rem;color:#6e7681;text-align:center">claude-sonnet-4-6<br>Anthropic API</div>
+            </div>
+
+            <!-- Arrow + transport label -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 8px">
+              <div style="font-size:0.63rem;font-weight:700;color:#3fb950;letter-spacing:.04em;white-space:nowrap">stdio transport</div>
+              <div style="display:flex;align-items:center;gap:2px;color:#30363d;font-size:1.1rem">←&nbsp;─────&nbsp;→</div>
+              <div style="font-size:0.63rem;color:#6e7681;white-space:nowrap">JSON-RPC 2.0</div>
+            </div>
+
+            <!-- MCP Server -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px;min-width:110px">
+              <div style="width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,#238636,#2ea043);display:flex;align-items:center;justify-content:center;font-size:1.6rem;box-shadow:0 0 0 1px #2ea04340">🖥️</div>
+              <div style="font-size:0.78rem;font-weight:700;color:#e6edf3;text-align:center">MCP Server</div>
+              <div style="font-size:0.64rem;color:#6e7681;text-align:center">Node.js process<br>tradingview-mcp</div>
+            </div>
+
+            <!-- Arrow + CDP label -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 8px">
+              <div style="font-size:0.63rem;font-weight:700;color:#d29922;letter-spacing:.04em;white-space:nowrap">CDP WebSocket</div>
+              <div style="display:flex;align-items:center;gap:2px;color:#30363d;font-size:1.1rem">─────────→</div>
+              <div style="font-size:0.63rem;color:#6e7681;white-space:nowrap">localhost:9222</div>
+            </div>
+
+            <!-- TradingView Desktop -->
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px;min-width:110px">
+              <div style="width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,#2c2c54,#4a4a8a);display:flex;align-items:center;justify-content:center;font-size:1.6rem;box-shadow:0 0 0 1px #4a4a8a40">📈</div>
+              <div style="font-size:0.78rem;font-weight:700;color:#e6edf3;text-align:center">TradingView</div>
+              <div style="font-size:0.64rem;color:#6e7681;text-align:center">Desktop (Electron)<br>--remote-debugging-port=9222</div>
+            </div>
+          </div>
+
+          <!-- Transport details row -->
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;padding-top:14px;border-top:1px solid #21262d">
+            <div style="flex:1;min-width:180px;background:#161b22;border-radius:7px;padding:10px 12px">
+              <div style="font-size:0.68rem;font-weight:700;color:#3fb950;margin-bottom:4px">stdio Transport</div>
+              <div style="font-size:0.71rem;color:#8b949e;line-height:1.5">Claude Code spawns the MCP server as a child process and communicates over stdin/stdout. No network port. Messages are newline-delimited JSON-RPC 2.0 frames.</div>
+            </div>
+            <div style="flex:1;min-width:180px;background:#161b22;border-radius:7px;padding:10px 12px">
+              <div style="font-size:0.68rem;font-weight:700;color:#d29922;margin-bottom:4px">Chrome DevTools Protocol (CDP)</div>
+              <div style="font-size:0.71rem;color:#8b949e;line-height:1.5">MCP server connects to TradingView's Electron renderer via WebSocket. Executes JavaScript directly in the charting page — reads state, triggers actions, injects Pine Script.</div>
+            </div>
+            <div style="flex:1;min-width:180px;background:#161b22;border-radius:7px;padding:10px 12px">
+              <div style="font-size:0.68rem;font-weight:700;color:#bc8cff;margin-bottom:4px">Tool Execution Model</div>
+              <div style="font-size:0.71rem;color:#8b949e;line-height:1.5">Claude calls a tool → MCP server receives JSON-RPC request → runs CDP <code style="background:#21262d;padding:1px 4px;border-radius:3px;color:#79c0ff;font-size:0.68rem">Runtime.evaluate</code> in Electron → returns structured result back to Claude.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tool inventory -->
+        <div style="font-size:0.72rem;font-weight:700;color:#6e7681;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">79 Tools — By Category</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px">
+
+          <!-- Chart Control -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">📊</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Chart Control</div>
+                <div style="font-size:0.67rem;color:#6e7681">14 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#1f6feb22;color:#58a6ff;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #1f6feb44">14</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              chart_get_state · chart_set_symbol<br>
+              chart_set_timeframe · chart_set_type<br>
+              chart_manage_indicator · chart_scroll_to_date<br>
+              chart_set_visible_range · chart_zoom_in<br>
+              chart_zoom_out · chart_reset_zoom<br>
+              chart_scroll_left · chart_scroll_right<br>
+              chart_lock_price_scale · chart_set_log_scale
+            </div>
+          </div>
+
+          <!-- Data & Indicators -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">📡</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Data &amp; Indicators</div>
+                <div style="font-size:0.67rem;color:#6e7681">16 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#3fb95022;color:#3fb950;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #3fb95044">16</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              portfolio_chart_snapshot · quote_get<br>
+              data_get_ohlcv · data_get_study_values<br>
+              data_get_pine_lines · data_get_pine_labels<br>
+              data_get_pine_tables · data_get_pine_boxes<br>
+              data_get_indicator · data_get_bar_data<br>
+              data_get_volume_profile · data_get_depth<br>
+              data_get_symbol_info · data_get_market_status<br>
+              data_get_session_breaks · data_get_news
+            </div>
+          </div>
+
+          <!-- Pine Script -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">🌲</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Pine Script</div>
+                <div style="font-size:0.67rem;color:#6e7681">10 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#d2992222;color:#d29922;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #d2992244">10</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              pine_set_source · pine_smart_compile<br>
+              pine_get_errors · pine_get_console<br>
+              pine_get_source · pine_save<br>
+              pine_new · pine_open<br>
+              pine_copy_to_chart · pine_get_templates
+            </div>
+          </div>
+
+          <!-- Replay / Paper Trading -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">⏪</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Replay &amp; Paper Trading</div>
+                <div style="font-size:0.67rem;color:#6e7681">10 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#bc8cff22;color:#bc8cff;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #bc8cff44">10</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              replay_start · replay_stop<br>
+              replay_step · replay_autoplay<br>
+              replay_trade · replay_status<br>
+              replay_reset · replay_jump_to_date<br>
+              replay_set_speed · replay_get_positions
+            </div>
+          </div>
+
+          <!-- Drawing Tools -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">✏️</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Drawing Tools</div>
+                <div style="font-size:0.67rem;color:#6e7681">8 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#f7816622;color:#f78166;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #f7816644">8</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              draw_shape · draw_list<br>
+              draw_remove_one · draw_clear<br>
+              draw_horizontal_line · draw_trend_line<br>
+              draw_rectangle · draw_text
+            </div>
+          </div>
+
+          <!-- UI Navigation -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">🖱️</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">UI Navigation</div>
+                <div style="font-size:0.67rem;color:#6e7681">10 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#39d35322;color:#39d353;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #39d35344">10</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              ui_open_panel · ui_click<br>
+              ui_fullscreen · layout_switch<br>
+              capture_screenshot · ui_open_tab<br>
+              ui_close_tab · ui_keyboard_shortcut<br>
+              ui_get_focused_widget · ui_scroll
+            </div>
+          </div>
+
+          <!-- Alerts -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">🔔</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Alerts</div>
+                <div style="font-size:0.67rem;color:#6e7681">5 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#ffa65722;color:#ffa657;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #ffa65744">5</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              alert_create · alert_list<br>
+              alert_delete · alert_modify<br>
+              alert_get_history
+            </div>
+          </div>
+
+          <!-- Batch & System -->
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <span style="font-size:1.1rem">⚙️</span>
+              <div>
+                <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Batch &amp; System</div>
+                <div style="font-size:0.67rem;color:#6e7681">6 tools</div>
+              </div>
+              <div style="margin-left:auto;background:#8b949e22;color:#8b949e;font-size:0.7rem;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid #8b949e44">6</div>
+            </div>
+            <div style="font-size:0.72rem;color:#8b949e;line-height:1.7;font-family:monospace">
+              batch_run · tv_launch<br>
+              tv_health_check · system_get_info<br>
+              system_get_logs · system_reconnect
+            </div>
+          </div>
+
+        </div><!-- /tool grid -->
+
+        <!-- Total summary bar -->
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:14px 18px;margin-top:14px">
+          <div style="font-size:2rem;font-weight:800;color:#58a6ff;line-height:1">79</div>
+          <div>
+            <div style="font-size:0.83rem;font-weight:700;color:#e6edf3">Total Tools</div>
+            <div style="font-size:0.72rem;color:#6e7681">Chart 14 · Data 16 · Pine 10 · Replay 10 · Draw 8 · UI 10 · Alerts 5 · System 6</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:10px;flex-wrap:wrap">
+            <div style="text-align:center">
+              <div style="font-size:0.95rem;font-weight:700;color:#3fb950">stdio</div>
+              <div style="font-size:0.64rem;color:#6e7681">Transport</div>
+            </div>
+            <div style="width:1px;background:#30363d"></div>
+            <div style="text-align:center">
+              <div style="font-size:0.95rem;font-weight:700;color:#d29922">:9222</div>
+              <div style="font-size:0.64rem;color:#6e7681">CDP Port</div>
+            </div>
+            <div style="width:1px;background:#30363d"></div>
+            <div style="text-align:center">
+              <div style="font-size:0.95rem;font-weight:700;color:#bc8cff">JSON-RPC</div>
+              <div style="font-size:0.64rem;color:#6e7681">Protocol</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /av-mcp -->
 
     </div><!-- /adminArchPanel -->
 
@@ -10784,7 +11033,7 @@ function erdInitPan() {
 
 let _erdRendered = false;
 function showArch(view) {
-  ['map','models','db','chat','pred','cal','scan','score','data'].forEach(v => {
+  ['map','models','db','chat','pred','cal','scan','score','data','mcp'].forEach(v => {
     const el = document.getElementById('av-' + v);
     if (el) el.style.display = v === view ? 'block' : 'none';
     const btn = document.querySelector(`[data-av="${v}"]`);
@@ -12501,15 +12750,6 @@ function toggleChat() {
     if (window.innerWidth <= 768) {
       _applyChatMobileSize();
       fab.style.display = 'none';
-      let bd = document.getElementById('chatBackdrop');
-      if (!bd) {
-        bd = document.createElement('div');
-        bd.id = 'chatBackdrop';
-        bd.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:299;';
-        bd.onclick = toggleChat;
-        document.body.appendChild(bd);
-      }
-      bd.style.display = 'block';
     }
     document.getElementById('chatMessages').scrollTop = 9999;
     document.getElementById('chatInput').focus();
@@ -12518,17 +12758,15 @@ function toggleChat() {
     widget.style.maxHeight = '';
     widget.style.bottom = '';
     fab.style.display = '';
-    const bd = document.getElementById('chatBackdrop');
-    if (bd) bd.style.display = 'none';
   }
 }
 
-// Click-outside to minimize AI Trading Analyst
-document.addEventListener('mousedown', function(e) {
+// Click-outside to close AI Trading Analyst (use 'click' not 'mousedown' so scroll gestures don't trigger it)
+document.addEventListener('click', function(e) {
   const widget = document.getElementById('chatWidget');
   const fab    = document.getElementById('chatFab');
   if (!widget || !widget.classList.contains('open')) return;
-  if (Date.now() - _chatOpenAt < 250) return; // ignore the click that opened it
+  if (Date.now() - _chatOpenAt < 300) return; // ignore the click that opened it
   if (!widget.contains(e.target) && (!fab || !fab.contains(e.target))) toggleChat();
 });
 

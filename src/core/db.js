@@ -4,6 +4,7 @@
  */
 
 import pg from 'pg';
+import { encryptCredential, decryptCredential } from './crypto.js';
 const { Pool, types } = pg;
 // Return DATE columns as 'YYYY-MM-DD' strings, not Date objects (avoids timezone-mangled keys)
 types.setTypeParser(1082, v => v);
@@ -786,9 +787,10 @@ export async function getTrades({ status, username, limit = 50 } = {}) {
     const params = [];
     if (status)   { where.push(`status = $${params.length + 1}`);   params.push(status); }
     if (username) { where.push(`username = $${params.length + 1}`); params.push(username); }
+    params.push(limit);
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const { rows } = await query(
-      `SELECT * FROM trades ${whereClause} ORDER BY opened_at DESC LIMIT ${limit}`,
+      `SELECT * FROM trades ${whereClause} ORDER BY opened_at DESC LIMIT $${params.length}`,
       params
     );
     return rows;
@@ -1077,11 +1079,26 @@ export async function cleanupOtpTokens() {
 
 // ─── User management (DB-backed) ─────────────────────────────────────────────
 
+function _decryptUserCreds(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    alpaca_api_key:         decryptCredential(row.alpaca_api_key),
+    alpaca_secret_key:      decryptCredential(row.alpaca_secret_key),
+    alpaca_live_api_key:    decryptCredential(row.alpaca_live_api_key),
+    alpaca_live_secret_key: decryptCredential(row.alpaca_live_secret_key),
+    moomoo_acc_id:          decryptCredential(row.moomoo_acc_id),
+    tiger_id:               decryptCredential(row.tiger_id),
+    tiger_account:          decryptCredential(row.tiger_account),
+    tiger_private_key:      decryptCredential(row.tiger_private_key),
+  };
+}
+
 export async function getDbUser(username) {
   if (!dbAvailable) return null;
   try {
     const { rows } = await query(`SELECT * FROM users WHERE username = $1`, [username.toLowerCase()]);
-    return rows[0] ?? null;
+    return _decryptUserCreds(rows[0] ?? null);
   } catch (err) {
     console.error('getDbUser error:', err.message);
     return null;
@@ -1092,7 +1109,7 @@ export async function getDbUserByEmail(email) {
   if (!dbAvailable) return null;
   try {
     const { rows } = await query(`SELECT * FROM users WHERE email = $1`, [email.toLowerCase()]);
-    return rows[0] ?? null;
+    return _decryptUserCreds(rows[0] ?? null);
   } catch (err) {
     console.error('getDbUserByEmail error:', err.message);
     return null;
@@ -1241,12 +1258,12 @@ export async function saveUserAlpaca(username, { apiKey, secretKey, baseUrl, acc
   if (accountType === 'live') {
     await query(
       `UPDATE users SET alpaca_live_api_key=$2, alpaca_live_secret_key=$3 WHERE username=$1`,
-      [username.toLowerCase(), apiKey, secretKey]
+      [username.toLowerCase(), encryptCredential(apiKey), encryptCredential(secretKey)]
     );
   } else {
     await query(
       `UPDATE users SET alpaca_api_key=$2, alpaca_secret_key=$3, alpaca_base_url=$4 WHERE username=$1`,
-      [username.toLowerCase(), apiKey, secretKey, baseUrl]
+      [username.toLowerCase(), encryptCredential(apiKey), encryptCredential(secretKey), baseUrl]
     );
   }
 }
@@ -1269,7 +1286,7 @@ export async function clearUserLiveAlpaca(username) {
 
 export async function saveUserMoomoo(username, accId) {
   if (!dbAvailable) throw new Error('Database not available');
-  await query(`UPDATE users SET moomoo_acc_id=$2 WHERE username=$1`, [username.toLowerCase(), accId]);
+  await query(`UPDATE users SET moomoo_acc_id=$2 WHERE username=$1`, [username.toLowerCase(), encryptCredential(String(accId))]);
 }
 
 export async function clearUserMoomoo(username) {
@@ -1281,7 +1298,7 @@ export async function saveUserTiger(username, { tigerId, account, privateKey }) 
   if (!dbAvailable) throw new Error('Database not available');
   await query(
     `UPDATE users SET tiger_id=$2, tiger_account=$3, tiger_private_key=$4 WHERE username=$1`,
-    [username.toLowerCase(), tigerId, account, privateKey]
+    [username.toLowerCase(), encryptCredential(tigerId), encryptCredential(account), encryptCredential(privateKey)]
   );
 }
 
@@ -1471,12 +1488,13 @@ export async function createBugReport({ username, title, description, page }) {
 export async function getBugReports({ status, limit = 100 } = {}) {
   if (!dbAvailable) return [];
   try {
+    const params = status ? [status, limit] : [limit];
     const { rows } = await query(
       `SELECT id, username, title, description, page, status, admin_note, created_at, resolved_at
        FROM bug_reports
        ${status ? 'WHERE status = $1' : ''}
-       ORDER BY created_at DESC LIMIT ${limit}`,
-      status ? [status] : []
+       ORDER BY created_at DESC LIMIT $${params.length}`,
+      params
     );
     return rows;
   } catch (err) {
