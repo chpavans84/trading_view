@@ -432,6 +432,40 @@ CREATE TABLE IF NOT EXISTS stock_predictions (
 CREATE INDEX IF NOT EXISTS stock_predictions_symbol_idx  ON stock_predictions(symbol);
 CREATE INDEX IF NOT EXISTS stock_predictions_week_idx    ON stock_predictions(week_start DESC);
 CREATE INDEX IF NOT EXISTS stock_predictions_target_idx  ON stock_predictions(target_date DESC);
+
+-- Calibration columns added after initial schema (safe to re-run)
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS adjusted_change_pct NUMERIC(8,4);
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS confidence          INTEGER;
+
+CREATE TABLE IF NOT EXISTS prediction_calibration (
+  symbol       VARCHAR(20) NOT NULL,
+  feature      VARCHAR(50) NOT NULL,
+  value        NUMERIC(10,6) NOT NULL,
+  sample_size  INTEGER NOT NULL DEFAULT 0,
+  last_trained TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (symbol, feature)
+);
+
+CREATE TABLE IF NOT EXISTS prediction_calibration_global (
+  feature      VARCHAR(80) NOT NULL PRIMARY KEY,
+  value        NUMERIC(10,6) NOT NULL,
+  sample_size  INTEGER NOT NULL DEFAULT 0,
+  last_trained TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS prediction_errors (
+  id                   SERIAL PRIMARY KEY,
+  symbol               VARCHAR(20) NOT NULL,
+  target_date          DATE NOT NULL,
+  r_squared            NUMERIC(6,4),
+  algorithm_signal     INTEGER,
+  predicted_change_pct NUMERIC(8,4),
+  actual_change_pct    NUMERIC(8,4),
+  error_pct            NUMERIC(8,4),
+  direction_correct    BOOLEAN,
+  recorded_at          TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(symbol, target_date)
+);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -1661,8 +1695,9 @@ export async function upsertPrediction(row) {
   await query(
     `INSERT INTO stock_predictions
        (symbol, week_start, target_date, predicted_price, predicted_change_pct,
-        base_price, algorithm_signal, slope_per_day, r_squared, has_earnings, earnings_date)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        base_price, algorithm_signal, slope_per_day, r_squared, has_earnings, earnings_date,
+        adjusted_change_pct, confidence)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      ON CONFLICT (symbol, week_start, target_date) DO UPDATE SET
        predicted_price      = EXCLUDED.predicted_price,
        predicted_change_pct = EXCLUDED.predicted_change_pct,
@@ -1672,10 +1707,13 @@ export async function upsertPrediction(row) {
        r_squared            = EXCLUDED.r_squared,
        has_earnings         = EXCLUDED.has_earnings,
        earnings_date        = EXCLUDED.earnings_date,
+       adjusted_change_pct  = EXCLUDED.adjusted_change_pct,
+       confidence           = EXCLUDED.confidence,
        updated_at           = NOW()`,
     [row.symbol, row.week_start, row.target_date, row.predicted_price,
      row.predicted_change_pct, row.base_price, row.algorithm_signal,
-     row.slope_per_day, row.r_squared, row.has_earnings, row.earnings_date ?? null]
+     row.slope_per_day, row.r_squared, row.has_earnings, row.earnings_date ?? null,
+     row.adjusted_change_pct ?? null, row.confidence ?? null]
   );
 }
 

@@ -42,6 +42,7 @@ import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
 import { getMarketContext } from '../core/market-context.js';
 import { selectBestTrade } from '../core/stock-selector.js';
+import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 
 // Generate a stable numeric chat ID per user so each user has their own
 // conversation history. 12 hex chars → max 2^48 fits safely in JS Number
@@ -1036,11 +1037,67 @@ async function getAccountData(source, username) {
     const dbUser = isDbAvailable() ? await getDbUser(username) : null;
     if (!dbUser?.tiger_id) return { account: null, positions: [], needs_tiger_setup: true };
     const creds = { tiger_id: dbUser.tiger_id, account: dbUser.tiger_account, private_key: dbUser.tiger_private_key };
-    const [funds, pos] = await Promise.allSettled([getTigerFunds(creds), getTigerPositions(creds)]);
+    const [funds, pos, ordersRes] = await Promise.allSettled([
+      getTigerFunds(creds),
+      getTigerPositions(creds),
+      getTigerOrders(creds, { days: 730 }),
+    ]);
     if (funds.status === 'rejected') console.error('[tiger] getTigerFunds failed:', funds.reason?.message);
     if (pos.status   === 'rejected') console.error('[tiger] getTigerPositions failed:', pos.reason?.message);
-    const f = funds.status === 'fulfilled' ? funds.value : null;
-    const p = pos.status  === 'fulfilled' ? pos.value  : [];
+    const f      = funds.status    === 'fulfilled' ? funds.value    : null;
+    const p      = pos.status      === 'fulfilled' ? pos.value      : [];
+    const orders = ordersRes.status === 'fulfilled' ? ordersRes.value : [];
+
+    // Tiger's positions API returns averageCost = lastClosePrice, so unrealizedPnl is only today's
+    // intraday move. Reconstruct true cost basis from order history (up to 2 years back).
+    const costMap = {};
+    for (const o of orders) {
+      const filled = (o.status || '').toLowerCase();
+      if (filled !== 'filled') continue;
+      const sym    = o.symbol;
+      const qty    = +(o.filledQuantity ?? 0);
+      const price  = +(o.avgFillPrice ?? o.averageFillPrice ?? 0);
+      const action = (o.action || '').toUpperCase();
+      if (!sym || qty <= 0 || price <= 0) continue;
+      if (!costMap[sym]) costMap[sym] = { totalCost: 0, totalQty: 0 };
+      if (action === 'BUY') {
+        costMap[sym].totalCost += price * qty;
+        costMap[sym].totalQty  += qty;
+      } else if (action === 'SELL' && costMap[sym].totalQty > 0) {
+        const avg = costMap[sym].totalCost / costMap[sym].totalQty;
+        costMap[sym].totalCost = Math.max(0, costMap[sym].totalCost - avg * Math.min(qty, costMap[sym].totalQty));
+        costMap[sym].totalQty  = Math.max(0, costMap[sym].totalQty - qty);
+      }
+    }
+
+    const positions = p.map(pos => {
+      const sym    = pos.symbol ?? pos.contract?.symbol;
+      const qty    = +(pos.position ?? pos.positionQty ?? pos.quantity ?? pos.qty ?? 0);
+      const lastPx = +(pos.latestPrice ?? pos.market_price ?? pos.current_price ?? 0);
+      const mktVal = +(pos.marketValue ?? pos.market_value ?? (lastPx * qty));
+
+      // Use order-history avg cost when available; fall back to Tiger's daily-only unrealizedPnl
+      let avgCost          = +(pos.averageCost ?? pos.average_cost ?? pos.avg_cost ?? 0);
+      let trueUnrealizedPl = +(pos.unrealizedPnl ?? 0);
+      if (sym && costMap[sym]?.totalQty > 0) {
+        avgCost          = costMap[sym].totalCost / costMap[sym].totalQty;
+        trueUnrealizedPl = (lastPx - avgCost) * qty;
+      }
+      const costBasis = avgCost * qty || (mktVal - trueUnrealizedPl);
+      const plPct     = costBasis > 0 ? (trueUnrealizedPl / costBasis) * 100 : (+(pos.unrealizedPnlPercent ?? 0) * 100);
+
+      return {
+        symbol:          sym,
+        qty,
+        avg_entry_price: avgCost || undefined,
+        current_price:   lastPx,
+        market_value:    mktVal,
+        unrealized_pl:   trueUnrealizedPl,
+        unrealized_plpc: plPct,
+        side:            ((pos.side ?? pos.direction ?? 'long') + '').toLowerCase() === 'short' ? 'short' : 'long',
+      };
+    }).filter(pos => pos.symbol);
+
     const account = f ? {
       source:          'tiger',
       account_number:  dbUser.tiger_account,
@@ -1048,19 +1105,9 @@ async function getAccountData(source, username) {
       buying_power:    f.buying_power,
       cash:            f.cash,
       market_value:    f.gross_position_value,
-      unrealized_pl:   p.reduce((s, x) => s + (x.unrealizedPnl ?? x.pnl ?? 0), 0),
+      unrealized_pl:   positions.reduce((s, x) => s + (x.unrealized_pl ?? 0), 0),
       paper:           false,
     } : null;
-    const positions = p.map(pos => ({
-      symbol:          pos.symbol ?? pos.contract?.symbol,
-      qty:             pos.quantity ?? pos.qty ?? pos.position,
-      avg_entry_price: pos.averageCost ?? pos.average_cost ?? pos.avg_cost,
-      current_price:   pos.latestPrice ?? pos.market_price ?? pos.current_price,
-      market_value:    pos.marketValue ?? pos.market_value,
-      unrealized_pl:   pos.unrealizedPnl ?? pos.pnl ?? pos.unrealized_pl,
-      unrealized_plpc: pos.unrealizedPnlRate ?? pos.pnl_rate ?? pos.pnl_percentage,
-      side:            ((pos.side ?? pos.direction ?? 'long') + '').toLowerCase() === 'short' ? 'short' : 'long',
-    })).filter(pos => pos.symbol);
     return { account, positions };
   }
   // Alpaca paper (default — bot trades here)
@@ -1268,15 +1315,25 @@ async function generateWeekPredictions(weekStart) {
         const sig   = pred.overall_signal;
         const earningsDate = earningsMap[sym] ?? null;
 
+        // Fetch calibration factors once per symbol using day-1 change as input.
+        // applyCalibrationToDay() then re-applies the same bias + reversal factor
+        // to each day's projected change without additional DB calls.
+        const day1Price     = +(base + slope).toFixed(4);
+        const day1ChangePct = +((day1Price - base) / base * 100).toFixed(4);
+        const cal = await applyCalibration(sym, day1ChangePct, rSq).catch(() => null);
+
         for (let d = 0; d < days.length; d++) {
           const projPrice     = +(base + slope * (d + 1)).toFixed(4);
           const projChangePct = +((projPrice - base) / base * 100).toFixed(4);
+          const adjChangePct  = applyCalibrationToDay(projChangePct, cal);
           await upsertPrediction({
             symbol: sym, week_start: weekStart, target_date: days[d],
             predicted_price: projPrice, predicted_change_pct: projChangePct,
             base_price: base, algorithm_signal: sig,
             slope_per_day: slope, r_squared: rSq,
             has_earnings: !!earningsDate, earnings_date: earningsDate,
+            adjusted_change_pct: adjChangePct,
+            confidence: cal?.confidence ?? null,
           });
         }
         done++;
@@ -1293,7 +1350,8 @@ async function generateWeekPredictions(weekStart) {
 }
 
 async function fillTodayActuals(dateStr) {
-  // Fetch closing prices for all symbols in batches
+  // Fetch closing prices for all symbols in batches.
+  // Uses regularMarketPrice (live/last price after 4 PM = official close).
   let filled = 0;
   const BATCH = 10;
   for (let i = 0; i < FORECAST_SYMBOLS.length; i += BATCH) {
@@ -1301,7 +1359,9 @@ async function fillTodayActuals(dateStr) {
     await Promise.allSettled(batch.map(async sym => {
       try {
         const data = await _yf.quoteSummary(sym, { modules: ['price'] });
-        const close = data?.price?.regularMarketPrice;
+        const p = data?.price;
+        // After 4 PM ET regularMarketPrice IS the official close; use postMarketPrice as fallback
+        const close = p?.regularMarketPrice ?? p?.postMarketPrice ?? null;
         if (!close) return;
         await fillActualPrice(sym, dateStr, close);
         filled++;
@@ -1309,6 +1369,11 @@ async function fillTodayActuals(dateStr) {
     }));
   }
   console.log(`[forecast] filled actuals for ${dateStr}: ${filled} symbols`);
+  if (filled > 0) {
+    trainCalibration().then(r => {
+      if (!r?.skipped) console.log(`[calibration] retrained on ${r?.samples ?? 0} actuals`);
+    }).catch(err => console.error('[calibration] train error:', err.message));
+  }
   return filled;
 }
 
@@ -1340,6 +1405,8 @@ app.get('/api/forecast', requireAuth, async (req, res) => {
         date:                 r.target_date,
         predicted_price:      n(r.predicted_price),
         predicted_change_pct: n(r.predicted_change_pct),
+        adjusted_change_pct:  n(r.adjusted_change_pct),
+        confidence:           r.confidence != null ? +r.confidence : null,
         actual_price:         n(r.actual_price),
         actual_change_pct:    n(r.actual_change_pct),
         error_pct:            n(r.error_pct),
@@ -1403,6 +1470,27 @@ app.post('/api/forecast/fill-actuals', requireAuth, async (req, res) => {
     const dateStr = req.query.date || new Date().toISOString().split('T')[0];
     const filled = await fillTodayActuals(dateStr);
     res.json({ success: true, filled, date: dateStr });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/forecast/failure-analysis — calibration stats and prediction failure breakdown
+app.get('/api/forecast/failure-analysis', requireAuth, async (req, res) => {
+  try {
+    const data = await getFailureAnalysis({ limit: 6 });
+    res.json({ success: true, ...data });
+  } catch (err) {
+    console.error('[failure-analysis]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/forecast/train-calibration — manually retrain calibration model
+app.post('/api/forecast/train-calibration', requireAuth, async (req, res) => {
+  try {
+    const result = await trainCalibration();
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2231,7 +2319,9 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
 
     // Real-money accounts (moomoo, tiger, alpaca_live) — live snapshot + DB-stored daily history
     if (source === 'moomoo' || source === 'tiger' || source === 'alpaca_live') {
+      console.log(`[pnl] source=${source} username=${req.session.username}`);
       const { account } = await getAccountData(source, req.session.username);
+      console.log(`[pnl] account=${account ? JSON.stringify({ pv: account.portfolio_value, unreal: account.unrealized_pl }) : 'null'}`);
 
       // Persist today's snapshot so history accumulates over time
       if (account && isDbAvailable()) {
@@ -2255,19 +2345,25 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
       for (let i = 1; i < snapshots.length; i++) {
         const prev = snapshots[i - 1];
         const curr = snapshots[i];
-        const pnl = curr.realized_pl != null && prev.realized_pl != null
+        const realDelta = curr.realized_pl != null && prev.realized_pl != null
           ? +( parseFloat(curr.realized_pl) - parseFloat(prev.realized_pl) ).toFixed(2)
           : null;
+        const equityDelta = curr.portfolio_value != null && prev.portfolio_value != null
+          ? +( parseFloat(curr.portfolio_value) - parseFloat(prev.portfolio_value) ).toFixed(2)
+          : null;
+        // Tiger (and some other brokers) don't report realized_pl — fall back to equity delta
+        const pnl = (realDelta !== null && realDelta !== 0) ? realDelta : (equityDelta ?? 0);
         history.push({
           date:           curr.date instanceof Date
             ? curr.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
             : String(curr.date).slice(0, 10),
-          pnl:            pnl ?? 0,
+          pnl,
           equity:         curr.portfolio_value != null ? parseFloat(curr.portfolio_value) : null,
           unrealized_pl:  curr.unrealized_pl  != null ? parseFloat(curr.unrealized_pl)  : null,
         });
       }
 
+      console.log(`[pnl] snapshots=${snapshots.length} history=${history.length}`, history.map(h => ({ date: h.date, pnl: h.pnl })));
       return res.json({
         today:   { pnl: account?.unrealized_pl ?? 0, available: !!account, live: true },
         account: account ?? null,
@@ -2306,7 +2402,10 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
     }
 
     // No account connected and not admin
-    if (!pnlAdmin) return res.json({ today: { pnl: 0, available: false }, history: [] });
+    if (!pnlAdmin) {
+      console.log(`[pnl] source=${source} username=${req.session.username} → no credentials, returning empty`);
+      return res.json({ today: { pnl: 0, available: false }, history: [] });
+    }
 
     // Admin — use bot's paper account
     const [alpacaPnl, alpacaHistory, tradeRows] = await Promise.allSettled([
@@ -2999,6 +3098,14 @@ app.post('/api/admin/chat/clear', requireAdmin, (req, res) => {
   const sessionId = `admin_${req.session.id}`;
   clearAdminHistory(sessionId);
   res.json({ ok: true });
+});
+
+// Admin: clear any specific user's conversation history (e.g. after a stale P&L block)
+app.post('/api/admin/chat/clear-user', requireAdmin, (req, res) => {
+  const target = (req.body?.username || '').trim().toLowerCase();
+  if (!target) return res.status(400).json({ error: 'username required' });
+  clearHistory(userChatId(target));
+  res.json({ ok: true, cleared: target });
 });
 
 // ─── 2-Layer AI Scanner ───────────────────────────────────────────────────────
@@ -4876,24 +4983,20 @@ cron.schedule('*/5 2 * * 0', async () => {
 
 // ─── Forecast Crons ──────────────────────────────────────────────────────────
 // Monday 8:30 AM ET — generate week predictions before market open
-cron.schedule('*/5 8-9 * * 1', async () => {
-  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const mins = et.getHours() * 60 + et.getMinutes();
-  if (mins < 8 * 60 + 30 || mins >= 8 * 60 + 35) return;
+cron.schedule('30 8 * * 1', async () => {
   try { await generateWeekPredictions(getMondayStr()); }
   catch (err) { console.error('[forecast] Monday cron error:', err.message); }
-});
+}, { timezone: 'America/New_York' });
 
-// Daily 4:15 PM ET (Mon-Fri) — fill actual close prices
-cron.schedule('*/5 16-17 * * 1-5', async () => {
-  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const mins = et.getHours() * 60 + et.getMinutes();
-  if (mins < 16 * 60 + 15 || mins >= 16 * 60 + 20) return;
+// Daily 4:15 PM ET (Mon-Fri) — fill actual close prices.
+// Timezone explicitly set to New York so this fires correctly regardless of server timezone (e.g. SGT/UTC+8).
+cron.schedule('15 16 * * 1-5', async () => {
   try {
-    const dateStr = et.toISOString().split('T')[0];
+    const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    console.log(`[forecast] EOD fill running for ${dateStr}`);
     await fillTodayActuals(dateStr);
   } catch (err) { console.error('[forecast] EOD fill cron error:', err.message); }
-});
+}, { timezone: 'America/New_York' });
 
 // ─── Admin API: manual trigger (per-step or all) ──────────────────────────────
 

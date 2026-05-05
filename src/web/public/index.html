@@ -1657,6 +1657,8 @@
           style="background:#1f6feb;border:1px solid #388bfd;border-radius:6px;padding:5px 12px;color:#fff;font-size:0.82rem;cursor:pointer" id="fcGenBtn">Generate week</button>
         <button onclick="fillActuals()"
           style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 12px;color:#e6edf3;font-size:0.82rem;cursor:pointer">Fill actuals</button>
+        <button onclick="trainCalibrationModel()"
+          style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 12px;color:#e6edf3;font-size:0.82rem;cursor:pointer" title="Re-learn from historical prediction errors">🎯 Train calibration</button>
         <button onclick="loadForecast(true)"
           style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 12px;color:#e6edf3;font-size:0.82rem;cursor:pointer">↻ Refresh</button>
       </div>
@@ -1677,6 +1679,14 @@
     <div style="margin-top:28px">
       <h3 style="font-size:0.95rem;font-weight:600;color:#8b949e;margin-bottom:10px;letter-spacing:.05em">HISTORICAL ACCURACY</h3>
       <div id="fcHistory" style="overflow-x:auto"></div>
+    </div>
+
+    <!-- Failure Analysis -->
+    <div style="margin-top:28px">
+      <h3 style="font-size:0.95rem;font-weight:600;color:#8b949e;margin-bottom:10px;letter-spacing:.05em">PREDICTION FAILURE ANALYSIS
+        <button onclick="loadFailureAnalysis(true)" style="background:none;border:1px solid #30363d;border-radius:4px;padding:2px 8px;color:#8b949e;font-size:0.72rem;cursor:pointer;margin-left:8px">↻</button>
+      </h3>
+      <div id="fcFailureAnalysis"></div>
     </div>
 
   </div>
@@ -2515,6 +2525,7 @@
         <button class="arch-tab-btn" data-av="db"    onclick="showArch('db')">🗄️ DB Schema</button>
         <button class="arch-tab-btn" data-av="chat"  onclick="showArch('chat')">💬 Chat Flow</button>
         <button class="arch-tab-btn" data-av="pred"  onclick="showArch('pred')">🔮 Predictor</button>
+        <button class="arch-tab-btn" data-av="cal"   onclick="showArch('cal')">🎯 Calibration</button>
         <button class="arch-tab-btn" data-av="scan"  onclick="showArch('scan')">🔍 Scan Engine</button>
         <button class="arch-tab-btn" data-av="score" onclick="showArch('score')">🎯 Conviction Score</button>
         <button class="arch-tab-btn" data-av="data"  onclick="showArch('data')">📡 Data Sources</button>
@@ -2621,6 +2632,11 @@
               <strong>5-Algorithm Predictor</strong>
               <span>predictor.js · Promise.allSettled (all 5 run in parallel) · 15-min cache per symbol · Zero LLM cost · (1) Linear Regression: slope, R², day-5/10 projections · (2) ATR Expected Move: Wilder ATR-14, ±ranges for 1/5/10 days · (3) Momentum Score 0–100: RSI + EMA9/20/50 + MACD + volume trend · (4) Personal Edge: your win rate &amp; profit factor from trades table · (5) Earnings Catalyst: revenue growth, EPS momentum, next earnings date via yahoo-finance2 · Combined → overall_signal 0–100</span>
             </div>
+            <div class="amap-node" style="--nc:#f0883e">
+              <span class="amap-node-icon">🎯</span>
+              <strong>Prediction Calibration</strong>
+              <span>prediction-calibration.js · Uses shared db.js pool (no separate connection) · <strong style="color:#f0883e">trainCalibration()</strong>: runs after every EOD fill + Mon 8:30 AM ET · Learns per-symbol bias (additive offset), vol_scale, dir_accuracy · Global R²-bucket error rates · Key finding: high R²&gt;0.6 stocks have only ~14% direction accuracy — strong trends over-extrapolate then reverse · <strong style="color:#f0883e">applyCalibration()</strong>: additive bias + R² reversal damper (×0.5 when R²&gt;0.6 &amp; dir_acc&lt;35%) + confidence 0–100 · <strong style="color:#f0883e">applyCalibrationToDay()</strong>: re-applies same factors to each forecast day (O(1) DB calls per symbol) · Enriches get_stock_prediction tool result with calibration block for Claude</span>
+            </div>
           </div>
         </div>
 
@@ -2697,7 +2713,7 @@
             <div class="amap-node" style="--nc:#bc8cff">
               <span class="amap-node-icon">🗄️</span>
               <strong>PostgreSQL :5432</strong>
-              <span>users · sessions · trades · conversation_history · daily_picks · performance_patterns · api_usage_stats · conviction_scores · trade_lessons · scanner_state · bug_reports · <strong style="color:#e3b341">fundamentals</strong> (S&amp;P 500 + NASDAQ-100 quarterly income data)</span>
+              <span>users · sessions · trades · conversation_history · daily_picks · performance_patterns · api_usage_stats · conviction_scores · trade_lessons · scanner_state · bug_reports · <strong style="color:#e3b341">fundamentals</strong> (quarterly income data) · <strong style="color:#bc8cff">stock_predictions</strong> (weekly 5-day forecasts with adjusted_change_pct + confidence) · <strong style="color:#f0883e">prediction_calibration</strong> (per-symbol bias/vol_scale/dir_accuracy) · <strong style="color:#f0883e">prediction_calibration_global</strong> (R² bucket stats + bullish bias) · <strong style="color:#f0883e">prediction_errors</strong> (one row per filled prediction for failure analysis)</span>
             </div>
             <div class="amap-node" style="--nc:#6e7681">
               <span class="amap-node-icon">⚡</span>
@@ -3252,7 +3268,111 @@
           </div>
         </div>
 
+        <!-- Calibration layer callout -->
+        <div style="background:rgba(240,136,62,0.06);border:1px solid rgba(240,136,62,0.3);border-radius:12px;padding:16px;margin-top:12px">
+          <div style="font-size:0.72rem;font-weight:700;color:#f0883e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">🎯 Calibration Layer — Applied After Prediction</div>
+          <div style="font-size:0.78rem;color:#8b949e;line-height:1.7">
+            After the 5 algorithms produce a raw prediction, <code>applyCalibration(symbol, changePct, rSquared)</code> adjusts it using learned error patterns:<br>
+            &nbsp;&nbsp;• <strong style="color:#c9d1d9">Bias correction</strong> — additive offset (e.g. MU consistently under-predicts by +3%). Weight scales 0→1 from 0→10 samples.<br>
+            &nbsp;&nbsp;• <strong style="color:#c9d1d9">R² reversal damper</strong> — if R²&gt;0.6 AND direction accuracy&lt;35%, multiply prediction by 0.5. Rationale: high-R² trends are being over-extrapolated; the stock then reverses sharply.<br>
+            &nbsp;&nbsp;• <strong style="color:#c9d1d9">Confidence score 0–100</strong> — error score (50%) + direction accuracy (40%) + sample bonus (10%).<br>
+            The same bias + reversal factors are re-applied to each forecast day via <code>applyCalibrationToDay()</code> with no additional DB calls.<br>
+            Claude sees the <code>calibration{}</code> block on every <code>get_stock_prediction</code> tool call.
+          </div>
+        </div>
+
       </div><!-- /av-pred -->
+
+      <!-- ══════════ CALIBRATION VIEW ══════════ -->
+      <div id="av-cal" class="arch-view" style="display:none">
+        <div class="arch-header">🎯 Prediction Calibration</div>
+        <div class="arch-subhead">A reinforcement learning layer that learns from every filled actual price and adjusts future predictions. Zero LLM cost — pure statistical correction on top of the 5-algorithm predictor.</div>
+
+        <!-- Key finding callout -->
+        <div style="background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.25);border-radius:12px;padding:14px;margin-bottom:18px">
+          <div style="font-size:0.72rem;font-weight:700;color:#f85149;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">⚠️ Key Discovery from Your Data</div>
+          <div style="font-size:0.82rem;color:#e6edf3;font-weight:600;margin-bottom:6px">High R² stocks are the worst performers, not the best.</div>
+          <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+            R²&gt;0.6 (strong trend) stocks have <strong style="color:#f85149">only ~14% direction accuracy</strong> and the <strong style="color:#f85149">highest average error (~3.85%)</strong>.<br>
+            Cause: strong linear trends get over-extrapolated by the regression. The stock then mean-reverts or reverses sharply.<br>
+            Fix: the calibration layer damps high-R² predictions by 50% when direction accuracy is below 35%.
+          </div>
+        </div>
+
+        <!-- How it trains -->
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+
+          <div style="background:rgba(57,211,83,0.06);border:1px solid rgba(57,211,83,0.25);border-radius:12px;padding:14px">
+            <div style="font-size:0.8rem;font-weight:700;color:#39d353;margin-bottom:8px">STEP 1 — trainCalibration() — When it runs</div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              Triggered automatically after every <code>fillTodayActuals()</code> call (EOD cron 4:15 PM ET + manual Fill Actuals button).<br>
+              Requires ≥5 actuals to train — skips gracefully with a log message if insufficient data.<br>
+              Scans all rows in <code>stock_predictions</code> where <code>actual_price IS NOT NULL</code>.
+            </div>
+          </div>
+
+          <div style="background:rgba(88,166,255,0.06);border:1px solid rgba(88,166,255,0.25);border-radius:12px;padding:14px">
+            <div style="font-size:0.8rem;font-weight:700;color:#58a6ff;margin-bottom:8px">STEP 2 — Per-symbol factors stored in prediction_calibration</div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              <strong style="color:#c9d1d9">bias</strong> — mean(actual_change − predicted_change). Positive = model under-predicts. Applied additively, weighted by sample_size/10.<br>
+              <strong style="color:#c9d1d9">vol_scale</strong> — mean(|actual_change| / max(|predicted_change|, 0.1)). Captures whether real moves are larger than modeled.<br>
+              <strong style="color:#c9d1d9">dir_accuracy</strong> — fraction of predictions where direction (UP/DOWN) was correct.
+            </div>
+          </div>
+
+          <div style="background:rgba(240,136,62,0.06);border:1px solid rgba(240,136,62,0.25);border-radius:12px;padding:14px">
+            <div style="font-size:0.8rem;font-weight:700;color:#f0883e;margin-bottom:8px">STEP 3 — Global R²-bucket stats stored in prediction_calibration_global</div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              Four buckets: r2_low (&lt;0.1) · r2_poor (0.1–0.3) · r2_mid (0.3–0.6) · r2_high (&gt;0.6).<br>
+              For each: avg_abs_error and dir_accuracy stored.<br>
+              Also stores <strong style="color:#c9d1d9">model_bullish_bias</strong> (% of predictions that were UP) and <strong style="color:#c9d1d9">actual_bullish_rate</strong> (% of stocks that actually closed UP).
+            </div>
+          </div>
+
+          <div style="background:rgba(188,140,255,0.06);border:1px solid rgba(188,140,255,0.25);border-radius:12px;padding:14px">
+            <div style="font-size:0.8rem;font-weight:700;color:#bc8cff;margin-bottom:8px">STEP 4 — Individual errors logged to prediction_errors</div>
+            <div style="font-size:0.78rem;color:#8b949e;line-height:1.6">
+              One row per (symbol, target_date) with: r_squared, algorithm_signal, predicted_change_pct, actual_change_pct, error_pct, direction_correct.<br>
+              Unique constraint on (symbol, target_date) — re-running trainCalibration() is idempotent.<br>
+              Powers the <strong style="color:#bc8cff">Failure Analysis</strong> panel in Forecast Lab.
+            </div>
+          </div>
+        </div>
+
+        <!-- Application -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px;margin-bottom:12px">
+          <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">applyCalibration() — Applied at Forecast Generation</div>
+          <pre style="font-size:0.78rem;color:#e6edf3;margin:0;line-height:1.8;font-family:monospace">1. Load per-symbol bias (if ≥2 samples)
+   weight = min(1, sample_size / 10)
+   adjusted += bias × weight              <span style="color:#6e7681">// additive, constant across all days</span>
+
+2. Determine R² bucket → load dir_accuracy + expected_error
+
+3. R² reversal damper (if R²>0.6 AND dir_acc&lt;0.35):
+   adjusted = adjusted × 0.5             <span style="color:#6e7681">// multiplicative, constant across all days</span>
+
+4. confidence = errorScore×0.5 + dirScore×0.4 + sampleBonus×0.1
+   (0–100; green≥60, orange≥40, red&lt;40)
+
+For days 2–5 of the weekly forecast:
+   applyCalibrationToDay(projPct, factors)
+   → same bias + same reversal, no extra DB calls</pre>
+        </div>
+
+        <!-- Integration points -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:12px;padding:16px">
+          <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Where calibration data surfaces</div>
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:0.78rem;color:#8b949e">
+            <div><span style="color:#39d353;margin-right:8px">●</span><strong style="color:#c9d1d9">Forecast Lab table</strong> — adjusted_change_pct shown with * suffix when &gt;0.05% different; confidence score colour-coded green/orange/red</div>
+            <div><span style="color:#39d353;margin-right:8px">●</span><strong style="color:#c9d1d9">Forecast Lab — Failure Analysis panel</strong> — worst symbols by error, R² bucket breakdown, direction quadrant counts, global bullish bias</div>
+            <div><span style="color:#39d353;margin-right:8px">●</span><strong style="color:#c9d1d9">AI Chat get_stock_prediction</strong> — Claude receives <code>calibration: { adjusted_change_pct, confidence, expected_error_pct, notes }</code></div>
+            <div><span style="color:#39d353;margin-right:8px">●</span><strong style="color:#c9d1d9">GET /api/forecast</strong> — every day object includes <code>adjusted_change_pct</code> and <code>confidence</code></div>
+            <div><span style="color:#39d353;margin-right:8px">●</span><strong style="color:#c9d1d9">GET /api/forecast/failure-analysis</strong> — full failure breakdown JSON</div>
+            <div><span style="color:#39d353;margin-right:8px">●</span><strong style="color:#c9d1d9">POST /api/forecast/train-calibration</strong> — manual retrain trigger (button in Forecast Lab header)</div>
+          </div>
+        </div>
+
+      </div><!-- /av-cal -->
 
       <div id="av-scan" class="arch-view" style="display:none">
         <div class="arch-header">🔍 How the Scanner Finds and Executes Trades</div>
@@ -4311,6 +4431,50 @@ erDiagram
         text    key   UK
         jsonb   value
     }
+    stock_predictions {
+        serial  id                   PK
+        varchar symbol
+        date    week_start
+        date    target_date
+        numeric predicted_price
+        numeric predicted_change_pct
+        numeric adjusted_change_pct
+        int     confidence
+        numeric base_price
+        numeric actual_price
+        numeric actual_change_pct
+        numeric error_pct
+        int     algorithm_signal
+        numeric slope_per_day
+        numeric r_squared
+        bool    has_earnings
+        date    earnings_date
+    }
+    prediction_calibration {
+        varchar symbol    PK
+        varchar feature   PK
+        numeric value
+        int     sample_size
+        timestamptz last_trained
+    }
+    prediction_calibration_global {
+        varchar feature   PK
+        numeric value
+        int     sample_size
+        timestamptz last_trained
+    }
+    prediction_errors {
+        serial  id                   PK
+        varchar symbol
+        date    target_date          UK
+        numeric r_squared
+        int     algorithm_signal
+        numeric predicted_change_pct
+        numeric actual_change_pct
+        numeric error_pct
+        bool    direction_correct
+        timestamptz recorded_at
+    }
 
     users                ||--o{ otp_tokens            : "email"
     users                ||--o{ bug_reports           : "username"
@@ -4327,6 +4491,8 @@ erDiagram
     trades               ||--o{ trade_lessons         : "trade_id"
     backtest_prices      ||--o{ backtest_scores       : "symbol"
     backtest_scores      ||--o{ backtest_returns      : "symbol"
+    stock_predictions    ||--o{ prediction_errors     : "symbol+date"
+    prediction_calibration }o--|| stock_predictions   : "symbol"
           </script></div>
         </div>
 
@@ -4887,13 +5053,12 @@ fetch('/auth/check').then(r => r.json()).then(d => {
     if (src === 'tiger')  return !!sel2?.querySelector('option[value="tiger"]')  || !!d.has_tiger;
     return false;
   };
-  const wantedSource = (savedSource && isValidSource(savedSource)) ? savedSource : 'alpaca';
-  if (wantedSource !== currentSource) setSource(wantedSource);
-  else {
-    // Sync dropdown (applyPermissions may have reset it)
-    const sel = document.getElementById('sourceSelect');
-    if (sel && sel.value !== currentSource) sel.value = currentSource;
-  }
+  // Pick the best default source for this user when no preference is saved
+  const _defaultSource = d.has_tiger ? 'tiger' : d.has_moomoo && d.role !== 'admin' ? 'moomoo' : 'alpaca';
+  const wantedSource = (savedSource && isValidSource(savedSource)) ? savedSource : _defaultSource;
+  // Always call setSource so loaders (loadDashboard, loadPnl, etc.) run on every page load,
+  // even when the source hasn't changed from what was stored in localStorage.
+  setSource(wantedSource);
   if (!d.has_alpaca && !d.has_tiger) showAlpacaSetup();
   // Update broker settings badge in user menu
   const badge = document.getElementById('brokerSettingsBadge');
@@ -8341,15 +8506,18 @@ function renderForecast() {
 
   const heldSymbols = new Set((window._moomooPositions || []).map(p => (p.symbol||'').toUpperCase()));
 
+  // Header: each day gets colspan=2 (Pred | Actual)
   let th = `<tr><th rowspan="2">Symbol</th><th rowspan="2">Base</th><th rowspan="2">Signal</th>`;
   days.forEach((d, i) => {
     const isToday = d === todayStr;
-    th += `<th colspan="1" class="${isToday ? 'fc-today-col' : ''}">${DAY_LABELS[i]}<br><span style="font-weight:400;color:#6e7681">${d.slice(5)}</span></th>`;
+    th += `<th colspan="2" class="${isToday ? 'fc-today-col' : ''}" style="text-align:center;border-right:1px solid #30363d">${DAY_LABELS[i]}<br><span style="font-weight:400;color:#6e7681;font-size:0.7rem">${d.slice(5)}</span></th>`;
   });
   th += `</tr><tr>`;
   days.forEach((d) => {
     const isToday = d === todayStr;
-    th += `<th class="${isToday ? 'fc-today-col' : ''}" style="font-size:0.6rem;color:#58a6ff;font-weight:600;padding:2px 8px">Pred</th>`;
+    const c = isToday ? 'fc-today-col' : '';
+    th += `<th class="${c}" style="font-size:0.6rem;color:#58a6ff;font-weight:600;padding:2px 6px;border-right:none">Pred</th>`;
+    th += `<th class="${c}" style="font-size:0.6rem;color:#39d353;font-weight:600;padding:2px 6px;border-right:1px solid #30363d">Actual</th>`;
   });
   th += `</tr>`;
 
@@ -8362,49 +8530,68 @@ function renderForecast() {
     const rowBase = s.has_earnings ? 'fc-earnings-row' : '';
     const heldDot = isHeld ? '<span style="color:#39d353;font-size:0.65rem"> ●</span>' : '';
 
-    // Pred row
-    const predCells = days.map((d) => {
+    // One row per stock — 2 cells per day: Pred cell + Actual cell
+    const dayCells = days.map((d) => {
       const day = s.days?.[d];
       const colClass = d === todayStr ? 'fc-today-col' : '';
-      if (!day) return `<td class="fc-day-cell ${colClass}"><span class="fc-empty-cell">—</span></td>`;
-      return `<td class="fc-day-cell ${colClass}">
-        <div class="fc-pred">${fcFmt(day.predicted_price)}</div>
-        <div class="fc-pred-chg">${fcPct(day.predicted_change_pct)}</div>
-      </td>`;
-    }).join('');
+      const isPast = d < todayStr;
 
-    // Actual row
-    const actualCells = days.map((d) => {
-      const day = s.days?.[d];
-      const colClass = d === todayStr ? 'fc-today-col' : '';
-      if (!day) return `<td class="fc-day-cell ${colClass}"><span class="fc-empty-cell">—</span></td>`;
-      const hasActual = day.actual_price != null;
-      const ac = day.actual_change_pct;
-      const acColor = hasActual ? (ac >= 0 ? '#39d353' : '#f85149') : '#484f58';
-      if (hasActual) {
-        return `<td class="fc-day-cell ${colClass}">
-          <div class="fc-actual" style="color:${acColor}">${fcFmt(day.actual_price)}</div>
-          <div class="fc-error" style="color:${fcErrColor(day.error_pct)}">err ${fcPct(day.error_pct)}</div>
+      // Pred cell
+      let predCell;
+      if (!day) {
+        predCell = `<td class="fc-day-cell ${colClass}" style="border-right:none"><span class="fc-empty-cell">—</span></td>`;
+      } else {
+        const hasAdj = day.adjusted_change_pct != null && Math.abs(day.adjusted_change_pct - day.predicted_change_pct) > 0.05;
+        const adjStr = hasAdj ? `<div style="font-size:0.6rem;color:#f0883e" title="Calibration-adjusted">${fcPct(day.adjusted_change_pct)}*</div>` : '';
+        const conf = day.confidence;
+        const confBadge = conf != null
+          ? `<div style="font-size:0.58rem;font-weight:700;color:${conf>=60?'#39d353':conf>=40?'#f0883e':'#f85149'};letter-spacing:0.02em" title="Confidence score (0–100)">${conf}</div>`
+          : '';
+        predCell = `<td class="fc-day-cell ${colClass}" style="border-right:none">
+          <div class="fc-pred">${fcFmt(day.predicted_price)}</div>
+          <div class="fc-pred-chg" style="font-size:0.67rem;color:#8b949e">${fcPct(day.predicted_change_pct)}</div>
+          ${adjStr}${confBadge}
         </td>`;
       }
-      return `<td class="fc-day-cell ${colClass}"><span style="color:#484f58;font-size:0.72rem">—</span></td>`;
+
+      // Actual cell
+      let actualCell;
+      const hasActual = day?.actual_price != null;
+      if (hasActual) {
+        const ac = day.actual_change_pct;
+        const acColor = ac >= 0 ? '#39d353' : '#f85149';
+        const errAbs = day.error_pct != null ? Math.abs(day.error_pct) : null;
+        actualCell = `<td class="fc-day-cell ${colClass}" style="border-right:1px solid #30363d;background:rgba(57,211,83,0.04)">
+          <div class="fc-actual" style="color:${acColor};font-weight:700">${fcFmt(day.actual_price)}</div>
+          <div style="font-size:0.65rem;color:${fcErrColor(day.error_pct)}">±${errAbs != null ? errAbs.toFixed(1) : '?'}%</div>
+        </td>`;
+      } else if (isPast) {
+        // Past day but no actual filled yet — highlight as missing
+        actualCell = `<td class="fc-day-cell ${colClass}" style="border-right:1px solid #30363d;background:rgba(248,81,73,0.04)">
+          <span style="color:#484f58;font-size:0.7rem" title="Click Fill actuals to fetch">—</span>
+        </td>`;
+      } else {
+        // Future or today (market not closed yet)
+        actualCell = `<td class="fc-day-cell ${colClass}" style="border-right:1px solid #30363d">
+          <span style="color:#30363d;font-size:0.72rem">—</span>
+        </td>`;
+      }
+
+      return predCell + actualCell;
     }).join('');
 
     return `
-    <tr class="${rowBase} fc-pred-row">
-      <td rowspan="2"><span class="sym-link fc-sym" data-symbol="${s.symbol}" style="cursor:pointer">${s.symbol}${heldDot}</span>${earningsTag}<br>
-        <span class="fc-base" style="font-size:0.63rem">R²=${(s.r_squared||0).toFixed(2)} s=${s.slope_per_day>=0?'+':''}${(s.slope_per_day||0).toFixed(2)}</span></td>
-      <td rowspan="2"><span class="fc-sym">${fcFmt(s.base_price)}</span></td>
-      <td rowspan="2" style="min-width:70px">
+    <tr class="${rowBase}">
+      <td><span class="sym-link fc-sym" data-symbol="${s.symbol}" style="cursor:pointer">${s.symbol}${heldDot}</span>${earningsTag}<br>
+        <span class="fc-base" style="font-size:0.63rem;color:#6e7681">R²=${(s.r_squared||0).toFixed(2)} s=${s.slope_per_day>=0?'+':''}${(s.slope_per_day||0).toFixed(2)}</span></td>
+      <td><span class="fc-sym">${fcFmt(s.base_price)}</span></td>
+      <td style="min-width:70px">
         <div style="position:relative;display:inline-block">
           <div class="fc-signal-bar"><div class="fc-signal-dot" style="left:${sigLeft}%;background:${sigColor}"></div></div>
         </div>
         <div style="font-size:0.68rem;color:${sigColor};font-weight:600">${sigPct}</div>
       </td>
-      ${predCells}
-    </tr>
-    <tr class="${rowBase} fc-actual-row">
-      ${actualCells}
+      ${dayCells}
     </tr>`;
   }).join('');
 
@@ -8469,11 +8656,154 @@ async function generateForecast() {
 
 async function fillActuals() {
   const r = await api('/api/forecast/fill-actuals', 60000, 'POST');
-  if (r?.success) { _fcData = null; loadForecast(true); }
+  if (r?.success) { _fcData = null; loadForecast(true); loadFailureAnalysis(true); }
+}
+
+async function trainCalibrationModel() {
+  const r = await api('/api/forecast/train-calibration', 30000, 'POST');
+  if (r?.success) {
+    const msg = r.skipped ? `Skipped: ${r.reason} (n=${r.n})` : `Trained on ${r.samples} actuals across ${r.symbols} symbols`;
+    alert('Calibration: ' + msg);
+    loadFailureAnalysis(true);
+  } else {
+    alert('Train failed: ' + (r?.error || 'unknown'));
+  }
+}
+
+let _failureData = null;
+
+async function loadFailureAnalysis(force) {
+  if (force) _failureData = null;
+  if (_failureData) { renderFailureAnalysis(_failureData); return; }
+  const el = document.getElementById('fcFailureAnalysis');
+  if (el) el.innerHTML = '<div style="color:#6e7681;font-size:0.8rem">Loading…</div>';
+  const d = await api('/api/forecast/failure-analysis', 20000);
+  if (!d) {
+    if (el) el.innerHTML = '<div style="color:#f85149;font-size:0.8rem">Failed to load — check server connection.</div>';
+    return;
+  }
+  if (!d.success) {
+    if (el) el.innerHTML = `<div style="color:#f85149;font-size:0.8rem">Error: ${d.error || 'Unknown error'}</div>`;
+    return;
+  }
+  _failureData = d;
+  renderFailureAnalysis(d);
+}
+
+function renderFailureAnalysis(d) {
+  const el = document.getElementById('fcFailureAnalysis');
+  if (!el) return;
+  if (!d || (!d.worst_symbols?.length && !d.r2_bucket_stats?.length && !d.direction_stats?.length)) {
+    el.innerHTML = `<div style="color:#6e7681;font-size:0.8rem">
+      No calibration data yet — click <strong style="color:#58a6ff">Fill actuals</strong> to fetch close prices, then <strong style="color:#f0883e">🎯 Train calibration</strong> to learn from the errors.
+      ${d?.global?.total_samples === 0 ? '<span style="color:#484f58"> (0 samples logged)</span>' : ''}
+    </div>`;
+    return;
+  }
+
+  // Global bias summary
+  const g = d.global || {};
+  const bullBias = g.model_bullish_bias != null ? Math.round(g.model_bullish_bias * 100) : null;
+  const actBull  = g.actual_bullish_rate != null ? Math.round(g.actual_bullish_rate * 100) : null;
+  const totalN   = g.total_samples ?? 0;
+  const biasHtml = bullBias != null ? `
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px">
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;min-width:140px">
+        <div style="font-size:0.7rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Model bullish bias</div>
+        <div style="font-size:1.4rem;font-weight:700;color:${bullBias>55?'#f0883e':'#e6edf3'}">${bullBias}%</div>
+        <div style="font-size:0.7rem;color:#6e7681">predicts UP</div>
+      </div>
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;min-width:140px">
+        <div style="font-size:0.7rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Actual up rate</div>
+        <div style="font-size:1.4rem;font-weight:700;color:#e6edf3">${actBull}%</div>
+        <div style="font-size:0.7rem;color:#6e7681">stocks close up</div>
+      </div>
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;min-width:140px">
+        <div style="font-size:0.7rem;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Total samples</div>
+        <div style="font-size:1.4rem;font-weight:700;color:#e6edf3">${totalN}</div>
+        <div style="font-size:0.7rem;color:#6e7681">prediction errors logged</div>
+      </div>
+    </div>` : '';
+
+  // R² bucket table
+  let r2Html = '';
+  if (d.r2_bucket_stats?.length) {
+    r2Html = `<div style="margin-bottom:20px">
+      <div style="font-size:0.78rem;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">R² Bucket Performance</div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
+        <thead><tr style="color:#6e7681">
+          <th style="text-align:left;padding:4px 8px">R² Range</th>
+          <th style="padding:4px 8px">N</th>
+          <th style="padding:4px 8px">Avg |Error|</th>
+          <th style="padding:4px 8px">Direction Acc</th>
+        </tr></thead><tbody>`;
+    for (const r of d.r2_bucket_stats) {
+      const err = r.avg_abs_error != null ? +r.avg_abs_error : null;
+      const dir = r.dir_acc != null ? +r.dir_acc : null;
+      r2Html += `<tr style="border-top:1px solid #21262d">
+        <td style="padding:4px 8px;color:#e6edf3">${r.r2_bucket}</td>
+        <td style="padding:4px 8px;text-align:center;color:#8b949e">${r.n}</td>
+        <td style="padding:4px 8px;text-align:center;color:${err!=null&&err<2?'#39d353':err<4?'#f0883e':'#f85149'}">${err!=null?err.toFixed(2)+'%':'—'}</td>
+        <td style="padding:4px 8px;text-align:center;color:${dir>=55?'#39d353':dir>=45?'#f0883e':'#f85149'}">${dir!=null?dir.toFixed(1)+'%':'—'}</td>
+      </tr>`;
+    }
+    r2Html += `</tbody></table></div>`;
+  }
+
+  // Direction breakdown
+  let dirHtml = '';
+  if (d.direction_stats?.length) {
+    const dirLabels = { pred_up_actual_down:'↑ Pred / ↓ Actual', pred_down_actual_up:'↓ Pred / ↑ Actual', both_up:'↑ Both Up', both_down:'↓ Both Down' };
+    const dirColors = { pred_up_actual_down:'#f85149', pred_down_actual_up:'#f85149', both_up:'#39d353', both_down:'#39d353' };
+    dirHtml = `<div style="margin-bottom:20px">
+      <div style="font-size:0.78rem;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Direction Breakdown</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">`;
+    for (const r of d.direction_stats) {
+      const label = dirLabels[r.pattern] || r.pattern;
+      const col = dirColors[r.pattern] || '#8b949e';
+      dirHtml += `<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 14px;min-width:120px;text-align:center">
+        <div style="font-size:0.75rem;color:${col};font-weight:600">${label}</div>
+        <div style="font-size:1.2rem;font-weight:700;color:#e6edf3">${r.n}</div>
+        <div style="font-size:0.68rem;color:#6e7681">avg err ${r.avg_abs_error != null ? (+r.avg_abs_error).toFixed(1)+'%' : '—'}</div>
+      </div>`;
+    }
+    dirHtml += `</div></div>`;
+  }
+
+  // Worst symbols table
+  let symHtml = '';
+  if (d.worst_symbols?.length) {
+    symHtml = `<div>
+      <div style="font-size:0.78rem;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Worst Predicted Symbols</div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
+        <thead><tr style="color:#6e7681">
+          <th style="text-align:left;padding:4px 8px">Symbol</th>
+          <th style="padding:4px 8px">Samples</th>
+          <th style="padding:4px 8px">Avg |Error|</th>
+          <th style="padding:4px 8px">Dir Acc</th>
+          <th style="padding:4px 8px">Avg R²</th>
+          <th style="padding:4px 8px">Avg Signal</th>
+        </tr></thead><tbody>`;
+    for (const r of d.worst_symbols) {
+      const err = r.avg_abs_error != null ? +r.avg_abs_error : null;
+      const dir = r.dir_acc != null ? +r.dir_acc : null;
+      symHtml += `<tr style="border-top:1px solid #21262d">
+        <td style="padding:4px 8px;color:#58a6ff;font-weight:600">${r.symbol}</td>
+        <td style="padding:4px 8px;text-align:center;color:#8b949e">${r.n}</td>
+        <td style="padding:4px 8px;text-align:center;color:${err!=null&&err<2?'#39d353':err<4?'#f0883e':'#f85149'}">${err!=null?err.toFixed(2)+'%':'—'}</td>
+        <td style="padding:4px 8px;text-align:center;color:${dir>=55?'#39d353':dir>=45?'#f0883e':'#f85149'}">${dir!=null?dir.toFixed(1)+'%':'—'}</td>
+        <td style="padding:4px 8px;text-align:center;color:#6e7681">${r.avg_r2!=null?(+r.avg_r2).toFixed(3):'—'}</td>
+        <td style="padding:4px 8px;text-align:center;color:#6e7681">${r.avg_signal??'—'}</td>
+      </tr>`;
+    }
+    symHtml += `</tbody></table></div>`;
+  }
+
+  el.innerHTML = biasHtml + r2Html + dirHtml + symHtml;
 }
 
 // ── loadCalendar alias keeps showPage() loader working ────────────
-function loadCalendar(force) { loadForecast(force); }
+function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); }
 
 async function loadMarket() {
   const d = await api('/api/market');
@@ -8697,8 +9027,8 @@ async function loadPnl() {
         <div class="card-value" style="color:${realPl >= 0 ? '#3fb950' : '#f85149'}">${usd(realPl)}</div>
         <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">all-time closed trades</div>
       </div>` : ''}
-      ${hist.length > 1 ? `<div class="card">
-        <div class="card-label">Period Realized P&amp;L</div>
+      ${hist.length > 0 ? `<div class="card">
+        <div class="card-label">Period P&amp;L</div>
         <div class="card-value" style="color:${totalRealPnl >= 0 ? '#3fb950' : '#f85149'}">${usd(totalRealPnl)}</div>
         <div style="font-size:0.78rem;color:#8b949e;margin-top:4px">${winDaysR}W / ${lossDaysR}L days</div>
       </div>` : ''}
@@ -8710,17 +9040,17 @@ async function loadPnl() {
         <div class="card-label">Buying Power</div>
         <div class="card-value">$${buyPow.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
       </div>` : ''}
-      ${hist.length > 1 && bestDayR > 0 ? `<div class="card">
+      ${hist.length > 0 && bestDayR > 0 ? `<div class="card">
         <div class="card-label">Best Day</div>
         <div class="card-value" style="color:#3fb950">${usd(bestDayR)}</div>
       </div>` : ''}
-      ${hist.length > 1 && worstDayR < 0 ? `<div class="card">
+      ${hist.length > 0 && worstDayR < 0 ? `<div class="card">
         <div class="card-label">Worst Day</div>
         <div class="card-value" style="color:#f85149">${usd(worstDayR)}</div>
       </div>` : ''}`;
 
     // ── Bar chart (same structure as paper, using day-over-day realized P&L change)
-    if (hist.length < 2) {
+    if (hist.length < 1) {
       document.getElementById('pnlChart').innerHTML = `
         <div class="empty" style="padding:16px;text-align:center;color:#8b949e;font-size:0.85rem">
           Daily history accumulates here each day. Check back tomorrow for your first data point.
@@ -8765,7 +9095,7 @@ async function loadPnl() {
       <table>
         <thead><tr>
           <th>Date</th>
-          <th>Day Realized P&amp;L</th>
+          <th>Daily P&amp;L</th>
           <th>Portfolio Value</th>
           <th>Unrealized P&amp;L</th>
         </tr></thead>
@@ -10454,7 +10784,7 @@ function erdInitPan() {
 
 let _erdRendered = false;
 function showArch(view) {
-  ['map','models','db','chat','pred','scan','score','data'].forEach(v => {
+  ['map','models','db','chat','pred','cal','scan','score','data'].forEach(v => {
     const el = document.getElementById('av-' + v);
     if (el) el.style.display = v === view ? 'block' : 'none';
     const btn = document.querySelector(`[data-av="${v}"]`);

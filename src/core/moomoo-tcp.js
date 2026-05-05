@@ -375,13 +375,18 @@ function makePacketID(client) {
 }
 
 /** Pick the account matching the target trdEnv with US market auth. */
-async function pickAccount(client, trdEnv) {
+async function pickAccount(client, trdEnv, accId = null) {
   const resp = await client.sendProto(
     PROTO.GetAccList, 'Trd_GetAccList.Request', 'Trd_GetAccList.Response',
     { c2s: { userID: 0, needGeneralSecAccount: true } }
   );
   if (resp.retType !== 0) throw new Error(resp.retMsg || 'Failed to get account list');
   const list = resp.s2c.accList || [];
+  // If a specific acc_id is requested, match by it
+  if (accId) {
+    const byId = list.find(a => String(a.accID) === String(accId));
+    if (byId) return byId;
+  }
   return (
     list.find(a => a.trdEnv === trdEnv && (a.trdMarketAuthList || []).includes(TRD_MARKET.US)) ||
     list.find(a => a.trdEnv === trdEnv) ||
@@ -440,13 +445,13 @@ async function placeSingleOrder(client, { accID, trdEnv, symbol, side, qty, orde
  *
  * Returns all three order IDs so the caller can track and cancel them.
  */
-export async function placeMoomooTrade({ symbol, side = 'buy', qty, stop_price = null, take_profit_price = null, trailing_pct = null }) {
+export async function placeMoomooTrade({ symbol, side = 'buy', qty, stop_price = null, take_profit_price = null, trailing_pct = null, acc_id = null }) {
   const trdEnv  = MOOMOO_TRADE_ENV_VALUE;
   const mooSide = side === 'buy' ? TRD_SIDE.Buy : TRD_SIDE.Sell;
   const sellSide = TRD_SIDE.Sell;
 
   return withClient(async (client) => {
-    const acc = await pickAccount(client, trdEnv);
+    const acc = await pickAccount(client, trdEnv, acc_id);
     if (!acc) throw new Error(`No Moomoo account found for ${MOOMOO_IS_SIMULATE ? 'simulate' : 'real'} environment`);
     const accID = acc.accID;
 
@@ -536,10 +541,10 @@ export async function cancelMoomooOrder({ order_id }) {
 /**
  * Cancel ALL open Moomoo orders for the US market.
  */
-export async function cancelAllMoomooOrders() {
+export async function cancelAllMoomooOrders({ acc_id = null } = {}) {
   const trdEnv = MOOMOO_TRADE_ENV_VALUE;
   return withClient(async (client) => {
-    const acc = await pickAccount(client, trdEnv);
+    const acc = await pickAccount(client, trdEnv, acc_id);
     if (!acc) throw new Error('No Moomoo account found');
     await unlockTrade(client, trdEnv);
 
@@ -565,10 +570,10 @@ export async function cancelAllMoomooOrders() {
  * Close an entire Moomoo position by selling at market.
  * Looks up the current qty from the position list first.
  */
-export async function closeMoomooPosition({ symbol }) {
+export async function closeMoomooPosition({ symbol, acc_id = null }) {
   const trdEnv = MOOMOO_TRADE_ENV_VALUE;
   return withClient(async (client) => {
-    const acc = await pickAccount(client, trdEnv);
+    const acc = await pickAccount(client, trdEnv, acc_id);
     if (!acc) throw new Error('No Moomoo account found');
 
     const posResp = await client.sendProto(

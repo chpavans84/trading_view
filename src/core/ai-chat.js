@@ -38,6 +38,7 @@ import { getFunds, getPositions as getMoomooPositions, getQuote as moomooGetQuot
 import { placeTigerOrder, closeTigerPosition, cancelAllTigerOrders, getTigerPositions, getTigerFunds, getTigerQuote } from './tiger.js';
 import { isKnowledgeQuestion, answerKnowledgeQuestion, isTradeHistoryQuestion, answerTradeHistoryQuestion } from './knowledge.js';
 import { getStockPrediction } from './predictor.js';
+import { applyCalibration } from './prediction-calibration.js';
 import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswer } from './fundamental-screener.js';
 
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
@@ -227,10 +228,34 @@ function _stripEphemeralToolResults(rows) {
     .filter(Boolean);
 }
 
+// Patterns in assistant text that are time-sensitive and must not be replayed.
+// These stale blocking messages cause Claude to refuse trades based on old data.
+const _STALE_TEXT_PATTERNS = [
+  /daily loss limit\s+(hit|reached|breached)/i,
+  /trade blocked.*loss limit/i,
+  /blocked.*daily loss/i,
+  /P&L.*-\$[\d,.]+.*limit/i,
+  /loss limit.*P&L/i,
+  /loss limit.*-\$[\d,.]+.*blocked/i,
+  /you.re at.*-\$[\d,.]+.*trading is stopped/i,
+  /at -\$[\d,.]+ vs -\$[\d,.]+ ?(limit)?\.? ?blocked/i,
+];
+
+function _stripStaleBlockingText(rows) {
+  if (!rows?.length) return rows;
+  return rows.map(msg => {
+    if (msg.role !== 'assistant') return msg;
+    const text = typeof msg.content === 'string' ? msg.content : '';
+    if (text && _STALE_TEXT_PATTERNS.some(p => p.test(text))) return null;
+    return msg;
+  }).filter(Boolean);
+}
+
 export async function loadHistoryForChat(chatId) {
   if (chatHistory.has(chatId)) return;
   const rows = await loadConversationHistory(chatId, 20);
-  chatHistory.set(chatId, _stripEphemeralToolResults(rows ?? []));
+  const stripped = _stripEphemeralToolResults(rows ?? []);
+  chatHistory.set(chatId, _stripStaleBlockingText(stripped));
 }
 
 export function pushHistory(chatId, message) {
@@ -771,6 +796,30 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         return { account, positions, open_orders: orders, trade_source: 'paper' };
       }
       case 'propose_trade': {
+        // SERVER-SIDE HARD GATE: always verify P&L fresh from DB before any trade.
+        // This bypasses whatever Claude "remembers" from conversation text — the DB is ground truth.
+        if (username) {
+          try {
+            const _gTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+            const _gClosed   = await getTrades({ username, status: 'closed', limit: 500 });
+            const _gPnl      = (_gClosed ?? [])
+              .filter(t => t.closed_at && new Date(t.closed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === _gTodayStr)
+              .reduce((sum, t) => sum + (parseFloat(t.pnl_usd) || 0), 0);
+            const _gLimit    = userCfg?.daily_loss_limit ?? DAILY_LOSS_LIMIT;
+            if (_gPnl <= -_gLimit) {
+              return {
+                status:  'blocked_loss_limit',
+                pnl:     +_gPnl.toFixed(2),
+                limit:   -_gLimit,
+                reason:  `Daily loss limit reached for ${username}. Realized P&L today: $${_gPnl.toFixed(2)} (limit: -$${_gLimit}).`,
+              };
+            }
+            // P&L is within limits — proceed regardless of what conversation history says
+          } catch {
+            // DB error → allow trade (never block on infrastructure failure)
+          }
+        }
+
         const _tDbU = username ? await getDbUser(username).catch(() => null) : null;
         const _tDis = Array.isArray(_tDbU?.disabled_sources) ? _tDbU.disabled_sources : [];
         const tradeSource = _resolveTradeSource(userCfg?.trade_source ?? 'paper', _tDis);
@@ -824,7 +873,19 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const maxDol = sizing.max_dollars ?? 5000;
           const dollars = Math.min(maxDol, Math.max(minDol, Math.round(targetProfit / 0.05)));
           const qty = Math.max(1, Math.floor(dollars / price));
-          const result = await placeTigerOrder(creds, { symbol: input.symbol, side: input.side, qty });
+          let result;
+          try {
+            result = await placeTigerOrder(creds, { symbol: input.symbol, side: input.side, qty });
+          } catch (tigerErr) {
+            const msg = tigerErr.message ?? '';
+            // Tiger error 4 / code 1000 = method not supported = API trading permission not enabled
+            const isPermissionError = msg.includes('not support') || msg.includes('1000') || msg.includes('error 4:');
+            const hint = isPermissionError
+              ? 'Tiger OpenAPI trading permission is not enabled. Go to Tiger App → Profile → OpenAPI → enable Trading permissions, then regenerate your API key.'
+              : 'Check the server logs (pm2 logs trading-bot) for the full Tiger API error code and message.';
+            return { status: 'error', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price,
+              reason: msg, hint };
+          }
           recordTrade({ username, order_id: String(result.order_id), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown }).catch(() => {});
           if (onTrade) onTrade(result);
           return { status: 'executed', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price, price_source: priceSource, order_id: result.order_id, conviction_score: convictionScore };
@@ -1011,7 +1072,28 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       case 'get_ohlcv_summary':      return await getOHLCVSummary({ symbol: input.symbol });
       case 'get_conviction_score':   return await getConvictionScore({ symbol: input.symbol, positions: input.positions || [] });
       case 'get_earnings_surprise':  return await getEarningsSurprise({ symbol: input.symbol });
-      case 'get_stock_prediction':   return await getStockPrediction(input.symbol);
+      case 'get_stock_prediction': {
+        const pred = await getStockPrediction(input.symbol);
+        // Enrich with calibration so Claude sees adjusted prediction + confidence
+        try {
+          const base   = pred.current_price;
+          const day5   = pred.trend?.projected_day5;
+          const rSq    = pred.trend?.r_squared ?? 0;
+          if (base && day5) {
+            const rawChg = (day5 - base) / base * 100;
+            const cal = await applyCalibration(input.symbol, rawChg, rSq);
+            if (cal && cal.confidence != null) {
+              pred.calibration = {
+                adjusted_change_pct: cal.adjusted_change_pct,
+                confidence:          cal.confidence,
+                expected_error_pct:  cal.expected_error_pct,
+                notes:               cal.notes,
+              };
+            }
+          }
+        } catch { /* calibration is best-effort — never block predictions */ }
+        return pred;
+      }
       case 'get_my_config': {
         const cfg = userCfg ?? { ...BOT_CONFIG_DEFAULTS };
         return { current_config: cfg, note: 'Use update_my_config to change any of these values.' };
@@ -1194,7 +1276,8 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
   if (!chatHistory.has(chatId)) await loadHistoryForChat(chatId);
   pushHistory(chatId, { role: 'user', content: message });
 
-  let messages = [...chatHistory.get(chatId)];
+  // Strip stale P&L blocking text on every turn — catches in-memory history too
+  let messages = _stripStaleBlockingText([...chatHistory.get(chatId)]);
   let fullText = '';
 
   const [lessonsBlock, earningsBlock] = await Promise.all([
