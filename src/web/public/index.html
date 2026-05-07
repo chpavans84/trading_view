@@ -906,7 +906,9 @@
   .nd-ticker {
     background: var(--accent); color: #fff; border-radius: 3px;
     padding: 1px 5px; font-size: 0.66rem; font-weight: 700;
+    cursor: pointer; border: none; transition: opacity 0.12s;
   }
+  .nd-ticker:hover { opacity: 0.75; }
   .nd-sentiment { font-size: 0.63rem; font-weight: 600; padding: 1px 5px; border-radius: 3px; }
   .nd-sentiment.bullish { background: rgba(16,185,129,0.15); color: #10b981; }
   .nd-sentiment.bearish { background: rgba(244,63,94,0.15); color: #f43f5e; }
@@ -921,6 +923,13 @@
     transition: all 0.15s;
   }
   .nd-analyze-btn:hover { background: rgba(14,165,233,0.12); border-color: var(--accent); }
+  .nd-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .nd-teaser { font-size: 0.74rem; color: var(--muted); line-height: 1.5; padding: 2px 0; }
+  .nd-teaser-collapsed { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .nd-expand-btn { background: none; border: none; color: var(--muted); font-size: 0.65rem; cursor: pointer; padding: 0; transition: color 0.12s; }
+  .nd-expand-btn:hover { color: var(--text); }
+  .nd-fullart-btn { background: none; border: 1px solid rgba(148,163,184,0.25); color: var(--muted); border-radius: 4px; padding: 2px 8px; font-size: 0.66rem; cursor: pointer; text-decoration: none; transition: all 0.15s; }
+  .nd-fullart-btn:hover { border-color: var(--accent); color: var(--accent); }
   .nd-status { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 24px 12px; }
   .nd-refresh-bar {
     display: flex; align-items: center; gap: 8px;
@@ -14776,6 +14785,14 @@ function openFloatExplorer() {
   loadExplorerSymbols();
   document.getElementById('explorerSymbol').focus();
 }
+
+function openExplorerForSymbol(sym) {
+  const input = document.getElementById('explorerSymbol');
+  if (!input || !sym) return;
+  input.value = sym.toUpperCase();
+  openFloatExplorer();
+  loadStockExplorer();
+}
 function closeFloatExplorer() {
   document.getElementById('floatExplorer').classList.remove('open');
   document.getElementById('tab-explorer').classList.remove('active');
@@ -15325,11 +15342,23 @@ function toggleNewsDrawer() {
   const ndToggle = document.getElementById('newsDrawerToggle');
   if (ndToggle) ndToggle.addEventListener('click', toggleNewsDrawer);
 
-  // Analyze button — uses data attributes to avoid JSON-in-onclick quoting issues
+  // News drawer click delegation — analyze, ticker→explorer, expand teaser
   const items = document.getElementById('newsDrawerItems');
   if (items) items.addEventListener('click', e => {
-    const btn = e.target.closest('.nd-analyze-btn');
-    if (btn) analyzeNewsItem(btn.dataset.ticker || '', btn.dataset.headline || '');
+    const analyzeBtn = e.target.closest('.nd-analyze-btn');
+    if (analyzeBtn) { analyzeNewsItem(analyzeBtn.dataset.ticker || '', analyzeBtn.dataset.headline || ''); return; }
+
+    const symBtn = e.target.closest('[data-sym]');
+    if (symBtn) { openExplorerForSymbol(symBtn.dataset.sym); return; }
+
+    const expandBtn = e.target.closest('.nd-expand-btn');
+    if (expandBtn) {
+      const teaser = expandBtn.closest('.nd-card')?.querySelector('.nd-teaser');
+      if (teaser) {
+        const nowCollapsed = teaser.classList.toggle('nd-teaser-collapsed');
+        expandBtn.textContent = nowCollapsed ? '▼ More' : '▲ Less';
+      }
+    }
   });
 })();
 
@@ -15423,20 +15452,27 @@ async function loadNewsDrawer(force = false) {
       const sentiment = ['bullish','bearish','neutral'].includes(raw_sent) ? raw_sent : '';
       const ts       = a.published_at ? _ndRelTime(new Date(a.published_at)) : '';
       const badges   = tickers.slice(0, 3).map(t =>
-        `<span class="nd-ticker">${t.replace(/</g,'&lt;')}</span>`
+        `<button class="nd-ticker" data-sym="${t.replace(/"/g,'&quot;')}">${t.replace(/</g,'&lt;')}</button>`
       ).join('');
       const sentBadge = sentiment
         ? `<span class="nd-sentiment ${sentiment}">${sentiment}</span>` : '';
-      const title    = (a.title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const title      = (a.title   || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const teaser     = (a.teaser  || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const articleUrl = (a.url     || '');
       const safeTitle   = (a.title  || '').replace(/"/g,'&quot;');
       const safeTicker  = (tickers[0] || '').replace(/"/g,'&quot;');
 
       return `<div class="nd-card">
         <div class="nd-card-meta">${badges}${sentBadge}<span class="nd-time">${ts}</span></div>
         <div class="nd-headline">${title}</div>
+        ${teaser ? `<div class="nd-teaser nd-teaser-collapsed">${teaser}</div>` : ''}
         <div class="nd-footer-row">
           <span class="nd-source">Benzinga</span>
-          <button class="nd-analyze-btn" data-ticker="${safeTicker}" data-headline="${safeTitle}">🤖 Analyze</button>
+          <div class="nd-actions">
+            ${teaser ? `<button class="nd-expand-btn">▼ More</button>` : ''}
+            ${articleUrl ? `<a class="nd-fullart-btn" href="${articleUrl}" target="_blank" rel="noopener">↗ Full article</a>` : ''}
+            <button class="nd-analyze-btn" data-ticker="${safeTicker}" data-headline="${safeTitle}">🤖 Analyze</button>
+          </div>
         </div>
       </div>`;
     }).join('');
