@@ -4734,17 +4734,45 @@ app.get('/api/research/stock', async (req, res) => {
 });
 
 // Stock Explorer extras — news + analyst rating (fetched lazily after chart loads)
+// Merge Yahoo/Alpaca + Benzinga news, Benzinga first, dedup by URL
+async function _mergedSymbolNews(symbol, limit = 8) {
+  const [base, bz] = await Promise.allSettled([
+    getSymbolNews({ symbol, limit }),
+    isBenzingaConfigured() ? getBzNews({ symbol, limit }) : Promise.resolve(null),
+  ]);
+  const baseArticles = base.status === 'fulfilled' ? (base.value?.articles ?? []) : [];
+  const bzArticles   = bz.status   === 'fulfilled' && bz.value
+    ? (bz.value.articles ?? []).map(a => ({
+        title:     a.title,
+        url:       a.url,
+        source:    'Benzinga',
+        published: a.published_at,
+        tickers:   a.tickers ?? [],
+        teaser:    a.teaser  ?? null,
+      }))
+    : [];
+
+  const seen = new Set();
+  return [...bzArticles, ...baseArticles]
+    .filter(a => {
+      if (!a.url || seen.has(a.url)) return false;
+      seen.add(a.url);
+      return true;
+    })
+    .slice(0, limit);
+}
+
 app.get('/api/explorer/extras', requireAuth, async (req, res) => {
   try {
     const symbol = (req.query.symbol || '').toUpperCase().trim();
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
 
     const [newsResult, scoreResult] = await Promise.allSettled([
-      getSymbolNews({ symbol, limit: 8 }),
+      _mergedSymbolNews(symbol, 8),
       getConvictionScore({ symbol, positions: [] }),
     ]);
 
-    const news    = newsResult.status    === 'fulfilled' ? newsResult.value    : null;
+    const news    = newsResult.status === 'fulfilled' ? newsResult.value : [];
     const scoring = scoreResult.status === 'fulfilled' ? scoreResult.value : null;
 
     const sig = scoring?.signals ?? {};
@@ -4770,7 +4798,7 @@ app.get('/api/explorer/extras', requireAuth, async (req, res) => {
       horizon:      scoring.horizon      ?? null,
     } : null;
 
-    res.json({ symbol, news: news?.articles ?? [], analyst, signals });
+    res.json({ symbol, news, analyst, signals });
   } catch (err) {
     console.error('[explorer/extras]', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -4784,13 +4812,13 @@ app.get('/api/explorer/company', requireAuth, async (req, res) => {
   try {
     const [yfResult, newsResult] = await Promise.allSettled([
       _yf.quoteSummary(symbol, { modules: ['assetProfile', 'majorHoldersBreakdown', 'institutionOwnership'] }),
-      getSymbolNews({ symbol, limit: 8 }),
+      _mergedSymbolNews(symbol, 8),
     ]);
     const yfData = yfResult.status === 'fulfilled' ? yfResult.value : null;
     const profile = yfData?.assetProfile ?? null;
     const majorHolders = yfData?.majorHoldersBreakdown ?? null;
     const instOwn = yfData?.institutionOwnership ?? null;
-    const news = newsResult.status === 'fulfilled' ? (newsResult.value?.articles ?? []) : [];
+    const news = newsResult.status === 'fulfilled' ? (newsResult.value ?? []) : [];
 
     const topHolders = (instOwn?.ownershipList ?? []).slice(0, 8).map(h => ({
       name:      h.organization,
