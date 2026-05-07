@@ -124,6 +124,8 @@ export async function getTigerOrders(creds, { days = 30 } = {}) {
 export async function placeTigerOrder(creds, { symbol, side, qty, limitPrice = null, outsideRth = true }) {
   const action     = side.toUpperCase() === 'BUY' ? 'BUY' : 'SELL';
   const order_type = limitPrice ? 'LMT' : 'MKT';
+  // MKT and STP orders do not support outside_rth on Tiger
+  const rth = (order_type === 'MKT' || order_type === 'STP') ? false : outsideRth;
   const biz = {
     symbol,
     market:         'US',
@@ -134,10 +136,10 @@ export async function placeTigerOrder(creds, { symbol, side, qty, limitPrice = n
     total_quantity: qty,
     ...(limitPrice ? { limit_price: limitPrice } : {}),
     time_in_force:  'DAY',
-    outside_rth:    outsideRth,
+    outside_rth:    rth,
   };
   console.log(`[tiger] placing order: ${action} ${qty} ${symbol} @ ${order_type}${limitPrice ? ' $'+limitPrice : ''}`);
-  const raw  = await request(creds, 'order', biz);
+  const raw  = await request(creds, 'place_order', biz);
   const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
   const id   = data?.id ?? data?.order_id ?? data?.orderId;
   return { order_id: id, symbol, action, qty, order_type, status: data?.status ?? 'submitted', raw: data };

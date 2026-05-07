@@ -4,6 +4,7 @@
  * Live account is read-only — no trades placed against live money automatically.
  */
 import { closeTrade, getTrades, getRecentLosses, logRejection } from './db.js';
+import { getTigerQuote, isTigerConfigured } from './tiger-data.js';
 
 // Paper account (bot trades here)
 const BASE_URL   = process.env.ALPACA_BASE_URL   || 'https://paper-api.alpaca.markets';
@@ -114,6 +115,9 @@ export async function getUserDailyPnL(creds) {
     const pnl_pct = pnlPctArr.length ? (pnlPctArr[pnlPctArr.length - 1] * 100) : 0;
     const result = { pnl: parseFloat(pnl.toFixed(2)), pnl_pct: +pnl_pct.toFixed(3), available: true };
     _userPnlCache.set(cacheKey, { result, ts: now });
+    if (_userPnlCache.size > MAX_CACHE_SIZE) {
+      _userPnlCache.delete(_userPnlCache.keys().next().value);
+    }
     return result;
   } catch { return { pnl: 0, available: false }; }
 }
@@ -147,6 +151,9 @@ export async function getUserPortfolioHistory(creds, { days = 30 } = {}) {
       });
     }
     _userPortfolioHistCache.set(cacheKey, { result: rows, ts: Date.now() });
+    if (_userPortfolioHistCache.size > MAX_CACHE_SIZE) {
+      _userPortfolioHistCache.delete(_userPortfolioHistCache.keys().next().value);
+    }
     return rows;
   } catch { return []; }
 }
@@ -284,6 +291,7 @@ const _pnlCache = { admin: null, ts: 0 };
 const _userPnlCache = new Map(); // username → { result, ts }
 const PNL_CACHE_TTL = 90_000; // 90 seconds
 const PORTFOLIO_HIST_TTL = 300_000; // 5 minutes
+const MAX_CACHE_SIZE = 500;
 
 // Bust both PnL caches — call after any trade so next dashboard load reflects reality
 export function clearPnlCache() {
@@ -362,6 +370,9 @@ export async function getPortfolioHistory({ days = 30 } = {}) {
     cutoff.setDate(cutoff.getDate() - days);
     const result = rows.filter(r => new Date(r.date) >= cutoff);
     _portfolioHistCache.set(cacheKey, { result, ts: Date.now() });
+    if (_portfolioHistCache.size > MAX_CACHE_SIZE) {
+      _portfolioHistCache.delete(_portfolioHistCache.keys().next().value);
+    }
     return result;
   } catch {
     return [];
@@ -426,6 +437,22 @@ async function fetchATR(symbol) {
 // ─── Quote ────────────────────────────────────────────────────────────────────
 
 export async function getLatestPrice(symbol) {
+  // Tiger NBBO — real-time from all 16 US exchanges (primary source)
+  if (isTigerConfigured()) {
+    try {
+      const tq = await getTigerQuote(symbol);
+      if (tq?.ask > 0 || tq?.bid > 0) {
+        const ask = tq.ask || tq.mid;
+        const bid = tq.bid || tq.mid;
+        const mid = +((ask + bid) / 2).toFixed(4);
+        return { symbol, ask, bid, mid, source: 'tiger_nbbo' };
+      }
+    } catch {
+      // Tiger unavailable — fall through to Alpaca
+    }
+  }
+
+  // Fallback — Alpaca IEX (free, single exchange)
   const r = await fetch(
     `https://data.alpaca.markets/v2/stocks/${symbol}/quotes/latest`,
     { headers: HEADERS }
@@ -434,7 +461,7 @@ export async function getLatestPrice(symbol) {
   const q = d?.quote;
   if (!q) throw new Error(`No quote for ${symbol}`);
   const mid = ((q.ap || 0) + (q.bp || 0)) / 2;
-  return { symbol, ask: q.ap, bid: q.bp, mid: +mid.toFixed(4) };
+  return { symbol, ask: q.ap, bid: q.bp, mid: +mid.toFixed(4), source: 'alpaca_iex' };
 }
 
 // ─── Place Trade (bracket order: entry + stop loss + take profit) ─────────────
@@ -505,7 +532,7 @@ export async function placeTrade({
     throw new Error(`Duplicate blocked: already holding ${alreadyOpen.qty} shares of ${symbol} (avg $${alreadyOpen.avg_entry_price})`);
 
   // Fix 2: Multi-day re-entry block
-  const recentLosses = await getRecentLosses({ symbol, days: 5 });
+  const recentLosses = await getRecentLosses({ symbol, days: 5, account_source: 'alpaca_paper' });
   const hoursSinceLastLoss = recentLosses.last_loss_at
     ? (Date.now() - new Date(recentLosses.last_loss_at)) / 3600000
     : 999;
@@ -614,12 +641,19 @@ export async function placeTrade({
   const estimated_profit  = +(dollars_invested * take_profit_pct / 100).toFixed(2);
   const estimated_risk    = +(dollars_invested * stop_loss_pct   / 100).toFixed(2);
 
+  const fill_price = parseFloat(order.filled_avg_price || 0);
+  const slippage_cents = fill_price > 0
+    ? +(Math.abs(fill_price - price) * qty * 100).toFixed(2)
+    : null;
+
   return {
     order_id:        order.id,
     symbol,
     side,
     qty,
     estimated_price:  price,
+    fill_price:       fill_price || null,
+    slippage_cents,
     dollars_invested,
     stop_loss:        stopPrice,
     take_profit:      targetPrice,
@@ -754,6 +788,10 @@ export async function placeQuickTrade({
   }
 
   const order = await alpaca('POST', '/v2/orders', body);
+  const quickFill = parseFloat(order.filled_avg_price || 0);
+  const quickSlippage = quickFill > 0
+    ? +(Math.abs(quickFill - price) * shares * 100).toFixed(2)
+    : null;
   return {
     ok:              true,
     order_id:        order.id,
@@ -764,6 +802,8 @@ export async function placeQuickTrade({
     time_in_force:   tif,
     estimated_price: +price.toFixed(2),
     estimated_cost:  +(price * shares).toFixed(2),
+    fill_price:      quickFill || null,
+    slippage_cents:  quickSlippage,
     stop_price:      stop_price   ? +stop_price   : null,
     limit_price:     limit_price  ? +limit_price  : null,
     trail_price:     trail_price  ? +trail_price  : null,
@@ -779,7 +819,7 @@ export async function placeQuickTrade({
 // Alpaca fires stop/target legs automatically; this job notices and marks trades closed.
 
 export async function syncClosedTrades() {
-  const openDbTrades = await getTrades({ status: 'open', limit: 200 });
+  const openDbTrades = await getTrades({ status: 'open', limit: 200, account_source: 'alpaca_paper' });
   if (!openDbTrades?.length) return { synced: 0, trades: [] };
 
   // Current Alpaca positions (symbols that are still genuinely open)

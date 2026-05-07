@@ -35,11 +35,12 @@ import {
 } from './trader.js';
 import { recordTrade, recordApiCall, upsertUsageStats, setUserBotConfig, getUserBotConfig, BOT_CONFIG_DEFAULTS, getTrades, logRejection, getRecentLessons, getPerformancePatterns, getDbUser, getDbUserByEmail, setDisabledSources, logActivity } from './db.js';
 import { getFunds, getPositions as getMoomooPositions, getQuote as moomooGetQuote, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE } from './moomoo-tcp.js';
-import { placeTigerOrder, closeTigerPosition, cancelAllTigerOrders, getTigerPositions, getTigerFunds, getTigerQuote } from './tiger.js';
+import { placeTigerOrder, closeTigerPosition, cancelTigerOrder, cancelAllTigerOrders, getTigerPositions, getTigerFunds, getTigerQuote, getTigerOrders } from './tiger.js';
 import { isKnowledgeQuestion, answerKnowledgeQuestion, isTradeHistoryQuestion, answerTradeHistoryQuestion } from './knowledge.js';
 import { getStockPrediction } from './predictor.js';
 import { applyCalibration } from './prediction-calibration.js';
 import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswer } from './fundamental-screener.js';
+import { runCatalystScan } from './catalyst-scanner.js';
 
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
 
@@ -544,7 +545,7 @@ export const TOOLS = [
   { name: 'get_trending_stocks', description: 'Get most searched/trending stocks on Yahoo Finance right now.',                      input_schema: { type: 'object', properties: { limit: { type: 'number' } } } },
   { name: 'get_day_trading_dashboard', description: 'Full day trading dashboard: sentiment, sectors, trending stocks.',            input_schema: { type: 'object', properties: {} } },
   { name: 'get_market_movers',   description: 'Get top gainers and biggest movers today across 88 liquid US stocks.',               input_schema: { type: 'object', properties: { limit: { type: 'number' } } } },
-  { name: 'get_portfolio',       description: 'Get current paper trading portfolio: balance, buying power, open positions.',        input_schema: { type: 'object', properties: {} } },
+  { name: 'get_portfolio',       description: 'Get current portfolio for the active trading account: balance, buying power, open positions. Routes to whichever broker is configured (Alpaca paper, Tiger, or Moomoo).', input_schema: { type: 'object', properties: {} } },
   { name: 'propose_trade',       description: 'Execute a paper trade immediately. Requires conviction score >= 70. Use trailing_stop=true for momentum stocks to let winners run.',                          input_schema: { type: 'object', properties: { symbol: { type: 'string' }, side: { type: 'string', enum: ['buy','sell'] }, reasoning: { type: 'string' }, trailing_stop: { type: 'boolean' } }, required: ['symbol','side','reasoning'] } },
   { name: 'close_position',      description: 'Close an open position at market price.',                                           input_schema: { type: 'object', properties: { symbol: { type: 'string' } }, required: ['symbol'] } },
   { name: 'get_market_status',   description: 'Check if the US market is currently open or closed.',                               input_schema: { type: 'object', properties: {} } },
@@ -679,6 +680,12 @@ export const TOOLS = [
       required: ['identifier'],
     },
   },
+
+  {
+    name: 'scan_catalyst_movers',
+    description: 'Scan for pre-market explosive movers and catalysts — CNSP/SKK/GBTG-type setups. Runs 4 detectors in parallel: (1) pre-market gap screener (≥5% gap, >100K volume), (2) SEC 8-K filings from last few hours (acquisitions, press releases, material events), (3) low-float setups (<20M float + RVOL>1.5), (4) biotech/pharma catalyst news (FDA/PDUFA/clinical trial headlines from last 72h). Use this before market open or when looking for high-momentum small-cap plays. Results are cached 10 minutes.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ];
 
 const _CHAT_PROFILE_PRESETS = {
@@ -697,6 +704,11 @@ const _TOOL_SOURCE_MAP = {
 
 // Maps trade_source config values → disabled_sources DB keys (they use different naming)
 const _TRADE_SOURCE_TO_DISABLED_KEY = { paper: 'alpaca', alpaca_live: 'alpaca_live', tiger: 'tiger', moomoo: 'moomoo' };
+
+// Maps trade_source → account_source value stored in the trades table
+function _tradeSourceToAccountSource(src) {
+  return { paper: 'alpaca_paper', alpaca_live: 'alpaca_live', tiger: 'tiger', moomoo: 'moomoo' }[src] ?? 'alpaca_paper';
+}
 
 // Returns the effective trade source for a user, routing around disabled sources.
 // Preference order when blocked: tiger → moomoo → paper (Alpaca always last resort).
@@ -797,21 +809,22 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       }
       case 'propose_trade': {
         // SERVER-SIDE HARD GATE: always verify P&L fresh from DB before any trade.
-        // This bypasses whatever Claude "remembers" from conversation text — the DB is ground truth.
+        // Scoped to the active account_source so Moomoo P&L never blocks Alpaca trades and vice versa.
         if (username) {
           try {
-            const _gTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-            const _gClosed   = await getTrades({ username, status: 'closed', limit: 500 });
-            const _gPnl      = (_gClosed ?? [])
+            const _gTodayStr  = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+            const _gSrc       = _tradeSourceToAccountSource(userCfg?.trade_source ?? 'paper');
+            const _gClosed    = await getTrades({ username, status: 'closed', account_source: _gSrc, limit: 500 });
+            const _gPnl       = (_gClosed ?? [])
               .filter(t => t.closed_at && new Date(t.closed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === _gTodayStr)
               .reduce((sum, t) => sum + (parseFloat(t.pnl_usd) || 0), 0);
-            const _gLimit    = userCfg?.daily_loss_limit ?? DAILY_LOSS_LIMIT;
+            const _gLimit     = userCfg?.daily_loss_limit ?? DAILY_LOSS_LIMIT;
             if (_gPnl <= -_gLimit) {
               return {
                 status:  'blocked_loss_limit',
                 pnl:     +_gPnl.toFixed(2),
                 limit:   -_gLimit,
-                reason:  `Daily loss limit reached for ${username}. Realized P&L today: $${_gPnl.toFixed(2)} (limit: -$${_gLimit}).`,
+                reason:  `Daily loss limit reached for ${username} on ${_gSrc}. Realized P&L today: $${_gPnl.toFixed(2)} (limit: -$${_gLimit}).`,
               };
             }
             // P&L is within limits — proceed regardless of what conversation history says
@@ -873,22 +886,30 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const maxDol = sizing.max_dollars ?? 5000;
           const dollars = Math.min(maxDol, Math.max(minDol, Math.round(targetProfit / 0.05)));
           const qty = Math.max(1, Math.floor(dollars / price));
+          // Auto-convert MKT → LMT outside regular hours so pre/post-market works
+          let tigerLimitPrice = null;
+          let tigerOutsideRth = false;
+          const mktClock = await getMarketStatus().catch(() => null);
+          if (!mktClock?.is_open) {
+            tigerLimitPrice = +price.toFixed(2);
+            tigerOutsideRth = true;
+          }
           let result;
           try {
-            result = await placeTigerOrder(creds, { symbol: input.symbol, side: input.side, qty });
+            result = await placeTigerOrder(creds, { symbol: input.symbol, side: input.side, qty, limitPrice: tigerLimitPrice, outsideRth: tigerOutsideRth });
           } catch (tigerErr) {
             const msg = tigerErr.message ?? '';
-            // Tiger error 4 / code 1000 = method not supported = API trading permission not enabled
             const isPermissionError = msg.includes('not support') || msg.includes('1000') || msg.includes('error 4:');
             const hint = isPermissionError
               ? 'Tiger OpenAPI trading permission is not enabled. Go to Tiger App → Profile → OpenAPI → enable Trading permissions, then regenerate your API key.'
-              : 'Check the server logs (pm2 logs trading-bot) for the full Tiger API error code and message.';
+              : 'Check the server logs for the full Tiger API error code and message.';
             return { status: 'error', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price,
               reason: msg, hint };
           }
-          recordTrade({ username, order_id: String(result.order_id), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown }).catch(() => {});
+          recordTrade({ username, order_id: String(result.order_id), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown, account_source: 'tiger' }).catch(() => {});
           if (onTrade) onTrade(result);
-          return { status: 'executed', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price, price_source: priceSource, order_id: result.order_id, conviction_score: convictionScore };
+          const extNote = tigerOutsideRth ? ` (extended hours limit @ $${tigerLimitPrice})` : '';
+          return { status: 'executed', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price, price_source: priceSource, order_id: result.order_id, conviction_score: convictionScore, note: extNote };
         }
 
         if (tradeSource === 'moomoo') {
@@ -908,7 +929,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const dollars = Math.min(sizing.max_dollars ?? 5000, Math.max(sizing.min_dollars ?? 1500, Math.round((sizing.target_profit_per_trade ?? 150) / 0.05)));
           const qty = Math.max(1, Math.floor(dollars / price));
           const result = await placeMoomooTrade({ symbol: input.symbol, side: input.side, qty, acc_id: dbU?.moomoo_acc_id }).catch(e => { throw e; });
-          recordTrade({ username, order_id: String(result.order_id ?? ''), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown }).catch(() => {});
+          recordTrade({ username, order_id: String(result.order_id ?? ''), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown, account_source: 'moomoo' }).catch(() => {});
           if (onTrade) onTrade(result);
           return { status: 'executed', broker: 'moomoo', symbol: input.symbol, side: input.side, qty, estimated_price: price, conviction_score: convictionScore };
         }
@@ -929,6 +950,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           stop_loss_pct: result.stop_loss_pct, take_profit_pct: result.take_profit_pct,
           atr_pct: result.atr_pct, conviction_score: convictionScore,
           conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown,
+          account_source: 'alpaca_paper',
         }).catch(() => {});
         if (onTrade) onTrade(result);
         return { status: 'executed', broker: 'paper', ...result };
@@ -956,13 +978,22 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const dbU = await getDbUser(username).catch(() => null);
           if (dbU?.tiger_id) {
             const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
-            const { getTigerOrders } = await import('./tiger.js');
             return await getTigerOrders(creds, { days: 1 });
           }
         }
         return await getOrders();
       }
-      case 'cancel_order':           return await cancelOrder(input.order_id);
+      case 'cancel_order': {
+        const _coSrc = userCfg?.trade_source ?? 'paper';
+        if (_coSrc === 'tiger' && username) {
+          const _coDbU = await getDbUser(username).catch(() => null);
+          if (_coDbU?.tiger_id) {
+            const _coCreds = { tiger_id: _coDbU.tiger_id, account: _coDbU.tiger_account, private_key: _coDbU.tiger_private_key };
+            return await cancelTigerOrder(_coCreds, input.order_id);
+          }
+        }
+        return await cancelOrder(input.order_id);
+      }
       case 'cancel_all_orders': {
         const tradeSource = userCfg?.trade_source ?? 'paper';
         if (tradeSource === 'tiger' && username) {
@@ -1015,24 +1046,31 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         return { scanned: symbols.length, positions_held: [...heldSymbols], candidates: results };
       }
       case 'get_trade_history': {
-        // Always scoped to the calling user — never show another user's trades
-        const trades = await getTrades({ status: input.status, limit: input.limit || 20, username });
+        // Scoped to the calling user AND their active broker account
+        const _thSrc = _tradeSourceToAccountSource(userCfg?.trade_source ?? 'paper');
+        const trades = await getTrades({ status: input.status, limit: input.limit || 20, username, account_source: _thSrc });
         if (!trades) return { error: 'Trade history unavailable — database not connected' };
         return { trades, count: trades.length };
       }
-      case 'move_stop_to_breakeven': return await moveStopToBreakeven(input.symbol);
+      case 'move_stop_to_breakeven': {
+        const _msSrc = userCfg?.trade_source ?? 'paper';
+        if (_msSrc === 'tiger' || _msSrc === 'moomoo') {
+          return { status: 'unsupported', reason: `Move-stop-to-breakeven is not supported for ${_msSrc} via API. Adjust your stop manually in the ${_msSrc === 'tiger' ? 'Tiger' : 'Moomoo'} app.` };
+        }
+        return await moveStopToBreakeven(input.symbol);
+      }
       case 'get_daily_pnl': {
         const _pnlLimit  = userCfg?.daily_loss_limit  ?? DAILY_LOSS_LIMIT;
         const _pnlTarget = userCfg?.daily_profit_target ?? DAILY_PROFIT_TARGET;
         const _pnlSource = userCfg?.trade_source ?? 'paper';
 
-        // When a user is identified, always compute P&L from their own trades DB.
-        // This keeps Tiger/Moomoo/paper users isolated — Alpaca paper losses on one
-        // account must never block trades on a different account.
+        // Compute P&L scoped to the active broker account only.
+        // Alpaca P&L must never bleed into Moomoo/Tiger sessions and vice versa.
         if (username) {
           try {
-            const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-            const closedToday = await getTrades({ username, status: 'closed', limit: 500 });
+            const todayStr     = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+            const accountSrc   = _tradeSourceToAccountSource(_pnlSource);
+            const closedToday  = await getTrades({ username, status: 'closed', account_source: accountSrc, limit: 500 });
             const pnl = (closedToday ?? [])
               .filter(t => t.closed_at &&
                 new Date(t.closed_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === todayStr)
@@ -1041,7 +1079,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
               pnl:                 +pnl.toFixed(2),
               pnl_pct:             0,
               available:           true,
-              source:              _pnlSource,
+              source:              accountSrc,
               daily_target:        _pnlTarget,
               daily_loss_limit:    -_pnlLimit,
               target_reached:      pnl >= _pnlTarget,
@@ -1205,6 +1243,8 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         const enabled = ['alpaca', ...['alpaca_live','moomoo','tiger'].filter(s => !current.includes(s))];
         return { ok: true, username: target, disabled_sources: current, enabled_sources: enabled };
       }
+
+      case 'scan_catalyst_movers':      return await runCatalystScan();
 
       default:                         return { error: `Unknown tool: ${name}` };
     }

@@ -93,6 +93,7 @@
     color: var(--text);
     background-image: var(--body-grad);
     background-attachment: fixed;
+    padding-bottom: 30px; /* space for fixed disclaimer footer */
   }
   /* Subtle full-page background image — opacity kept very low so widgets stay readable */
   body::before {
@@ -568,11 +569,9 @@
   .float-explorer {
     position: fixed;
     top: 60px; right: 16px;
-    width: min(960px, calc(100vw - 32px));
+    width: min(700px, calc(100vw - 32px));
     max-height: calc(100vh - 76px);
-    background: var(--table-bg);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    background: var(--bg2);
     border: 1px solid var(--border);
     border-radius: 14px;
     box-shadow: 0 28px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(88,166,255,0.06);
@@ -1070,6 +1069,9 @@
   .sidebar-head h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: #8b949e; margin: 0; }
 
   .earn-item { padding: 10px 18px; border-bottom: 1px solid #161b22; }
+  .earn-item-link { cursor:pointer; transition:background .12s; }
+  .earn-item-link:hover { background:rgba(88,166,255,0.06); }
+  .earn-item-link:active { background:rgba(88,166,255,0.12); }
   .earn-item:last-child { border-bottom: none; }
   .earn-row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
   .earn-sym  { font-weight: 700; font-size: 0.88rem; color: #e6edf3; }
@@ -1636,7 +1638,112 @@
 
 <!-- ═══════════════════════ EARNINGS CALENDAR PAGE ═══════════════════════ -->
 <div class="page" id="page-calendar">
+  <style>
+    .ecal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin-bottom:28px; }
+    .ecal-day { background:var(--card-bg); border:1px solid var(--border); border-radius:10px; padding:10px 8px; min-height:130px; }
+    .ecal-day.ecal-today { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+    .ecal-day.ecal-weekend { opacity:0.55; }
+    .ecal-day-name { font-size:0.68rem; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.06em; margin-bottom:2px; }
+    .ecal-day-num  { font-size:1.15rem; font-weight:700; color:var(--text); margin-bottom:8px; line-height:1; }
+    .ecal-today .ecal-day-num { color:var(--accent); }
+    .ecal-chip { background:rgba(88,166,255,0.1); border:1px solid rgba(88,166,255,0.18); border-radius:5px; padding:3px 6px; margin-bottom:4px; cursor:default; }
+    .ecal-chip:hover { background:rgba(88,166,255,0.2); }
+    .ecal-chip-link { cursor:pointer; transition:background .12s,border-color .12s; }
+    .ecal-chip-link:hover { background:rgba(88,166,255,0.28); border-color:var(--accent); }
+    .ecal-chip-link:active { transform:scale(0.97); }
+    .ecal-chip-sym  { font-size:0.75rem; font-weight:700; color:var(--accent); }
+    .ecal-chip-name { font-size:0.65rem; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; max-width:100%; }
+    .ecal-more { font-size:0.68rem; color:var(--text2); margin-top:2px; }
+    .ecal-empty { font-size:0.72rem; color:var(--muted); margin-top:4px; }
+
+    /* ── Earnings Reaction Analysis ─────────────────── */
+    .er-sym-btn { background:var(--card-bg);border:1px solid var(--border);border-radius:5px;padding:3px 9px;color:var(--text2);font-size:0.75rem;cursor:pointer;transition:all .15s; }
+    .er-sym-btn:hover,.er-sym-btn.active { background:var(--accent);border-color:var(--accent);color:#fff; }
+    .er-wrap { overflow-x:auto;border-radius:10px;border:1px solid var(--border); }
+    .er-table { width:100%;border-collapse:collapse;font-size:0.78rem;white-space:nowrap; }
+    .er-table th { background:#1c2128;color:#cdd9e5;font-weight:600;padding:7px 10px;border-bottom:1px solid var(--border);text-align:center; }
+    .er-table th.er-th-left { text-align:left;color:#e6edf3; }
+    /* Group header row — color-coded bands */
+    .er-table th.er-group          { font-size:0.7rem;letter-spacing:.08em;text-transform:uppercase;padding:5px 10px;border-bottom:1px solid var(--border);background:#1a1f26;color:#8b949e;font-weight:700; }
+    .er-table th.er-group-hdr-e0   { background:#0d1f33;color:#58a6ff;border-bottom:2px solid #1f6feb; }
+    .er-table th.er-group-hdr-ep1  { background:#0d2011;color:#3fb950;border-bottom:2px solid #238636; }
+    /* Sub-column header row — tinted per band */
+    .er-table th.er-sub-e0  { background:#0a1929;color:#7ec8e3;border-left:2px solid rgba(88,166,255,.4); }
+    .er-table th.er-sub-ep1 { background:#081a10;color:#85e89d;border-left:2px solid rgba(63,185,80,.4); }
+    .er-table td { padding:7px 10px;border-bottom:1px solid rgba(48,54,61,.55);vertical-align:middle; }
+    .er-table tr:last-child td { border-bottom:none; }
+    .er-table tr:hover td { background:rgba(88,166,255,.04); }
+    .er-avg td { background:#0d1117;font-weight:700;color:var(--text); }
+    .er-beat { background:#0d2818;color:#3fb950;border:1px solid #238636;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:700; }
+    .er-miss { background:#2d1318;color:#f85149;border:1px solid #f85149;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:700; }
+    .er-na   { background:#161b22;color:#8b949e;border:1px solid #30363d;border-radius:4px;padding:2px 6px;font-size:0.7rem; }
+    .er-up { color:#3fb950;font-weight:600; }
+    .er-dn { color:#f85149;font-weight:600; }
+    .er-muted { color:#8b949e; }
+    .er-vol { font-size:0.73rem;color:var(--text2); }
+    .er-price { font-weight:600;color:var(--text); }
+    .er-group-e0 { border-left:2px solid rgba(88,166,255,.35); }
+    .er-group-ep1{ border-left:2px solid rgba(63,185,80,.25); }
+  </style>
+
   <div style="max-width:1300px">
+
+    <!-- Earnings Calendar -->
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:var(--text)">📅 Earnings Calendar</h3>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button onclick="earningsCalNav(-7)" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:0.85rem;cursor:pointer">‹‹</button>
+          <span id="earningsCalLabel" style="font-size:0.85rem;font-weight:600;color:var(--text);min-width:160px;text-align:center">—</span>
+          <button onclick="earningsCalNav(7)"  style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:0.85rem;cursor:pointer">››</button>
+          <button onclick="earningsCalReset()" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--accent);font-size:0.8rem;cursor:pointer;font-weight:600">Today</button>
+          <input type="date" id="earningsCalJumpInput" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:3px 7px;color:var(--text);font-size:0.78rem;cursor:pointer" title="Jump to date" onchange="earningsCalJump(this.value)">
+          <button onclick="loadEarningsCalendar(true)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
+        </div>
+      </div>
+      <div id="earningsCalGrid" class="ecal-grid">
+        <div class="loading" style="grid-column:1/-1;padding:32px;text-align:center">Loading earnings…</div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
+
+    <!-- ── Earnings Reaction Analysis ── -->
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div>
+          <h3 style="margin:0 0 2px;font-size:1rem;font-weight:700;color:var(--text)">📊 Earnings Reaction Analysis</h3>
+          <div style="font-size:0.73rem;color:var(--text2)">Day before / Earnings day / Day after — price, volume, change% — last 3 years</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <input id="erSymInput" type="text" placeholder="NVDA" maxlength="8"
+            style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#e6edf3;font-size:0.82rem;width:80px;outline:none;text-transform:uppercase"
+            oninput="this.value=this.value.toUpperCase()"
+            onkeydown="if(event.key==='Enter')loadEarningsReaction(this.value.trim())">
+          <button onclick="loadEarningsReaction(document.getElementById('erSymInput').value.trim()||'NVDA')"
+            style="background:#1f6feb;border:1px solid #388bfd;border-radius:6px;padding:5px 10px;color:#fff;font-size:0.8rem;cursor:pointer">Go</button>
+          <div style="display:flex;gap:5px;flex-wrap:wrap" id="erQuickBtns">
+            <button class="er-sym-btn active" onclick="erQuickSelect('NVDA')">NVDA</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('AAPL')">AAPL</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('MSFT')">MSFT</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('META')">META</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('GOOGL')">GOOGL</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('AMZN')">AMZN</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('TSLA')">TSLA</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('AMD')">AMD</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('NFLX')">NFLX</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('CRM')">CRM</button>
+          </div>
+          <button onclick="loadEarningsReaction(_erCurrentSym, true)"
+            style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
+        </div>
+      </div>
+      <div id="erBody">
+        <div class="loading" style="padding:30px;text-align:center">Select a symbol to load earnings reaction data…</div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
 
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
@@ -2553,7 +2660,7 @@
             <div class="amap-node" style="--nc:#d29922">
               <span class="amap-node-icon">⏰</span>
               <strong>Cron Scheduler</strong>
-              <span>node-cron · 6 jobs · ET timezone · auto</span>
+              <span>node-cron · 8 jobs · ET timezone · auto</span>
             </div>
           </div>
         </div>
@@ -2638,6 +2745,11 @@
               <strong>Prediction Calibration</strong>
               <span>prediction-calibration.js · Uses shared db.js pool (no separate connection) · <strong style="color:#f0883e">trainCalibration()</strong>: runs after every EOD fill + Mon 8:30 AM ET · Learns per-symbol bias (additive offset), vol_scale, dir_accuracy · Global R²-bucket error rates · Key finding: high R²&gt;0.6 stocks have only ~14% direction accuracy — strong trends over-extrapolate then reverse · <strong style="color:#f0883e">applyCalibration()</strong>: additive bias + R² reversal damper (×0.5 when R²&gt;0.6 &amp; dir_acc&lt;35%) + confidence 0–100 · <strong style="color:#f0883e">applyCalibrationToDay()</strong>: re-applies same factors to each forecast day (O(1) DB calls per symbol) · Enriches get_stock_prediction tool result with calibration block for Claude</span>
             </div>
+            <div class="amap-node" style="--nc:#f85149">
+              <span class="amap-node-icon">🚨</span>
+              <strong>Catalyst Scanner</strong>
+              <span>catalyst-scanner.js · <code>runCatalystScan()</code> · 4 detectors via <code>Promise.allSettled</code> · 10-min cache · Crons: 9 AM ET (pre-market sweep) + 8 PM ET (SEC evening sweep) · API: <code>GET /api/catalyst-scan</code> · AI tool: <code>scan_catalyst_movers</code> · Detects: pre-market gappers ≥5% · SEC 8-K filings (item 2.01/7.01/8.01) · low-float setups &lt;20M shares · biotech FDA/PDUFA catalysts</span>
+            </div>
           </div>
         </div>
 
@@ -2673,6 +2785,11 @@
               <span class="amap-node-icon">⚡</span>
               <strong>CBOE VIX CDN</strong>
               <span>HTTPS · Free · No API key · ~15s delay · Fallback: Yahoo ^VIX</span>
+            </div>
+            <div class="amap-node" style="--nc:#f85149">
+              <span class="amap-node-icon">📋</span>
+              <strong>SEC EDGAR</strong>
+              <span>HTTPS · Free · Atom RSS feed · 8-K real-time filings · XBRL earnings data · Form 4 insider buys · Requires User-Agent header</span>
             </div>
           </div>
         </div>
@@ -2719,7 +2836,7 @@
             <div class="amap-node" style="--nc:#6e7681">
               <span class="amap-node-icon">⚡</span>
               <strong>In-Memory Cache</strong>
-              <span>TTL Map · Sentiment 2min · Market 15min · Scores 5min · Analyst 4hr · Stampede-protection (inflight dedup)</span>
+              <span>TTL Map · Sentiment 2min · Market 15min · Scores 5min · Analyst 4hr · Catalyst scan 10min · Stampede-protection (inflight dedup)</span>
             </div>
           </div>
         </div>
@@ -3388,7 +3505,7 @@ For days 2–5 of the weekly forecast:
                 <strong>Auto:</strong> <code>node-cron</code> fires every 10 min, 9:30am–3:50pm ET, weekdays only<br>
                 <strong>Manual:</strong> "▶ Run Scan" button in Admin → Scanner tab (analysis only)<br>
                 <strong>Auto-trade:</strong> "▶ Run &amp; Trade" — executes if selection qualifies<br>
-                6 total background jobs: scan (10min) · position monitor (2min) · morning briefing (9:30am) · EOD summary (4pm) · stale position close (3:50pm) · regime refresh (15min)
+                8 total background jobs: scan (10min) · position monitor (2min) · morning briefing (9:30am) · EOD summary (4pm) · stale position close (3:50pm) · regime refresh (15min) · catalyst pre-market sweep (9:00am) · catalyst SEC evening sweep (8:00pm)
               </div>
               <div class="aflow-tags">
                 <span class="atag" style="--tc:#d29922">node-cron</span>
@@ -3914,6 +4031,27 @@ For days 2–5 of the weekly forecast:
                 <strong>Pricing:</strong> $0.80/M input · $4.00/M output · ~$0.001/message · ~$2–8/month total
               </div>
               <div class="dsc-note">All API calls tracked in <code>api_usage_stats</code> table: input tokens, output tokens, cost, model, timestamp. Viewable in Stats → Cost Per Day table.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#f85149">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#f85149;color:#fff">FREE</div>
+              <div class="dsc-name">📋 SEC EDGAR</div>
+              <div class="dsc-conn">HTTPS · www.sec.gov · No API key · Requires User-Agent header</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Provides:</strong>
+                <strong>8-K RSS feed</strong> (real-time filings — material events, acquisitions, press releases, earnings) ·
+                <strong>XBRL earnings data</strong> (EPS actuals, revenue, quarterly history per symbol) ·
+                <strong>Form 4 filings</strong> (insider buy/sell transactions for conviction scoring)
+              </div>
+              <div class="dsc-chain"><strong>Used in:</strong>
+                <code>scanSECFilings()</code> — parses Atom RSS for 8-K filings, flags items 2.01 (acquisition), 7.01/8.01 (press release), 1.01 (material contract) ·
+                <code>getEarningsSurprise()</code> — XBRL API for historical EPS vs estimate ·
+                <code>getInsiderBuying()</code> — Form 4 full-text search for recent purchases
+              </div>
+              <div class="dsc-note">SEC requires a descriptive User-Agent (<code>CompanyName contact@email.com</code>). 8-K RSS feed returns ~20 most recent filings across all public companies. XBRL API is stable and free with no rate limit documented. All EDGAR calls timeout at 12 seconds.</div>
             </div>
           </div>
 
@@ -6287,9 +6425,10 @@ document.addEventListener('keydown', e => {
 
 // ── Research / Backtest ───────────────────────────────
 
-let _explorerData   = null;
-let _explorerChart  = null;
-let _explorerView   = 'price';
+let _explorerData      = null;
+let _explorerLiveQuote = null;
+let _explorerChart     = null;
+let _explorerView      = 'price';
 
 async function loadResearch() {
   loadTopPicks();
@@ -6861,6 +7000,7 @@ async function loadStockExplorer() {
   document.getElementById('explorerChartWrap').style.display = 'none';
   document.getElementById('explorerDips').style.display      = 'none';
   document.getElementById('explorerExtras').style.display    = 'none';
+  _explorerLiveQuote = null;
   if (_lwChart) { try { _lwChart.remove(); } catch {} _lwChart = null; }
 
   // Show loading state
@@ -6869,7 +7009,11 @@ async function loadStockExplorer() {
     '<div style="height:420px;display:flex;align-items:center;justify-content:center;color:#8b949e;font-size:0.9rem">Loading chart…</div>';
 
   try {
-    _explorerData = await api(`/api/research/stock?symbol=${symbol}`);
+    // Fetch historical data and live quote in parallel
+    [_explorerData] = await Promise.all([
+      api(`/api/research/stock?symbol=${symbol}`),
+      api(`/api/quote/${symbol}`).then(q => { _explorerLiveQuote = q; }).catch(() => {}),
+    ]);
     renderExplorerStats();
     renderExplorerDips();
     document.getElementById('explorerStats').style.display = 'flex';
@@ -6899,8 +7043,19 @@ function renderExplorerStats() {
   const dips       = (returns||[]).filter(r=>r.dip_pct!=null).length;
   const gradeColor = { A:'#3fb950', B:'#58a6ff', C:'#d29922', F:'#f85149' };
 
+  // Live quote overlay — show real-time price if available, with change vs previous close
+  const lq = _explorerLiveQuote;
+  const livePrice = lq?.price ?? lq?.mid ?? null;
+  const prevClose = lastPrice ? parseFloat(lastPrice.close) : null;
+  const livePct   = livePrice && prevClose ? ((livePrice - prevClose) / prevClose * 100) : null;
+  const livePriceHtml = livePrice
+    ? `<div style="font-size:0.72rem;color:#8b949e">Live Price <span style="background:#1f3a1f;color:#3fb950;border-radius:3px;padding:1px 5px;font-size:0.65rem;font-weight:700;margin-left:2px">LIVE</span></div>
+       <div style="font-size:1.2rem;font-weight:700;color:#e6edf3">$${parseFloat(livePrice).toFixed(2)}</div>
+       ${livePct != null ? `<div style="font-size:0.75rem;font-weight:600;color:${livePct>=0?'#3fb950':'#f85149'}">${livePct>=0?'+':''}${livePct.toFixed(2)}% today</div>` : ''}`
+    : (lastPrice ? `<div style="font-size:0.72rem;color:#8b949e">Last Close</div><div style="font-size:1.2rem;font-weight:700">$${parseFloat(lastPrice.close).toFixed(2)}</div>` : '');
+
   document.getElementById('explorerStatsInner').innerHTML = [
-    lastPrice  ? `<div><div style="font-size:0.72rem;color:#8b949e">Latest Price</div><div style="font-size:1.2rem;font-weight:700">$${parseFloat(lastPrice.close).toFixed(2)}</div></div>` : '',
+    (lastPrice || livePrice) ? `<div>${livePriceHtml}</div>` : '',
     totalReturn ? `<div><div style="font-size:0.72rem;color:#8b949e">3Y Return</div><div style="font-size:1.2rem;font-weight:700;color:${parseFloat(totalReturn)>=0?'#3fb950':'#f85149'}">${parseFloat(totalReturn)>=0?'+':''}${totalReturn}%</div></div>` : '',
     lastScore  ? `<div title="Historical score from the offline research pipeline (EOD indicators: RSI, EMA, MACD). Different from the live conviction score below which uses real-time news, analyst ratings, and insider data."><div style="font-size:0.72rem;color:#8b949e">Backtest Score <span style="color:#484f58">(pipeline)</span></div><div style="font-size:1.2rem;font-weight:700;color:${gradeColor[lastScore.grade]||'#e6edf3'}">Grade ${lastScore.grade} (${parseFloat(lastScore.score).toFixed(0)})</div><div style="font-size:0.68rem;color:#484f58">${lastScore.score_date ? new Date(lastScore.score_date).toLocaleDateString([],{month:'short',day:'numeric'}) : 'historical'}</div></div>` : '',
     `<div><div style="font-size:0.72rem;color:#8b949e">Dip Events</div><div style="font-size:1.2rem;font-weight:700;color:#f0883e">${dips}</div></div>`,
@@ -9051,8 +9206,253 @@ function renderFailureAnalysis(d) {
   el.innerHTML = biasHtml + r2Html + dirHtml + symHtml;
 }
 
+// ── Earnings Calendar ─────────────────────────────────────────────
+let _earningsCalOffset = 0;
+const _earningsCalCache = new Map(); // dateStr → items[] (populated = fetched, even if empty)
+
+// Merge a flat earnings array into the per-date cache (dedupes by symbol)
+function _seedCalCache(earnings) {
+  for (const e of (earnings || [])) {
+    if (!_earningsCalCache.has(e.date)) _earningsCalCache.set(e.date, []);
+    const arr = _earningsCalCache.get(e.date);
+    if (!arr.find(x => x.symbol === e.symbol)) arr.push(e);
+  }
+}
+
+// Fetch any weekdays in the current 7-day window that aren't cached yet
+async function _ensureEarningsCalWeek() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const start = new Date(today.getTime() + _earningsCalOffset * 86400000);
+
+  const missing = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start.getTime() + i * 86400000);
+    if (d.getDay() === 0 || d.getDay() === 6) continue;
+    const ds = d.toISOString().split('T')[0];
+    if (!_earningsCalCache.has(ds)) missing.push(ds);
+  }
+  if (!missing.length) return;
+
+  try {
+    const startStr = start.toISOString().split('T')[0];
+    const d = await api(`/api/earnings-calendar?date=${startStr}`, 25000);
+    // Pre-mark all weekdays in this window as fetched (empty array = "fetched, no data")
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(start.getTime() + i * 86400000);
+      if (day.getDay() === 0 || day.getDay() === 6) continue;
+      const ds = day.toISOString().split('T')[0];
+      if (!_earningsCalCache.has(ds)) _earningsCalCache.set(ds, []);
+    }
+    _seedCalCache(d?.earnings || []);
+  } catch { /* leave missing so next nav retries */ }
+}
+
+async function loadEarningsCalendar(force) {
+  if (force) _earningsCalCache.clear();
+  if (_earningsCalCache.size === 0) {
+    const grid = document.getElementById('earningsCalGrid');
+    if (grid) grid.innerHTML = '<div class="loading" style="grid-column:1/-1;padding:32px;text-align:center">Loading earnings…</div>';
+    try {
+      const d = await api('/api/earnings-month', 20000);
+      _seedCalCache(d?.earnings || []);
+    } catch {}
+  }
+  await _ensureEarningsCalWeek();
+  renderEarningsCalendar();
+}
+
+async function earningsCalNav(days) {
+  _earningsCalOffset += days;
+  renderEarningsCalendar(); // immediate render (may show "Loading…" for uncached days)
+  await _ensureEarningsCalWeek();
+  renderEarningsCalendar(); // re-render with fresh data
+}
+
+async function earningsCalReset() {
+  _earningsCalOffset = 0;
+  await _ensureEarningsCalWeek();
+  renderEarningsCalendar();
+}
+
+async function earningsCalJump(dateStr) {
+  if (!dateStr) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(dateStr + 'T00:00:00');
+  if (isNaN(target)) return;
+  _earningsCalOffset = Math.round((target - today) / 86400000);
+  renderEarningsCalendar();
+  await _ensureEarningsCalWeek();
+  renderEarningsCalendar();
+}
+
+function renderEarningsCalendar() {
+  const grid  = document.getElementById('earningsCalGrid');
+  const label = document.getElementById('earningsCalLabel');
+  if (!grid) return;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const start = new Date(today.getTime() + _earningsCalOffset * 86400000);
+  const end   = new Date(start.getTime() + 6 * 86400000);
+
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmtD = d => `${MON_NAMES[d.getMonth()]} ${d.getDate()}`;
+  label.textContent = `${fmtD(start)} – ${fmtD(end)}`;
+
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d       = new Date(start.getTime() + i * 86400000);
+    const dateStr = d.toISOString().split('T')[0];
+    const isToday   = d.getTime() === today.getTime();
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+
+    let inner = '';
+    if (isWeekend) {
+      inner = '<div class="ecal-empty">Weekend</div>';
+    } else if (!_earningsCalCache.has(dateStr)) {
+      inner = '<div class="ecal-empty" style="color:var(--text2);font-size:0.72rem">Loading…</div>';
+    } else {
+      const stocks = _earningsCalCache.get(dateStr) || [];
+      const chips = stocks.slice(0, 8).map(s =>
+        `<div class="ecal-chip ecal-chip-link" title="${s.company||s.symbol}${s.call_time&&s.call_time!=='?'?' · '+s.call_time:''}${s.eps_estimate!=null?' · EPS est $'+s.eps_estimate:''}"
+             onclick="calEarningClick('${s.symbol}')">
+          <span class="ecal-chip-sym">${s.symbol}</span>
+          <span class="ecal-chip-name">${s.company||''}</span>
+        </div>`
+      ).join('');
+      const more = stocks.length > 8
+        ? `<div class="ecal-more">+${stocks.length - 8} more · ${stocks.length} total</div>` : '';
+      const empty = stocks.length === 0
+        ? '<div class="ecal-empty">No earnings</div>' : '';
+      inner = chips + more + empty;
+    }
+
+    html += `<div class="ecal-day${isToday ? ' ecal-today' : ''}${isWeekend ? ' ecal-weekend' : ''}">
+      <div class="ecal-day-name">${DAY_NAMES[d.getDay()]}</div>
+      <div class="ecal-day-num">${d.getDate()}</div>
+      ${inner}
+    </div>`;
+  }
+  grid.innerHTML = html;
+}
+
 // ── loadCalendar alias keeps showPage() loader working ────────────
-function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); }
+function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); loadEarningsCalendar(); loadEarningsReaction('NVDA'); }
+
+// ── Earnings Reaction Analysis ─────────────────────────────────────
+let _erCurrentSym = 'NVDA';
+let _erLoaded = new Set();
+
+function erQuickSelect(sym) {
+  document.getElementById('erSymInput').value = sym;
+  document.querySelectorAll('.er-sym-btn').forEach(b => b.classList.toggle('active', b.textContent === sym));
+  loadEarningsReaction(sym);
+}
+
+async function loadEarningsReaction(sym, force = false) {
+  sym = (sym || 'NVDA').toUpperCase().trim();
+  if (!sym) return;
+  _erCurrentSym = sym;
+  document.getElementById('erSymInput').value = sym;
+  document.querySelectorAll('.er-sym-btn').forEach(b => b.classList.toggle('active', b.textContent === sym));
+
+  if (!force && _erLoaded.has(sym)) return; // already rendered
+
+  const el = document.getElementById('erBody');
+  el.innerHTML = '<div class="loading" style="padding:30px;text-align:center">Loading earnings reaction data for ' + sym + '…</div>';
+
+  const data = await api('/api/earnings-reaction?symbol=' + encodeURIComponent(sym), 30000);
+  if (!data || !data.events?.length) {
+    // Don't lock into _erLoaded on failure so next visit retries
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text2);font-size:0.85rem">No earnings history found for ' + sym + '</div>';
+    return;
+  }
+  _erLoaded.add(sym);
+
+  const fmtVol = v => {
+    if (!v) return '—';
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+    return v;
+  };
+  const fmtPct = v => v == null ? '<span class="er-muted">—</span>' :
+    `<span class="${v > 0 ? 'er-up' : v < 0 ? 'er-dn' : 'er-muted'}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+  const fmtPrice = v => v == null ? '—' : `$${v.toFixed(2)}`;
+
+  // grpCls is applied only to the first cell of each column group (for the left divider border)
+  const dayCell = (bar, grpCls='') => {
+    if (!bar) return `<td class="${grpCls}" colspan="3" style="text-align:center;color:var(--muted)">—</td>`;
+    return `<td class="er-price ${grpCls}">${fmtPrice(bar.close)}</td>` +
+           `<td class="er-vol">${fmtVol(bar.volume)}</td>` +
+           `<td>${fmtPct(bar.pct_chg)}</td>`;
+  };
+
+  // Compute averages over events that have the relevant data
+  const avg = (arr, fn) => {
+    const vals = arr.map(fn).filter(v => v != null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  };
+  const evs = data.events;
+
+  let rows = evs.map(e => {
+    const beat = e.surprise_pct != null ? e.surprise_pct > 0 : null;
+    const epsBadge = beat === true
+      ? `<span class="er-beat">▲ Beat ${e.surprise_pct > 0 ? '+' : ''}${e.surprise_pct?.toFixed(1)}%</span>`
+      : beat === false
+      ? `<span class="er-miss">▼ Miss ${e.surprise_pct?.toFixed(1)}%</span>`
+      : `<span class="er-na">—</span>`;
+    const epsDetail = (e.eps_actual != null)
+      ? `<div style="font-size:0.68rem;color:var(--text2);margin-top:2px">A:${e.eps_actual.toFixed(2)} E:${e.eps_estimate?.toFixed(2)??'—'}</div>`
+      : '';
+    return `<tr>
+      <td class="er-th-left" style="font-size:0.8rem;color:var(--text);font-weight:600">${e.earnings_date}</td>
+      <td style="text-align:center">${epsBadge}${epsDetail}</td>
+      ${dayCell(e.prev_day)}
+      ${dayCell(e.earnings_day, 'er-group-e0')}
+      ${dayCell(e.next_day,     'er-group-ep1')}
+    </tr>`;
+  }).join('');
+
+  // Average row
+  const avgPrevPct  = avg(evs, e => e.prev_day?.pct_chg);
+  const avgPrevVol  = avg(evs, e => e.prev_day?.volume);
+  const avgE0Pct    = avg(evs, e => e.earnings_day?.pct_chg);
+  const avgE0Vol    = avg(evs, e => e.earnings_day?.volume);
+  const avgEp1Pct   = avg(evs, e => e.next_day?.pct_chg);
+  const avgEp1Vol   = avg(evs, e => e.next_day?.volume);
+
+  const avgRow = `<tr class="er-avg">
+    <td colspan="2" style="color:var(--text2);font-size:0.75rem">Avg (${evs.length} events)</td>
+    <td>—</td><td class="er-vol">${fmtVol(avgPrevVol)}</td><td>${fmtPct(avgPrevPct)}</td>
+    <td class="er-group-e0">—</td><td class="er-vol">${fmtVol(avgE0Vol)}</td><td>${fmtPct(avgE0Pct)}</td>
+    <td class="er-group-ep1">—</td><td class="er-vol">${fmtVol(avgEp1Vol)}</td><td>${fmtPct(avgEp1Pct)}</td>
+  </tr>`;
+
+  el.innerHTML = `
+    <div class="er-wrap">
+      <table class="er-table">
+        <thead>
+          <tr>
+            <th class="er-th-left" rowspan="2">Date</th>
+            <th rowspan="2" style="color:#e6edf3">EPS vs Estimate</th>
+            <th class="er-group" colspan="3">Day Before</th>
+            <th class="er-group er-group-hdr-e0" colspan="3">Reaction Day (highest vol)</th>
+            <th class="er-group er-group-hdr-ep1" colspan="3">Day After</th>
+          </tr>
+          <tr>
+            <th style="color:#cdd9e5">Close</th><th style="color:#cdd9e5">Volume</th><th style="color:#cdd9e5">Chg%</th>
+            <th class="er-sub-e0">Close</th><th class="er-sub-e0">Volume</th><th class="er-sub-e0">Chg%</th>
+            <th class="er-sub-ep1">Close</th><th class="er-sub-ep1">Volume</th><th class="er-sub-ep1">Chg%</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+          ${avgRow}
+        </tbody>
+      </table>
+    </div>`;
+}
 
 async function loadMarket() {
   const d = await api('/api/market');
@@ -10810,16 +11210,28 @@ function applyBrProfile(name) {
   document.getElementById(`brProf-${name}`)?.classList.add('active');
 }
 
-async function saveBotConfig() {
+async function saveBotConfig(autoTradeConsented = false) {
   const cfg = brReadConfig();
   const btn = document.getElementById('brSaveBtn');
   const err = document.getElementById('brSaveErr');
+
+  // If enabling auto-execute for the first time, require explicit consent
+  if (cfg.auto_execute === true && !autoTradeConsented) {
+    const previouslyEnabled = _brCfg?.auto_execute === true;
+    if (!previouslyEnabled) {
+      showAutoTradeConsentModal();
+      return;
+    }
+  }
+
   btn.disabled = true;
   btn.textContent = '⏳ Saving…';
   if (err) err.style.display = 'none';
   try {
+    const payload = { ...cfg };
+    if (cfg.auto_execute === true && autoTradeConsented) payload.auto_trade_consent = true;
     const r = await fetch('/api/bot/config', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Save failed');
@@ -10833,6 +11245,24 @@ async function saveBotConfig() {
   } finally {
     btn.textContent = '💾 Save Changes';
   }
+}
+
+function showAutoTradeConsentModal() {
+  document.getElementById('autoTradeConsentModal').style.display = 'flex';
+}
+
+function closeAutoTradeConsentModal() {
+  document.getElementById('autoTradeConsentModal').style.display = 'none';
+}
+
+async function confirmAutoTradeConsent() {
+  const checked = document.getElementById('autoTradeConsentCheck').checked;
+  if (!checked) {
+    document.getElementById('autoTradeConsentErr').style.display = '';
+    return;
+  }
+  closeAutoTradeConsentModal();
+  await saveBotConfig(true);
 }
 
 async function resetBotConfig() {
@@ -11627,8 +12057,8 @@ async function loadHome(force = false) {
       <div class="home-sidebar">
         <div class="sidebar-panel">
           <div class="sidebar-head">
-            <h3>📅 Earnings Today</h3>
-            <span style="font-size:0.72rem;color:#8b949e">${now.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+            <h3>📅 Upcoming Earnings</h3>
+            <span style="font-size:0.72rem;color:#8b949e">Today + 7 days</span>
           </div>
           <div id="homeEarnings"><div style="padding:20px;color:#8b949e;font-size:0.82rem">Loading…</div></div>
         </div>
@@ -11684,36 +12114,77 @@ async function loadHome(force = false) {
   const rest = homeAllNews.filter(a => a !== featured);
   renderHomeNews(homeActivecat === 'all' ? rest : rest.filter(a => a.category === homeActivecat));
 
-  // ── Fetch earnings separately — never blocks news rendering ────────────────
-  api('/api/home-earnings', 15000).then(earningsRaw => {
-    const earningsList = (Array.isArray(earningsRaw) ? earningsRaw : []).slice(0, 12);
+  // ── Fetch upcoming earnings (today + 7 days) ──────────────────────────────
+  api('/api/earnings-month', 15000).then(data => {
+    const todayD = new Date(); todayD.setHours(0,0,0,0);
+    const cutoff = new Date(todayD.getTime() + 7 * 86400000);
+    const todayStr = `${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}-${String(todayD.getDate()).padStart(2,'0')}`;
+    const all = (data?.earnings || []).filter(e => {
+      const d = new Date(e.date + 'T00:00:00');
+      return d >= todayD && d <= cutoff;
+    });
+
     const earnEl = document.getElementById('homeEarnings');
     if (!earnEl) return;
-    earnEl.innerHTML = earningsList.length
-      ? earningsList.map(e => {
-          const ct = e.call_time || e.time || '';
-          const isBMO = ct === 'BMO';
-          const isAMC = ct === 'AMC';
-          const timeLabel = isBMO ? 'Pre-Mkt' : isAMC ? 'Post-Mkt' : ct || 'TBD';
-          const sym = e.symbol || e.ticker || '?';
-          return `<div class="earn-item" id="earn-row-${sym}">
-            <div class="earn-row-top">
-              <div>
-                <div class="earn-sym">${sym}</div>
-                <div class="earn-name">${escHtml(e.company||e.name||'')}</div>
-              </div>
-              <span class="earn-time ${isBMO?'earn-pre':isAMC?'earn-post':'earn-na'}">${timeLabel}</span>
-            </div>
-            <div class="earn-trend" id="earn-trend-${sym}"><span class="earn-trend-loading">loading…</span></div>
-          </div>`;
-        }).join('')
-      : '<div style="padding:20px;color:#8b949e;font-size:0.82rem">No earnings today.</div>';
 
-    if (!earningsList.length) return;
-    const syms = earningsList.map(e => e.symbol || e.ticker).filter(Boolean);
-    api('/api/earnings-trend?symbols=' + syms.join(',')).then(trends => {
-      if (!trends) return;
-      syms.forEach(sym => {
+    if (!all.length) {
+      earnEl.innerHTML = '<div style="padding:20px;color:#8b949e;font-size:0.82rem">No earnings in the next 7 days.</div>';
+      return;
+    }
+
+    const byDate = {};
+    for (const e of all) { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e); }
+
+    const MON_N = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const DAY_N = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    const EARN_SHOW_DEFAULT = 20; // show top N per day, expand on click
+    let html = '';
+    for (const [dateStr, items] of Object.entries(byDate).sort()) {
+      const d = new Date(dateStr + 'T00:00:00');
+      const isToday = dateStr === todayStr;
+      const dayLabel = isToday ? 'Today' : `${DAY_N[d.getDay()]} ${MON_N[d.getMonth()]} ${d.getDate()}`;
+      const hidden = items.length > EARN_SHOW_DEFAULT;
+      const visible = hidden ? items.slice(0, EARN_SHOW_DEFAULT) : items;
+      html += `<div style="padding:5px 12px;background:rgba(88,166,255,0.07);font-size:0.68rem;font-weight:700;color:${isToday?'var(--accent)':'var(--text2)'};text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border)">${dayLabel} · ${items.length} reporting</div>`;
+      html += visible.map(e => {
+        const ct = e.call_time || '';
+        const isBMO = ct === 'BMO', isAMC = ct === 'AMC';
+        const timeLabel = isBMO ? 'Pre-Mkt' : isAMC ? 'Post-Mkt' : (ct && ct !== '?') ? ct : 'TBD';
+        const sym = e.symbol || '?';
+        const mcap = e.market_cap ? `<span style="font-size:0.63rem;color:var(--muted);margin-left:4px">${e.market_cap}</span>` : '';
+        return `<div class="earn-item earn-item-link" id="earn-row-${sym}-${dateStr}" onclick="calEarningClick('${sym}')">
+          <div class="earn-row-top">
+            <div>
+              <div class="earn-sym">${sym}${mcap}</div>
+              <div class="earn-name">${escHtml(e.company||'')}</div>
+            </div>
+            <span class="earn-time ${isBMO?'earn-pre':isAMC?'earn-post':'earn-na'}">${timeLabel}</span>
+          </div>
+          <div class="earn-trend" id="earn-trend-${sym}"><span class="earn-trend-loading">loading…</span></div>
+        </div>`;
+      }).join('');
+      if (hidden) {
+        html += `<div id="earn-more-${dateStr}" style="padding:8px 18px;font-size:0.75rem;color:var(--accent);cursor:pointer;border-bottom:1px solid var(--border)"
+          onclick="earnShowMore('${dateStr}',${JSON.stringify(items.slice(EARN_SHOW_DEFAULT)).replace(/</g,'\\u003c')})"
+          >▼ Show ${items.length - EARN_SHOW_DEFAULT} more (${items.length} total reporting today)</div>`;
+      }
+    }
+    earnEl.innerHTML = html;
+
+    // EPS beat/miss trend — only for initially visible symbols (top EARN_SHOW_DEFAULT per day)
+    const visibleSyms = [];
+    for (const items of Object.values(byDate)) {
+      items.slice(0, EARN_SHOW_DEFAULT).forEach(e => { if (e.symbol) visibleSyms.push(e.symbol); });
+    }
+    const allSyms = [...new Set(visibleSyms)];
+    if (!allSyms.length) return;
+    // API supports up to 15 — chunk if needed
+    const chunks = [];
+    for (let i = 0; i < allSyms.length; i += 15) chunks.push(allSyms.slice(i, i + 15));
+    Promise.all(chunks.map(ch => api('/api/earnings-trend?symbols=' + ch.join(','), 30000))).then(results => {
+      const trends = Object.assign({}, ...results.filter(Boolean));
+      allSyms.forEach(sym => {
         const te = document.getElementById(`earn-trend-${sym}`);
         if (!te) return;
         const quarters = trends[sym] || [];
@@ -11723,8 +12194,7 @@ async function loadHome(force = false) {
           const yr    = q.end_date ? q.end_date.slice(0,4) : '';
           const disp  = label + (yr ? ` '${yr.slice(2)}` : '');
           if (q.beat === null) return `<span class="eq-badge eq-na">${disp}</span>`;
-          const cls = q.beat ? 'eq-beat' : 'eq-miss';
-          return `<span class="eq-badge ${cls}">${q.beat?'▲':'▼'} ${disp}</span>`;
+          return `<span class="eq-badge ${q.beat?'eq-beat':'eq-miss'}">${q.beat?'▲':'▼'} ${disp}</span>`;
         }).join('');
       });
     }).catch(()=>{});
@@ -11735,6 +12205,51 @@ async function loadHome(force = false) {
   homeRefreshTimer = setTimeout(() => {
     if (document.getElementById('page-market')?.classList.contains('active')) loadHome(true);
   }, 180000);
+}
+
+function earnShowMore(dateStr, moreItems) {
+  const btn = document.getElementById(`earn-more-${dateStr}`);
+  if (!btn) return;
+  const todayD = new Date(); todayD.setHours(0,0,0,0);
+  const todayStr = `${todayD.getFullYear()}-${String(todayD.getMonth()+1).padStart(2,'0')}-${String(todayD.getDate()).padStart(2,'0')}`;
+  let extra = '';
+  moreItems.forEach(e => {
+    const ct = e.call_time || '';
+    const isBMO = ct === 'BMO', isAMC = ct === 'AMC';
+    const timeLabel = isBMO ? 'Pre-Mkt' : isAMC ? 'Post-Mkt' : (ct && ct !== '?') ? ct : 'TBD';
+    const sym = e.symbol || '?';
+    const mcap = e.market_cap ? `<span style="font-size:0.63rem;color:var(--muted);margin-left:4px">${e.market_cap}</span>` : '';
+    extra += `<div class="earn-item earn-item-link" id="earn-row-${sym}-${dateStr}" onclick="calEarningClick('${sym}')">
+      <div class="earn-row-top">
+        <div><div class="earn-sym">${sym}${mcap}</div><div class="earn-name">${escHtml(e.company||'')}</div></div>
+        <span class="earn-time ${isBMO?'earn-pre':isAMC?'earn-post':'earn-na'}">${timeLabel}</span>
+      </div>
+      <div class="earn-trend" id="earn-trend-${sym}"><span class="earn-trend-loading">loading…</span></div>
+    </div>`;
+  });
+  btn.insertAdjacentHTML('beforebegin', extra);
+  btn.remove();
+  // Fetch EPS trend for the newly shown symbols
+  const newSyms = moreItems.map(e => e.symbol).filter(Boolean);
+  if (!newSyms.length) return;
+  const chunks = [];
+  for (let i = 0; i < newSyms.length; i += 15) chunks.push(newSyms.slice(i, i + 15));
+  Promise.all(chunks.map(ch => api('/api/earnings-trend?symbols=' + ch.join(','), 30000))).then(results => {
+    const trends = Object.assign({}, ...results.filter(Boolean));
+    newSyms.forEach(sym => {
+      const te = document.getElementById(`earn-trend-${sym}`);
+      if (!te) return;
+      const quarters = trends[sym] || [];
+      if (!quarters.length) { te.innerHTML = '<span style="color:#8b949e;font-size:0.7rem">No history</span>'; return; }
+      te.innerHTML = quarters.map(q => {
+        const label = q.period || '?';
+        const yr = q.end_date ? q.end_date.slice(0,4) : '';
+        const disp = label + (yr ? ` '${yr.slice(2)}` : '');
+        if (q.beat === null) return `<span class="eq-badge eq-na">${disp}</span>`;
+        return `<span class="eq-badge ${q.beat?'eq-beat':'eq-miss'}">${q.beat?'▲':'▼'} ${disp}</span>`;
+      }).join('');
+    });
+  }).catch(()=>{});
 }
 
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -12072,6 +12587,70 @@ qty = floor(position_size ÷ current_price)
 </table>`
   },
   {
+    id: 'catalyst', title: 'Pre-Market Catalyst Scanner', color: '#f85149', tags: ['catalyst','pre-market','gap','sec','8-k','edgar','biotech','fda','low float','pdufa','explosive','small cap','cnsp','skk','gbtg','scanner','morning'],
+    content: `
+<p>The Pre-Market Catalyst Scanner (<code>catalyst-scanner.js</code>) identifies CNSP/SKK/GBTG-type explosive moves before or at the open. It runs 4 detection methods in parallel via <code>Promise.allSettled</code> and caches results for 10 minutes.</p>
+
+<h4>How to Use</h4>
+<ul>
+<li><strong>AI Chat:</strong> Ask <em>"scan for pre-market catalysts"</em> or <em>"find explosive movers before the open"</em> — Claude calls <code>scan_catalyst_movers</code></li>
+<li><strong>API:</strong> <code>GET /api/catalyst-scan</code> (requires login)</li>
+<li><strong>Automatic:</strong> Runs via cron at 9:00 AM ET (pre-market) and 8:00 PM ET (SEC evening sweep)</li>
+</ul>
+
+<h4>4 Detection Methods</h4>
+<table>
+<tr><th>#</th><th>Scanner</th><th>Source</th><th>Filter Criteria</th></tr>
+<tr>
+  <td><strong>1</strong></td>
+  <td>Pre-Market Gap Scanner</td>
+  <td>Yahoo Finance screener<br><code>premarket_gainers</code> preset</td>
+  <td>≥5% gap vs previous close · price ≥$1 · volume ≥100K · Falls back to <code>day_gainers</code> → <code>most_actives</code></td>
+</tr>
+<tr>
+  <td><strong>2</strong></td>
+  <td>SEC 8-K Monitor</td>
+  <td>SEC EDGAR Atom RSS feed<br><code>sec.gov/cgi-bin/browse-edgar</code></td>
+  <td>Latest ~20 8-K filings · High-impact items: 2.01 (acquisition), 7.01/8.01 (press release), 1.01 (material contract), 3.02/5.02 · Returns company name, CIK, filing time, item numbers</td>
+</tr>
+<tr>
+  <td><strong>3</strong></td>
+  <td>Low-Float Setup Scanner</td>
+  <td>Yahoo Finance <code>quoteSummary</code><br>(defaultKeyStatistics + price modules)</td>
+  <td>Float &lt;20M shares · RVOL ≥1.5 · Checks pre-market gappers + a curated watchlist (CNSP, SKK, GBTG, SIDU, etc.) · Fetches float + volume per symbol individually</td>
+</tr>
+<tr>
+  <td><strong>4</strong></td>
+  <td>Biotech Catalyst Watchlist</td>
+  <td>Symbol news via <code>getSymbolNews()</code></td>
+  <td>24 known biotech/pharma symbols · Keywords: FDA, PDUFA, BLA, NDA, phase 3, clinical trial, approval, data readout · Only articles from last 72 hours</td>
+</tr>
+</table>
+
+<h4>Cron Schedule</h4>
+<table>
+<tr><th>Job</th><th>Time (ET)</th><th>Why</th></tr>
+<tr><td>Pre-Market Sweep</td><td>9:00 AM Mon–Fri</td><td>30 min before open — catches overnight gaps and morning SEC filings</td></tr>
+<tr><td>SEC Evening Sweep</td><td>8:00 PM Mon–Fri</td><td>After-hours filings land 4–8 PM — catches acquisitions and material events for tomorrow</td></tr>
+</table>
+
+<h4>Result Structure</h4>
+<table>
+<tr><th>Field</th><th>Contents</th></tr>
+<tr><td><code>pre_market_gappers</code></td><td>Array of {symbol, name, gap_pct, price, prev_close, volume, avg_volume, market_cap}</td></tr>
+<tr><td><code>sec_filings</code></td><td>Array of {company, cik, filed_at, items[], has_high_impact, link}</td></tr>
+<tr><td><code>low_float_setups</code></td><td>Array of {symbol, name, float_m, rvol, gap_pct, price}</td></tr>
+<tr><td><code>biotech_catalysts</code></td><td>Array of {symbol, catalyst_count, latest_title, hours_ago, keywords_found[]}</td></tr>
+<tr><td><code>scanned_at</code></td><td>ISO timestamp of scan</td></tr>
+</table>
+
+<h4>Cache & Freshness</h4>
+<p>Results are cached in memory for 10 minutes. If you ask the AI twice within 10 minutes, the second call returns the cached result instantly. The cron jobs also populate this cache so the first chat request after 9AM is instant.</p>
+
+<h4>Failure Isolation</h4>
+<p>All 4 scanners run via <code>Promise.allSettled</code> — if Yahoo Finance is down, the gap scanner returns <code>[]</code> but SEC and biotech scans still complete. Individual symbol lookups in the low-float scanner also use <code>Promise.allSettled</code> internally.</p>`
+  },
+  {
     id: 'political', title: 'Political Catalysts & Sector Impact', color: '#f85149', tags: ['political','geopolitical','war','tariff','sanctions','trade','sector','rotation','trump','fed','policy','executive order','news'],
     content: `
 <p>Political events can move markets faster and harder than earnings. The AI is trained to detect these catalysts from live news (FinancialJuice, NYT Politics, The Hill, Alpaca News) and immediately map them to specific winning and losing sectors.</p>
@@ -12173,7 +12752,7 @@ qty = floor(position_size ÷ current_price)
 </table>`
   },
   {
-    id: 'datasources', title: 'Data Sources', color: '#e3b341', tags: ['data','sources','yahoo','alpaca','moomoo','sec','edgar','tradingview','api','news','quotes','real time','reuters','nyt','the hill','political','geopolitical'],
+    id: 'datasources', title: 'Data Sources', color: '#e3b341', tags: ['data','sources','yahoo','alpaca','moomoo','sec','edgar','8-k','tradingview','api','news','quotes','real time','reuters','nyt','the hill','political','geopolitical','catalyst','pre-market'],
     content: `
 <p style="color:#8b949e;font-size:0.85rem;margin-bottom:12px">Sources are listed in priority order — Moomoo is the primary market data provider; Yahoo Finance is the fallback when OpenD is offline.</p>
 <table>
@@ -12199,11 +12778,14 @@ qty = floor(position_size ÷ current_price)
   <td>Stock news + macro keyword search</td><td>Yahoo search (includes "tariffs trade war geopolitics")</td><td>Guidance signals, political catalyst detection</td>
 </tr>
 <tr>
-  <td rowspan="2"><strong style="color:#79c0ff">SEC EDGAR<br><span style="font-size:0.72rem;font-weight:400;opacity:0.8">Free / Public</span></strong></td>
+  <td rowspan="3"><strong style="color:#79c0ff">SEC EDGAR<br><span style="font-size:0.72rem;font-weight:400;opacity:0.8">Free / Public</span></strong></td>
   <td>Earnings actuals + beat history</td><td>EDGAR XBRL API</td><td>Beat streak, earnings quality score</td>
 </tr>
 <tr>
   <td>Insider buying (Form 4 filings)</td><td>EDGAR full-text search</td><td>Insider signal in conviction score</td>
+</tr>
+<tr>
+  <td>8-K real-time filings (acquisitions, press releases, material events)</td><td>EDGAR Atom RSS feed · 20 most recent</td><td>Pre-market catalyst scanner · high-impact items 2.01/7.01/8.01</td>
 </tr>
 <tr style="background:#1f1a0a20">
   <td rowspan="3"><strong style="color:#f0883e">Political &amp; Macro News<br><span style="font-size:0.72rem;font-weight:400;opacity:0.8">Real-Time</span></strong></td>
@@ -13535,8 +14117,16 @@ function exploreSymbol(sym) {
     <div class="qt-result" id="qtResult"></div>
   </div>
 
+  <!-- Explorer section tabs -->
+  <div style="display:flex;border-bottom:1px solid var(--border);background:var(--card-bg)">
+    <button id="exTabChart" onclick="switchExplorerTab('chart')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--accent);border-bottom:2px solid var(--accent)">📈 Chart</button>
+    <button id="exTabPortfolio" onclick="switchExplorerTab('portfolio')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">💼 My Positions</button>
+  </div>
+
   <!-- Scrollable body -->
   <div class="float-explorer-body">
+    <!-- ── CHART VIEW ── -->
+    <div id="exViewChart">
     <!-- Stock summary stats -->
     <div id="explorerStats" style="display:none;padding:16px;border-bottom:1px solid #21262d">
       <div style="display:flex;gap:24px;flex-wrap:wrap" id="explorerStatsInner"></div>
@@ -13653,12 +14243,124 @@ function exploreSymbol(sym) {
     <div id="explorerEmpty" style="padding:40px;text-align:center;color:#8b949e;font-size:0.85rem">
       Enter a stock symbol above to explore its 3-year history, conviction scores, and dip events.
     </div>
+    </div><!-- end exViewChart -->
+
+    <!-- ── PORTFOLIO VIEW ── -->
+    <div id="exViewPortfolio" style="display:none;padding:14px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <span style="font-size:0.82rem;font-weight:600;color:var(--text2)">OPEN POSITIONS</span>
+        <button onclick="loadExplorerPortfolio()" style="background:none;border:1px solid #30363d;border-radius:6px;padding:3px 10px;color:#8b949e;cursor:pointer;font-size:0.75rem">↻ Refresh</button>
+      </div>
+      <div id="exPortfolioPositions" style="margin-bottom:18px;font-size:0.82rem;color:var(--text2)">Loading…</div>
+
+      <div style="font-size:0.82rem;font-weight:600;color:var(--text2);margin-bottom:10px">RECENT TRADES</div>
+      <div id="exPortfolioTrades" style="font-size:0.82rem;color:var(--text2)">Loading…</div>
+    </div>
   </div>
 </div>
 
 <script>
+// ── Explorer tab switching ─────────────────────────────────────────────────
+function switchExplorerTab(tab) {
+  const isChart = tab === 'chart';
+  document.getElementById('exViewChart').style.display     = isChart ? '' : 'none';
+  document.getElementById('exViewPortfolio').style.display = isChart ? 'none' : '';
+  const btnChart = document.getElementById('exTabChart');
+  const btnPort  = document.getElementById('exTabPortfolio');
+  btnChart.style.color       = isChart ? 'var(--accent)' : 'var(--text2)';
+  btnChart.style.borderBottomColor = isChart ? 'var(--accent)' : 'transparent';
+  btnPort.style.color        = isChart ? 'var(--text2)' : 'var(--accent)';
+  btnPort.style.borderBottomColor  = isChart ? 'transparent' : 'var(--accent)';
+  if (!isChart) loadExplorerPortfolio();
+}
+
+async function loadExplorerPortfolio() {
+  const posEl   = document.getElementById('exPortfolioPositions');
+  const tradeEl = document.getElementById('exPortfolioTrades');
+  posEl.textContent   = 'Loading…';
+  tradeEl.textContent = 'Loading…';
+
+  // Use same source as dashboard
+  const src = (typeof currentSource !== 'undefined' ? currentSource : null) || 'alpaca';
+
+  try {
+    // Positions
+    const posRes  = await fetch(`/api/positions?source=${src}`);
+    const posData = await posRes.json();
+    const positions = posData.positions || [];
+    if (!positions.length) {
+      posEl.innerHTML = '<span style="color:#8b949e">No open positions</span>';
+    } else {
+      posEl.innerHTML = positions.map(p => {
+        const pl    = parseFloat(p.unrealized_pl ?? p.unrealized_plpc ?? 0);
+        const plPct = parseFloat(p.unrealized_plpc ?? 0);
+        const plClr = pl >= 0 ? 'var(--green)' : 'var(--red)';
+        const plStr = pl >= 0 ? `+$${pl.toFixed(2)}` : `-$${Math.abs(pl).toFixed(2)}`;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--faint)">
+          <div>
+            <span style="font-weight:700;color:var(--text)">${p.symbol}</span>
+            <span style="color:var(--text2);margin-left:8px">${p.qty} shares @ $${parseFloat(p.avg_entry_price||0).toFixed(2)}</span>
+          </div>
+          <div style="text-align:right">
+            <div style="color:${plClr};font-weight:600">${plStr}</div>
+            <div style="color:#8b949e;font-size:0.72rem">${(plPct*100).toFixed(2)}%</div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // Recent trades
+    const tradeRes  = await fetch(`/api/trades?source=${src}&limit=15`);
+    const tradeData = await tradeRes.json();
+    const trades = tradeData.trades || [];
+    if (!trades.length) {
+      tradeEl.innerHTML = '<span style="color:#8b949e">No recent trades</span>';
+    } else {
+      tradeEl.innerHTML = trades.slice(0, 15).map(t => {
+        const isBuy   = (t.side||t.action||'').toLowerCase() === 'buy';
+        const pnl     = parseFloat(t.pnl_usd ?? 0);
+        const hasPnl  = t.status === 'closed' && t.pnl_usd != null;
+        const pnlClr  = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+        const pnlStr  = hasPnl ? (pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`) : '';
+        const dt      = t.opened_at || t.created_at || '';
+        const dtStr   = dt ? new Date(dt).toLocaleString('en-SG', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+        const badge   = isBuy
+          ? '<span style="background:rgba(16,185,129,0.15);color:var(--green);border-radius:4px;padding:1px 6px;font-size:0.72rem;font-weight:700">BUY</span>'
+          : '<span style="background:rgba(244,63,94,0.15);color:var(--red);border-radius:4px;padding:1px 6px;font-size:0.72rem;font-weight:700">SELL</span>';
+        const st      = (t.status||'').toLowerCase();
+        const stClr   = st==='rejected' ? 'var(--red)' : st==='cancelled'||st==='expired' ? '#8b949e' : st==='partial' ? 'var(--yellow,#f59e0b)' : 'var(--text2)';
+        const stLbl   = st==='rejected' ? '⚠ Rejected' : st==='cancelled' ? 'Cancelled' : st==='expired' ? 'Expired' : st==='partial' ? 'Partial' : st;
+        const statusHtml = hasPnl
+          ? `<div style="color:${pnlClr};font-weight:600">${pnlStr}</div>`
+          : `<div style="color:${stClr};font-size:0.78rem">${stLbl}</div>`;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--faint)">
+          <div style="display:flex;align-items:center;gap:8px">
+            ${badge}
+            <span style="font-weight:700;color:var(--text)">${t.symbol}</span>
+            <span style="color:var(--text2)">${t.qty||1} sh</span>
+          </div>
+          <div style="text-align:right">
+            ${statusHtml}
+            <div style="color:#8b949e;font-size:0.72rem">${dtStr}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } catch(e) {
+    posEl.textContent   = 'Failed to load positions';
+    tradeEl.textContent = 'Failed to load trades';
+  }
+}
+
 // ── Floating Explorer controls ─────────────────────────────────────────────
 let _explorerOpenAt = 0;
+// Called when a user clicks any earnings chip or row — opens Stock Explorer + filters Reaction Analysis
+function calEarningClick(symbol) {
+  explorerSelect(symbol);   // set symbol + load chart data
+  openFloatExplorer();      // open floating panel
+  erQuickSelect(symbol);    // filter Earnings Reaction Analysis (Forecast Lab)
+}
+
 function openFloatExplorer() {
   _explorerOpenAt = Date.now();
   document.getElementById('floatExplorer').classList.add('open');
@@ -13822,7 +14524,8 @@ async function qtSubmit(side) {
       trailing_stop: trailPrice ? `trail $${trailPrice.toFixed(2)}` : `trail ${trailPct}%`,
     }[_qtType] ?? _qtType;
     const tifLabel = { day:'Day', gtc:'GTC', opg:'MOO', cls:'MOC' }[_qtTif] ?? _qtTif.toUpperCase();
-    qtShowResult('ok', `${emoji} ${side.toUpperCase()} ${data.qty} ${sym} · ${priceDesc} · ${tifLabel} · Est. $${data.estimated_cost?.toLocaleString()} · ${data.status}`);
+    const noteStr = data.note ? ` · ${data.note}` : '';
+    qtShowResult('ok', `${emoji} ${side.toUpperCase()} ${data.qty} ${sym} · ${priceDesc} · ${tifLabel} · Est. $${data.estimated_cost?.toLocaleString()} · ${data.status}${noteStr}`);
     setTimeout(refreshPositions, 600);
     setTimeout(loadDashboard,    2500);
   } catch(e) {
@@ -13837,7 +14540,7 @@ function qtShowResult(type, msg) {
   const el = document.getElementById('qtResult');
   el.textContent = msg;
   el.className   = `qt-result ${type === 'error' ? 'err' : 'ok'}`;
-  el.style.display = '';
+  el.style.display = 'block';
   el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
@@ -13861,6 +14564,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const handle = document.getElementById('floatExplorerHeader');
   let dragging = false, startX, startY, startRight, startBottom;
 
+  // Restore last saved position
+  try {
+    const saved = JSON.parse(localStorage.getItem('explorerPos') || 'null');
+    if (saved) {
+      const maxRight = window.innerWidth - 300;
+      const maxTop   = window.innerHeight - 200;
+      panel.style.right = Math.min(Math.max(0, saved.right), maxRight) + 'px';
+      panel.style.top   = Math.min(Math.max(56, saved.top),  maxTop)  + 'px';
+    }
+  } catch {}
+
   handle.addEventListener('mousedown', e => {
     if (e.target.closest('input,button,.explorer-search-wrap')) return;
     dragging = true;
@@ -13880,7 +14594,16 @@ document.addEventListener('DOMContentLoaded', () => {
     panel.style.top   = Math.max(56, startBottom + dy) + 'px';
   });
 
-  document.addEventListener('mouseup', () => { dragging = false; });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      localStorage.setItem('explorerPos', JSON.stringify({
+        right: parseFloat(panel.style.right) || 16,
+        top:   parseFloat(panel.style.top)   || 60,
+      }));
+    } catch {}
+  });
 })();
 
 // Connect autonomous push stream once page is ready
@@ -14155,5 +14878,41 @@ function buildThemePalette() { applyTheme(_currentTheme, false); }
 
 applyTheme(localStorage.getItem('theme') || 'vexai', false);
 </script>
+
+<!-- ─── Auto-Trade Consent Modal ──────────────────────────────────────────── -->
+<div id="autoTradeConsentModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#161b22;border:1px solid #f85149;border-radius:14px;padding:28px 32px;max-width:480px;width:calc(100%-32px);box-shadow:0 20px 60px rgba(0,0,0,0.6)">
+    <div style="font-size:1.2rem;font-weight:700;color:#f85149;margin-bottom:6px">⚠️ Automated Trading Consent</div>
+    <div style="font-size:0.82rem;color:#8b949e;margin-bottom:16px">You are about to enable automated trading. Please read and confirm below.</div>
+    <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px;font-size:0.82rem;color:#c9d1d9;line-height:1.65;margin-bottom:16px">
+      <p style="margin:0 0 8px"><strong style="color:#f85149">Risk Warning:</strong> By enabling automated trading, trades may be placed on your broker account automatically without requiring your manual confirmation for each order.</p>
+      <ul style="margin:0;padding-left:18px;color:#8b949e">
+        <li>You remain solely responsible for all trades executed on your accounts</li>
+        <li>Automated systems can malfunction or behave unexpectedly</li>
+        <li>You can disable auto-trading at any time from this settings panel</li>
+        <li>This platform does not provide financial advice</li>
+        <li>Past performance does not guarantee future results</li>
+      </ul>
+    </div>
+    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
+      <input type="checkbox" id="autoTradeConsentCheck" style="width:16px;height:16px;flex-shrink:0;margin-top:2px;accent-color:#f85149">
+      <label for="autoTradeConsentCheck" style="font-size:0.82rem;color:#e6edf3;cursor:pointer;line-height:1.5">
+        I understand the risks of automated trading and accept full responsibility for all trades executed on my accounts. I confirm this is not financial advice.
+      </label>
+    </div>
+    <div id="autoTradeConsentErr" style="display:none;color:#f85149;font-size:0.78rem;margin-bottom:8px">Please check the box above to confirm your consent.</div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="closeAutoTradeConsentModal()" style="flex:1;padding:9px;background:#21262d;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:0.9rem;cursor:pointer">Cancel</button>
+      <button onclick="confirmAutoTradeConsent()" style="flex:1;padding:9px;background:#b91c1c;border:none;border-radius:8px;color:#fff;font-size:0.9rem;font-weight:600;cursor:pointer">Enable Auto-Trading</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Disclaimer Footer ─────────────────────────────────────────────────── -->
+<div style="position:fixed;bottom:0;left:0;right:0;background:#111318;border-top:1px solid #21262d;padding:6px 16px;font-size:11px;color:#555;display:flex;justify-content:space-between;align-items:center;z-index:1000;gap:12px">
+  <span>⚠️ For educational purposes only. Not financial advice. Trading involves risk of loss. Past performance does not guarantee future results.</span>
+  <a href="/terms" target="_blank" style="color:#6e7681;text-decoration:none;white-space:nowrap;flex-shrink:0">Terms &amp; Risk Disclosure</a>
+</div>
+
 </body>
 </html>

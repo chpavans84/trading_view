@@ -32,7 +32,7 @@ import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews, getEarnings } from '../core/news.js';
 import { getAccounts, getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
-import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders } from '../core/tiger.js';
+import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, placeTigerOrder } from '../core/tiger.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
 import { getStockPrediction } from '../core/predictor.js';
@@ -43,6 +43,7 @@ import { getConvictionScore } from '../core/scoring.js';
 import { getMarketContext } from '../core/market-context.js';
 import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
+import { runCatalystScan } from '../core/catalyst-scanner.js';
 
 // Generate a stable numeric chat ID per user so each user has their own
 // Use username string directly as chat key — no hash collision possible.
@@ -307,6 +308,8 @@ app.use(express.static(join(__dirname, 'public'), {
 // Serve project-level images folder (e.g. /images/background.png)
 app.use('/images', express.static(join(__dirname, '../../images')));
 
+// /terms is served as a static file: src/web/public/terms.html
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {
@@ -378,7 +381,10 @@ const otpVerifyLimiter = rateLimit({
 
 app.post('/auth/register', registerLimiter, async (req, res) => {
   if (!isDbAvailable()) return res.status(503).json({ error: 'Registration unavailable — database not connected' });
-  const { username, email, password } = req.body;
+  const { username, email, password, terms_accepted } = req.body;
+  if (!terms_accepted) {
+    return res.status(400).json({ error: 'You must accept the Terms of Service and Risk Disclosure to use this platform.' });
+  }
   if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: 'username and password are required' });
   }
@@ -406,8 +412,12 @@ app.post('/auth/register', registerLimiter, async (req, res) => {
     plan:     'free',
     credits:  100,
   });
+  await query(
+    `UPDATE users SET terms_accepted_at = NOW(), terms_version = '1.0' WHERE username = $1`,
+    [username.toLowerCase()]
+  ).catch(() => {}); // non-fatal — columns added by migration
   const ip = req.ip || req.socket?.remoteAddress;
-  logActivity(username.toLowerCase(), 'register', 'Self-service signup — 100 free credits', ip);
+  logActivity(username.toLowerCase(), 'register', 'Self-service signup — 100 free credits, terms v1.0 accepted', ip);
   res.json({ ok: true, message: 'Account created! You have 100 free credits.' });
 });
 
@@ -1176,53 +1186,234 @@ app.get('/api/earnings-trend', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
-// Earnings calendar — next 30 days via Yahoo Finance per-symbol (batched)
-const EARNINGS_MONTH_WATCHLIST = [
-  'NVDA','AMD','AAPL','MSFT','GOOGL','META','AMZN','TSLA','NFLX','INTC',
-  'QCOM','MU','AVGO','TSM','SMCI','RTX','LMT','XOM','JPM','MRVL',
-  'CRM','ORCL','ADBE','UBER','LYFT','SNAP','SPOT','COIN','SQ','HOOD',
-  'PLTR','ARM','ANET','PANW','CRWD','ZS','NET','DDOG','MDB','SNOW',
-];
+// Earnings reaction analysis — price / volume / % for E-1, E-0, E+1 across available history
+// Data: earningsHistory (Yahoo quoteSummary) for dates+EPS, chart API for OHLCV
+app.get('/api/earnings-reaction', requireAuth, async (req, res) => {
+  try {
+    const symbol = (req.query.symbol || '').toUpperCase().trim().replace(/[^A-Z0-9.^-]/g, '');
+    if (!symbol) return res.json({ symbol: '', events: [] });
+    const data = await ttlCache(`er:reaction2:${symbol}`, 4 * 60 * 60 * 1000, async () => {
+      // 1. Fetch EPS + fiscal quarter-end dates from Yahoo earningsHistory
+      //    quarter = fiscal quarter end date (earnings call is ~30-50 days after)
+      let yfQuarters = [];
+      try {
+        const yfData = await _yf.quoteSummary(symbol, { modules: ['earningsHistory'] });
+        const hist = yfData?.earningsHistory?.history || [];
+        yfQuarters = hist
+          .filter(h => h.quarter)
+          .map(h => {
+            const qEnd = (h.quarter instanceof Date ? h.quarter : new Date(h.quarter))
+              .toISOString().split('T')[0];
+            const eps = h.epsActual  ?? null;
+            const est = h.epsEstimate ?? null;
+            return {
+              quarter_end:  qEnd,
+              eps_actual:   eps,
+              eps_estimate: est,
+              surprise_pct: (eps != null && est != null && Math.abs(est) > 0.001)
+                ? +((eps - est) / Math.abs(est) * 100).toFixed(2) : null,
+            };
+          })
+          .sort((a, b) => new Date(a.quarter_end) - new Date(b.quarter_end));
+      } catch (e) { console.warn('[earnings-reaction] earningsHistory failed:', e.message); }
+
+      if (!yfQuarters.length) return { symbol, events: [] };
+
+      // 2. Fetch 3yr daily OHLCV from Yahoo Finance chart API
+      const p1 = Math.floor((Date.now() - 3 * 365 * 86400 * 1000) / 1000);
+      const p2 = Math.floor(Date.now() / 1000) + 86400;
+      const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+        `?interval=1d&period1=${p1}&period2=${p2}`;
+      const chartResp = await fetch(chartUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!chartResp.ok) return { symbol, events: [] };
+      const chartJson = await chartResp.json();
+      const result = chartJson?.chart?.result?.[0];
+      if (!result) return { symbol, events: [] };
+
+      const tss = result.timestamp || [];
+      const q   = result.indicators?.quote?.[0] || {};
+      const barMap = {};
+      tss.forEach((ts, i) => {
+        if (q.close?.[i] == null) return;
+        const date = new Date(ts * 1000).toISOString().split('T')[0];
+        barMap[date] = {
+          date,
+          open:   q.open?.[i]   != null ? +q.open[i].toFixed(2)   : null,
+          high:   q.high?.[i]   != null ? +q.high[i].toFixed(2)   : null,
+          low:    q.low?.[i]    != null ? +q.low[i].toFixed(2)    : null,
+          close:  +q.close[i].toFixed(2),
+          volume: q.volume?.[i] || 0,
+        };
+      });
+      const sorted = Object.keys(barMap).sort();
+
+      const pct = (a, b) =>
+        (a?.close && b?.close) ? +((a.close - b.close) / b.close * 100).toFixed(2) : null;
+
+      // 3. For each quarter, find the reaction day:
+      //    Earnings are announced 20-60 days after fiscal quarter end.
+      //    The highest-volume day in that window is the market-reaction day
+      //    (E-0 for BMO companies; E+1 for AMC companies — either way it captures the move).
+      const events = yfQuarters.map(ev => {
+        const qEnd = new Date(ev.quarter_end + 'T00:00:00');
+        const winStart = new Date(qEnd.getTime() + 18 * 86400000).toISOString().split('T')[0];
+        const winEnd   = new Date(qEnd.getTime() + 65 * 86400000).toISOString().split('T')[0];
+        const winBars  = sorted.filter(d => d >= winStart && d <= winEnd).map(d => barMap[d]);
+        if (!winBars.length) return null;
+
+        // Pick the highest-volume bar as the reaction/event bar
+        const reactBar = winBars.reduce((mx, b) => (b.volume > mx.volume ? b : mx), winBars[0]);
+        const rIdx = sorted.indexOf(reactBar.date);
+        const b_1  = rIdx >= 1 ? barMap[sorted[rIdx - 1]] : null;
+        const b_2  = rIdx >= 2 ? barMap[sorted[rIdx - 2]] : null;
+        const bp1  = rIdx + 1 < sorted.length ? barMap[sorted[rIdx + 1]] : null;
+
+        return {
+          earnings_date: reactBar.date,
+          quarter_end:   ev.quarter_end,
+          eps_actual:    ev.eps_actual,
+          eps_estimate:  ev.eps_estimate,
+          surprise_pct:  ev.surprise_pct,
+          prev_day:     b_1     ? { ...b_1,     pct_chg: pct(b_1, b_2)        } : null,
+          earnings_day: reactBar ? { ...reactBar, pct_chg: pct(reactBar, b_1)  } : null,
+          next_day:     bp1     ? { ...bp1,     pct_chg: pct(bp1, reactBar)   } : null,
+        };
+      }).filter(Boolean).reverse(); // most recent first
+
+      return { symbol, events };
+    });
+    res.json(data);
+  } catch (err) {
+    console.error('[earnings-reaction]', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Earnings calendar — next 30 days
+// Primary: Nasdaq Calendar API (one request per day, returns ALL reporting stocks with time+EPS)
+// Fallback: Yahoo Finance quoteSummary per-symbol (S&P500 + NASDAQ100 + watchlist)
+// SP500 + NASDAQ100 as fallback when Nasdaq Calendar API is blocked (defined before DEFAULT_WATCHLIST_SB)
+const EARNINGS_FALLBACK_LIST = [...new Set([...SP500, ...NASDAQ100])];
+
+const NASDAQ_CAL_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Origin': 'https://www.nasdaq.com',
+  'Referer': 'https://www.nasdaq.com/market-activity/earnings',
+};
+
+function parseMarketCapNum(str) {
+  if (!str) return 0;
+  const s = String(str).replace(/[$,\s]/g, '');
+  const n = parseFloat(s);
+  if (!n) return 0;
+  if (s.endsWith('T')) return n * 1e12;
+  if (s.endsWith('B')) return n * 1e9;
+  if (s.endsWith('M')) return n * 1e6;
+  if (s.endsWith('K')) return n * 1e3;
+  return n;
+}
+
+async function fetchNasdaqEarningsDay(dateStr) {
+  try {
+    const r = await fetch(
+      `https://api.nasdaq.com/api/calendar/earnings?date=${dateStr}`,
+      { headers: NASDAQ_CAL_HEADERS, signal: AbortSignal.timeout(8000) }
+    );
+    if (!r.ok) return null;
+    const j = await r.json();
+    const rows = j?.data?.rows;
+    if (!Array.isArray(rows)) return null;
+    return rows
+      .map(row => ({
+        symbol:        (row.symbol || '').toUpperCase(),
+        company:       row.name || row.symbol || '',
+        call_time:     row.time === 'time-pre-market'  ? 'BMO'
+                     : row.time === 'time-after-hours' ? 'AMC' : '?',
+        eps_estimate:  row.epsForecast != null ? parseFloat(row.epsForecast) || null : null,
+        market_cap:    row.marketCap || null,
+        market_cap_n:  parseMarketCapNum(row.marketCap),
+        source:        'nasdaq',
+      }))
+      .filter(e => e.symbol)
+      .sort((a, b) => b.market_cap_n - a.market_cap_n); // largest companies first
+  } catch { return null; }
+}
 
 app.get('/api/earnings-month', requireAuth, async (req, res) => {
   try {
-    const cacheKey = 'earnings:month:' + new Date().toISOString().slice(0, 10);
-    const result = await ttlCache(cacheKey, 60 * 60 * 1000, async () => {
+    const todayLocal = new Date();
+    const localDateStr = `${todayLocal.getFullYear()}-${String(todayLocal.getMonth()+1).padStart(2,'0')}-${String(todayLocal.getDate()).padStart(2,'0')}`;
+    const cacheKey = 'earnings:month2:' + localDateStr;
+    const result = await ttlCache(cacheKey, 2 * 60 * 60 * 1000, async () => {
       const today = new Date(); today.setHours(0, 0, 0, 0);
-      const cutoff = new Date(today.getTime() + 30 * 86400000);
 
-      // Fetch calendarEvents only (no SEC data) in batches of 8 to avoid rate limiting
+      // Build list of weekdays for next 30 calendar days
+      const dates = [];
+      for (let i = 0; i < 30; i++) {
+        const d = new Date(today.getTime() + i * 86400000);
+        const dow = d.getDay();
+        if (dow === 0 || dow === 6) continue; // skip weekends
+        dates.push(d.toISOString().split('T')[0]);
+      }
+
+      // ── Primary: Nasdaq Calendar API (parallel, one request per day) ──
+      const nasdaqResults = await Promise.allSettled(
+        dates.map(d => fetchNasdaqEarningsDay(d))
+      );
+
       const byDate = {};
-      const BATCH = 8;
-      for (let i = 0; i < EARNINGS_MONTH_WATCHLIST.length; i += BATCH) {
-        const batch = EARNINGS_MONTH_WATCHLIST.slice(i, i + BATCH);
-        const results = await Promise.allSettled(
-          batch.map(sym =>
-            _yf.quoteSummary(sym, { modules: ['calendarEvents', 'price'] }).catch(() => null)
-          )
-        );
-        for (let j = 0; j < batch.length; j++) {
-          const sym = batch[j];
-          const r = results[j];
-          if (r.status !== 'fulfilled' || !r.value) continue;
-          const rawDates = r.value.calendarEvents?.earnings?.earningsDate ?? [];
-          const future = rawDates
-            .map(d => (d instanceof Date ? d : new Date(d)))
-            .filter(d => !isNaN(d) && d >= today && d <= cutoff)
-            .sort((a, b) => a - b);
-          if (!future.length) continue;
-          const dateStr = future[0].toISOString().split('T')[0];
-          if (!byDate[dateStr]) byDate[dateStr] = [];
-          byDate[dateStr].push({
-            symbol: sym,
-            company: r.value.price?.longName || r.value.price?.shortName || sym,
-            call_time: '?',
-            eps_estimate: null,
-            source: 'yahoo',
-          });
+      let nasdaqOk = 0;
+      nasdaqResults.forEach((r, i) => {
+        if (r.status !== 'fulfilled' || !r.value) return;
+        nasdaqOk++;
+        const d = dates[i];
+        byDate[d] = r.value; // full list — ALL reporting stocks
+      });
+
+      // ── Fallback: Yahoo Finance per-symbol for any day Nasdaq blocked ──
+      const missedDates = new Set(dates.filter(d => !byDate[d]));
+      if (missedDates.size > 0) {
+        console.log(`[earnings-month] Nasdaq blocked for ${missedDates.size} days — Yahoo fallback`);
+        const cutoff = new Date(today.getTime() + 30 * 86400000);
+        const BATCH = 20;
+        for (let i = 0; i < EARNINGS_FALLBACK_LIST.length; i += BATCH) {
+          const batch = EARNINGS_FALLBACK_LIST.slice(i, i + BATCH);
+          const yfResults = await Promise.allSettled(
+            batch.map(sym => _yf.quoteSummary(sym, { modules: ['calendarEvents', 'price'] }).catch(() => null))
+          );
+          for (let j = 0; j < batch.length; j++) {
+            const sym = batch[j];
+            const r = yfResults[j];
+            if (r.status !== 'fulfilled' || !r.value) continue;
+            const rawDates = r.value.calendarEvents?.earnings?.earningsDate ?? [];
+            const future = rawDates
+              .map(d => (d instanceof Date ? d : new Date(d)))
+              .filter(d => !isNaN(d) && d >= today && d <= cutoff)
+              .sort((a, b) => a - b);
+            if (!future.length) continue;
+            const dateStr = future[0].toISOString().split('T')[0];
+            if (!missedDates.has(dateStr)) continue; // only fill gaps
+            if (!byDate[dateStr]) byDate[dateStr] = [];
+            // Avoid dupes if partial Nasdaq data exists
+            if (!byDate[dateStr].find(e => e.symbol === sym)) {
+              byDate[dateStr].push({
+                symbol: sym,
+                company: r.value.price?.longName || r.value.price?.shortName || sym,
+                call_time: '?',
+                eps_estimate: null,
+                source: 'yahoo',
+              });
+            }
+          }
         }
       }
 
+      console.log(`[earnings-month] Nasdaq ok: ${nasdaqOk}/${dates.length} days, total entries: ${Object.values(byDate).flat().length}`);
       const all = [];
       for (const [date, entries] of Object.entries(byDate).sort()) {
         for (const e of entries) all.push({ date, ...e });
@@ -1232,6 +1423,107 @@ app.get('/api/earnings-month', requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[earnings-month]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// Yahoo Finance historical earnings fallback — fetches earningsHistory for major stocks
+// and estimates announcement date as fiscal_quarter_end + 35 days (snapped to weekday)
+// Cached per calendar month (24h TTL) so subsequent navigations are instant
+async function buildYahooHistoricalMonth(yearMonth) {
+  // DEFAULT_WATCHLIST_SB and NASDAQ100 are accessible at runtime (defined below in module)
+  const CAL_MAJOR = [...new Set([...DEFAULT_WATCHLIST_SB, ...NASDAQ100.slice(0, 70)])];
+  const [year, month] = yearMonth.split('-').map(Number);
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd   = new Date(year, month, 0, 23, 59, 59);
+  const byDate = {};
+  const BATCH = 25;
+  for (let i = 0; i < CAL_MAJOR.length; i += BATCH) {
+    const batch = CAL_MAJOR.slice(i, i + BATCH);
+    const batchResults = await Promise.allSettled(
+      batch.map(sym => _yf.quoteSummary(sym, { modules: ['earningsHistory', 'price'] }).catch(() => null))
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const sym = batch[j];
+      const r = batchResults[j];
+      if (r.status !== 'fulfilled' || !r.value) continue;
+      const hist = r.value.earningsHistory?.history || [];
+      const name  = r.value.price?.longName || r.value.price?.shortName || sym;
+      const mktCap = r.value.price?.marketCap || 0;
+      for (const h of hist) {
+        if (!h.quarter) continue;
+        const qEnd = h.quarter instanceof Date ? h.quarter : new Date(h.quarter);
+        if (isNaN(qEnd)) continue;
+        // Estimate announcement: quarter_end + 35 days, snapped to nearest weekday
+        let est = new Date(qEnd.getTime() + 35 * 86400000);
+        const dow = est.getDay();
+        if (dow === 0) est = new Date(est.getTime() + 86400000); // Sun → Mon
+        if (dow === 6) est = new Date(est.getTime() - 86400000); // Sat → Fri
+        if (est < monthStart || est > monthEnd) continue;
+        const ds = est.toISOString().split('T')[0];
+        if (!byDate[ds]) byDate[ds] = [];
+        byDate[ds].push({ symbol: sym, company: name, call_time: '?', eps_estimate: h.epsEstimate ?? null, market_cap_n: mktCap, source: 'yahoo_hist' });
+      }
+    }
+  }
+  for (const ds of Object.keys(byDate)) {
+    byDate[ds].sort((a, b) => (b.market_cap_n || 0) - (a.market_cap_n || 0));
+  }
+  console.log(`[earnings-hist] ${yearMonth}: ${Object.values(byDate).flat().length} entries across ${Object.keys(byDate).length} dates (Yahoo fallback)`);
+  return byDate;
+}
+
+// Per-date earnings calendar — supports historical navigation
+// Primary: Nasdaq Calendar API (all reporting stocks)
+// Fallback: Yahoo earningsHistory for ~100 major stocks when Nasdaq is blocked
+app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
+  try {
+    const dateParam = (req.query.date || '').trim();
+    if (!dateParam || !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      return res.status(400).json({ error: 'date param required (YYYY-MM-DD)' });
+    }
+    const startDate = new Date(dateParam + 'T00:00:00');
+    if (isNaN(startDate)) return res.status(400).json({ error: 'invalid date' });
+
+    // All weekdays in the 7-day window from startDate
+    const dates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startDate.getTime() + i * 86400000);
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+      dates.push(d.toISOString().split('T')[0]);
+    }
+
+    // ── Primary: Nasdaq Calendar API (per-day, 6h TTL) ──
+    const nasdaqResults = await Promise.allSettled(
+      dates.map(d => ttlCache(`earnings:cal:${d}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(d)))
+    );
+
+    const earnings = [];
+    const missedDates = [];
+    nasdaqResults.forEach((r, i) => {
+      const items = r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null;
+      if (items) {
+        for (const e of items) earnings.push({ date: dates[i], ...e });
+      } else {
+        missedDates.push(dates[i]);
+      }
+    });
+
+    // ── Fallback: Yahoo earningsHistory for days Nasdaq couldn't serve ──
+    if (missedDates.length > 0) {
+      const months = [...new Set(missedDates.map(d => d.substring(0, 7)))];
+      for (const ym of months) {
+        const histByDate = await ttlCache(`earnings:hist:${ym}`, 24 * 60 * 60 * 1000, () => buildYahooHistoricalMonth(ym));
+        for (const d of missedDates.filter(ds => ds.startsWith(ym))) {
+          const items = histByDate?.[d] || [];
+          for (const e of items) earnings.push({ date: d, ...e });
+        }
+      }
+    }
+
+    res.json({ success: true, date: dateParam, earnings });
+  } catch (err) {
+    console.error('[earnings-calendar]', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
@@ -1601,8 +1893,8 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     } else if (isAdmin) {
       // Admin paper account — DB trades (force trades) + Alpaca orders (quick trades)
       const [openTrades, recentClosed, alpacaOrders] = await Promise.all([
-        getTrades({ status: 'open', limit: 50 }),
-        getTrades({ status: 'closed', limit: 10 }),
+        getTrades({ status: 'open',   limit: 50, account_source: 'alpaca_paper' }),
+        getTrades({ status: 'closed', limit: 10, account_source: 'alpaca_paper' }),
         getOrders({ status: 'all' }).catch(() => []),
       ]);
       const seen = new Set();
@@ -1710,7 +2002,7 @@ app.get('/api/trades', requireAuth, async (req, res) => {
     // Paper source — admin sees DB force trades merged with Alpaca quick trades
     if (tradesAdmin) {
       const [dbTrades, alpacaOrders] = await Promise.allSettled([
-        getTrades({ status, limit }),
+        getTrades({ status, limit, account_source: 'alpaca_paper' }),
         getOrders({ status: 'all', limit: 50 }),
       ]);
       const db = (dbTrades.status === 'fulfilled' ? dbTrades.value : null) ?? [];
@@ -1741,13 +2033,24 @@ app.get('/api/trades', requireAuth, async (req, res) => {
       const dbUserT = isDbAvailable() ? await getDbUser(req.session.username) : null;
       if (!dbUserT?.tiger_id) return res.json({ source: 'tiger', trades: [] });
       const creds = { tiger_id: dbUserT.tiger_id, account: dbUserT.tiger_account, private_key: dbUserT.tiger_private_key };
+      const normaliseTigerStatus = s => {
+        const u = (s || '').toUpperCase();
+        if (u === 'FILLED')                         return 'closed';
+        if (u === 'PARTIAL_FILLED')                 return 'partial';
+        if (['NEW', 'PENDING', 'HELD', 'SUBMITTED'].includes(u)) return 'open';
+        if (['CANCELLED', 'CANCELED'].includes(u))  return 'cancelled';
+        if (u === 'EXPIRED')                        return 'expired';
+        if (u === 'INVALID')                        return 'rejected';
+        return s?.toLowerCase() || 'unknown';
+      };
       const orders = await getTigerOrders(creds, { days: 90 });
       const trades = orders.slice(0, limit).map(o => ({
         symbol:      o.symbol,
         side:        (o.action || o.side || '').toLowerCase(),
-        qty:         o.filledQuantity ?? o.quantity ?? 0,
+        qty:         o.filledQuantity || o.quantity || o.totalQuantity || 0,
         entry_price: o.avgFillPrice ?? o.filledPrice ?? o.price ?? 0,
-        status:      o.status,
+        status:      normaliseTigerStatus(o.status),
+        tiger_status: o.status,
         opened_at:   o.createTime ? new Date(o.createTime).toISOString() : null,
         source:      'tiger',
       }));
@@ -1758,14 +2061,14 @@ app.get('/api/trades', requireAuth, async (req, res) => {
     const dbUser = isDbAvailable() ? await getDbUser(req.session.username) : null;
     if (!dbUser?.alpaca_api_key || !isPaperUrl(dbUser.alpaca_base_url)) {
       // No Alpaca creds — return only their DB trades (bot trades placed on their behalf)
-      const dbTrades = await getTrades({ status, limit, username: req.session.username }) ?? [];
+      const dbTrades = await getTrades({ status, limit, username: req.session.username, account_source: 'alpaca_paper' }) ?? [];
       return res.json({ source: 'alpaca_user', trades: dbTrades.map(t => ({ ...t, source: 'force' })) });
     }
     const creds  = { apiKey: dbUser.alpaca_api_key, secretKey: dbUser.alpaca_secret_key, baseUrl: dbUser.alpaca_base_url };
     const alpacaStatus = status === 'open' ? 'open' : 'all';
     const [orders, dbTrades] = await Promise.allSettled([
       getUserOrders(creds, { status: alpacaStatus, limit }),
-      getTrades({ status, limit, username: req.session.username }),
+      getTrades({ status, limit, username: req.session.username, account_source: 'alpaca_paper' }),
     ]);
     const alpacaOrders = orders.status === 'fulfilled' ? (orders.value ?? []) : [];
     const userDbTrades = dbTrades.status === 'fulfilled' ? (dbTrades.value ?? []) : [];
@@ -2439,6 +2742,7 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
         FROM trades
         WHERE status = 'closed' AND closed_at IS NOT NULL
           AND closed_at >= NOW() - ($1 || ' days')::INTERVAL
+          AND (account_source = 'alpaca_paper' OR account_source IS NULL)
         GROUP BY 1
         ORDER BY 1 DESC`, [days])
       : Promise.resolve(null),
@@ -2787,6 +3091,8 @@ app.post('/api/trade/force', requireAuth, async (req, res, next) => {
       atr_pct:           result.atr_pct,
       conviction_score:  result.conviction_score,
       conviction_grade:  result.conviction_grade,
+      slippage_cents:    result.slippage_cents,
+      account_source:    'alpaca_paper',
       username:          req.session.username,
     }).catch(e => console.error('[trade/force] recordTrade:', e.message));
     res.json(result);
@@ -2808,67 +3114,82 @@ app.post('/api/trade/close', requireAuth, async (req, res, next) => {
     if (!symbol) return res.status(400).json({ error: 'symbol is required' });
     const ticker2 = symbol.toUpperCase().trim();
 
-    // Ownership check — verify the session user actually holds this position
     const sessionUser = await getUser(req.session.username) || {};
-    const isAdmin = sessionUser.role === 'admin';
+    const isAdmin     = sessionUser.role === 'admin';
+    const dbU         = isDbAvailable() ? await getDbUser(req.session.username) : null;
+    const userCfg     = dbU ? (await getUserBotConfig(req.session.username)) : {};
+    const broker      = isAdmin ? 'paper' : (userCfg?.trade_source ?? 'paper');
+
+    // ── Tiger close ───────────────────────────────────────────────────────────
+    if (broker === 'tiger') {
+      if (!dbU?.tiger_id) return res.status(400).json({ error: 'Tiger credentials not configured.' });
+      const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+      const tigerPositions = await getTigerPositions(creds).catch(() => []);
+      const pos = tigerPositions.find(p => (p.symbol ?? p.contract?.symbol ?? '').toUpperCase() === ticker2);
+      if (!pos) return res.status(403).json({ error: `You do not have an open Tiger position in ${ticker2}` });
+      const result = await placeTigerOrder(creds, { symbol: ticker2, side: 'sell', qty: Math.abs(pos.quantity ?? pos.qty ?? 0) });
+      logActivity(req.session.username, 'position_closed', `${ticker2} [Tiger]`, req.ip);
+      const entryPrice = parseFloat(pos.averageCost ?? pos.avg_cost ?? 0);
+      const exitPrice  = parseFloat(pos.latestPrice ?? pos.market_price ?? entryPrice);
+      const posQty     = Math.abs(pos.quantity ?? pos.qty ?? 0);
+      const pnlUsd     = +((exitPrice - entryPrice) * posQty).toFixed(2);
+      const pnlPct     = entryPrice > 0 ? +((exitPrice - entryPrice) / entryPrice * 100).toFixed(4) : 0;
+      getOpenTrade(ticker2, { account_source: 'tiger' }).then(async (openTrade) => {
+        if (openTrade) await closeTrade({ order_id: openTrade.order_id, exit_price: exitPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct });
+      }).catch(() => {});
+      return res.json(result);
+    }
+
+    // ── Moomoo close ──────────────────────────────────────────────────────────
+    if (broker === 'moomoo') {
+      const mooPos = await getMoomooPositions({ acc_id: dbU?.moomoo_acc_id }).catch(() => null);
+      const pos = (mooPos?.positions ?? []).find(p => (p.symbol ?? '').toUpperCase() === ticker2);
+      if (!pos) return res.status(403).json({ error: `You do not have an open Moomoo position in ${ticker2}` });
+      const result = await closeMoomooPosition(ticker2);
+      logActivity(req.session.username, 'position_closed', `${ticker2} [Moomoo]`, req.ip);
+      return res.json(result);
+    }
+
+    // ── Alpaca paper/live close ───────────────────────────────────────────────
     let positions;
     if (isAdmin) {
       positions = await getPositions().catch(() => []);
     } else {
-      const dbU = isDbAvailable() ? await getDbUser(req.session.username) : null;
-      const userCreds = dbU?.alpaca_api_key ? {
-        key: dbU.alpaca_api_key, secret: dbU.alpaca_secret_key,
-        baseUrl: dbU.alpaca_base_url || 'https://paper-api.alpaca.markets',
-      } : null;
+      const userCreds = dbU?.alpaca_api_key ? { apiKey: dbU.alpaca_api_key, secretKey: dbU.alpaca_secret_key, baseUrl: dbU.alpaca_base_url || 'https://paper-api.alpaca.markets' } : null;
       positions = userCreds ? await getUserPositions(userCreds).catch(() => []) : [];
     }
-    const holds = Array.isArray(positions) ? positions.find(p => p.symbol?.toUpperCase() === ticker2) : null;
-    if (!holds) return res.status(403).json({ error: `You do not have an open position in ${ticker2}` });
-
-    const pos = holds;
+    const pos = Array.isArray(positions) ? positions.find(p => p.symbol?.toUpperCase() === ticker2) : null;
+    if (!pos) return res.status(403).json({ error: `You do not have an open position in ${ticker2}` });
 
     const result = await closePosition(ticker2);
     logActivity(req.session.username, 'position_closed', ticker2, req.ip);
     clearPnlCache();
-    // Sync immediately so DB reflects the close before next dashboard load
     syncClosedTrades().catch(() => {});
 
-    // Persist the close to DB immediately
-    if (pos) {
-      const entryPrice = parseFloat(pos.avg_entry_price) || 0;
-      const exitPrice  = parseFloat(pos.current_price)   || entryPrice;
-      const posQty     = parseFloat(pos.qty)             || 0;
-      const isLong     = (pos.side || 'long') === 'long';
-      const pnlUsd     = isLong
-        ? +((exitPrice - entryPrice) * posQty).toFixed(2)
-        : +((entryPrice - exitPrice) * posQty).toFixed(2);
-      const pnlPct     = entryPrice > 0
-        ? +((exitPrice - entryPrice) / entryPrice * 100 * (isLong ? 1 : -1)).toFixed(4)
-        : 0;
-
-      getOpenTrade(ticker2).then(async (openTrade) => {
-        if (openTrade) {
-          await closeTrade({ order_id: openTrade.order_id, exit_price: exitPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct });
-        } else {
-          await recordTrade({
-            order_id:    `manual_close_${ticker2}_${Date.now()}`,
-            symbol:      ticker2,
-            side:        isLong ? 'sell' : 'buy',
-            qty:         posQty,
-            entry_price: entryPrice,
-            exit_price:  exitPrice,
-            status:      'closed',
-            pnl_usd:     pnlUsd,
-            pnl_pct:     pnlPct,
-            username:    req.session.username,
-          });
-        }
-      }).catch(e => console.error('[trade/close] recordTrade:', e.message));
-    }
+    const entryPrice = parseFloat(pos.avg_entry_price) || 0;
+    const exitPrice  = parseFloat(pos.current_price)   || entryPrice;
+    const posQty     = parseFloat(pos.qty)             || 0;
+    const isLong     = (pos.side || 'long') === 'long';
+    const pnlUsd     = isLong ? +((exitPrice - entryPrice) * posQty).toFixed(2) : +((entryPrice - exitPrice) * posQty).toFixed(2);
+    const pnlPct     = entryPrice > 0 ? +((exitPrice - entryPrice) / entryPrice * 100 * (isLong ? 1 : -1)).toFixed(4) : 0;
+    const acctSrc    = broker === 'alpaca_live' ? 'alpaca_live' : 'alpaca_paper';
+    getOpenTrade(ticker2, { account_source: acctSrc }).then(async (openTrade) => {
+      if (openTrade) {
+        await closeTrade({ order_id: openTrade.order_id, exit_price: exitPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct });
+      } else {
+        await recordTrade({
+          order_id:    `manual_close_${ticker2}_${Date.now()}`,
+          symbol:      ticker2, side: isLong ? 'sell' : 'buy',
+          qty: posQty, entry_price: entryPrice, exit_price: exitPrice,
+          status: 'closed', pnl_usd: pnlUsd, pnl_pct: pnlPct,
+          account_source: acctSrc, username: req.session.username,
+        });
+      }
+    }).catch(e => console.error('[trade/close] recordTrade:', e.message));
 
     res.json(result);
   } catch (err) {
-    console.error(err); res.status(500).json({ error: 'Internal server error' });
+    console.error('[trade/close]', err); res.status(500).json({ error: err.message || 'Internal server error' });
   }
 });
 
@@ -2883,6 +3204,12 @@ app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
     const { symbol } = req.body;
     if (!symbol) return res.status(400).json({ error: 'symbol is required' });
     const ticker = symbol.toUpperCase().trim();
+    const dbU    = isDbAvailable() ? await getDbUser(req.session.username) : null;
+    const userCfg = dbU ? (await getUserBotConfig(req.session.username)) : {};
+    const broker = userCfg?.trade_source ?? 'paper';
+    if (broker === 'tiger' || broker === 'moomoo') {
+      return res.json({ ok: false, message: `Move-stop-to-breakeven is not supported for ${broker} via API. Adjust your stop manually in the ${broker === 'tiger' ? 'Tiger' : 'Moomoo'} app.` });
+    }
     const result = await moveStopToBreakeven(ticker);
     logActivity(req.session.username, 'stop_moved', `${ticker} stop → BE $${result.new_stop}`, req.ip);
     res.json(result);
@@ -2935,14 +3262,91 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
             stop_loss, take_profit, time_in_force = 'day' } = req.body;
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
     if (!qty || qty < 1) return res.status(400).json({ error: 'qty must be ≥ 1' });
-    const result = await placeQuickTrade({ symbol, side, qty: Number(qty), order_type,
+
+    const ticker = symbol.toUpperCase().trim();
+    const shares = Math.floor(Number(qty));
+
+    // Determine user's configured broker
+    const dbUser   = isDbAvailable() ? await getDbUser(req.session.username) : null;
+    const userCfg  = dbUser ? (await getUserBotConfig(req.session.username)) : {};
+    const broker   = userCfg?.trade_source ?? 'paper';
+
+    // ── Tiger path ────────────────────────────────────────────────────────────
+    if (broker === 'tiger') {
+      if (!dbUser?.tiger_id) return res.status(400).json({ error: 'Tiger credentials not configured. Go to Settings → Tiger Brokers to connect.' });
+      const creds = { tiger_id: dbUser.tiger_id, account: dbUser.tiger_account, private_key: dbUser.tiger_private_key };
+
+      // Resolve limit price from request (explicit limit/stop_limit orders)
+      let tigerLimitPrice  = (order_type === 'limit' || order_type === 'stop_limit') ? (limit_price ? +limit_price : null) : null;
+      let tigerOutsideRth  = false;
+      let extendedHoursNote = null;
+
+      // For market orders: check if market is open — if not, auto-convert to limit at ask
+      if (order_type === 'market' && !tigerLimitPrice) {
+        const mktStatus = await getMarketStatus().catch(() => null);
+        if (!mktStatus?.is_open) {
+          const quote = await getLatestPrice(ticker).catch(() => null);
+          const askBid = side === 'buy' ? (quote?.ask || quote?.mid) : (quote?.bid || quote?.mid);
+          if (askBid) {
+            tigerLimitPrice  = +askBid.toFixed(2);
+            tigerOutsideRth  = true;
+            extendedHoursNote = `Market closed — converted to limit order at $${tigerLimitPrice} (extended hours)`;
+            console.log(`[tiger] extended hours: MKT→LMT $${tigerLimitPrice} outside_rth=true for ${ticker}`);
+          }
+        }
+      }
+
+      const tigerRes = await placeTigerOrder(creds, { symbol: ticker, side, qty: shares, limitPrice: tigerLimitPrice, outsideRth: tigerOutsideRth });
+
+      logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${shares} ${ticker} @ ${order_type} [Tiger]${tigerOutsideRth ? ' ext-hrs' : ''}`, req.ip);
+
+      // Estimate price for display
+      const estPrice = tigerLimitPrice || 0;
+      const estCost  = +(estPrice * shares).toFixed(2);
+
+      if (side === 'buy') {
+        recordTrade({
+          order_id:       String(tigerRes.order_id),
+          symbol:         ticker,
+          side:           'buy',
+          qty:            shares,
+          entry_price:    estPrice,
+          dollars_invested: estCost,
+          account_source: 'tiger',
+          username:       req.session.username,
+        }).catch(e => console.error('[trade/quick/tiger] recordTrade:', e.message));
+      } else {
+        getOpenTrade(ticker, { account_source: 'tiger' }).then(async (openTrade) => {
+          if (openTrade) {
+            const pnlUsd = +((estPrice - parseFloat(openTrade.entry_price)) * shares).toFixed(2);
+            const pnlPct = openTrade.entry_price > 0 ? +((estPrice - openTrade.entry_price) / openTrade.entry_price * 100).toFixed(4) : 0;
+            await closeTrade({ order_id: openTrade.order_id, exit_price: estPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct });
+          }
+        }).catch(e => console.error('[trade/quick/tiger] closeTrade:', e.message));
+      }
+
+      return res.json({
+        ok:             true,
+        order_id:       tigerRes.order_id,
+        symbol:         ticker,
+        side,
+        qty:            shares,
+        order_type:     tigerRes.order_type,
+        note:           extendedHoursNote,
+        estimated_price: estPrice,
+        estimated_cost:  estCost,
+        status:         tigerRes.status,
+        broker:         'tiger',
+      });
+    }
+
+    // ── Alpaca paper path (default) ───────────────────────────────────────────
+    const result = await placeQuickTrade({ symbol: ticker, side, qty: shares, order_type,
       limit_price, stop_price, trail_price, trail_percent,
       stop_loss, take_profit, time_in_force });
-    logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${qty} ${symbol.toUpperCase()} @ ${order_type}`, req.ip);
+    logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${shares} ${ticker} @ ${order_type}`, req.ip);
     clearPnlCache();
 
-    // Persist to DB immediately
-    const ticker = symbol.toUpperCase().trim();
     if (side === 'buy') {
       recordTrade({
         order_id:         result.order_id,
@@ -2953,12 +3357,13 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
         stop_loss:        result.stop_loss,
         take_profit:      result.take_profit,
         dollars_invested: result.estimated_cost,
+        slippage_cents:   result.slippage_cents,
+        account_source:   'alpaca_paper',
         username:         req.session.username,
       }).catch(e => console.error('[trade/quick] recordTrade buy:', e.message));
     } else {
-      // SELL — close the open DB trade for this symbol, or create a closed record
       const exitPrice = result.estimated_price;
-      getOpenTrade(ticker).then(async (openTrade) => {
+      getOpenTrade(ticker, { account_source: 'alpaca_paper' }).then(async (openTrade) => {
         if (openTrade) {
           const entryPrice = parseFloat(openTrade.entry_price) || exitPrice;
           const pnlUsd = +((exitPrice - entryPrice) * result.qty).toFixed(2);
@@ -2984,7 +3389,7 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[trade/quick]', err);
-    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+    res.status(500).json({ error: err.message || 'Something went wrong. Please try again.' });
   }
 });
 
@@ -3185,7 +3590,7 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual', username
     // Re-entry block: exclude symbols that lost money in the last 24 hours
     let blocked_symbols = [];
     try {
-      const recentClosed = await getTrades({ status: 'closed', limit: 50 });
+      const recentClosed = await getTrades({ status: 'closed', limit: 50, account_source: 'alpaca_paper' });
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       blocked_symbols = (recentClosed ?? [])
         .filter(t => t.closed_at && new Date(t.closed_at).getTime() > cutoff && (t.pnl_usd ?? 0) < 0)
@@ -3240,7 +3645,7 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual', username
         }
 
         // Per-user loss streak check
-        const userLosses = await getRecentLosses({ symbol: selection.symbol, days: 5 })
+        const userLosses = await getRecentLosses({ symbol: selection.symbol, days: 5, account_source: 'alpaca_paper' })
           .catch(() => ({ loss_count: 0, last_loss_at: null }));
         const hoursSince = userLosses.last_loss_at
           ? (Date.now() - new Date(userLosses.last_loss_at)) / 3600000 : 999;
@@ -3282,6 +3687,8 @@ async function runAiScan({ autoExecute = false, triggeredBy = 'manual', username
             conviction_score:     score,
             conviction_grade:     score >= 75 ? 'A' : score >= 60 ? 'B' : 'C',
             conviction_breakdown: { reason: selection.reason, regime: context.regime },
+            slippage_cents:       result.slippage_cents,
+            account_source:       'alpaca_paper',
             username:             u.username,
           }).catch(e => console.error(`[scanner] recordTrade for ${u.username}:`, e.message));
 
@@ -3375,6 +3782,32 @@ app.post('/api/scanner/watchlist/remove', requireAdmin, async (req, res) => {
   await saveWatchlist(list);
   logActivity(req.session.username, 'watchlist_remove', sym, req.ip);
   res.json({ ok: true, watchlist: list });
+});
+
+// ─── Stock Prediction ─────────────────────────────────────────────────────────
+
+app.get('/api/predict/:symbol', requireAuth, async (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase().trim();
+    if (!symbol) return res.status(400).json({ error: 'symbol is required' });
+    const result = await getStockPrediction(symbol);
+    res.json({ ok: true, symbol, ...result });
+  } catch (err) {
+    console.error('[predict]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ─── Catalyst Scanner ─────────────────────────────────────────────────────────
+
+app.get('/api/catalyst-scan', requireAuth, async (req, res) => {
+  try {
+    const result = await runCatalystScan();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[catalyst-scan]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
 });
 
 // ─── User Watchlist ───────────────────────────────────────────────────────────
@@ -3596,7 +4029,7 @@ async function runEODSummary() {
 
   const [pnl, allTrades, context] = await Promise.allSettled([
     getDailyPnL(),
-    getTrades({ limit: 100 }),
+    getTrades({ limit: 100, account_source: 'alpaca_paper' }),
     getMarketContext(),
   ]).then(r => r.map(p => p.status === 'fulfilled' ? p.value : null));
 
@@ -3805,7 +4238,7 @@ async function runPositionMonitor() {
   } catch {}
 
   // Per-position checks
-  const openTrades = await getTrades({ status: 'open', limit: 50 }).catch(() => []) ?? [];
+  const openTrades = await getTrades({ status: 'open', limit: 50, account_source: 'alpaca_paper' }).catch(() => []) ?? [];
 
   for (const pos of positions) {
     const sym   = pos.symbol;
@@ -3956,6 +4389,21 @@ app.put('/api/bot/config', requireAuth, async (req, res) => {
   const body     = req.body;
   if (!body || typeof body !== 'object') return res.status(400).json({ error: 'Invalid body' });
 
+  // Require explicit consent before enabling automated trading
+  if (body.auto_execute === true) {
+    if (!body.auto_trade_consent) {
+      return res.status(400).json({
+        error: 'You must explicitly consent to automated trading before enabling this feature.',
+        require_consent: true,
+      });
+    }
+    query(
+      `UPDATE users SET auto_trade_consent_at = NOW() WHERE username = $1`,
+      [username]
+    ).catch(() => {}); // non-fatal
+    logActivity(username, 'auto_trade_consent', 'User consented to automated trading');
+  }
+
   // Whitelist allowed fields — reject unknown keys
   const allowed = ['profile', 'daily_profit_target', 'daily_loss_limit', 'max_open_positions',
     'min_conviction_score', 'auto_execute', 'max_vix_for_scan', 'trade_source', 'position_sizing',
@@ -4058,6 +4506,26 @@ app.get('/api/stats/detail', requireAuth, async (req, res) => {
     res.json({ detail, summary: summary ?? [] });
   } catch (err) {
     console.error(err); res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/stats/slippage', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT
+         ROUND(AVG(slippage_cents), 2)  AS avg_slippage_cents,
+         ROUND(MAX(slippage_cents), 2)  AS max_slippage_cents,
+         COUNT(*)                        AS trade_count,
+         COUNT(slippage_cents)           AS trades_with_slippage
+       FROM trades
+       WHERE username = $1
+         AND created_at > NOW() - INTERVAL '30 days'`,
+      [req.session.username]
+    );
+    res.json({ ok: true, ...rows[0] });
+  } catch (err) {
+    console.error('[stats/slippage]', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -5063,6 +5531,28 @@ cron.schedule('15 16 * * 1-5', async () => {
     console.log(`[forecast] EOD fill running for ${dateStr}`);
     await fillTodayActuals(dateStr);
   } catch (err) { console.error('[forecast] EOD fill cron error:', err.message); }
+}, { timezone: 'America/New_York' });
+
+// ─── Catalyst Scanner Crons ───────────────────────────────────────────────────
+// 9:00 AM ET Mon-Fri — pre-market sweep (market opens at 9:30, this runs 30 min early)
+cron.schedule('0 9 * * 1-5', async () => {
+  try {
+    const result = await runCatalystScan();
+    const total = result.gappers.length + result.low_float.length + result.sec_filings.length;
+    console.log(`[catalyst] 9AM pre-market sweep complete — ${total} signals (${result.top_picks.length} top picks)`);
+  } catch (err) {
+    console.error('[catalyst] 9AM cron error:', err.message);
+  }
+}, { timezone: 'America/New_York' });
+
+// 8:00 PM ET Mon-Fri — evening SEC 8-K sweep (after-hours filings)
+cron.schedule('0 20 * * 1-5', async () => {
+  try {
+    const result = await runCatalystScan();
+    console.log(`[catalyst] 8PM SEC sweep — ${result.sec_filings.length} 8-K filings found`);
+  } catch (err) {
+    console.error('[catalyst] 8PM cron error:', err.message);
+  }
 }, { timezone: 'America/New_York' });
 
 // ─── Admin API: manual trigger (per-step or all) ──────────────────────────────

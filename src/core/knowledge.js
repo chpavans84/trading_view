@@ -29,7 +29,7 @@ function searchKnowledgeByKeyword(query) {
   const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 5);
   return KNOWLEDGE_BASE
     .map(chunk => {
-      const hay = `${chunk.topic} ${chunk.title} ${chunk.content}`.toLowerCase();
+      const hay = `${chunk.topic} ${chunk.title} ${chunk.content} ${(chunk.keywords ?? []).join(' ')}`.toLowerCase();
       const score = words.filter(w => hay.includes(w)).length;
       return { ...chunk, score };
     })
@@ -289,6 +289,58 @@ const KNOWLEDGE_BASE = [
   {
     topic: 'midday chop', category: 'market_structure', title: 'Midday Chop (11:30 AM – 2 PM ET)',
     content: 'Between roughly 11:30 AM and 2 PM ET, trading volume drops sharply and price action becomes choppy and directionless as institutional traders break for lunch. Breakouts during this window frequently fail; trends started in the morning often stall. Many intraday traders reduce size or stop trading entirely during this window, resuming at the 2 PM "power hour" session.',
+  },
+
+  // ── Bot-Specific ──────────────────────────────────────────────────────────────────
+  {
+    topic: 'pre-market gap trading', category: 'strategy', title: 'Pre-Market Gaps: Gap-and-Go vs Gap Fill',
+    keywords: ['premarket', 'gap', 'gapper', 'gap-and-go', 'gap fill', 'overnight', 'catalyst'],
+    content: 'A pre-market gap occurs when a stock opens significantly higher or lower than the prior day\'s close due to overnight news, earnings, or a catalyst. Two opposite strategies apply: gap-and-go and gap fill. Gap-and-go: if a stock gaps up 5%+ on high volume with a genuine catalyst (earnings beat, FDA approval, M&A), the move often continues after open — traders buy the breakout above the pre-market high. Gap fill: without a strong catalyst, stocks often pull back to fill the gap before continuing. Key rules: gaps above 10% on a low-float stock (<20M shares) tend to run further. Gaps on heavy volume (≥3× average) are more likely to hold. Avoid chasing gaps that have already moved 30%+ before market open — the risk/reward is poor. The bot\'s catalyst scanner flags pre-market movers above 5% with volume ≥ 100K shares as potential gap-and-go setups.',
+  },
+  {
+    topic: 'low float momentum', category: 'strategy', title: 'Low Float Stocks: Why They Move Fast',
+    keywords: ['low float', 'float', 'shares outstanding', 'squeeze', 'short squeeze', 'momentum', 'CNSP', 'SKK', 'GBTG'],
+    content: 'Float is the number of shares available for public trading — it excludes shares held by insiders or locked up. Low-float stocks have fewer than 20 million shares available. When buying pressure hits a low-float stock, supply is limited, so price moves up sharply with relatively little volume. A 1-million-share buy on a 5-million-float stock is a 20% float turnover — massive. This is why low-float names like CNSP, SKK, and GBTG can move 50–200% in a single session. The squeeze mechanic: short sellers who bet against these stocks are forced to buy back shares to cover losses, adding more buying pressure on top of organic demand. Risks are equally large: these stocks drop just as fast when momentum reverses. Key filters the bot uses: float ≤ 20M shares, RVOL ≥ 1.5× average, price ≥ $1. Low-float trades require tight stops and quick exits — they are not suitable for overnight holds.',
+  },
+  {
+    topic: 'RVOL relative volume', category: 'indicators', title: 'RVOL: Relative Volume and Why It Matters',
+    keywords: ['rvol', 'relative volume', 'volume ratio', 'unusual volume', 'volume spike', 'float turnover'],
+    content: 'Relative Volume (RVOL) compares today\'s current volume to the average volume for the same time of day over the past 20 sessions. An RVOL of 2.0 means twice the normal trading activity — institutional or retail interest is abnormally high. RVOL is calculated as: current_volume / (average_daily_volume × (minutes_elapsed / 390)). An RVOL above 2× at market open is a strong signal that a move has momentum behind it and is not a low-volume fake-out. The bot requires RVOL ≥ 1.5 for low-float catalyst setups. Above 3×, volume is exceptional and suggests a major catalyst is driving the move. RVOL alone is not enough — it must be paired with a catalyst (earnings, FDA, 8-K news) and a clean chart setup. High RVOL on a declining stock can signal panic selling — in that case, it warns against buying, not for it.',
+  },
+  {
+    topic: '8-K SEC filing catalyst', category: 'strategy', title: 'SEC 8-K Filings: What They Signal for Traders',
+    keywords: ['8-K', 'SEC', 'EDGAR', 'filing', 'material event', 'acquisition', 'merger', 'FDA', 'press release', 'guidance'],
+    content: 'An 8-K is a form public companies file with the SEC to report material events that shareholders must know about immediately. Unlike quarterly reports (10-Q) or annual reports (10-K), 8-Ks are filed within 4 business days of the triggering event. High-impact items for traders: Item 2.01 (completion of acquisition or disposition) — M&A deals that often cause 20–50% gaps. Item 1.01 (entry into a material agreement) — major contracts or partnerships. Items 7.01/8.01 (Regulation FD disclosure / other events) — press releases with earnings guidance or strategic announcements. Items 3.02/5.02 — stock issuance or executive changes that may signal dilution risk. The bot\'s SEC scanner monitors EDGAR in real-time for these item types during market hours. When a high-impact 8-K is detected, it appears in the Catalyst Scan panel. Not all 8-Ks are bullish — read the content, not just the filing.',
+  },
+  {
+    topic: 'ATR position sizing', category: 'risk_management', title: 'ATR-Based Position Sizing in This Bot',
+    keywords: ['ATR', 'average true range', 'position size', 'stop loss', 'risk per trade', 'volatility sizing'],
+    content: 'Average True Range (ATR) measures a stock\'s average daily price swing over the past 14 days. The bot uses ATR to set stop-loss distances and calculate position size automatically. Formula: stop_distance = 1.5 × ATR14. Position size = risk_per_trade / stop_distance, where risk_per_trade is capped at 1% of portfolio value or $200, whichever is lower. Example: AAPL with ATR of $2.50 → stop distance = $3.75. If your portfolio is $10,000 and max risk is $100, position size = $100 / $3.75 = 26 shares. This keeps your dollar risk constant regardless of the stock\'s price or volatility. High-volatility stocks get smaller positions automatically — you can\'t override ATR sizing manually in automated mode. For paper trading, the same formula applies but no real money is at risk. ATR position sizing prevents outsized losses on any single trade and is one of the most important risk controls in the system.',
+  },
+  {
+    topic: 'conviction scoring system factors', category: 'strategy', title: 'Conviction Score: How the 0–100 Score Is Built',
+    keywords: ['conviction', 'score', 'scoring', 'factors', 'RSI', 'MACD', 'EMA', 'VIX', 'earnings', 'sentiment', 'ML model'],
+    content: 'The conviction score is a composite 0–100 signal built from 15 factors across 5 categories. Technical (40 pts): RSI positioning (above/below 50), MACD signal crossover direction, EMA alignment (price above/below EMA9/20/50), Bollinger Band position, volume trend vs 20-day average. Fundamental (20 pts): earnings surprise direction, revenue growth trend, EPS momentum over last 4 quarters. Sentiment (15 pts): relative strength vs SPY over 5 days, VIX regime (above 25 is bearish adjustment), news sentiment score from last 48 hours. ML adjustment (±10 pts): logistic regression model trained on 3 years of S&P500/NASDAQ100 data; adjusts score by grade (+8 for A, +3 for B, -2 for C, -9 for F). Catalyst (15 pts): insider buying signal, earnings within 5 days flag, sector momentum. Important: the ML model has an AUC of ~0.52 — barely above random chance. Use conviction scores as a screening filter to narrow candidates, not as a buy/sell signal. Scores above 60 favor longs; below 35 avoid.',
+  },
+  {
+    topic: 'daily loss limit bot guard', category: 'risk_management', title: 'Daily Loss Limit: How the $200 Guard Works',
+    keywords: ['daily loss', 'loss limit', 'drawdown', 'guard', 'block', 'circuit breaker', 'max loss'],
+    content: 'The bot enforces a hard daily loss limit of $200 (configurable in Bot Rules settings). Once realized losses for the day hit this threshold, the bot stops executing new trades for the remainder of the trading session. How it works: after each trade closes, the bot sums all realized P&L from today\'s closed positions. If total is ≤ -$200, the guard activates and any new trade attempt is logged to trade_rejections with reason "daily_loss_limit". The limit resets automatically at midnight ET. Manual trades placed directly through the Quick Trade panel or Force Trade do NOT bypass this guard — they also check the daily loss total. If you want to override for testing, temporarily raise the limit in Bot Rules or switch to paper trading mode. The $200 default represents 0.5% of a $40K portfolio — keeping any single bad day from causing serious damage. You can see the current day\'s P&L and whether the guard is active in the Dashboard → Positions panel.',
+  },
+  {
+    topic: 'time filters trading hours', category: 'risk_management', title: 'Time Filters: When the Bot Blocks Trading',
+    keywords: ['time filter', 'trading hours', 'market open', 'market close', 'after hours', 'block', 'schedule', '9:30', '4:00'],
+    content: 'The bot applies time-based filters to avoid the most dangerous trading windows. Blocked periods: pre-market (before 9:30 AM ET) — liquidity is thin and spreads are wide, making fills unpredictable. First 5 minutes (9:30–9:35 AM ET) — extreme volatility as overnight orders fill; most reversals happen here. Last 5 minutes (3:55–4:00 PM ET) — closing auction volatility can cause sudden gaps. After-hours (after 4:00 PM ET) — no automated trades; only manual overrides. Midday soft block (11:30 AM – 1:30 PM ET) — this is not a hard block, but the bot reduces its conviction threshold by 5 points during this window to account for lower-quality breakouts. The bot uses New York time (America/New_York) for all time checks, so it handles daylight saving automatically. These filters are enforced before ATR sizing or conviction checks — a trade that would otherwise pass all checks is still rejected if it falls in a blocked window. The rejection is logged to trade_rejections with reason "time_filter".',
+  },
+  {
+    topic: 'bracket orders OTO Alpaca', category: 'strategy', title: 'Bracket Orders: How the Bot Protects Every Trade',
+    keywords: ['bracket', 'OTO', 'take profit', 'stop loss', 'order', 'Alpaca', 'limit order', 'stop order', 'one-triggers-other'],
+    content: 'The bot places every trade as a bracket order on Alpaca — a primary market buy paired with two contingent exits: a take-profit limit order and a stop-loss stop order. This is implemented as an OTO (One-Triggers-Other) or bracket order in the Alpaca API: `order_class: "bracket"`, `take_profit: { limit_price }`, `stop_loss: { stop_price }`. Stop-loss distance is 1.5 × ATR14 below entry. Take-profit is 3 × ATR14 above entry — a 2:1 reward-to-risk ratio. Once the primary buy fills, Alpaca automatically manages both exit legs. If the stop is hit, the take-profit cancels automatically (OCO — One-Cancels-Other). This means you do not need to babysit positions — exits are handled server-side by Alpaca even if the bot crashes. In paper trading mode, bracket orders use the paper trading API base URL (`paper-api.alpaca.markets`). Important: Alpaca does not support bracket orders on fractional shares — the bot rounds position sizes to whole shares before submitting.',
+  },
+  {
+    topic: 'paper trading live trading switch', category: 'strategy', title: 'Paper vs Live Trading: How to Switch',
+    keywords: ['paper', 'live', 'paper trading', 'real money', 'Alpaca', 'API key', 'switch', 'mode', 'simulation'],
+    content: 'Paper trading uses Alpaca\'s simulated environment with fake money — no real capital is at risk. Live trading connects to your real Alpaca brokerage account and executes real orders. To switch between them: go to Settings → Broker Config → Alpaca and enter the appropriate API key and secret. Paper trading uses keys from Alpaca\'s paper portal (`paper-api.alpaca.markets`); live trading uses keys from the live portal (`api.alpaca.markets`). The bot automatically uses the correct base URL based on whether your key begins with `PK` (paper) or `AK` (live). What changes between modes: (1) All trade data is isolated — paper trades do not appear in live history and vice versa. (2) Paper orders fill instantly at mid-price; live orders fill at market price with real slippage. (3) Paper account starts with $100,000 simulated cash. (4) The daily loss limit and all other guards apply equally in both modes. Recommendation: always test any new Bot Rule configuration on paper trading for at least one week before switching to live.',
   },
 ];
 
