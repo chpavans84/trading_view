@@ -15610,16 +15610,38 @@ document.addEventListener('DOMContentLoaded', () => {
   const handle = document.getElementById('floatExplorerHeader');
   let dragging = false, startX, startY, startRight, startBottom;
 
-  // Restore last saved position
+  // Clamp panel fully within the current viewport (handles screen/window size changes)
+  function clampExplorer() {
+    if (!panel.classList.contains('open')) return;
+    requestAnimationFrame(() => {
+      const rect = panel.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let right = parseFloat(panel.style.right) || 16;
+      let top   = parseFloat(panel.style.top)   || 60;
+      // Left edge off-screen → slide right until fully visible
+      if (rect.left < 0) right = Math.max(0, vw - rect.width);
+      // Right edge off-screen → pin to right edge
+      if (rect.right > vw) right = 0;
+      // Vertical bounds
+      top = Math.min(Math.max(56, top), Math.max(56, vh - 120));
+      panel.style.right = right + 'px';
+      panel.style.top   = top   + 'px';
+    });
+  }
+
+  // Restore last saved position then immediately clamp to current viewport
   try {
     const saved = JSON.parse(localStorage.getItem('explorerPos') || 'null');
     if (saved) {
-      const maxRight = window.innerWidth - 300;
-      const maxTop   = window.innerHeight - 200;
-      panel.style.right = Math.min(Math.max(0, saved.right), maxRight) + 'px';
-      panel.style.top   = Math.min(Math.max(56, saved.top),  maxTop)  + 'px';
+      panel.style.right = (saved.right || 16) + 'px';
+      panel.style.top   = (saved.top   || 60) + 'px';
+      clampExplorer();
     }
   } catch {}
+
+  // Re-clamp whenever the browser window is resized or the screen changes
+  window.addEventListener('resize', clampExplorer);
 
   handle.addEventListener('mousedown', e => {
     if (e.target.closest('input,button,.explorer-search-wrap')) return;
@@ -15634,10 +15656,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('mousemove', e => {
     if (!dragging) return;
-    const dx = startX - e.clientX;
-    const dy = e.clientY - startY;
-    panel.style.right = Math.max(0, startRight + dx) + 'px';
-    panel.style.top   = Math.max(56, startBottom + dy) + 'px';
+    const dx  = startX - e.clientX;
+    const dy  = e.clientY - startY;
+    const vw  = window.innerWidth;
+    const vh  = window.innerHeight;
+    const pw  = panel.getBoundingClientRect().width || 700;
+    // Clamp right so panel never slides off either edge
+    const newRight = Math.min(Math.max(0, startRight + dx), Math.max(0, vw - pw));
+    const newTop   = Math.min(Math.max(56, startBottom + dy), vh - 120);
+    panel.style.right = newRight + 'px';
+    panel.style.top   = newTop   + 'px';
   });
 
   document.addEventListener('mouseup', () => {
