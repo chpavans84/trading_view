@@ -432,6 +432,8 @@ trade_source controls where the bot EXECUTES trades:
 
 When switching to tiger or moomoo: ALWAYS warn the user this uses real money and ask them to confirm.
 
+CRITICAL: If propose_trade returns status: 'error' with broker: 'tiger' — do NOT call moomoo_place_trade as a fallback. Instead, explain the specific error (use the hint field), and ask the user if they want to execute as a paper trade on Alpaca instead by switching trade_source to 'paper'.
+
 ━━━ HOW THE SCANNER WORKS (be accurate when asked) ━━━
 When a user asks "how do you pick trades?", "what did you use?",
 "do you use ML?", or "how does your analysis work?", answer accurately:
@@ -886,11 +888,19 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           const maxDol = sizing.max_dollars ?? 5000;
           const dollars = Math.min(maxDol, Math.max(minDol, Math.round(targetProfit / 0.05)));
           const qty = Math.max(1, Math.floor(dollars / price));
-          // Auto-convert MKT → LMT outside regular hours so pre/post-market works
+          // Auto-convert MKT → LMT outside regular hours so pre/post-market works.
+          // Only use outside_rth if the price came from Tiger itself — Yahoo Finance
+          // prices can diverge from Tiger's reference and cause "price exceeds ±10%" rejections.
           let tigerLimitPrice = null;
           let tigerOutsideRth = false;
           const mktClock = await getMarketStatus().catch(() => null);
           if (!mktClock?.is_open) {
+            if (priceSource !== 'tiger') {
+              return { status: 'error', broker: 'tiger', do_not_fallback: true,
+                symbol: input.symbol, side: input.side,
+                reason: 'Market is closed and Tiger real-time quote is unavailable right now. Cannot safely set a limit price — Tiger rejects orders where the price is >10% from its own reference. Try again during market hours (9:30 AM – 4:00 PM ET).',
+                hint: 'Wait for market open or switch to paper trading.' };
+            }
             tigerLimitPrice = +price.toFixed(2);
             tigerOutsideRth = true;
           }
@@ -899,11 +909,15 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
             result = await placeTigerOrder(creds, { symbol: input.symbol, side: input.side, qty, limitPrice: tigerLimitPrice, outsideRth: tigerOutsideRth });
           } catch (tigerErr) {
             const msg = tigerErr.message ?? '';
-            const isPermissionError = msg.includes('not support') || msg.includes('1000') || msg.includes('error 4:');
+            const isPriceError      = /price.*limit|exceed.*10|outside.*band|price.*band/i.test(msg);
+            const isPermissionError = msg.includes('not support') || msg.includes('1000') || msg.includes('error 4:') || msg.includes('permission');
             const hint = isPermissionError
               ? 'Tiger OpenAPI trading permission is not enabled. Go to Tiger App → Profile → OpenAPI → enable Trading permissions, then regenerate your API key.'
+              : isPriceError
+              ? `Tiger rejected the order because the limit price $${tigerLimitPrice} is more than 10% from Tiger's reference price. This often happens outside regular hours when Tiger's reference differs from Yahoo Finance. Try during market hours or use paper trading.`
               : 'Check the server logs for the full Tiger API error code and message.';
-            return { status: 'error', broker: 'tiger', symbol: input.symbol, side: input.side, qty, estimated_price: price,
+            // do_not_fallback tells Claude not to retry with moomoo — offer paper trading instead
+            return { status: 'error', broker: 'tiger', do_not_fallback: true, symbol: input.symbol, side: input.side, qty, estimated_price: price,
               reason: msg, hint };
           }
           recordTrade({ username, order_id: String(result.order_id), symbol: input.symbol, side: input.side, qty, entry_price: price, conviction_score: convictionScore, conviction_grade: convictionGrade, conviction_breakdown: convictionBreakdown, account_source: 'tiger' }).catch(() => {});

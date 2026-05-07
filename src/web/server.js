@@ -1194,7 +1194,7 @@ app.get('/api/earnings-reaction', requireAuth, async (req, res) => {
   try {
     const symbol = (req.query.symbol || '').toUpperCase().trim().replace(/[^A-Z0-9.^-]/g, '');
     if (!symbol) return res.json({ symbol: '', events: [] });
-    const data = await ttlCache(`er:reaction2:${symbol}`, 4 * 60 * 60 * 1000, async () => {
+    const data = await ttlCache(`er:reaction3:${symbol}`, 4 * 60 * 60 * 1000, async () => {
       // 1. Fetch EPS + fiscal quarter-end dates from Yahoo earningsHistory
       //    quarter = fiscal quarter end date (earnings call is ~30-50 days after)
       let yfQuarters = [];
@@ -1269,9 +1269,18 @@ app.get('/api/earnings-reaction', requireAuth, async (req, res) => {
         // Pick the highest-volume bar as the reaction/event bar
         const reactBar = winBars.reduce((mx, b) => (b.volume > mx.volume ? b : mx), winBars[0]);
         const rIdx = sorted.indexOf(reactBar.date);
-        const b_1  = rIdx >= 1 ? barMap[sorted[rIdx - 1]] : null;
-        const b_2  = rIdx >= 2 ? barMap[sorted[rIdx - 2]] : null;
-        const bp1  = rIdx + 1 < sorted.length ? barMap[sorted[rIdx + 1]] : null;
+        // Last 10 trading days before earnings day
+        const pre_days = [];
+        for (let back = 10; back >= 1; back--) {
+          const idx     = rIdx - back;
+          if (idx < 0) { pre_days.push(null); continue; }
+          const bar     = barMap[sorted[idx]];
+          const prevBar = idx > 0 ? barMap[sorted[idx - 1]] : null;
+          pre_days.push({ ...bar, pct_chg: pct(bar, prevBar), day_offset: -back });
+        }
+
+        const b_1 = rIdx >= 1 ? barMap[sorted[rIdx - 1]] : null;
+        const bp1 = rIdx + 1 < sorted.length ? barMap[sorted[rIdx + 1]] : null;
 
         return {
           earnings_date: reactBar.date,
@@ -1279,9 +1288,9 @@ app.get('/api/earnings-reaction', requireAuth, async (req, res) => {
           eps_actual:    ev.eps_actual,
           eps_estimate:  ev.eps_estimate,
           surprise_pct:  ev.surprise_pct,
-          prev_day:     b_1     ? { ...b_1,     pct_chg: pct(b_1, b_2)        } : null,
-          earnings_day: reactBar ? { ...reactBar, pct_chg: pct(reactBar, b_1)  } : null,
-          next_day:     bp1     ? { ...bp1,     pct_chg: pct(bp1, reactBar)   } : null,
+          pre_days,
+          earnings_day: reactBar ? { ...reactBar, pct_chg: pct(reactBar, b_1) } : null,
+          next_day:     bp1      ? { ...bp1,      pct_chg: pct(bp1, reactBar) } : null,
         };
       }).filter(Boolean).reverse(); // most recent first
 
@@ -1576,6 +1585,276 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
     res.json({ success: true, date: dateParam, earnings });
   } catch (err) {
     console.error('[earnings-calendar]', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ─── Tomorrow's Catalysts ────────────────────────────────────────────────────
+// Answers: "what should I buy TODAY to profit TOMORROW?"
+// Three buckets:
+//   amc_tonight  — reports after close today  → buy before 3 PM, sell at tomorrow open
+//   bmo_tomorrow — reports before open tomorrow → buy today's close, gap play
+//   pre_drift    — reports in 2–5 days → ride pre-earnings drift, exit before report
+
+app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
+  try {
+    const now   = new Date();
+    const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0];
+    const cacheKey = `tomorrow:catalysts:${todayStr}`;
+    if (req.query.force === '1') _cache.delete(cacheKey);
+
+    const result = await ttlCache(cacheKey, 60 * 60 * 1000, async () => {
+      // Build date range: today + next 5 weekdays
+      const dates = [];
+      let d = new Date(today);
+      while (dates.length < 6) {
+        if (d.getDay() !== 0 && d.getDay() !== 6) dates.push(d.toISOString().split('T')[0]);
+        d = new Date(d.getTime() + 86400000);
+      }
+
+      // Fetch calendar for all dates in parallel (reuses Nasdaq cache)
+      const calResults = await Promise.allSettled(
+        dates.map(ds => ttlCache(`earnings:cal:${ds}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(ds)))
+      );
+
+      // Build flat list with date + day offset
+      const allEntries = [];
+      calResults.forEach((r, i) => {
+        const items = r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : [];
+        items.forEach(e => allEntries.push({ ...e, date: dates[i], day_offset: i }));
+      });
+
+      // Categorise
+      const amc_raw   = allEntries.filter(e => e.day_offset === 0 && e.call_time === 'AMC');
+      const bmo_raw   = allEntries.filter(e => e.day_offset === 1 && e.call_time === 'BMO');
+      const drift_raw = allEntries.filter(e => e.day_offset >= 2 && e.day_offset <= 5);
+
+      // Sort each bucket by market cap descending, cap at 12 each
+      const sortCap = (arr, n) =>
+        [...arr].sort((a, b) => (b.market_cap_n || 0) - (a.market_cap_n || 0)).slice(0, n);
+
+      const amcList   = sortCap(amc_raw, 12);
+      const bmoList   = sortCap(bmo_raw, 12);
+      const driftList = sortCap(drift_raw, 12);
+
+      // Enrich each symbol: consensus, target, avg historical move, latest headline
+      const enrich = async (entry) => {
+        const sym = entry.symbol;
+        const [scoreRes, yfRes, newsRes] = await Promise.allSettled([
+          getConvictionScore({ symbol: sym, positions: [] }),
+          _yf.quoteSummary(sym, { modules: ['financialData', 'earningsTrend', 'earningsHistory', 'price'] }),
+          _mergedSymbolNews(sym, 2),
+        ]);
+
+        const score = scoreRes.status === 'fulfilled' ? scoreRes.value : null;
+        const yf    = yfRes.status   === 'fulfilled' ? yfRes.value   : null;
+        const news  = newsRes.status === 'fulfilled' ? newsRes.value : [];
+
+        // Avg historical earnings surprise % — calc from epsActual vs epsEstimate
+        const hist = yf?.earningsHistory?.history ?? [];
+        const surprises = hist
+          .filter(h => h.epsActual != null && h.epsEstimate != null && Math.abs(h.epsEstimate) > 0.001)
+          .map(h => +((h.epsActual - h.epsEstimate) / Math.abs(h.epsEstimate) * 100).toFixed(1))
+          .slice(0, 4);
+        const avg_surprise_pct = surprises.length
+          ? +(surprises.reduce((a, b) => a + b, 0) / surprises.length).toFixed(1)
+          : null;
+
+        // EPS estimate for upcoming quarter (earningsTrend is more reliable than Nasdaq)
+        const yfTrend    = yf?.earningsTrend?.trend ?? [];
+        const nextQTrend = yfTrend.find(t => t.period === '0q') || yfTrend[0] || null;
+        const eps_estimate_yf = nextQTrend?.earningsEstimate?.avg ?? null;
+
+        // Current price
+        const price = yf?.price?.regularMarketPrice ?? null;
+        const pre_price = yf?.price?.preMarketPrice ?? null;
+        const pre_chg_pct = yf?.price?.preMarketChangePercent != null && typeof yf.price.preMarketChangePercent !== 'object'
+          ? yf.price.preMarketChangePercent * 100
+          : null;
+
+        return {
+          symbol:            sym,
+          company:           yf?.price?.shortName || entry.company || sym,
+          date:              entry.date,
+          call_time:         entry.call_time || '?',
+          eps_estimate:      eps_estimate_yf ?? entry.eps_estimate ?? null,
+          market_cap:        entry.market_cap  ?? null,
+          price,
+          pre_price,
+          pre_chg_pct,
+          analyst_consensus: score?.signals?.analyst_consensus ?? null,
+          analyst_target:    score?.signals?.analyst_target    ?? null,
+          analyst_upside:    score?.signals?.analyst_upside    ?? null,
+          conviction_score:  score?.score ?? null,
+          conviction_grade:  score?.grade ?? null,
+          avg_surprise_pct,
+          top_news: news.length ? { title: news[0].title, url: news[0].url, published: news[0].published } : null,
+        };
+      };
+
+      const [amcEnriched, bmoEnriched, driftEnriched] = await Promise.all([
+        Promise.allSettled(amcList.map(enrich)),
+        Promise.allSettled(bmoList.map(enrich)),
+        Promise.allSettled(driftList.map(enrich)),
+      ]);
+
+      const ok = arr => arr.filter(r => r.status === 'fulfilled').map(r => r.value);
+
+      return {
+        amc_tonight:  ok(amcEnriched),
+        bmo_tomorrow: ok(bmoEnriched),
+        pre_drift:    ok(driftEnriched),
+        generated_at: new Date().toISOString(),
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[tomorrow-catalysts]', err);
+    res.status(500).json({ error: 'Failed to load catalysts.' });
+  }
+});
+
+// ─── Earnings Preview — deep weekly research ────────────────────────────────
+
+app.get('/api/earnings-preview', requireAuth, async (req, res) => {
+  try {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
+    // Next Monday–Friday (calendar week after the current week)
+    const dow = today.getDay(); // 0=Sun,1=Mon,...,6=Sat
+    const daysToNextMon = dow === 0 ? 1 : 8 - dow; // days until next Monday
+    const nextMon = new Date(today.getTime() + daysToNextMon * 86400000);
+    const weekStr = nextMon.toISOString().split('T')[0];
+    const cacheKey = `earnings:preview:week:${weekStr}`;
+
+    if (req.query.force === '1') _cache.delete(cacheKey);
+
+    const result = await ttlCache(cacheKey, 2 * 60 * 60 * 1000, async () => {
+      // Gather Mon–Fri of next calendar week
+      const dates = [];
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(nextMon.getTime() + i * 86400000);
+        dates.push(d.toISOString().split('T')[0]);
+      }
+      const nasdaqResults = await Promise.allSettled(
+        dates.map(d => ttlCache(`earnings:cal:${d}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(d)))
+      );
+
+      // Flatten to unique symbols, sort by market cap (most tradable first), cap at 12
+      const calBySymbol = {};
+      nasdaqResults.forEach((r, i) => {
+        const items = r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : [];
+        for (const e of items) {
+          if (!calBySymbol[e.symbol]) calBySymbol[e.symbol] = { ...e, date: dates[i] };
+        }
+      });
+      const calEntries = Object.values(calBySymbol)
+        .sort((a, b) => (b.market_cap_n || 0) - (a.market_cap_n || 0))
+        .slice(0, 12);
+
+      if (!calEntries.length) return { stocks: [], generated_at: new Date().toISOString() };
+
+      // Deep-fetch each symbol in parallel
+      const perStock = await Promise.allSettled(calEntries.map(async (entry) => {
+        const sym = entry.symbol;
+
+        const [trendRes, yfRes, newsRes, scoreRes, quoteRes] = await Promise.allSettled([
+          getEarningsTrend(sym),
+          _yf.quoteSummary(sym, { modules: ['financialData', 'defaultKeyStatistics', 'earningsTrend', 'price'] }),
+          _mergedSymbolNews(sym, 4),
+          getConvictionScore({ symbol: sym, positions: [] }),
+          fetchCurrentPrice(sym),
+        ]);
+
+        const quarters  = trendRes.status === 'fulfilled' ? (trendRes.value || []) : [];
+        const yf        = yfRes.status   === 'fulfilled' ? yfRes.value : null;
+        const newsArr   = newsRes.status === 'fulfilled' ? newsRes.value : [];
+        const score     = scoreRes.status === 'fulfilled' ? scoreRes.value : null;
+        const quote     = quoteRes.status === 'fulfilled' ? quoteRes.value : null;
+
+        // ── Trend scoring ──
+        const beatCount    = quarters.filter(q => q.beat === true).length;
+        const strongCount  = quarters.filter(q => q.quality === 'strong').length;
+        const modCount     = quarters.filter(q => q.quality === 'moderate').length;
+        const weakCount    = quarters.filter(q => q.quality === 'weak').length;
+
+        let trendScore = 0;
+        trendScore += beatCount >= 4 ? 5 : beatCount === 3 ? 3 : beatCount === 2 ? 1 : beatCount === 1 ? 0 : -1;
+        trendScore += strongCount >= 3 ? 2 : strongCount >= 2 ? 1 : 0;
+        trendScore += weakCount >= 3 ? -2 : weakCount >= 2 ? -1 : 0;
+
+        const consensus = score?.signals?.analyst_consensus; // scoring.js uses snake_case: 'strong_buy','buy','sell','strong_sell'
+        trendScore += consensus === 'strong_buy' ? 3 : consensus === 'buy' ? 2 : consensus === 'sell' ? -2 : consensus === 'strong_sell' ? -3 : 0;
+
+        const rsi = score?.signals?.rsi;
+        trendScore += rsi != null ? (rsi > 65 ? 1 : rsi < 35 ? -1 : 0) : 0;
+
+        const revGrowth = yf?.financialData?.revenueGrowth ?? null;
+        trendScore += revGrowth != null ? (revGrowth > 0.15 ? 1 : revGrowth < 0 ? -1 : 0) : 0;
+
+        const trend_label =
+          trendScore >= 8  ? 'Very Strong' :
+          trendScore >= 4  ? 'Strong'      :
+          trendScore >= 1  ? 'Neutral'     :
+          trendScore >= -2 ? 'Weak'        : 'Very Weak';
+
+        // ── Analyst & financial data ──
+        const yfTrend     = yf?.earningsTrend?.trend ?? [];
+        const nextQTrend  = yfTrend.find(t => t.period === '0q') || yfTrend[0] || null;
+        const eps_estimate     = nextQTrend?.earningsEstimate?.avg ?? entry.eps_estimate ?? null;
+        const eps_est_low      = nextQTrend?.earningsEstimate?.low ?? null;
+        const eps_est_high     = nextQTrend?.earningsEstimate?.high ?? null;
+        const revenue_estimate = nextQTrend?.revenueEstimate?.avg ?? null;
+        const gross_margins    = yf?.financialData?.grossMargins ?? null;
+        const operating_margins= yf?.financialData?.operatingMargins ?? null;
+        const debt_to_equity   = yf?.financialData?.debtToEquity ?? null;
+        const analyst_target   = yf?.financialData?.targetMeanPrice ?? null;
+        const forward_pe       = yf?.defaultKeyStatistics?.forwardPE ?? null;
+
+        return {
+          symbol:            sym,
+          company:           yf?.price?.shortName || yf?.price?.longName || entry.company || sym,
+          earnings_date:     entry.date,
+          call_time:         entry.call_time || '?',
+          market_cap:        entry.market_cap || null,
+          trend_label,
+          trend_score:       trendScore,
+          beat_count:        beatCount,
+          quarters,
+          eps_estimate,
+          eps_est_low,
+          eps_est_high,
+          revenue_estimate,
+          revenue_growth:    revGrowth,
+          gross_margins,
+          operating_margins,
+          debt_to_equity,
+          analyst_target,
+          analyst_consensus: consensus ?? null,
+          forward_pe,
+          conviction_score:  score?.score  ?? null,
+          conviction_grade:  score?.grade  ?? null,
+          price:             quote?.price  ?? null,
+          change_pct:        quote?.change_pct ?? null,
+          pre_price:         quote?.pre_price  ?? null,
+          pre_change_pct:    quote?.pre_change_pct ?? null,
+          news: newsArr.slice(0, 3).map(a => ({ title: a.title, url: a.url, source: a.source, published: a.published })),
+        };
+      }));
+
+      const stocks = perStock
+        .filter(r => r.status === 'fulfilled')
+        .map(r => r.value)
+        .sort((a, b) => b.trend_score - a.trend_score);  // strongest first
+
+      return { stocks, generated_at: new Date().toISOString() };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('[earnings-preview]', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
@@ -5881,6 +6160,142 @@ cron.schedule('0 20 * * 1-5', async () => {
   } catch (err) {
     console.error('[catalyst] 8PM cron error:', err.message);
   }
+}, { timezone: 'America/New_York' });
+
+// ─── Catalyst Performance Tracker ─────────────────────────────────────────────
+// Answers: "If you bought $1000 yesterday at close and sold at today's open, P&L?"
+
+function _prevTradingDay(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  let p = new Date(d.getTime() - 86400000);
+  while (p.getUTCDay() === 0 || p.getUTCDay() === 6) p = new Date(p.getTime() - 86400000);
+  return p.toISOString().split('T')[0];
+}
+function _nextTradingDay(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  let n = new Date(d.getTime() + 86400000);
+  while (n.getUTCDay() === 0 || n.getUTCDay() === 6) n = new Date(n.getTime() + 86400000);
+  return n.toISOString().split('T')[0];
+}
+
+async function _fetchDailyBar(symbol, dateStr) {
+  // Returns { open, close } for a specific trading day via Yahoo Finance chart API
+  const p1 = Math.floor(new Date(dateStr + 'T00:00:00Z').getTime() / 1000) - 86400;
+  const p2 = Math.floor(new Date(dateStr + 'T23:59:59Z').getTime() / 1000) + 86400;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${p1}&period2=${p2}`;
+  try {
+    const resp = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) return null;
+    const tss = result.timestamp || [];
+    const q   = result.indicators?.quote?.[0] || {};
+    for (let i = 0; i < tss.length; i++) {
+      const d = new Date(tss[i] * 1000).toISOString().split('T')[0];
+      if (d === dateStr && q.close?.[i] != null) {
+        return { open: q.open?.[i] != null ? +q.open[i].toFixed(4) : null, close: +q.close[i].toFixed(4) };
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function computeCatalystPerf(tradeDate) {
+  const earningsDate = _nextTradingDay(tradeDate);
+
+  // AMC stocks from tradeDate (reported after close) + BMO stocks from earningsDate (reported before open)
+  const [amcRes, bmoRes] = await Promise.allSettled([
+    ttlCache(`earnings:cal:${tradeDate}`,    6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(tradeDate)),
+    ttlCache(`earnings:cal:${earningsDate}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(earningsDate)),
+  ]);
+  const amc = (amcRes.status === 'fulfilled' ? amcRes.value : []).filter(e => e.call_time === 'AMC');
+  const bmo = (bmoRes.status === 'fulfilled' ? bmoRes.value : []).filter(e => e.call_time === 'BMO');
+  const all = [...amc.map(s => ({ ...s, bucket: 'amc' })), ...bmo.map(s => ({ ...s, bucket: 'bmo' }))]
+    .sort((a, b) => (b.market_cap_n || 0) - (a.market_cap_n || 0)).slice(0, 20);
+
+  if (!all.length) {
+    console.log(`[catalyst-perf] No AMC/BMO stocks found for trade_date=${tradeDate}`);
+    return 0;
+  }
+
+  let saved = 0;
+  await Promise.allSettled(all.map(async (stock) => {
+    try {
+      const [entryBar, exitBar] = await Promise.all([
+        _fetchDailyBar(stock.symbol, tradeDate),    // buy at close
+        _fetchDailyBar(stock.symbol, earningsDate),  // sell at open
+      ]);
+      const entryPrice = entryBar?.close ?? null;
+      const exitPrice  = exitBar?.open   ?? null;
+      const change_pct = (entryPrice && exitPrice)
+        ? +((exitPrice - entryPrice) / entryPrice * 100).toFixed(2) : null;
+      const pnl_1000 = change_pct != null ? +(change_pct / 100 * 1000).toFixed(2) : null;
+
+      await query(
+        `INSERT INTO catalyst_performance (trade_date,symbol,company,bucket,call_time,entry_price,exit_price,change_pct,pnl_1000)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (trade_date,symbol) DO UPDATE SET exit_price=EXCLUDED.exit_price,change_pct=EXCLUDED.change_pct,pnl_1000=EXCLUDED.pnl_1000`,
+        [tradeDate, stock.symbol, stock.company || stock.symbol, stock.bucket, stock.call_time, entryPrice, exitPrice, change_pct, pnl_1000]
+      );
+      saved++;
+    } catch (err) { console.warn(`[catalyst-perf] ${stock.symbol}:`, err.message); }
+  }));
+
+  console.log(`[catalyst-perf] trade_date=${tradeDate} earnings_date=${earningsDate} saved=${saved}/${all.length}`);
+  return saved;
+}
+
+// GET /api/catalyst-performance?date=YYYY-MM-DD — fetch results for a date
+app.get('/api/catalyst-performance', requireAuth, async (req, res) => {
+  const date = (req.query.date || '').slice(0, 10);
+  if (!date) return res.json({ results: [], trade_date: null });
+  if (!isDbAvailable()) return res.json({ results: [], trade_date: date, error: 'db_unavailable' });
+  const { rows } = await query(
+    `SELECT symbol,company,bucket,call_time,
+            ROUND(entry_price,2) AS entry_price, ROUND(exit_price,2) AS exit_price,
+            change_pct, pnl_1000
+     FROM catalyst_performance WHERE trade_date=$1
+     ORDER BY ABS(COALESCE(pnl_1000,0)) DESC`,
+    [date]
+  );
+  res.json({ results: rows, trade_date: date });
+});
+
+// GET /api/catalyst-performance/dates — list available dates (for calendar)
+app.get('/api/catalyst-performance/dates', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.json({ dates: [] });
+  const { rows } = await query(
+    `SELECT trade_date::text AS date, COUNT(*) AS count
+     FROM catalyst_performance GROUP BY trade_date ORDER BY trade_date DESC LIMIT 90`
+  );
+  res.json({ dates: rows.map(r => ({ date: r.date, count: +r.count })) });
+});
+
+// POST /api/catalyst-performance/run — admin manual trigger
+app.post('/api/catalyst-performance/run', requireAdmin, async (req, res) => {
+  const date = (req.body?.date || _prevTradingDay(
+    new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  )).slice(0, 10);
+  try {
+    const saved = await computeCatalystPerf(date);
+    res.json({ ok: true, trade_date: date, saved });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 10:05 AM ET Tue–Sat — compute previous day's catalyst performance (gap at open)
+// Tue–Fri covers Mon–Thu. Saturday covers Friday's AMC/BMO stocks.
+// Note: Friday's exit price (Monday open) will be null on Saturday — filled in when
+// the user clicks "Compute Now" on Monday, or by the Tuesday run via ON CONFLICT UPDATE.
+cron.schedule('5 10 * * 2-6', async () => {
+  try {
+    const etToday   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const tradeDate = _prevTradingDay(etToday);
+    console.log(`[catalyst-perf] 10:05 AM ET cron: trade_date=${tradeDate}`);
+    await computeCatalystPerf(tradeDate);
+  } catch (err) { console.error('[catalyst-perf] cron error:', err.message); }
 }, { timezone: 'America/New_York' });
 
 // ─── Admin API: manual trigger (per-step or all) ──────────────────────────────

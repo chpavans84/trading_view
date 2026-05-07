@@ -501,6 +501,22 @@ DO $$ BEGIN
 END $$;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS slippage_cents NUMERIC(8,2);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS account_source VARCHAR(20);
+
+CREATE TABLE IF NOT EXISTS catalyst_performance (
+  id           SERIAL PRIMARY KEY,
+  trade_date   DATE NOT NULL,
+  symbol       VARCHAR(20) NOT NULL,
+  company      TEXT,
+  bucket       VARCHAR(5),
+  call_time    VARCHAR(5),
+  entry_price  NUMERIC(12,4),
+  exit_price   NUMERIC(12,4),
+  change_pct   NUMERIC(8,4),
+  pnl_1000     NUMERIC(10,2),
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(trade_date, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_catperf_date ON catalyst_performance(trade_date);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
