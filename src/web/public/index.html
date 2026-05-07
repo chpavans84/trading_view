@@ -1810,11 +1810,11 @@
     .ecal-chip-link:active { transform:scale(0.97); }
     .ecal-chip-sym  { font-size:0.75rem; font-weight:700; color:var(--accent); }
     .ecal-chip-name { font-size:0.65rem; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; max-width:100%; }
-    .ecal-more { font-size:0.68rem; color:var(--accent); margin-top:2px; background:none; border:none; padding:0; cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
-    .ecal-more:hover { color:#93c5fd; }
-    .ecal-less { color:var(--muted); text-decoration:none; font-size:0.65rem; }
-    .ecal-less:hover { color:var(--text2); }
     .ecal-empty { font-size:0.72rem; color:var(--muted); margin-top:4px; }
+    .ecal-count { font-size:0.62rem; color:var(--muted); margin-bottom:4px; }
+    .ecal-chips-wrap { max-height:180px; overflow-y:auto; }
+    .ecal-chips-wrap::-webkit-scrollbar { width:3px; }
+    .ecal-chips-wrap::-webkit-scrollbar-thumb { background:var(--faint,#30363d); border-radius:2px; }
 
     /* ── Earnings Reaction Analysis ─────────────────── */
     .er-sym-btn { background:var(--card-bg);border:1px solid var(--border);border-radius:5px;padding:3px 9px;color:var(--text2);font-size:0.75rem;cursor:pointer;transition:all .15s; }
@@ -9484,42 +9484,19 @@ async function earningsCalJump(dateStr) {
   renderEarningsCalendar();
 }
 
-function _ecalDayInner(stocks, dateStr, limit) {
+function _ecalDayInner(stocks, dateStr) {
   if (!stocks.length) return '<div class="ecal-empty">No earnings</div>';
-  const chips = stocks.slice(0, limit).map(s =>
+  const sorted = [...stocks].sort((a, b) => a.symbol.localeCompare(b.symbol));
+  const count  = sorted.length > 1 ? `<div class="ecal-count">${sorted.length} companies</div>` : '';
+  const chips  = sorted.map(s =>
     `<div class="ecal-chip ecal-chip-link" title="${s.company||s.symbol}${s.call_time&&s.call_time!=='?'?' · '+s.call_time:''}${s.eps_estimate!=null?' · EPS est $'+s.eps_estimate:''}"
          onclick="calEarningClick('${s.symbol}')">
       <span class="ecal-chip-sym">${s.symbol}</span>
       <span class="ecal-chip-name">${s.company||''}</span>
     </div>`
   ).join('');
-  const more = stocks.length > limit
-    ? `<button class="ecal-more" data-date="${dateStr}" data-limit="${limit}">+${stocks.length - limit} more</button>`
-    : limit > 8
-    ? `<button class="ecal-less ecal-more" data-date="${dateStr}" data-limit="8">▲ Show less</button>`
-    : '';
-  return chips + more;
+  return `${count}<div class="ecal-chips-wrap">${chips}</div>`;
 }
-
-// Expand / collapse "+X more" in the earnings calendar
-document.addEventListener('click', e => {
-  const btn = e.target.closest('.ecal-more[data-date]');
-  if (!btn) return;
-  const dateStr = btn.dataset.date;
-  const currentLimit = parseInt(btn.dataset.limit) || 8;
-  const stocks = _earningsCalCache.get(dateStr) || [];
-  const dayCol = btn.closest('.ecal-day');
-  if (!dayCol) return;
-  // Toggle: if currently collapsed (limit=8) expand to all; if expanded collapse to 8
-  const newLimit = currentLimit <= 8 ? stocks.length : 8;
-  // Replace everything after the date number (keep day-name and day-num)
-  const dayNum = dayCol.querySelector('.ecal-day-num');
-  if (dayNum) {
-    // Remove all nodes after dayNum
-    while (dayNum.nextSibling) dayNum.nextSibling.remove();
-    dayNum.insertAdjacentHTML('afterend', _ecalDayInner(stocks, dateStr, newLimit));
-  }
-});
 
 function renderEarningsCalendar() {
   const grid  = document.getElementById('earningsCalGrid');
@@ -9549,7 +9526,7 @@ function renderEarningsCalendar() {
       inner = '<div class="ecal-empty" style="color:var(--text2);font-size:0.72rem">Loading…</div>';
     } else {
       const stocks = _earningsCalCache.get(dateStr) || [];
-      inner = _ecalDayInner(stocks, dateStr, 8);
+      inner = _ecalDayInner(stocks, dateStr);
     }
 
     html += `<div class="ecal-day${isToday ? ' ecal-today' : ''}${isWeekend ? ' ecal-weekend' : ''}">
