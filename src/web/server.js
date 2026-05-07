@@ -4844,6 +4844,53 @@ app.get('/api/benzinga/options', requireAuth, async (req, res) => {
   }
 });
 
+// ── News AI analysis — batches top-5 headlines through Claude-Haiku, 10-min cache ──
+let _newsAnalysisCache = null;
+let _newsAnalysisCacheAt = 0;
+app.get('/api/news/analysis', requireAuth, async (req, res) => {
+  if (_newsAnalysisCache && Date.now() - _newsAnalysisCacheAt < 10 * 60_000) {
+    return res.json(_newsAnalysisCache);
+  }
+  try {
+    const news = isBenzingaConfigured() ? await getBzNews({ limit: 6 }) : null;
+    const articles = news?.articles ?? [];
+    if (!articles.length) return res.json([]);
+
+    const lines = articles.map((a, i) => {
+      const tickers = (a.tickers || []).slice(0, 3).join(',') || 'MARKET';
+      return `${i + 1}. [${tickers}] ${a.title}`;
+    }).join('\n');
+
+    const msg = await _anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 700,
+      messages: [{
+        role: 'user',
+        content: `You are a stock market analyst. For each news headline below, write ONE short sentence (≤15 words) explaining which stocks may go up or down and why (include indirect impacts like suppliers, competitors).
+
+Headlines:\n${lines}
+
+Reply ONLY as a JSON array — no prose, no markdown fences:
+[{"n":1,"up":["TICK"],"down":["TICK"],"impact":"one sentence"},...]`,
+      }],
+    });
+
+    const raw  = msg.content[0]?.text || '[]';
+    const json = raw.match(/\[[\s\S]*\]/)?.[0] || '[]';
+    const analyzed = JSON.parse(json).map((item, i) => ({
+      ...item,
+      title: articles[i]?.title || '',
+      tickers: articles[i]?.tickers || [],
+    }));
+    _newsAnalysisCache   = analyzed;
+    _newsAnalysisCacheAt = Date.now();
+    res.json(analyzed);
+  } catch (e) {
+    console.error('[news/analysis]', e.message);
+    res.json([]);
+  }
+});
+
 app.get('/api/benzinga/news', requireAuth, async (req, res) => {
   if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
   const symbol = req.query.symbol ? req.query.symbol.toUpperCase().trim() : undefined;

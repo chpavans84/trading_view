@@ -125,7 +125,7 @@
     height: 112px;
     position: relative;
     overflow: visible;
-    z-index: 200;
+    z-index: 850;
     background-image:
       linear-gradient(rgba(7,13,24,0.78), rgba(7,13,24,0.78)),
       url('/images/background.png');
@@ -388,7 +388,7 @@
     box-shadow: 0 16px 48px rgba(0,0,0,0.6);
     opacity: 0; visibility: hidden; transform: translateY(-6px) scale(0.97);
     transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
-    z-index: 500;
+    z-index: 900;
   }
   .user-menu:hover .user-dropdown {
     opacity: 1; visibility: visible; transform: translateY(0) scale(1);
@@ -805,10 +805,10 @@
   .grade-B { background:rgba(26,35,50,0.85);color:#58a6ff;box-shadow:0 0 6px rgba(88,166,255,0.2); }
   .grade-C { background:rgba(45,42,31,0.85);color:#d29922;box-shadow:0 0 6px rgba(210,153,34,0.2); }
   .grade-F { background:rgba(45,19,24,0.85);color:#f85149;box-shadow:0 0 6px rgba(248,81,73,0.2); }
-  .chat-fab { position: fixed; bottom: 28px; right: 28px; width: 56px; height: 56px; border-radius: 50%; background: #238636; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 300; transition: transform 0.2s; display: flex; align-items: center; justify-content: center; }
+  .chat-fab { position: fixed; bottom: 28px; right: 28px; width: 56px; height: 56px; border-radius: 50%; background: #238636; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 300; transition: transform 0.2s, right 0.3s cubic-bezier(0.4,0,0.2,1); display: flex; align-items: center; justify-content: center; }
   .chat-fab:hover { transform: scale(1.1); background: #2ea043; }
   .chat-fab .chat-fab-badge { position: absolute; top: -4px; right: -4px; background: #f85149; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; display: none; align-items: center; justify-content: center; }
-  .chat-widget { position: fixed; bottom: 96px; right: 28px; width: min(380px, calc(100vw - 32px)); height: 560px; background: #161b22; border: 1px solid rgba(48,54,61,0.8); border-top: 1px solid rgba(255,255,255,0.06); border-radius: 16px; box-shadow: 0 16px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(88,166,255,0.05); z-index: 300; display: none; flex-direction: column; overflow: hidden; min-width: 300px; min-height: 300px; max-width: calc(100vw - 32px); max-height: calc(100vh - 120px); }
+  .chat-widget { position: fixed; bottom: 96px; right: 28px; width: min(380px, calc(100vw - 32px)); height: 560px; background: #161b22; border: 1px solid rgba(48,54,61,0.8); border-top: 1px solid rgba(255,255,255,0.06); border-radius: 16px; box-shadow: 0 16px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(88,166,255,0.05); z-index: 300; display: none; flex-direction: column; overflow: hidden; min-width: 300px; min-height: 300px; max-width: calc(100vw - 32px); max-height: calc(100vh - 120px); transition: right 0.3s cubic-bezier(0.4,0,0.2,1); }
   .chat-widget.open { display: flex; }
   .chat-resize-handle { position: absolute; top: 0; left: 0; width: 18px; height: 18px; cursor: nw-resize; z-index: 10; }
   .chat-resize-handle::after { content:''; position:absolute; top:4px; left:4px; width:8px; height:8px; border-top:2px solid #30363d; border-left:2px solid #30363d; border-radius:1px; }
@@ -823,6 +823,109 @@
   .chat-widget-header button:hover { color: #e6edf3; background: #21262d; }
   .chat-report-btn { color: #e3b341 !important; }
   .chat-report-btn:hover { color: #f0c040 !important; background: rgba(227,179,65,0.12) !important; }
+
+  /* ── Floating News Drawer ─────────────────────────────────────────────── */
+  #newsDrawer {
+    position: fixed; right: -302px; top: 76px; bottom: 30px; width: 300px;
+    background: #0f1c2e; border-left: 1px solid rgba(255,255,255,0.1);
+    z-index: 800; display: flex; flex-direction: column;
+    transition: right 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: -4px 0 24px rgba(0,0,0,0.55);
+  }
+  #newsDrawer.open { right: 0; }
+  /* Hero AI news ticker */
+  #heroNewsTicker {
+    flex: 1; min-width: 0; overflow: hidden; position: relative;
+    height: 48px; display: flex; align-items: center; z-index: 1;
+    mask-image: linear-gradient(to right, transparent 0, black 32px, black calc(100% - 32px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, black 32px, black calc(100% - 32px), transparent 100%);
+  }
+  #heroTickerTrack {
+    display: flex; align-items: center; white-space: nowrap;
+    animation: heroScroll 60s linear infinite;
+    will-change: transform;
+  }
+  #heroTickerTrack:hover { animation-play-state: paused; }
+  .htk-item {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 0 36px; font-size: 0.85rem; font-weight: 500;
+    border-right: 1px solid rgba(255,255,255,0.08);
+    cursor: pointer; color: #c9d1d9;
+  }
+  .htk-item:hover { opacity: 0.8; }
+  .htk-impact { font-size: 0.82rem; color: #c9d1d9; }
+  /* Arrow icons — green up, red down */
+  .htk-arrow-up   { color: #10b981; font-size: 0.9rem; font-weight: 900; }
+  .htk-arrow-down { color: #f43f5e; font-size: 0.9rem; font-weight: 900; }
+  /* Stock symbol badges — blue */
+  .htk-sym {
+    font-size: 0.78rem; font-weight: 800; padding: 2px 6px;
+    border-radius: 4px; letter-spacing: 0.06em;
+    background: rgba(56,189,248,0.12); color: #60a5fa;
+    border: 1px solid rgba(56,189,248,0.25);
+  }
+  .htk-sym-up   { border-color: rgba(16,185,129,0.3); }
+  .htk-sym-down { border-color: rgba(244,63,94,0.3);  }
+  @keyframes heroScroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  /* News toggle button inside hero-controls */
+  #newsDrawerToggle {
+    background: rgba(14,165,233,0.15); color: #38bdf8;
+    border: 1px solid rgba(14,165,233,0.4); border-radius: 6px;
+    padding: 5px 10px; font-size: 0.72rem; font-weight: 700;
+    cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    transition: background 0.15s, transform 0.1s;
+  }
+  #newsDrawerToggle:hover  { background: rgba(14,165,233,0.28); }
+  #newsDrawerToggle:active { transform: scale(0.95); }
+  .nd-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .nd-header h4 { font-size: 0.85rem; font-weight: 600; margin: 0; color: var(--text); }
+  .nd-header-actions { display: flex; gap: 4px; align-items: center; }
+  .nd-hbtn {
+    background: none; border: none; color: var(--text2); cursor: pointer;
+    font-size: 0.9rem; padding: 3px 7px; border-radius: 4px;
+  }
+  .nd-hbtn:hover { color: var(--accent); background: rgba(255,255,255,0.05); }
+  #newsDrawerItems {
+    flex: 1; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px;
+  }
+  #newsDrawerItems::-webkit-scrollbar { width: 3px; }
+  #newsDrawerItems::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 2px; }
+  .nd-card {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; display: flex; flex-direction: column; gap: 5px;
+    transition: border-color 0.15s;
+  }
+  .nd-card:hover { border-color: var(--accent); }
+  .nd-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .nd-ticker {
+    background: var(--accent); color: #fff; border-radius: 3px;
+    padding: 1px 5px; font-size: 0.66rem; font-weight: 700;
+  }
+  .nd-sentiment { font-size: 0.63rem; font-weight: 600; padding: 1px 5px; border-radius: 3px; }
+  .nd-sentiment.bullish { background: rgba(16,185,129,0.15); color: #10b981; }
+  .nd-sentiment.bearish { background: rgba(244,63,94,0.15); color: #f43f5e; }
+  .nd-sentiment.neutral { background: rgba(148,163,184,0.1); color: #94a3b8; }
+  .nd-time { font-size: 0.63rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+  .nd-headline { font-size: 0.78rem; color: var(--text); line-height: 1.4; font-weight: 500; }
+  .nd-footer-row { display: flex; align-items: center; justify-content: space-between; }
+  .nd-source { font-size: 0.63rem; color: var(--muted); }
+  .nd-analyze-btn {
+    background: none; border: 1px solid rgba(14,165,233,0.3); color: var(--accent);
+    border-radius: 4px; padding: 2px 8px; font-size: 0.66rem; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .nd-analyze-btn:hover { background: rgba(14,165,233,0.12); border-color: var(--accent); }
+  .nd-status { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 24px 12px; }
+  .nd-footer-bar {
+    padding: 7px 10px; border-top: 1px solid var(--border);
+    flex-shrink: 0; font-size: 0.62rem; color: var(--muted); text-align: center;
+  }
 
   /* Report modal */
   #reportModal { display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); align-items:center; justify-content:center; }
@@ -1250,6 +1353,11 @@
     <div class="hero-subtitle">AI-Powered Stock Intelligence</div>
   </div>
   <div class="hero-divider"></div>
+  <!-- AI news analysis scrolling ticker -->
+  <div id="heroNewsTicker">
+    <div id="heroTickerTrack"><span style="color:var(--text2)">Loading AI news analysis…</span></div>
+  </div>
+  <div class="hero-divider" style="margin-left:0"></div>
   <div class="hero-markets" id="heroMarkets">
     <div class="hero-market-item">
       <div class="hero-market-label">S&amp;P 500</div>
@@ -1270,6 +1378,7 @@
   </div>
   <!-- Controls: clocks, broker selector, status, user menu — pushed to right -->
   <div class="hero-controls">
+    <button id="newsDrawerToggle">📰 News</button>
     <div class="nav-clocks" id="navClocks">
       <div class="nav-clock" id="clockSGT">
         <span class="nav-clock-label">SGT</span>
@@ -5314,6 +5423,19 @@ erDiagram
     <button class="chat-send" id="chatSend" onclick="sendChat()">Send ↵</button>
   </div>
 </div>
+<!-- ── Floating News Drawer ──────────────────────────────── -->
+<div id="newsDrawer">
+  <div class="nd-header">
+    <h4>📰 Live Market News</h4>
+    <div class="nd-header-actions">
+      <button class="nd-hbtn" onclick="loadNewsDrawer(true)" title="Refresh">↻</button>
+      <button class="nd-hbtn" onclick="toggleNewsDrawer()" title="Close">✕</button>
+    </div>
+  </div>
+  <div id="newsDrawerItems"><div class="nd-status">Loading news…</div></div>
+  <div class="nd-footer-bar">Auto-refreshes every 90s · Benzinga</div>
+</div>
+
 <button class="chat-fab" id="chatFab" onclick="toggleChat()" title="AI Trading Analyst">🤖</button>
 
 <!-- ── Report Issue Modal ────────────────────────────── -->
@@ -14870,11 +14992,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 })();
 
-// Connect autonomous push stream once page is ready
-connectPushStream();
-
 // ── Autonomous Push Notifications (SSE) ────────────────────────────────────────
 let _pushSource = null;
+
+// Connect autonomous push stream once page is ready
+connectPushStream();
 
 function connectPushStream() {
   if (_pushSource) return;
@@ -15141,6 +15263,191 @@ function applyTheme(id, save = true) {
 function buildThemePalette() { applyTheme(_currentTheme, false); }
 
 applyTheme(localStorage.getItem('theme') || 'vexai', false);
+
+// ── Floating News Drawer ─────────────────────────────────────────────────────
+
+let _newsDrawerOpen = false;
+let _newsDrawerInterval = null;
+let _newsDrawerLastFetch = 0;
+
+function toggleNewsDrawer() {
+  const drawer     = document.getElementById('newsDrawer');
+  const toggle     = document.getElementById('newsDrawerToggle');
+  const chatWidget = document.getElementById('chatWidget');
+  const chatFab    = document.getElementById('chatFab');
+  if (!drawer || !toggle) return;
+
+  _newsDrawerOpen = !_newsDrawerOpen;
+  // Drawer is 300px wide; chat/FAB sit at right:28px normally → shift to 328px when open
+  const chatRight = _newsDrawerOpen ? '336px' : '28px';
+
+  if (_newsDrawerOpen) {
+    drawer.style.right = '0';
+    toggle.textContent = '✕ Close';
+    loadNewsDrawer();
+    _newsDrawerInterval = setInterval(() => loadNewsDrawer(), 90_000);
+  } else {
+    drawer.style.right = '-302px';
+    toggle.textContent = '📰 News';
+    clearInterval(_newsDrawerInterval);
+    _newsDrawerInterval = null;
+  }
+
+  // Slide chat FAB and widget out of the way
+  if (chatFab)    chatFab.style.right    = chatRight;
+  if (chatWidget) chatWidget.style.right = chatRight;
+}
+
+// Wire toggle and analyze via event delegation
+(function() {
+  const ndToggle = document.getElementById('newsDrawerToggle');
+  if (ndToggle) ndToggle.addEventListener('click', toggleNewsDrawer);
+
+  // Analyze button — uses data attributes to avoid JSON-in-onclick quoting issues
+  const items = document.getElementById('newsDrawerItems');
+  if (items) items.addEventListener('click', e => {
+    const btn = e.target.closest('.nd-analyze-btn');
+    if (btn) analyzeNewsItem(btn.dataset.ticker || '', btn.dataset.headline || '');
+  });
+})();
+
+// ── Hero AI News Ticker ──────────────────────────────────────────────────────
+
+let _heroTickerTimer = null;
+
+async function loadHeroNewsTicker() {
+  const track = document.getElementById('heroTickerTrack');
+  if (!track) return;
+
+  try {
+    const res  = await fetch('/api/news/analysis');
+    const data = res.ok ? await res.json() : [];
+
+    if (data.length) {
+      _renderHeroTicker(track, data.map(item => {
+        const up   = (item.up   || []).slice(0, 3);
+        const down = (item.down || []).slice(0, 3);
+        // ▲ symbols in green, ▼ symbols in red, names in blue
+        const upParts   = up.map(t =>
+          `<span class="htk-arrow-up">▲</span><span class="htk-sym htk-sym-up">${t}</span>`
+        ).join('');
+        const downParts = down.map(t =>
+          `<span class="htk-arrow-down">▼</span><span class="htk-sym htk-sym-down">${t}</span>`
+        ).join('');
+        const impact = (item.impact || item.title || '').replace(/</g,'&lt;');
+        return `<span class="htk-item">${upParts}${downParts}<span class="htk-impact">${impact}</span></span>`;
+      }));
+      return;
+    }
+  } catch { /* fall through */ }
+
+  // Fallback: plain news headlines with sentiment coloring
+  try {
+    const res2 = await fetch('/api/benzinga/news?limit=8');
+    if (!res2.ok) throw new Error();
+    const arts = (await res2.json())?.articles ?? [];
+    _renderHeroTicker(track, arts.map(a => {
+      const s      = (a.sentiment || '').toLowerCase();
+      const arrow  = s === 'bullish' ? `<span class="htk-arrow-up">▲</span>` : s === 'bearish' ? `<span class="htk-arrow-down">▼</span>` : '';
+      const syms   = (a.tickers || []).slice(0, 2).map(t =>
+        `<span class="htk-sym">${t}</span>`
+      ).join('');
+      const title  = (a.title || '').replace(/</g,'&lt;');
+      return `<span class="htk-item">${arrow}${syms}<span class="htk-impact">${title}</span></span>`;
+    }));
+  } catch { /* ignore */ }
+}
+
+function _renderHeroTicker(track, segments) {
+  if (!segments.length) return;
+  // Duplicate for seamless infinite scroll
+  const html = segments.join('');
+  track.innerHTML = html + html;
+  // Adjust animation speed based on content width
+  const totalWidth = track.scrollWidth / 2;
+  const speed = Math.max(30, Math.min(90, totalWidth / 8)); // px/s range 30–90s
+  track.style.animationDuration = speed + 's';
+}
+
+// Load immediately and refresh every 10 min
+loadHeroNewsTicker();
+setInterval(loadHeroNewsTicker, 10 * 60_000);
+
+async function loadNewsDrawer(force = false) {
+  if (!_newsDrawerOpen && !force) return;
+  if (!force && Date.now() - _newsDrawerLastFetch < 30_000) return;
+  _newsDrawerLastFetch = Date.now();
+
+  const container = document.getElementById('newsDrawerItems');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/benzinga/news?limit=25');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const articles = data?.articles ?? [];
+
+    if (!articles.length) {
+      container.innerHTML = '<div class="nd-status">No news available.<br><small style="color:var(--muted)">Benzinga API key required.</small></div>';
+      return;
+    }
+
+    container.innerHTML = articles.map(a => {
+      const tickers  = a.tickers ?? [];
+      const raw_sent = (a.sentiment || '').toLowerCase();
+      const sentiment = ['bullish','bearish','neutral'].includes(raw_sent) ? raw_sent : '';
+      const ts       = a.published_at ? _ndRelTime(new Date(a.published_at)) : '';
+      const badges   = tickers.slice(0, 3).map(t =>
+        `<span class="nd-ticker">${t.replace(/</g,'&lt;')}</span>`
+      ).join('');
+      const sentBadge = sentiment
+        ? `<span class="nd-sentiment ${sentiment}">${sentiment}</span>` : '';
+      const title    = (a.title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      // Use data-attributes to avoid JSON-in-onclick quoting issues
+      const safeTitle   = (a.title  || '').replace(/"/g,'&quot;');
+      const safeTicker  = (tickers[0] || '').replace(/"/g,'&quot;');
+
+      return `<div class="nd-card">
+        <div class="nd-card-meta">${badges}${sentBadge}<span class="nd-time">${ts}</span></div>
+        <div class="nd-headline">${title}</div>
+        <div class="nd-footer-row">
+          <span class="nd-source">Benzinga</span>
+          <button class="nd-analyze-btn" data-ticker="${safeTicker}" data-headline="${safeTitle}">🤖 Analyze</button>
+        </div>
+      </div>`;
+    }).join('');
+
+  } catch (e) {
+    container.innerHTML = `<div class="nd-status">Could not load news.<br><small style="color:var(--muted)">${e.message}</small></div>`;
+  }
+}
+
+function _ndRelTime(date) {
+  const diff = Date.now() - date.getTime();
+  const m = Math.floor(diff / 60_000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function analyzeNewsItem(ticker, headline) {
+  const chatWidget = document.getElementById('chatWidget');
+  const chatInput  = document.getElementById('chatInput');
+  if (!chatWidget || !chatInput) return;
+
+  if (!chatWidget.classList.contains('open')) toggleChat();
+
+  const prompt = ticker
+    ? `Quick trade analysis — ${ticker}: "${headline}". Should I trade ${ticker} on this news? What's the setup, risk, and opportunity?`
+    : `Quick market analysis: "${headline}". What's the trading implication — is there a setup here?`;
+
+  chatInput.value = prompt;
+  chatInput.dispatchEvent(new Event('input'));
+  chatInput.focus();
+  sendChat();
+}
 </script>
 
 <!-- ─── Auto-Trade Consent Modal ──────────────────────────────────────────── -->
