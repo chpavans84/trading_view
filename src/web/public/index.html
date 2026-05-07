@@ -1861,12 +1861,15 @@
           <button onclick="loadEarningsCalendar(true)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
         </div>
       </div>
-      <div style="position:relative;margin-bottom:10px">
-        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:0.82rem;pointer-events:none">🔍</span>
-        <input id="earningsCalSearch" type="text" placeholder="Search symbol or company name…"
-          style="width:100%;box-sizing:border-box;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:7px 12px 7px 32px;color:var(--text);font-size:0.82rem;outline:none;transition:border-color .15s"
+      <div style="position:relative;margin-bottom:12px">
+        <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:#8b949e" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="earningsCalSearch" type="text" placeholder="Search ticker or company…"
+          style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 34px 8px 32px;color:#e6edf3;font-size:0.83rem;outline:none;transition:border-color .15s"
           oninput="earningsCalSetSearch(this.value)"
-          onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+          onfocus="this.style.borderColor='#58a6ff';this.style.boxShadow='0 0 0 3px rgba(88,166,255,0.12)'"
+          onblur="this.style.borderColor='#30363d';this.style.boxShadow='none'">
+        <button id="earningsCalClear" onclick="document.getElementById('earningsCalSearch').value='';earningsCalSetSearch('')"
+          style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#8b949e;cursor:pointer;font-size:0.9rem;line-height:1;padding:2px 4px">✕</button>
       </div>
       <div id="earningsCalGrid" class="ecal-grid">
         <div class="loading" style="grid-column:1/-1;padding:32px;text-align:center">Loading earnings…</div>
@@ -9494,6 +9497,8 @@ async function earningsCalJump(dateStr) {
 let _ecalSearch = '';
 function earningsCalSetSearch(q) {
   _ecalSearch = q.trim().toUpperCase();
+  const clr = document.getElementById('earningsCalClear');
+  if (clr) clr.style.display = _ecalSearch ? 'block' : 'none';
   renderEarningsCalendar();
 }
 
