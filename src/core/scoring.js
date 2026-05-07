@@ -12,6 +12,92 @@ import { getRelativeStrength, getMarketSentiment, SECTOR_MAP } from './sentiment
 import { isBadTradingTime } from './trader.js';
 import { getChartTechnicals, getPriceLevels } from './tradingview-bridge.js';
 import { recordConvictionScore, getFactorWeights } from './db.js';
+import { getBzOptionsSentiment, getBzGuidance } from './benzinga.js';
+
+// ─── Benzinga helpers — used in place of Yahoo/EDGAR when key is present ──────
+const _bzKey = () => process.env.BENZINGA_API_KEY || process.env.BENZINGA_API || null;
+
+function _bzCatalystType(article) {
+  const text = ((article.title || '') + ' ' + (article.teaser || '')).toLowerCase();
+  const ch   = (article.channels || []).map(c => (c.name || '').toLowerCase());
+  if (ch.includes('earnings') || /\bearnings\b|eps beat|eps miss|\brevenue beat\b|\brevenue miss\b/.test(text)) return 'earnings';
+  if (/raises guidance|raised guidance|raises outlook|raises forecast|lowers guidance|cuts forecast|cuts outlook/.test(text)) return 'guidance';
+  if (/\bupgrade\b|\bdowngrade\b|price target|outperform|underperform|\banalyst\b/.test(text)) return 'analyst_rating';
+  if (/\bmerger\b|\bacquir|\btakeover\b|\bbuyout\b/.test(text)) return 'merger';
+  if (/\bfda\b|clinical trial|\bpdufa\b|drug approval/.test(text)) return 'fda';
+  if (/\binsider\b|form 4|10b5/.test(text)) return 'insider';
+  return 'general';
+}
+
+// Returns same shape as getEarningsSurprise(): { beat_streak, eps_surprise_pct, next_earnings_date }
+async function getBenzingaEarnings(symbol) {
+  const key = _bzKey();
+  if (!key) return null;
+  const ticker = symbol.toUpperCase();
+  const fmt    = d => d.toISOString().split('T')[0];
+  const today  = new Date();
+  const yr_ago = new Date(today); yr_ago.setFullYear(today.getFullYear() - 1);
+  const in_90d = new Date(today); in_90d.setDate(today.getDate() + 90);
+  const HDR    = { Accept: 'application/json' };
+  const SIG    = { signal: AbortSignal.timeout(5000) };
+
+  const [histJson, upcomJson] = await Promise.allSettled([
+    fetch(`https://api.benzinga.com/api/v2.1/calendar/earnings?token=${key}&parameters[tickers]=${ticker}&parameters[date_from]=${fmt(yr_ago)}&parameters[date_to]=${fmt(today)}&pageSize=8`, { ...SIG, headers: HDR }).then(r => r.json()),
+    fetch(`https://api.benzinga.com/api/v2.1/calendar/earnings?token=${key}&parameters[tickers]=${ticker}&parameters[date_from]=${fmt(today)}&parameters[date_to]=${fmt(in_90d)}&pageSize=3`, { ...SIG, headers: HDR }).then(r => r.json()),
+  ]);
+
+  const hist   = (histJson.status === 'fulfilled'  ? histJson.value?.earnings  : null) ?? [];
+  const upc    = (upcomJson.status === 'fulfilled' ? upcomJson.value?.earnings : null) ?? [];
+
+  // Sort by date descending, keep only rows with actual EPS reported
+  const reported = hist
+    .filter(e => e.eps != null && e.eps !== '')
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Beat streak: consecutive quarters with positive eps_surprise_percent
+  let beat_streak = 0;
+  for (const e of reported) {
+    const sp = parseFloat(e.eps_surprise_percent);
+    if (!isNaN(sp) && sp > 0) beat_streak++;
+    else break;
+  }
+
+  const latest          = reported[0];
+  const eps_surprise_pct = latest ? (parseFloat(latest.eps_surprise_percent) || null) : null;
+  const next_earnings_date = upc[0]?.date || null;
+
+  return { beat_streak, eps_surprise_pct, next_earnings_date };
+}
+
+// Returns same shape as getSymbolNews(): { articles, guidance_signal, sources_used }
+async function getBenzingaNews(symbol) {
+  const key = _bzKey();
+  if (!key) return null;
+  const ticker = symbol.toUpperCase();
+  const r = await fetch(
+    `https://api.benzinga.com/api/v2/news?token=${key}&tickers=${ticker}&pageSize=10&displayOutput=full`,
+    { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) }
+  );
+  if (!r.ok) return null;
+  const raw = await r.json();
+  const articles = (Array.isArray(raw) ? raw : []).map(a => ({
+    title:         a.title,
+    url:           a.url,
+    published_at:  a.created,
+    published:     a.created,
+    source:        'Benzinga',
+    catalyst_type: _bzCatalystType(a),
+  }));
+
+  const text       = articles.map(a => a.title.toLowerCase()).join(' ');
+  const raisedKw   = ['raises guidance', 'raised guidance', 'raises outlook', 'raises forecast', 'raised its'];
+  const loweredKw  = ['lowers guidance', 'lowered guidance', 'cuts forecast', 'cuts outlook', 'below expectations'];
+  const guidance_signal =
+    raisedKw.some(k => text.includes(k))  ? 'raised'  :
+    loweredKw.some(k => text.includes(k)) ? 'lowered' : 'neutral';
+
+  return { articles, guidance_signal, article_count: articles.length, sources_used: ['Benzinga'] };
+}
 
 const KNOWN_NAMES = {
   AAPL:'Apple Inc.', MSFT:'Microsoft Corporation', GOOGL:'Alphabet Inc.', GOOG:'Alphabet Inc.',
@@ -192,15 +278,20 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const sectorEtf = SECTOR_MAP[ticker] || 'SPY';
 
   // Fetch all signals in parallel — individual failures don't abort scoring
-  const [driftRes, rsRes, newsRes, earningsRes, sentimentRes, insiderRes, surpriseRes, techRes, levelsRes, nameRes, rvolRes, weeklyRes, analystRes, shortRes] =
+  // Prefer Benzinga for news + earnings surprise when key is configured; fall back to Yahoo/EDGAR
+  const _hasBz = !!_bzKey();
+  const _newsPromise     = _hasBz ? getBenzingaNews(ticker).catch(() => getSymbolNews({ symbol: ticker, limit: 10 }))     : getSymbolNews({ symbol: ticker, limit: 10 });
+  const _surprisePromise = _hasBz ? getBenzingaEarnings(ticker).catch(() => getEarningsSurprise({ symbol: ticker }))      : getEarningsSurprise({ symbol: ticker });
+
+  const [driftRes, rsRes, newsRes, earningsRes, sentimentRes, insiderRes, surpriseRes, techRes, levelsRes, nameRes, rvolRes, weeklyRes, analystRes, shortRes, bzOptsRes, bzGuidRes] =
     await Promise.allSettled([
       getPreEarningsDrift({ symbol: ticker }),
       getRelativeStrength({ symbol: ticker, sector_etf: sectorEtf }),
-      getSymbolNews({ symbol: ticker, limit: 10 }),
+      _newsPromise,
       getEarnings({ symbol: ticker }),
       getMarketSentiment(),
       getInsiderBuying({ symbol: ticker }),
-      getEarningsSurprise({ symbol: ticker }),
+      _surprisePromise,
       getChartTechnicals({ symbol: ticker }),
       getPriceLevels({ symbol: ticker }),
       KNOWN_NAMES[ticker]
@@ -212,6 +303,8 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
       getWeeklyTrend(ticker),
       getAnalystRating(ticker),
       getShortInterest(ticker),
+      getBzOptionsSentiment(ticker),
+      getBzGuidance({ symbol: ticker, limit: 5 }),
     ]);
 
   const drift    = driftRes.status    === 'fulfilled' ? driftRes.value    : null;
@@ -228,6 +321,8 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const weekly   = weeklyRes.status   === 'fulfilled' ? weeklyRes.value   : null;
   const analyst  = analystRes.status  === 'fulfilled' ? analystRes.value  : null;
   const short    = shortRes.status    === 'fulfilled' ? shortRes.value    : null;
+  const bzOpts   = bzOptsRes.status   === 'fulfilled' ? bzOptsRes.value   : null;
+  const bzGuid   = bzGuidRes.status   === 'fulfilled' ? bzGuidRes.value   : null;
 
   // Extract signal values
   const beat_streak       = surprise?.beat_streak        ?? 0;
@@ -284,6 +379,12 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     sector_concentrated:  sectorCheck.concentrated      ? -25 : 0,
     // Correlation — extra penalty when portfolio already holds a nearly identical stock
     correlated_position:  corrCheck.correlated          ? -20 : 0,
+    // Unusual options flow — institutional smart money directional bets
+    bz_options_bullish:   bzOpts === 'bullish' ? 12 : 0,
+    bz_options_bearish:   bzOpts === 'bearish' ? -12 : 0,
+    // Benzinga formal guidance — raised/lowered vs prior period
+    bz_guidance_raised:   bzGuid?.guidance?.[0]?.direction === 'raised'  ?  10 : 0,
+    bz_guidance_lowered:  bzGuid?.guidance?.[0]?.direction === 'lowered' ? -10 : 0,
     // Base score — starts at 20; a stock must earn its score through real signals
     base:                 20,
   };
@@ -389,11 +490,14 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     ema20:           tech?.ema20           ?? null,
     ema50:           tech?.ema50           ?? null,
     current_price:   tech?.current_price   ?? null,
-    sector_concentration: sectorCheck,
-    correlation:          corrCheck,
-    weights_source:       weightsSource,           // 'ml_model' | 'backtest_heuristic' | 'none'
-    ml_model_id:          factorWeights?.model_id  ?? null,
-    ml_auc_roc:           factorWeights?.auc_roc   ?? null,
+    sector_concentration:    sectorCheck,
+    correlation:             corrCheck,
+    weights_source:          weightsSource,
+    ml_model_id:             factorWeights?.model_id  ?? null,
+    ml_auc_roc:              factorWeights?.auc_roc   ?? null,
+    bz_options_sentiment:    bzOpts ?? null,
+    bz_guidance_direction:   bzGuid?.guidance?.[0]?.direction ?? null,
+    bz_guidance_date:        bzGuid?.guidance?.[0]?.date      ?? null,
   };
 
   // Persist to DB (non-blocking)
