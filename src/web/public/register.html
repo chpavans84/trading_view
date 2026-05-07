@@ -49,6 +49,12 @@
   .perks ul { list-style: none; padding: 0; }
   .perks li { font-size: 0.82rem; color: #e6edf3; padding: 2px 0; }
   .perks li::before { content: '✓ '; color: #3fb950; }
+  .terms-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; }
+  .terms-row input[type=checkbox] { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; accent-color: #238636; cursor: pointer; }
+  .terms-row label { font-size: 0.82rem; color: #8b949e; margin: 0; cursor: pointer; }
+  .terms-row a { color: #58a6ff; text-decoration: none; }
+  .terms-row a:hover { text-decoration: underline; }
+  .risk-note { background: #1a0a0a; border: 1px solid #6e1111; border-radius: 8px; padding: 10px 14px; margin-top: 14px; font-size: 0.78rem; color: #9a6060; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -74,6 +80,17 @@
   <input type="password" id="pw" placeholder="Min 10 characters" autocomplete="new-password">
   <label>Confirm Password</label>
   <input type="password" id="pw2" placeholder="Repeat password" autocomplete="new-password">
+  <div class="risk-note">
+    ⚠️ Trading involves substantial risk of loss. This platform is for educational purposes only and does not provide financial advice.
+  </div>
+  <div class="terms-row">
+    <input type="checkbox" id="terms">
+    <label for="terms">
+      I have read and agree to the
+      <a href="/terms" target="_blank">Terms of Service &amp; Risk Disclosure</a>.
+      I understand trading involves risk of loss and this platform does not provide financial advice.
+    </label>
+  </div>
   <button id="btn" onclick="register()">Create Account</button>
   <div class="msg error" id="err"></div>
   <div class="msg success" id="ok"></div>
@@ -83,10 +100,11 @@
   document.getElementById('pw2').addEventListener('keydown', e => e.key === 'Enter' && register());
 
   async function register() {
-    const username = document.getElementById('un').value.trim().toLowerCase();
-    const email    = document.getElementById('em').value.trim();
-    const password = document.getElementById('pw').value;
-    const confirm  = document.getElementById('pw2').value;
+    const username     = document.getElementById('un').value.trim().toLowerCase();
+    const email        = document.getElementById('em').value.trim();
+    const password     = document.getElementById('pw').value;
+    const confirm      = document.getElementById('pw2').value;
+    const termsChecked = document.getElementById('terms').checked;
     const errEl = document.getElementById('err');
     const okEl  = document.getElementById('ok');
     errEl.style.display = 'none';
@@ -96,13 +114,14 @@
     if (!/^[a-z0-9_]{2,32}$/.test(username)) { show(errEl, 'Username: 2–32 chars, letters/numbers/underscore only.'); return; }
     if (password.length < 10) { show(errEl, 'Password must be at least 10 characters.'); return; }
     if (password !== confirm) { show(errEl, 'Passwords do not match.'); return; }
+    if (!termsChecked) { show(errEl, 'You must accept the Terms of Service and Risk Disclosure to continue.'); return; }
 
     const btn = document.getElementById('btn');
     btn.disabled = true;
     btn.textContent = 'Creating…';
 
     try {
-      const body = { username, password };
+      const body = { username, password, terms_accepted: true };
       if (email) body.email = email;
       const r = await fetch('/auth/register', {
         method: 'POST',

@@ -487,6 +487,20 @@ CREATE TABLE IF NOT EXISTS prediction_errors (
   recorded_at          TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(symbol, target_date)
 );
+-- Legal consent columns
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='terms_accepted_at') THEN
+    ALTER TABLE users ADD COLUMN terms_accepted_at TIMESTAMPTZ;
+    ALTER TABLE users ADD COLUMN terms_version VARCHAR(10);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='auto_trade_consent_at') THEN
+    ALTER TABLE users ADD COLUMN auto_trade_consent_at TIMESTAMPTZ;
+  END IF;
+END $$;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS slippage_cents NUMERIC(8,2);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS account_source VARCHAR(20);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -718,6 +732,8 @@ export async function recordTrade({
   conviction_score, conviction_grade, conviction_breakdown,
   username,
   status = 'open', exit_price = null, pnl_usd = null, pnl_pct = null,
+  slippage_cents = null,
+  account_source = null,
 }) {
   if (!dbAvailable) return null;
   try {
@@ -727,8 +743,8 @@ export async function recordTrade({
          (order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
           dollars_invested, stop_loss_pct, take_profit_pct, atr_pct,
           conviction_score, conviction_grade, conviction_breakdown, username,
-          status, exit_price, pnl_usd, pnl_pct, closed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+          status, exit_price, pnl_usd, pnl_pct, closed_at, slippage_cents, account_source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        ON CONFLICT (order_id) DO NOTHING
        RETURNING id`,
       [order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
@@ -736,7 +752,8 @@ export async function recordTrade({
        conviction_score, conviction_grade,
        conviction_breakdown ? JSON.stringify(conviction_breakdown) : null,
        username ?? null,
-       status, exit_price ?? null, pnl_usd ?? null, pnl_pct ?? null, closedAt]
+       status, exit_price ?? null, pnl_usd ?? null, pnl_pct ?? null, closedAt,
+       slippage_cents ?? null, account_source ?? null]
     );
     return rows[0]?.id ?? null;
   } catch (err) {
@@ -766,12 +783,15 @@ export async function closeTrade({ order_id, symbol, exit_price, pnl_usd, pnl_pc
   }
 }
 
-export async function getOpenTrade(symbol) {
+export async function getOpenTrade(symbol, { account_source } = {}) {
   if (!dbAvailable) return null;
   try {
+    const src = account_source ? ` AND (account_source = $2 OR account_source IS NULL)` : '';
+    const params = [symbol.toUpperCase()];
+    if (account_source) params.push(account_source);
     const { rows } = await query(
-      `SELECT * FROM trades WHERE symbol = $1 AND status = 'open' ORDER BY opened_at DESC LIMIT 1`,
-      [symbol.toUpperCase()]
+      `SELECT * FROM trades WHERE symbol = $1 AND status = 'open'${src} ORDER BY opened_at DESC LIMIT 1`,
+      params
     );
     return rows[0] ?? null;
   } catch (err) {
@@ -780,13 +800,14 @@ export async function getOpenTrade(symbol) {
   }
 }
 
-export async function getTrades({ status, username, limit = 50 } = {}) {
+export async function getTrades({ status, username, account_source, limit = 50 } = {}) {
   if (!dbAvailable) return null;
   try {
     const where = [];
     const params = [];
-    if (status)   { where.push(`status = $${params.length + 1}`);   params.push(status); }
-    if (username) { where.push(`username = $${params.length + 1}`); params.push(username); }
+    if (status)         { where.push(`status = $${params.length + 1}`);         params.push(status); }
+    if (username)       { where.push(`username = $${params.length + 1}`);       params.push(username); }
+    if (account_source) { where.push(`(account_source = $${params.length + 1} OR account_source IS NULL)`); params.push(account_source); }
     params.push(limit);
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const { rows } = await query(
@@ -887,11 +908,15 @@ export async function getRejections({ limit = 50 } = {}) {
   }
 }
 
-export async function getRecentLosses({ symbol, days = 5 }) {
+export async function getRecentLosses({ symbol, days = 5, account_source } = {}) {
   if (!dbAvailable) return { loss_count: 0, total_pnl: 0, last_loss_at: null };
   try {
     const since = new Date();
     since.setDate(since.getDate() - days);
+    const srcClause = account_source
+      ? ` AND (account_source = $3 OR account_source IS NULL)` : '';
+    const params = [symbol.toUpperCase(), since.toISOString()];
+    if (account_source) params.push(account_source);
     const result = await query(`
       SELECT COUNT(*)        AS loss_count,
              SUM(pnl_usd)   AS total_pnl,
@@ -901,7 +926,8 @@ export async function getRecentLosses({ symbol, days = 5 }) {
         AND closed_at >= $2
         AND pnl_usd  < 0
         AND status   IN ('closed', 'stopped_out')
-    `, [symbol.toUpperCase(), since.toISOString()]);
+        ${srcClause}
+    `, params);
     return {
       loss_count:   parseInt(result.rows[0]?.loss_count  || 0),
       total_pnl:    parseFloat(result.rows[0]?.total_pnl || 0),

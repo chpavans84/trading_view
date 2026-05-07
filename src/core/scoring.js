@@ -55,6 +55,7 @@ async function getRVOL(symbol) {
 // Analyst consensus + short interest — fetched together via yahoo-finance2 (handles auth)
 let _yfSummaryCache = new Map(); // symbol → { ts, data }
 const YF_CACHE_TTL = 4 * 60 * 60 * 1000; // 4h — analyst data changes infrequently
+const MAX_CACHE_SIZE = 500;
 
 async function getYFSummary(symbol) {
   const cached = _yfSummaryCache.get(symbol);
@@ -62,6 +63,9 @@ async function getYFSummary(symbol) {
   try {
     const res = await yf.quoteSummary(symbol, { modules: ['financialData', 'defaultKeyStatistics', 'recommendationTrend'] });
     _yfSummaryCache.set(symbol, { ts: Date.now(), data: res });
+    if (_yfSummaryCache.size > MAX_CACHE_SIZE) {
+      _yfSummaryCache.delete(_yfSummaryCache.keys().next().value);
+    }
     return res;
   } catch { return null; }
 }
@@ -261,8 +265,15 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     // Short interest — high short + strong RS = squeeze setup
     short_squeeze:        (short?.short_float_pct ?? 0) >= 15 && rs_signal === 'strong' ? 10
                           : (short?.short_float_pct ?? 0) >= 25 ? -5 : 0,
-    // Relative Volume — institutional accumulation signal
-    rvol:                 rvol == null ? 0 : rvol >= 2.0 ? 15 : rvol >= 1.5 ? 8 : rvol < 0.5 ? -8 : 0,
+    // Relative Volume — volume confirmation is a gateway, not just a bonus.
+    // No volume = no institutional interest = lower score ceiling.
+    // EWTX/NBIS/CELC type failure: high score but RVOL < 1.0 = false signal.
+    rvol:                 rvol == null   ? -5   // unknown volume is mildly negative, not free
+                        : rvol >= 2.0   ?  15
+                        : rvol >= 1.5   ?   8
+                        : rvol >= 1.0   ?   0  // meeting average: neutral
+                        : rvol >= 0.5   ? -12  // below average: real penalty
+                        :                -22,  // very low: serious negative signal
     // Weekly trend confirmation — does the weekly chart agree with the daily signal?
     weekly_trend:         weekly == null ? 0 : weekly.trend === 'up' ? 12 : weekly.trend === 'down' ? -12 : 0,
     // VIX — graduated, only extreme fear is a hard penalty
@@ -401,5 +412,8 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     signals,
   };
   _scoreCache.set(ticker, { score: result, ts: Date.now() });
+  if (_scoreCache.size > MAX_CACHE_SIZE) {
+    _scoreCache.delete(_scoreCache.keys().next().value);
+  }
   return result;
 }
