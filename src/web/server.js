@@ -2475,7 +2475,15 @@ async function fetchCurrentPrice(symbol) {
       session    = 'regular';
     }
     if (price == null) throw new Error('no price');
-    return { price: +price.toFixed(2), change: change != null ? +change.toFixed(2) : null, change_pct, session };
+    return {
+      price:          +price.toFixed(2),
+      change:         change != null ? +change.toFixed(2) : null,
+      change_pct,
+      session,
+      pre_price:      p.preMarketPrice      != null ? +p.preMarketPrice.toFixed(3)                          : null,
+      pre_change:     p.preMarketChange     != null ? +p.preMarketChange.toFixed(3)                         : null,
+      pre_change_pct: p.preMarketChangePercent != null ? +(p.preMarketChangePercent * 100).toFixed(2)       : null,
+    };
   } catch { return null; }
 }
 
@@ -3277,7 +3285,7 @@ app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase().trim();
     const q = await fetchCurrentPrice(symbol);
-    if (q) return res.json({ symbol, mid: q.price, price: q.price, change: q.change ?? null, change_pct: q.change_pct ?? null, session: q.session ?? 'regular' });
+    if (q) return res.json({ symbol, mid: q.price, price: q.price, change: q.change ?? null, change_pct: q.change_pct ?? null, session: q.session ?? 'regular', pre_price: q.pre_price ?? null, pre_change: q.pre_change ?? null, pre_change_pct: q.pre_change_pct ?? null });
     const alpaca = await getLatestPrice(symbol);
     res.json(alpaca);
   } catch (err) {

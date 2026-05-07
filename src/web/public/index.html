@@ -7257,11 +7257,29 @@ function renderExplorerStats() {
   const livePrice = lq?.price ?? lq?.mid ?? null;
   const prevClose = lastPrice ? parseFloat(lastPrice.close) : null;
   const livePct   = livePrice && prevClose ? ((livePrice - prevClose) / prevClose * 100) : null;
+
+  // Pre-market row
+  const prePrice     = lq?.pre_price     ?? null;
+  const preChange    = lq?.pre_change    ?? null;
+  const preChangePct = lq?.pre_change_pct ?? null;
+  const preColor     = preChange != null ? (preChange >= 0 ? '#3fb950' : '#f85149') : '#8b949e';
+  const preHtml = prePrice != null
+    ? `<div style="margin-top:5px;padding-top:5px;border-top:1px solid #21262d">
+         <div style="font-size:0.65rem;color:#8b949e;margin-bottom:2px;letter-spacing:.03em">PRE-MKT</div>
+         <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+           <span style="font-size:0.95rem;font-weight:700;color:${preColor}">$${prePrice.toFixed(3)}</span>
+           ${preChange != null ? `<span style="font-size:0.75rem;font-weight:600;color:${preColor}">${preChange >= 0 ? '+' : ''}${preChange.toFixed(3)}</span>` : ''}
+           ${preChangePct != null ? `<span style="font-size:0.75rem;font-weight:600;color:${preColor}">${preChangePct >= 0 ? '+' : ''}${preChangePct.toFixed(2)}%</span>` : ''}
+         </div>
+       </div>`
+    : '';
+
   const livePriceHtml = livePrice
     ? `<div style="font-size:0.72rem;color:#8b949e">Live Price <span style="background:#1f3a1f;color:#3fb950;border-radius:3px;padding:1px 5px;font-size:0.65rem;font-weight:700;margin-left:2px">LIVE</span></div>
        <div style="font-size:1.2rem;font-weight:700;color:#e6edf3">$${parseFloat(livePrice).toFixed(2)}</div>
-       ${livePct != null ? `<div style="font-size:0.75rem;font-weight:600;color:${livePct>=0?'#3fb950':'#f85149'}">${livePct>=0?'+':''}${livePct.toFixed(2)}% today</div>` : ''}`
-    : (lastPrice ? `<div style="font-size:0.72rem;color:#8b949e">Last Close</div><div style="font-size:1.2rem;font-weight:700">$${parseFloat(lastPrice.close).toFixed(2)}</div>` : '');
+       ${livePct != null ? `<div style="font-size:0.75rem;font-weight:600;color:${livePct>=0?'#3fb950':'#f85149'}">${livePct>=0?'+':''}${livePct.toFixed(2)}% today</div>` : ''}
+       ${preHtml}`
+    : (lastPrice ? `<div style="font-size:0.72rem;color:#8b949e">Last Close</div><div style="font-size:1.2rem;font-weight:700">$${parseFloat(lastPrice.close).toFixed(2)}</div>${preHtml}` : '');
 
   document.getElementById('explorerStatsInner').innerHTML = [
     (lastPrice || livePrice) ? `<div>${livePriceHtml}</div>` : '',
