@@ -1481,6 +1481,7 @@ async function buildYahooHistoricalMonth(yearMonth) {
 app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
   try {
     const dateParam = (req.query.date || '').trim();
+    const force     = req.query.force === '1';
     if (!dateParam || !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
       return res.status(400).json({ error: 'date param required (YYYY-MM-DD)' });
     }
@@ -1495,6 +1496,14 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
       dates.push(d.toISOString().split('T')[0]);
     }
 
+    // Force-refresh: evict server-side cache for all days in this window
+    if (force) {
+      for (const d of dates) {
+        _cache.delete(`earnings:cal:${d}`);
+      }
+      _cache.delete(`earnings:supplement:${dateParam}`);
+    }
+
     // ── Primary: Nasdaq Calendar API (per-day, 6h TTL) ──
     const nasdaqResults = await Promise.allSettled(
       dates.map(d => ttlCache(`earnings:cal:${d}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(d)))
@@ -1502,8 +1511,11 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
 
     const earnings = [];
     const missedDates = [];
+    // Track what Nasdaq already returned per date (to avoid duplicates in supplement)
+    const nasdaqSymsByDate = {};
     nasdaqResults.forEach((r, i) => {
       const items = r.status === 'fulfilled' && Array.isArray(r.value) ? r.value : null;
+      nasdaqSymsByDate[dates[i]] = new Set(items ? items.map(e => e.symbol) : []);
       if (items) {
         for (const e of items) earnings.push({ date: dates[i], ...e });
       } else {
@@ -1521,6 +1533,44 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
           for (const e of items) earnings.push({ date: d, ...e });
         }
       }
+    }
+
+    // ── Supplement: Yahoo calendarEvents for tracked watchlist ──
+    // Catches stocks Nasdaq returned partial data for (e.g. DDOG missing from Nasdaq
+    // even though it reports that day). Cached separately for 4 hours.
+    const datesSet = new Set(dates);
+    const supplement = await ttlCache(`earnings:supplement:${dateParam}`, 4 * 60 * 60 * 1000, async () => {
+      const yfResults = await Promise.allSettled(
+        DEFAULT_WATCHLIST_SB.map(sym =>
+          _yf.quoteSummary(sym, { modules: ['calendarEvents', 'price'] }).catch(() => null)
+        )
+      );
+      const entries = [];
+      for (let j = 0; j < DEFAULT_WATCHLIST_SB.length; j++) {
+        const sym = DEFAULT_WATCHLIST_SB[j];
+        const r = yfResults[j];
+        if (r.status !== 'fulfilled' || !r.value) continue;
+        const rawDates = r.value.calendarEvents?.earnings?.earningsDate ?? [];
+        for (const raw of rawDates) {
+          const d = raw instanceof Date ? raw : new Date(raw);
+          if (isNaN(d)) continue;
+          const ds = d.toISOString().split('T')[0];
+          if (!datesSet.has(ds)) continue;
+          entries.push({
+            ds, symbol: sym,
+            company: r.value.price?.longName || r.value.price?.shortName || sym,
+          });
+        }
+      }
+      return entries;
+    });
+
+    // Merge supplement — skip if Nasdaq already has the symbol for that date
+    for (const s of (supplement || [])) {
+      if (nasdaqSymsByDate[s.ds]?.has(s.symbol)) continue;
+      // Also skip if already in earnings array from the Yahoo historical fallback
+      if (earnings.find(e => e.date === s.ds && e.symbol === s.symbol)) continue;
+      earnings.push({ date: s.ds, symbol: s.symbol, company: s.company, call_time: '?', eps_estimate: null, source: 'yahoo_supplement' });
     }
 
     res.json({ success: true, date: dateParam, earnings });
