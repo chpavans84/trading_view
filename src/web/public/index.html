@@ -922,10 +922,26 @@
   }
   .nd-analyze-btn:hover { background: rgba(14,165,233,0.12); border-color: var(--accent); }
   .nd-status { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 24px 12px; }
+  .nd-refresh-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .nd-refresh-full {
+    flex: 1; background: rgba(14,165,233,0.1); color: #38bdf8;
+    border: 1px solid rgba(14,165,233,0.35); border-radius: 6px;
+    padding: 5px 0; font-size: 0.75rem; font-weight: 700; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .nd-refresh-full:hover { background: rgba(14,165,233,0.22); }
+  .nd-refresh-full:active { transform: scale(0.97); }
+  .nd-last-fetch { font-size: 0.63rem; color: var(--muted); white-space: nowrap; flex-shrink: 0; }
   .nd-footer-bar {
     padding: 7px 10px; border-top: 1px solid var(--border);
     flex-shrink: 0; font-size: 0.62rem; color: var(--muted); text-align: center;
   }
+  /* Timestamp chip inside ticker items */
+  .htk-time { font-size: 0.65rem; color: #6e7681; margin-left: 4px; }
 
   /* Report modal */
   #reportModal { display:none; position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); align-items:center; justify-content:center; }
@@ -5428,9 +5444,15 @@ erDiagram
   <div class="nd-header">
     <h4>📰 Live Market News</h4>
     <div class="nd-header-actions">
-      <button class="nd-hbtn" onclick="loadNewsDrawer(true)" title="Refresh">↻</button>
       <button class="nd-hbtn" onclick="toggleNewsDrawer()" title="Close">✕</button>
     </div>
+  </div>
+  <!-- Prominent hard-refresh bar -->
+  <div class="nd-refresh-bar">
+    <button class="nd-refresh-full" onclick="loadNewsDrawer(true)" id="ndRefreshBtn">
+      ↻ Fetch Latest News
+    </button>
+    <span class="nd-last-fetch" id="ndLastFetch"></span>
   </div>
   <div id="newsDrawerItems"><div class="nd-status">Loading news…</div></div>
   <div class="nd-footer-bar">Auto-refreshes every 90s · Benzinga</div>
@@ -15327,7 +15349,6 @@ async function loadHeroNewsTicker() {
       _renderHeroTicker(track, data.map(item => {
         const up   = (item.up   || []).slice(0, 3);
         const down = (item.down || []).slice(0, 3);
-        // ▲ symbols in green, ▼ symbols in red, names in blue
         const upParts   = up.map(t =>
           `<span class="htk-arrow-up">▲</span><span class="htk-sym htk-sym-up">${t}</span>`
         ).join('');
@@ -15335,7 +15356,8 @@ async function loadHeroNewsTicker() {
           `<span class="htk-arrow-down">▼</span><span class="htk-sym htk-sym-down">${t}</span>`
         ).join('');
         const impact = (item.impact || item.title || '').replace(/</g,'&lt;');
-        return `<span class="htk-item">${upParts}${downParts}<span class="htk-impact">${impact}</span></span>`;
+        const ts     = item.published_at ? `<span class="htk-time">${_ndRelTime(new Date(item.published_at))}</span>` : '';
+        return `<span class="htk-item">${upParts}${downParts}<span class="htk-impact">${impact}</span>${ts}</span>`;
       }));
       return;
     }
@@ -15349,11 +15371,10 @@ async function loadHeroNewsTicker() {
     _renderHeroTicker(track, arts.map(a => {
       const s      = (a.sentiment || '').toLowerCase();
       const arrow  = s === 'bullish' ? `<span class="htk-arrow-up">▲</span>` : s === 'bearish' ? `<span class="htk-arrow-down">▼</span>` : '';
-      const syms   = (a.tickers || []).slice(0, 2).map(t =>
-        `<span class="htk-sym">${t}</span>`
-      ).join('');
+      const syms   = (a.tickers || []).slice(0, 2).map(t => `<span class="htk-sym">${t}</span>`).join('');
       const title  = (a.title || '').replace(/</g,'&lt;');
-      return `<span class="htk-item">${arrow}${syms}<span class="htk-impact">${title}</span></span>`;
+      const ts     = a.published_at ? `<span class="htk-time">${_ndRelTime(new Date(a.published_at))}</span>` : '';
+      return `<span class="htk-item">${arrow}${syms}<span class="htk-impact">${title}</span>${ts}</span>`;
     }));
   } catch { /* ignore */ }
 }
@@ -15378,8 +15399,12 @@ async function loadNewsDrawer(force = false) {
   if (!force && Date.now() - _newsDrawerLastFetch < 30_000) return;
   _newsDrawerLastFetch = Date.now();
 
-  const container = document.getElementById('newsDrawerItems');
+  const container  = document.getElementById('newsDrawerItems');
+  const refreshBtn = document.getElementById('ndRefreshBtn');
+  const lastFetch  = document.getElementById('ndLastFetch');
   if (!container) return;
+
+  if (refreshBtn) { refreshBtn.textContent = '↻ Fetching…'; refreshBtn.disabled = true; }
 
   try {
     const res = await fetch('/api/benzinga/news?limit=25');
@@ -15403,7 +15428,6 @@ async function loadNewsDrawer(force = false) {
       const sentBadge = sentiment
         ? `<span class="nd-sentiment ${sentiment}">${sentiment}</span>` : '';
       const title    = (a.title || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      // Use data-attributes to avoid JSON-in-onclick quoting issues
       const safeTitle   = (a.title  || '').replace(/"/g,'&quot;');
       const safeTicker  = (tickers[0] || '').replace(/"/g,'&quot;');
 
@@ -15417,8 +15441,17 @@ async function loadNewsDrawer(force = false) {
       </div>`;
     }).join('');
 
+    if (lastFetch) {
+      const now = new Date();
+      lastFetch.textContent = 'Updated ' + now.toLocaleTimeString('en-SG', {
+        timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      });
+    }
+
   } catch (e) {
     container.innerHTML = `<div class="nd-status">Could not load news.<br><small style="color:var(--muted)">${e.message}</small></div>`;
+  } finally {
+    if (refreshBtn) { refreshBtn.textContent = '↻ Fetch Latest News'; refreshBtn.disabled = false; }
   }
 }
 

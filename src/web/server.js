@@ -4879,8 +4879,9 @@ Reply ONLY as a JSON array — no prose, no markdown fences:
     const json = raw.match(/\[[\s\S]*\]/)?.[0] || '[]';
     const analyzed = JSON.parse(json).map((item, i) => ({
       ...item,
-      title: articles[i]?.title || '',
-      tickers: articles[i]?.tickers || [],
+      title:        articles[i]?.title        || '',
+      tickers:      articles[i]?.tickers      || [],
+      published_at: articles[i]?.published_at || null,
     }));
     _newsAnalysisCache   = analyzed;
     _newsAnalysisCacheAt = Date.now();
