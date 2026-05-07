@@ -1559,6 +1559,29 @@
   </div>
 
   <div id="page-home"></div>
+
+  <!-- ── Unusual Options Flow (Benzinga) ─────────────────────────────────── -->
+  <div class="table-wrap" style="margin-top:16px">
+    <div class="table-head">
+      <h3>Unusual Options Flow <span style="font-size:0.7rem;font-weight:400;color:#6e7681;margin-left:4px">Benzinga smart-money sweeps</span></h3>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="bzOptsSymInput" type="text" placeholder="All symbols" maxlength="8"
+          style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;font-size:0.78rem;width:100px;outline:none;text-transform:uppercase"
+          oninput="this.value=this.value.toUpperCase()"
+          onkeydown="if(event.key==='Enter')loadBzOptions()">
+        <select id="bzOptsSentFilter" onchange="loadBzOptions()"
+          style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:4px 8px;color:#e6edf3;font-size:0.78rem;outline:none">
+          <option value="">All Sentiment</option>
+          <option value="BULLISH">Bullish Only</option>
+          <option value="BEARISH">Bearish Only</option>
+        </select>
+        <button onclick="loadBzOptions()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
+      </div>
+    </div>
+    <div id="bzOptsBody" style="overflow-x:auto">
+      <div class="loading" style="padding:20px">Loading options flow…</div>
+    </div>
+  </div>
 </div>
 
 <!-- ── STATS ──────────────────────────────────────────── -->
@@ -1794,6 +1817,24 @@
         <button onclick="loadFailureAnalysis(true)" style="background:none;border:1px solid #30363d;border-radius:4px;padding:2px 8px;color:#8b949e;font-size:0.72rem;cursor:pointer;margin-left:8px">↻</button>
       </h3>
       <div id="fcFailureAnalysis"></div>
+    </div>
+
+    <!-- FDA Calendar (Benzinga) -->
+    <div style="margin-top:32px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:var(--text)">💊 FDA Calendar <span style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:4px">next 60 days — Benzinga</span></h3>
+        <button onclick="loadBzFDA()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
+      </div>
+      <div id="bzFDABody"><div class="loading" style="padding:16px">Loading FDA calendar…</div></div>
+    </div>
+
+    <!-- Dividend Calendar (Benzinga) -->
+    <div style="margin-top:28px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:var(--text)">💵 Dividend Calendar <span style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:4px">next 30 days — Benzinga</span></h3>
+        <button onclick="loadBzDividends()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
+      </div>
+      <div id="bzDividendsBody"><div class="loading" style="padding:16px">Loading dividend calendar…</div></div>
     </div>
 
   </div>
@@ -7022,6 +7063,8 @@ async function loadStockExplorer() {
     setExplorerView('price');
     // Load news + analyst lazily so chart renders immediately
     loadExplorerExtras(symbol);
+    // Refresh company tab if it's currently visible
+    if (document.getElementById('exViewPortfolio')?.style.display !== 'none') loadExplorerCompany();
   } catch (e) {
     _explorerData = null;
     document.getElementById('ev-score').style.display  = 'none';
@@ -8359,7 +8402,7 @@ function showPage(name, btn) {
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: () => { loadMarket(); loadHome(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: loadCalendar };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); } };
   loaders[name]?.();
 }
 
@@ -14120,7 +14163,7 @@ function exploreSymbol(sym) {
   <!-- Explorer section tabs -->
   <div style="display:flex;border-bottom:1px solid var(--border);background:var(--card-bg)">
     <button id="exTabChart" onclick="switchExplorerTab('chart')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--accent);border-bottom:2px solid var(--accent)">📈 Chart</button>
-    <button id="exTabPortfolio" onclick="switchExplorerTab('portfolio')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">💼 My Positions</button>
+    <button id="exTabPortfolio" onclick="switchExplorerTab('portfolio')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">🏢 Company</button>
   </div>
 
   <!-- Scrollable body -->
@@ -14245,16 +14288,46 @@ function exploreSymbol(sym) {
     </div>
     </div><!-- end exViewChart -->
 
-    <!-- ── PORTFOLIO VIEW ── -->
+    <!-- ── COMPANY VIEW ── -->
     <div id="exViewPortfolio" style="display:none;padding:14px 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <span style="font-size:0.82rem;font-weight:600;color:var(--text2)">OPEN POSITIONS</span>
-        <button onclick="loadExplorerPortfolio()" style="background:none;border:1px solid #30363d;border-radius:6px;padding:3px 10px;color:#8b949e;cursor:pointer;font-size:0.75rem">↻ Refresh</button>
+        <span style="font-size:0.82rem;font-weight:600;color:var(--text2)">COMPANY OVERVIEW</span>
+        <button onclick="loadExplorerCompany()" style="background:none;border:1px solid #30363d;border-radius:6px;padding:3px 10px;color:#8b949e;cursor:pointer;font-size:0.75rem">↻ Refresh</button>
       </div>
-      <div id="exPortfolioPositions" style="margin-bottom:18px;font-size:0.82rem;color:var(--text2)">Loading…</div>
+      <div id="exCompanyLoading" style="font-size:0.82rem;color:var(--text2);margin-bottom:12px">Loading…</div>
 
-      <div style="font-size:0.82rem;font-weight:600;color:var(--text2);margin-bottom:10px">RECENT TRADES</div>
-      <div id="exPortfolioTrades" style="font-size:0.82rem;color:var(--text2)">Loading…</div>
+      <!-- About -->
+      <div id="exCompanyAbout" style="display:none;margin-bottom:16px">
+        <div style="font-size:0.78rem;font-weight:700;color:var(--text2);letter-spacing:.06em;margin-bottom:8px">ABOUT</div>
+        <div id="exCompanyMeta" style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-bottom:10px;font-size:0.8rem"></div>
+        <div id="exCompanyDesc" style="font-size:0.79rem;color:#8b949e;line-height:1.55;max-height:110px;overflow:hidden;position:relative"></div>
+        <button id="exCompanyDescMore" onclick="exToggleDesc()" style="display:none;background:none;border:none;color:var(--accent);cursor:pointer;font-size:0.75rem;padding:4px 0">Show more ▾</button>
+      </div>
+
+      <!-- Benzinga Fundamentals -->
+      <div id="exCompanyFundWrap" style="display:none;margin-bottom:16px">
+        <div style="font-size:0.78rem;font-weight:700;color:var(--text2);letter-spacing:.06em;margin-bottom:8px">FUNDAMENTALS</div>
+        <div id="exCompanyFund" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px"></div>
+      </div>
+
+      <!-- Latest News -->
+      <div id="exCompanyNewsWrap" style="display:none;margin-bottom:16px">
+        <div style="font-size:0.78rem;font-weight:700;color:var(--text2);letter-spacing:.06em;margin-bottom:8px">LATEST NEWS</div>
+        <div id="exCompanyNews"></div>
+      </div>
+
+      <!-- Institutional Holders -->
+      <div id="exCompanyHoldersWrap" style="display:none;margin-bottom:16px">
+        <div style="font-size:0.78rem;font-weight:700;color:var(--text2);letter-spacing:.06em;margin-bottom:6px">INSTITUTIONAL HOLDERS</div>
+        <div id="exCompanyHoldersSummary" style="display:flex;gap:20px;font-size:0.8rem;margin-bottom:8px"></div>
+        <div id="exCompanyHoldersList"></div>
+      </div>
+
+      <!-- Key Executives -->
+      <div id="exCompanyExecsWrap" style="display:none;margin-bottom:8px">
+        <div style="font-size:0.78rem;font-weight:700;color:var(--text2);letter-spacing:.06em;margin-bottom:8px">KEY EXECUTIVES</div>
+        <div id="exCompanyExecs"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -14267,88 +14340,279 @@ function switchExplorerTab(tab) {
   document.getElementById('exViewPortfolio').style.display = isChart ? 'none' : '';
   const btnChart = document.getElementById('exTabChart');
   const btnPort  = document.getElementById('exTabPortfolio');
-  btnChart.style.color       = isChart ? 'var(--accent)' : 'var(--text2)';
+  btnChart.style.color             = isChart ? 'var(--accent)' : 'var(--text2)';
   btnChart.style.borderBottomColor = isChart ? 'var(--accent)' : 'transparent';
-  btnPort.style.color        = isChart ? 'var(--text2)' : 'var(--accent)';
+  btnPort.style.color              = isChart ? 'var(--text2)' : 'var(--accent)';
   btnPort.style.borderBottomColor  = isChart ? 'transparent' : 'var(--accent)';
-  if (!isChart) loadExplorerPortfolio();
+  if (!isChart) loadExplorerCompany();
 }
 
-async function loadExplorerPortfolio() {
-  const posEl   = document.getElementById('exPortfolioPositions');
-  const tradeEl = document.getElementById('exPortfolioTrades');
-  posEl.textContent   = 'Loading…';
-  tradeEl.textContent = 'Loading…';
+let _exDescExpanded = false;
+function exToggleDesc() {
+  _exDescExpanded = !_exDescExpanded;
+  const el  = document.getElementById('exCompanyDesc');
+  const btn = document.getElementById('exCompanyDescMore');
+  el.style.maxHeight = _exDescExpanded ? 'none' : '110px';
+  btn.textContent    = _exDescExpanded ? 'Show less ▴' : 'Show more ▾';
+}
 
-  // Use same source as dashboard
-  const src = (typeof currentSource !== 'undefined' ? currentSource : null) || 'alpaca';
+async function loadExplorerCompany() {
+  const symbol = (document.getElementById('explorerSymbol')?.value || '').trim().toUpperCase();
+  const loadEl = document.getElementById('exCompanyLoading');
+
+  // Hide all sections while loading
+  ['exCompanyAbout','exCompanyFundWrap','exCompanyNewsWrap','exCompanyHoldersWrap','exCompanyExecsWrap'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  loadEl.style.display = '';
+  loadEl.textContent   = symbol ? `Loading ${symbol}…` : 'Select a symbol first';
+  if (!symbol) return;
 
   try {
-    // Positions
-    const posRes  = await fetch(`/api/positions?source=${src}`);
-    const posData = await posRes.json();
-    const positions = posData.positions || [];
-    if (!positions.length) {
-      posEl.innerHTML = '<span style="color:#8b949e">No open positions</span>';
-    } else {
-      posEl.innerHTML = positions.map(p => {
-        const pl    = parseFloat(p.unrealized_pl ?? p.unrealized_plpc ?? 0);
-        const plPct = parseFloat(p.unrealized_plpc ?? 0);
-        const plClr = pl >= 0 ? 'var(--green)' : 'var(--red)';
-        const plStr = pl >= 0 ? `+$${pl.toFixed(2)}` : `-$${Math.abs(pl).toFixed(2)}`;
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--faint)">
-          <div>
-            <span style="font-weight:700;color:var(--text)">${p.symbol}</span>
-            <span style="color:var(--text2);margin-left:8px">${p.qty} shares @ $${parseFloat(p.avg_entry_price||0).toFixed(2)}</span>
-          </div>
-          <div style="text-align:right">
-            <div style="color:${plClr};font-weight:600">${plStr}</div>
-            <div style="color:#8b949e;font-size:0.72rem">${(plPct*100).toFixed(2)}%</div>
-          </div>
-        </div>`;
-      }).join('');
+    const [res, fundRes] = await Promise.all([
+      fetch(`/api/explorer/company?symbol=${encodeURIComponent(symbol)}`),
+      fetch(`/api/benzinga/fundamentals?symbol=${encodeURIComponent(symbol)}`).catch(() => null),
+    ]);
+    const data = await res.json();
+    const fund = fundRes?.ok ? await fundRes.json().catch(() => null) : null;
+    loadEl.style.display = 'none';
+
+    // ── About ──────────────────────────────────────────────────────
+    const p = data.profile;
+    if (p) {
+      const metaEl = document.getElementById('exCompanyMeta');
+      const metaItems = [];
+      if (p.sector)    metaItems.push(`<span style="background:rgba(99,102,241,0.12);color:#818cf8;border-radius:4px;padding:2px 8px">${p.sector}</span>`);
+      if (p.industry)  metaItems.push(`<span style="color:var(--text2)">${p.industry}</span>`);
+      if (p.country)   metaItems.push(`<span style="color:#8b949e">🌍 ${p.country}</span>`);
+      if (p.employees) metaItems.push(`<span style="color:#8b949e">👥 ${p.employees.toLocaleString()} employees</span>`);
+      if (p.website)   metaItems.push(`<a href="${p.website}" target="_blank" rel="noopener" style="color:var(--accent);font-size:0.78rem">🔗 ${p.website.replace(/^https?:\/\//, '')}</a>`);
+      metaEl.innerHTML = metaItems.join('');
+
+      const descEl  = document.getElementById('exCompanyDesc');
+      const descBtn = document.getElementById('exCompanyDescMore');
+      if (p.description) {
+        descEl.textContent   = p.description;
+        _exDescExpanded      = false;
+        descEl.style.maxHeight = '110px';
+        // Show "more" button only if text overflows
+        descBtn.style.display = p.description.length > 300 ? '' : 'none';
+      } else {
+        descEl.textContent    = 'No description available.';
+        descBtn.style.display = 'none';
+      }
+      document.getElementById('exCompanyAbout').style.display = '';
     }
 
-    // Recent trades
-    const tradeRes  = await fetch(`/api/trades?source=${src}&limit=15`);
-    const tradeData = await tradeRes.json();
-    const trades = tradeData.trades || [];
-    if (!trades.length) {
-      tradeEl.innerHTML = '<span style="color:#8b949e">No recent trades</span>';
-    } else {
-      tradeEl.innerHTML = trades.slice(0, 15).map(t => {
-        const isBuy   = (t.side||t.action||'').toLowerCase() === 'buy';
-        const pnl     = parseFloat(t.pnl_usd ?? 0);
-        const hasPnl  = t.status === 'closed' && t.pnl_usd != null;
-        const pnlClr  = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-        const pnlStr  = hasPnl ? (pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`) : '';
-        const dt      = t.opened_at || t.created_at || '';
-        const dtStr   = dt ? new Date(dt).toLocaleString('en-SG', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
-        const badge   = isBuy
-          ? '<span style="background:rgba(16,185,129,0.15);color:var(--green);border-radius:4px;padding:1px 6px;font-size:0.72rem;font-weight:700">BUY</span>'
-          : '<span style="background:rgba(244,63,94,0.15);color:var(--red);border-radius:4px;padding:1px 6px;font-size:0.72rem;font-weight:700">SELL</span>';
-        const st      = (t.status||'').toLowerCase();
-        const stClr   = st==='rejected' ? 'var(--red)' : st==='cancelled'||st==='expired' ? '#8b949e' : st==='partial' ? 'var(--yellow,#f59e0b)' : 'var(--text2)';
-        const stLbl   = st==='rejected' ? '⚠ Rejected' : st==='cancelled' ? 'Cancelled' : st==='expired' ? 'Expired' : st==='partial' ? 'Partial' : st;
-        const statusHtml = hasPnl
-          ? `<div style="color:${pnlClr};font-weight:600">${pnlStr}</div>`
-          : `<div style="color:${stClr};font-size:0.78rem">${stLbl}</div>`;
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--faint)">
-          <div style="display:flex;align-items:center;gap:8px">
-            ${badge}
-            <span style="font-weight:700;color:var(--text)">${t.symbol}</span>
-            <span style="color:var(--text2)">${t.qty||1} sh</span>
+    // ── Benzinga Fundamentals ──────────────────────────────────────
+    if (fund && !fund.error) {
+      const fmtN = (v, prefix='', suffix='', decimals=2) =>
+        v != null ? `${prefix}${typeof v === 'number' ? v.toFixed(decimals) : v}${suffix}` : '—';
+      const fmtM = v => v != null ? (Math.abs(v) >= 1e9 ? '$'+(v/1e9).toFixed(2)+'B' : '$'+(v/1e6).toFixed(0)+'M') : '—';
+      const metrics = [
+        { label:'P/E Ratio',     value: fmtN(fund.pe_ratio) },
+        { label:'P/B Ratio',     value: fmtN(fund.pb_ratio) },
+        { label:'P/S Ratio',     value: fmtN(fund.ps_ratio) },
+        { label:'EV/EBITDA',     value: fmtN(fund.ev_ebitda) },
+        { label:'Price/FCF',     value: fmtN(fund.price_to_fcf) },
+        { label:'Market Cap',    value: fmtM(fund.market_cap) },
+        { label:'Revenue (TTM)', value: fmtM(fund.revenue) },
+        { label:'Net Income',    value: fmtM(fund.net_income) },
+        { label:'Gross Profit',  value: fmtM(fund.gross_profit) },
+        { label:'Beta',          value: fmtN(fund.beta) },
+      ].filter(m => m.value !== '—');
+      if (metrics.length) {
+        document.getElementById('exCompanyFund').innerHTML = metrics.map(m =>
+          `<div style="background:rgba(255,255,255,0.03);border:1px solid var(--faint);border-radius:6px;padding:8px 10px">
+            <div style="font-size:0.68rem;color:#8b949e;margin-bottom:3px">${m.label}</div>
+            <div style="font-size:0.88rem;font-weight:600;color:var(--text)">${m.value}</div>
+          </div>`
+        ).join('');
+        document.getElementById('exCompanyFundWrap').style.display = '';
+      }
+    }
+
+    // ── News ───────────────────────────────────────────────────────
+    const articles = data.news || [];
+    if (articles.length) {
+      const newsEl = document.getElementById('exCompanyNews');
+      newsEl.innerHTML = articles.map(a => {
+        const sentClr = a.sentiment === 'positive' ? 'var(--green)' : a.sentiment === 'negative' ? 'var(--red)' : '#8b949e';
+        const sentLbl = a.sentiment === 'positive' ? '▲' : a.sentiment === 'negative' ? '▼' : '–';
+        const dt      = a.published_at ? new Date(a.published_at).toLocaleString('en-SG', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+        const urlAttr = a.url ? `href="${a.url}" target="_blank" rel="noopener"` : '';
+        return `<div style="padding:7px 0;border-bottom:1px solid var(--faint)">
+          <div style="display:flex;align-items:flex-start;gap:6px">
+            <span style="color:${sentClr};font-weight:700;flex-shrink:0;margin-top:1px">${sentLbl}</span>
+            <a ${urlAttr} style="color:var(--text);text-decoration:none;font-size:0.8rem;line-height:1.4;flex:1">${a.title || a.headline || 'Untitled'}</a>
           </div>
-          <div style="text-align:right">
-            ${statusHtml}
-            <div style="color:#8b949e;font-size:0.72rem">${dtStr}</div>
-          </div>
+          <div style="color:#8b949e;font-size:0.72rem;margin-top:3px;padding-left:14px">${a.source || ''} ${dt ? '· ' + dt : ''}</div>
         </div>`;
       }).join('');
+      document.getElementById('exCompanyNewsWrap').style.display = '';
+    }
+
+    // ── Institutional Holders ─────────────────────────────────────
+    const h = data.holders || {};
+    if (h.top_holders?.length) {
+      const summEl = document.getElementById('exCompanyHoldersSummary');
+      const summItems = [];
+      if (h.institutional_pct != null) summItems.push(`<span><span style="color:#8b949e">Institutional:</span> <span style="color:var(--text);font-weight:600">${h.institutional_pct}%</span></span>`);
+      if (h.insider_pct       != null) summItems.push(`<span><span style="color:#8b949e">Insider:</span> <span style="color:var(--text);font-weight:600">${h.insider_pct}%</span></span>`);
+      summEl.innerHTML = summItems.join('');
+
+      const listEl = document.getElementById('exCompanyHoldersList');
+      listEl.innerHTML = h.top_holders.map((holder, i) => {
+        const valStr = holder.value != null ? `$${(holder.value / 1e6).toFixed(1)}M` : '';
+        const pctStr = holder.pct_held != null ? `${holder.pct_held}%` : '';
+        return `<div style="display:flex;align-items:center;padding:5px 0;border-bottom:1px solid var(--faint);gap:8px">
+          <span style="color:#8b949e;font-size:0.72rem;width:16px;text-align:right;flex-shrink:0">${i+1}</span>
+          <span style="flex:1;font-size:0.8rem;color:var(--text)">${holder.name || '—'}</span>
+          <span style="font-size:0.78rem;color:var(--accent);font-weight:600">${pctStr}</span>
+          <span style="font-size:0.72rem;color:#8b949e">${valStr}</span>
+        </div>`;
+      }).join('');
+      document.getElementById('exCompanyHoldersWrap').style.display = '';
+    }
+
+    // ── Key Executives ────────────────────────────────────────────
+    const execs = data.executives || [];
+    if (execs.length) {
+      const execsEl = document.getElementById('exCompanyExecs');
+      execsEl.innerHTML = execs.map(e => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--faint)">
+          <div>
+            <div style="font-size:0.82rem;font-weight:600;color:var(--text)">${e.name || '—'}</div>
+            <div style="font-size:0.75rem;color:#8b949e">${e.title || ''}</div>
+          </div>
+          ${e.age ? `<span style="font-size:0.75rem;color:#8b949e">Age ${e.age}</span>` : ''}
+        </div>`).join('');
+      document.getElementById('exCompanyExecsWrap').style.display = '';
+    }
+
+    if (!p && !articles.length && !h.top_holders?.length && !execs.length) {
+      loadEl.style.display = '';
+      loadEl.textContent   = 'No company data available for this symbol.';
     }
   } catch(e) {
-    posEl.textContent   = 'Failed to load positions';
-    tradeEl.textContent = 'Failed to load trades';
+    loadEl.style.display = '';
+    loadEl.textContent   = 'Failed to load company data.';
+  }
+}
+
+// ── Benzinga: Unusual Options Flow ────────────────────────────────────────
+async function loadBzOptions() {
+  const el   = document.getElementById('bzOptsBody');
+  const sym  = (document.getElementById('bzOptsSymInput')?.value || '').trim().toUpperCase();
+  const sent = document.getElementById('bzOptsSentFilter')?.value || '';
+  el.innerHTML = '<div class="loading" style="padding:20px">Loading options flow…</div>';
+  try {
+    const params = new URLSearchParams({ limit: 30 });
+    if (sym)  params.set('symbol',    sym);
+    if (sent) params.set('sentiment', sent);
+    const data  = await api(`/api/benzinga/options?${params}`);
+    const items = data?.items || [];
+    if (!items.length) { el.innerHTML = '<div style="padding:20px;color:#8b949e;font-size:0.83rem">No unusual options activity found.</div>'; return; }
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.78rem">
+      <thead><tr style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;letter-spacing:.05em">
+        <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Ticker</th>
+        <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Type</th>
+        <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Sentiment</th>
+        <th style="padding:8px 12px;text-align:right;border-bottom:1px solid var(--border)">Strike</th>
+        <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Expiry</th>
+        <th style="padding:8px 12px;text-align:right;border-bottom:1px solid var(--border)">Size</th>
+        <th style="padding:8px 12px;text-align:right;border-bottom:1px solid var(--border)">Cost Basis</th>
+        <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Activity</th>
+        <th style="padding:8px 12px;text-align:right;border-bottom:1px solid var(--border)">Underlying</th>
+        <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Time</th>
+      </tr></thead>
+      <tbody>${items.map(o => {
+        const isBull  = o.sentiment === 'BULLISH';
+        const isBear  = o.sentiment === 'BEARISH';
+        const isCall  = o.put_call  === 'CALL';
+        const sentClr = isBull ? 'var(--green)' : isBear ? 'var(--red)' : '#8b949e';
+        const sentBg  = isBull ? 'rgba(16,185,129,0.1)' : isBear ? 'rgba(244,63,94,0.1)' : 'transparent';
+        const typeClr = isCall ? 'var(--green)' : 'var(--red)';
+        const cost    = o.cost_basis ? '$' + (o.cost_basis >= 1e6 ? (o.cost_basis/1e6).toFixed(2)+'M' : (o.cost_basis/1e3).toFixed(0)+'K') : '—';
+        const activity= (o.activity_type||'').replace('_',' ');
+        return `<tr style="border-bottom:1px solid var(--faint);background:${sentBg}">
+          <td style="padding:7px 12px;font-weight:700;color:var(--text)">${o.ticker}</td>
+          <td style="padding:7px 12px;color:${typeClr};font-weight:600">${o.put_call||'—'}</td>
+          <td style="padding:7px 12px;color:${sentClr};font-weight:600">${o.sentiment||'—'}</td>
+          <td style="padding:7px 12px;text-align:right">$${o.strike?.toFixed(2)||'—'}</td>
+          <td style="padding:7px 12px;color:#8b949e">${o.expiry||'—'}</td>
+          <td style="padding:7px 12px;text-align:right">${o.size?.toLocaleString()||'—'}</td>
+          <td style="padding:7px 12px;text-align:right;font-weight:600;color:${sentClr}">${cost}</td>
+          <td style="padding:7px 12px;color:#8b949e;font-size:0.72rem">${activity}</td>
+          <td style="padding:7px 12px;text-align:right;color:#8b949e">$${o.underlying_price?.toFixed(2)||'—'}</td>
+          <td style="padding:7px 12px;color:#6e7681;font-size:0.72rem">${o.time||o.date||'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch(e) {
+    el.innerHTML = '<div style="padding:20px;color:#f85149;font-size:0.83rem">Failed to load options flow.</div>';
+  }
+}
+
+// ── Benzinga: FDA Calendar ─────────────────────────────────────────────────
+async function loadBzFDA() {
+  const el = document.getElementById('bzFDABody');
+  el.innerHTML = '<div class="loading" style="padding:16px">Loading FDA calendar…</div>';
+  try {
+    const data   = await api('/api/benzinga/fda');
+    const events = data?.events || [];
+    if (!events.length) { el.innerHTML = '<div style="padding:16px;color:#8b949e;font-size:0.83rem">No upcoming FDA events.</div>'; return; }
+    el.innerHTML = events.map(f => {
+      const tickers = (f.companies||[]).map(c => `<span onclick="explorerSelect('${c.ticker}')" style="cursor:pointer;background:rgba(88,166,255,0.1);color:#58a6ff;border-radius:4px;padding:1px 6px;font-size:0.72rem;margin-right:4px">${c.ticker}</span>`).join('');
+      return `<div style="display:flex;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid var(--faint)">
+        <div style="min-width:72px;font-size:0.78rem;font-weight:600;color:var(--accent)">${f.date||'—'}</div>
+        <div style="flex:1">
+          <div style="font-size:0.82rem;font-weight:600;color:var(--text);margin-bottom:3px">${f.drug||'—'} <span style="font-size:0.72rem;background:rgba(248,81,73,0.12);color:#f85149;border-radius:4px;padding:1px 6px;margin-left:4px">${f.event_type||''}</span></div>
+          <div style="margin-bottom:3px">${tickers}</div>
+          ${f.commentary ? `<div style="font-size:0.75rem;color:#8b949e;line-height:1.4">${f.commentary}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="padding:16px;color:#f85149;font-size:0.83rem">Failed to load FDA calendar.</div>';
+  }
+}
+
+// ── Benzinga: Dividend Calendar ────────────────────────────────────────────
+async function loadBzDividends() {
+  const el = document.getElementById('bzDividendsBody');
+  el.innerHTML = '<div class="loading" style="padding:16px">Loading dividend calendar…</div>';
+  try {
+    const data = await api('/api/benzinga/dividends');
+    const divs = data?.dividends || [];
+    if (!divs.length) { el.innerHTML = '<div style="padding:16px;color:#8b949e;font-size:0.83rem">No upcoming dividends.</div>'; return; }
+    el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.78rem">
+      <thead><tr style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;letter-spacing:.05em">
+        <th style="padding:7px 12px;text-align:left;border-bottom:1px solid var(--border)">Ticker</th>
+        <th style="padding:7px 12px;text-align:left;border-bottom:1px solid var(--border)">Ex-Date</th>
+        <th style="padding:7px 12px;text-align:left;border-bottom:1px solid var(--border)">Pay Date</th>
+        <th style="padding:7px 12px;text-align:right;border-bottom:1px solid var(--border)">Dividend</th>
+        <th style="padding:7px 12px;text-align:right;border-bottom:1px solid var(--border)">Prior</th>
+        <th style="padding:7px 12px;text-align:right;border-bottom:1px solid var(--border)">Yield</th>
+        <th style="padding:7px 12px;text-align:left;border-bottom:1px solid var(--border)">Frequency</th>
+      </tr></thead>
+      <tbody>${divs.map(d => {
+        const chg    = d.dividend && d.dividend_prior ? ((d.dividend - d.dividend_prior)/d.dividend_prior*100) : null;
+        const chgClr = chg == null ? '' : chg > 0 ? 'color:var(--green)' : chg < 0 ? 'color:var(--red)' : '';
+        const chgStr = chg == null ? '' : ` <span style="${chgClr};font-size:0.7rem">${chg>0?'+':''}${chg.toFixed(1)}%</span>`;
+        return `<tr style="border-bottom:1px solid var(--faint)">
+          <td style="padding:7px 12px;font-weight:700;color:var(--text);cursor:pointer" onclick="explorerSelect('${d.ticker}')">${d.ticker}</td>
+          <td style="padding:7px 12px;color:var(--accent)">${d.ex_date||'—'}</td>
+          <td style="padding:7px 12px;color:#8b949e">${d.payment_date||'—'}</td>
+          <td style="padding:7px 12px;text-align:right;font-weight:600">$${d.dividend?.toFixed(4)||'—'}${chgStr}</td>
+          <td style="padding:7px 12px;text-align:right;color:#8b949e">${d.dividend_prior ? '$'+d.dividend_prior.toFixed(4) : '—'}</td>
+          <td style="padding:7px 12px;text-align:right;color:var(--green)">${d.yield ? d.yield.toFixed(2)+'%' : '—'}</td>
+          <td style="padding:7px 12px;color:#8b949e;text-transform:capitalize">${d.frequency||'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch(e) {
+    el.innerHTML = '<div style="padding:16px;color:#f85149;font-size:0.83rem">Failed to load dividend calendar.</div>';
   }
 }
 
@@ -14911,7 +15175,11 @@ applyTheme(localStorage.getItem('theme') || 'vexai', false);
 <!-- ─── Disclaimer Footer ─────────────────────────────────────────────────── -->
 <div style="position:fixed;bottom:0;left:0;right:0;background:#111318;border-top:1px solid #21262d;padding:6px 16px;font-size:11px;color:#555;display:flex;justify-content:space-between;align-items:center;z-index:1000;gap:12px">
   <span>⚠️ For educational purposes only. Not financial advice. Trading involves risk of loss. Past performance does not guarantee future results.</span>
-  <a href="/terms" target="_blank" style="color:#6e7681;text-decoration:none;white-space:nowrap;flex-shrink:0">Terms &amp; Risk Disclosure</a>
+  <div style="display:flex;align-items:center;gap:14px;flex-shrink:0">
+    <a href="/terms" target="_blank" style="color:#6e7681;text-decoration:none;white-space:nowrap">Terms &amp; Risk Disclosure</a>
+    <span style="color:#333">|</span>
+    <a href="mailto:info@trading.dlpinnovations.com" style="color:#6e7681;text-decoration:none;white-space:nowrap">✉ info@trading.dlpinnovations.com</a>
+  </div>
 </div>
 
 </body>

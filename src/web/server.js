@@ -26,6 +26,7 @@ import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
 import crypto from 'crypto';
 import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { SP500, NASDAQ100 } from '../research/sp500.js';
 import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades, clearPnlCache } from '../core/trader.js';
 import cron from 'node-cron';
@@ -44,6 +45,7 @@ import { getMarketContext } from '../core/market-context.js';
 import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 import { runCatalystScan } from '../core/catalyst-scanner.js';
+import { getBzNews, getBzOptionsActivity, getBzEarnings, getBzGuidance, getBzFDA, getBzDividends, getBzFundamentals, isBenzingaConfigured } from '../core/benzinga.js';
 
 // Generate a stable numeric chat ID per user so each user has their own
 // Use username string directly as chat key — no hash collision possible.
@@ -4775,6 +4777,154 @@ app.get('/api/explorer/extras', requireAuth, async (req, res) => {
   }
 });
 
+// Stock Explorer company tab — profile, institutional holders, executives, news
+app.get('/api/explorer/company', requireAuth, async (req, res) => {
+  const symbol = (req.query.symbol || '').toUpperCase().trim();
+  if (!symbol) return res.status(400).json({ error: 'symbol required' });
+  try {
+    const [yfResult, newsResult] = await Promise.allSettled([
+      _yf.quoteSummary(symbol, { modules: ['assetProfile', 'majorHoldersBreakdown', 'institutionOwnership'] }),
+      getSymbolNews({ symbol, limit: 8 }),
+    ]);
+    const yfData = yfResult.status === 'fulfilled' ? yfResult.value : null;
+    const profile = yfData?.assetProfile ?? null;
+    const majorHolders = yfData?.majorHoldersBreakdown ?? null;
+    const instOwn = yfData?.institutionOwnership ?? null;
+    const news = newsResult.status === 'fulfilled' ? (newsResult.value?.articles ?? []) : [];
+
+    const topHolders = (instOwn?.ownershipList ?? []).slice(0, 8).map(h => ({
+      name:      h.organization,
+      pct_held:  h.pctHeld != null ? +(h.pctHeld * 100).toFixed(2) : null,
+      shares:    h.position,
+      value:     h.value,
+    }));
+    const executives = (profile?.companyOfficers ?? []).slice(0, 6).map(o => ({
+      name:  o.name,
+      title: o.title,
+      age:   o.age ?? null,
+    }));
+
+    res.json({
+      symbol,
+      profile: profile ? {
+        description:  profile.longBusinessSummary ?? null,
+        sector:       profile.sector              ?? null,
+        industry:     profile.industry            ?? null,
+        website:      profile.website             ?? null,
+        employees:    profile.fullTimeEmployees   ?? null,
+        country:      profile.country             ?? null,
+      } : null,
+      holders: {
+        insider_pct:       majorHolders?.insidersPercentHeld       != null ? +(majorHolders.insidersPercentHeld       * 100).toFixed(2) : null,
+        institutional_pct: majorHolders?.institutionsPercentHeld   != null ? +(majorHolders.institutionsPercentHeld   * 100).toFixed(2) : null,
+        top_holders:       topHolders,
+      },
+      executives,
+      news: news.slice(0, 8),
+    });
+  } catch (err) {
+    console.error('[explorer/company]', err);
+    res.status(500).json({ error: 'Company data unavailable' });
+  }
+});
+
+// ─── Benzinga endpoints ───────────────────────────────────────────────────────
+
+app.get('/api/benzinga/options', requireAuth, async (req, res) => {
+  if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
+  const symbol    = req.query.symbol ? req.query.symbol.toUpperCase().trim() : undefined;
+  const limit     = Math.min(parseInt(req.query.limit) || 25, 100);
+  const sentiment = req.query.sentiment || undefined;
+  try {
+    const data = await getBzOptionsActivity({ symbol, limit, sentiment });
+    res.json(data ?? { items: [], total: 0 });
+  } catch (e) {
+    console.error('[benzinga/options]', e.message);
+    res.status(500).json({ error: 'Options data unavailable' });
+  }
+});
+
+app.get('/api/benzinga/news', requireAuth, async (req, res) => {
+  if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
+  const symbol = req.query.symbol ? req.query.symbol.toUpperCase().trim() : undefined;
+  const limit  = Math.min(parseInt(req.query.limit) || 10, 50);
+  try {
+    const data = await getBzNews({ symbol, limit });
+    res.json(data ?? { articles: [], total: 0 });
+  } catch (e) {
+    console.error('[benzinga/news]', e.message);
+    res.status(500).json({ error: 'News unavailable' });
+  }
+});
+
+app.get('/api/benzinga/guidance', requireAuth, async (req, res) => {
+  if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
+  const symbol   = req.query.symbol ? req.query.symbol.toUpperCase().trim() : undefined;
+  const dateFrom = req.query.from || undefined;
+  try {
+    const data = await getBzGuidance({ symbol, dateFrom, limit: 20 });
+    res.json(data ?? { guidance: [], total: 0 });
+  } catch (e) {
+    console.error('[benzinga/guidance]', e.message);
+    res.status(500).json({ error: 'Guidance data unavailable' });
+  }
+});
+
+app.get('/api/benzinga/fda', requireAuth, async (req, res) => {
+  if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
+  const dateFrom = req.query.from || undefined;
+  const dateTo   = req.query.to   || undefined;
+  try {
+    const data = await getBzFDA({ dateFrom, dateTo, limit: 30 });
+    res.json(data ?? { events: [], total: 0 });
+  } catch (e) {
+    console.error('[benzinga/fda]', e.message);
+    res.status(500).json({ error: 'FDA data unavailable' });
+  }
+});
+
+app.get('/api/benzinga/earnings', requireAuth, async (req, res) => {
+  if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
+  const symbol   = req.query.symbol ? req.query.symbol.toUpperCase().trim() : undefined;
+  const dateFrom = req.query.from || undefined;
+  const dateTo   = req.query.to   || undefined;
+  try {
+    const data = await getBzEarnings({ symbol, dateFrom, dateTo, limit: 30 });
+    res.json(data ?? { earnings: [], total: 0 });
+  } catch (e) {
+    console.error('[benzinga/earnings]', e.message);
+    res.status(500).json({ error: 'Earnings data unavailable' });
+  }
+});
+
+app.get('/api/benzinga/fundamentals', requireAuth, async (req, res) => {
+  if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
+  const symbol = (req.query.symbol || '').toUpperCase().trim();
+  if (!symbol) return res.status(400).json({ error: 'symbol required' });
+  try {
+    const data = await getBzFundamentals({ symbol });
+    if (!data) return res.status(404).json({ error: 'No fundamentals data' });
+    res.json(data);
+  } catch (e) {
+    console.error('[benzinga/fundamentals]', e.message);
+    res.status(500).json({ error: 'Fundamentals unavailable' });
+  }
+});
+
+app.get('/api/benzinga/dividends', requireAuth, async (req, res) => {
+  if (!isBenzingaConfigured()) return res.status(503).json({ error: 'Benzinga not configured' });
+  const symbol   = req.query.symbol ? req.query.symbol.toUpperCase().trim() : undefined;
+  const dateFrom = req.query.from || undefined;
+  const dateTo   = req.query.to   || undefined;
+  try {
+    const data = await getBzDividends({ symbol, dateFrom, dateTo, limit: 30 });
+    res.json(data ?? { dividends: [], total: 0 });
+  } catch (e) {
+    console.error('[benzinga/dividends]', e.message);
+    res.status(500).json({ error: 'Dividends data unavailable' });
+  }
+});
+
 // Dip analysis — worst drops with reasons
 app.get('/api/research/dips', async (req, res) => {
   try {
@@ -5054,6 +5204,47 @@ async function sendTelegramMsg(text) {
   });
 }
 
+// ─── Nodemailer alert transport (SMTP — Zoho / Google Workspace / any SMTP) ──
+let _mailer = null;
+function _getMailer() {
+  if (_mailer) return _mailer;
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
+  if (!SMTP_USER || !SMTP_PASS) return null;
+  const port   = parseInt(SMTP_PORT || '465');
+  _mailer = nodemailer.createTransport({
+    host:   SMTP_HOST || 'smtp.zoho.com',
+    port,
+    secure: port === 465,     // true = SSL/TLS (465), false = STARTTLS (587)
+    auth:   { user: SMTP_USER, pass: SMTP_PASS },
+  });
+  return _mailer;
+}
+
+async function sendEmailAlert(subject, body) {
+  const mailer = _getMailer();
+  if (!mailer) return;
+  const from = process.env.SMTP_USER;
+  const to   = process.env.ALERT_EMAIL || from;
+  // Convert Telegram Markdown to HTML (only the subset we actually use)
+  const html = body
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/_([^_\n]+)_/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+  try {
+    await mailer.sendMail({
+      from:    `Trading Bot <${from}>`,
+      to,
+      subject,
+      text:    body,
+      html:    `<div style="font-family:monospace;font-size:14px;line-height:1.7;color:#e6edf3;background:#0d1117;padding:24px;border-radius:8px">${html}</div>`,
+    });
+    console.log(`[email] sent: ${subject} → ${to}`);
+  } catch (e) {
+    console.error('[email] sendEmailAlert failed:', e.message);
+  }
+}
+
 let _eodFlattenedDate = null; // prevent double-run on same day
 
 async function eodFlatten() {
@@ -5095,15 +5286,17 @@ async function eodFlatten() {
       pnlLine = `\n💰 *Today's P&L: ${pnl.pnl >= 0 ? '+' : ''}$${pnl.pnl?.toFixed(2)} (${pnl.pnl_pct?.toFixed(2)}%)*`;
     } catch {}
 
-    // 4. Notify via Telegram
+    // 4. Notify via Telegram + email
     const posLines = results.length ? results.join('\n') : 'No open positions.';
-    await sendTelegramMsg(
-      `🔔 *EOD Flatten — 3:50 PM ET*\n\n${posLines}${pnlLine}\n\n_All orders cancelled. No overnight exposure._`
-    );
+    const eodMsg = `🔔 *EOD Flatten — 3:50 PM ET*\n\n${posLines}${pnlLine}\n\n_All orders cancelled. No overnight exposure._`;
+    await sendTelegramMsg(eodMsg);
+    await sendEmailAlert('EOD Flatten — 3:50 PM ET', eodMsg).catch(() => {});
     console.log('[EOD] Flatten complete:', results);
   } catch (e) {
     console.error('[EOD] Flatten error:', e.message);
-    await sendTelegramMsg(`⚠️ *EOD Flatten failed*: ${e.message}`).catch(() => {});
+    const failMsg = `⚠️ *EOD Flatten failed*: ${e.message}`;
+    await sendTelegramMsg(failMsg).catch(() => {});
+    await sendEmailAlert('⚠ EOD Flatten Failed', failMsg).catch(() => {});
   }
 }
 
@@ -5385,6 +5578,7 @@ async function runWeekendResearchRefresh() {
 
   pushToChat(summary, 'autonomous');
   await sendTelegramMsg(summary).catch(() => {});
+  await sendEmailAlert('Research Pipeline Complete', summary).catch(() => {});
   console.log('[research]', summary);
 
     _lastRefreshAt = new Date().toISOString();

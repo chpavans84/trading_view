@@ -210,6 +210,62 @@ export async function scanLowFloatSetups() {
     .sort((a, b) => b.rvol - a.rvol);
 }
 
+// ─── Scanner 4: FDA catalyst calendar (Benzinga) ─────────────────────────────
+
+export async function scanFDACalendar() {
+  const key = process.env.BENZINGA_API_KEY || process.env.BENZINGA_API;
+  if (!key) return [];
+
+  const today   = new Date();
+  const ago7d   = new Date(today); ago7d.setDate(today.getDate() - 7);
+  const in30d   = new Date(today); in30d.setDate(today.getDate() + 30);
+  const fmt     = d => d.toISOString().split('T')[0];
+  const todayMs = new Date(today).setHours(0, 0, 0, 0);
+
+  // Cast a wide net (past 7 days → next 30 days) — Benzinga pre-announces
+  // FDA events close to their date, so a future-only window often returns empty.
+  const data = await safeFetchJson(
+    `https://api.benzinga.com/api/v2.1/calendar/fda?token=${key}&parameters[date_from]=${fmt(ago7d)}&parameters[date_to]=${fmt(in30d)}&pageSize=30`,
+    { headers: { Accept: 'application/json' } }
+  );
+
+  // Response shape: { fda: [...] }  (not a plain array)
+  const events = data?.fda ?? (Array.isArray(data) ? data : []);
+
+  return events
+    .filter(e => e.date)
+    .map(e => {
+      const evType      = (e.event_type || '').toLowerCase();
+      const strength    = /approval|pdufa/.test(evType) ? 'high'
+                        : /trial|phase/.test(evType)    ? 'medium'
+                        :                                  'low';
+      const days_until  = Math.round((new Date(e.date) - todayMs) / 86_400_000);
+      // Extract primary ticker; Benzinga stores it inside securities array
+      const firstCo     = (e.companies || [])[0];
+      const symbol      = firstCo?.securities?.[0]?.symbol || firstCo?.ticker || null;
+
+      return {
+        symbol,
+        drug:              e.drug?.name  || null,
+        indication:        e.drug?.indication_symptom?.[0]?.trim() || null,
+        event_type:        e.event_type  || null,
+        status:            e.status      || null,
+        date:              e.date,
+        target_date:       e.target_date || null,
+        catalyst_strength: strength,
+        days_until,
+        companies:         (e.companies || []).map(c => ({
+          ticker: c.securities?.[0]?.symbol || null,
+          name:   c.name,
+        })),
+        outcome_brief:     e.outcome_brief || e.commentary || null,
+        source_link:       e.source_link   || null,
+      };
+    })
+    .sort((a, b) => new Date(a.date) - new Date(b.date))  // nearest first
+    .slice(0, 5);
+}
+
 // ─── Top-picks builder ────────────────────────────────────────────────────────
 
 function buildTopPicks(gappers, lowFloat) {
@@ -238,7 +294,7 @@ function buildTopPicks(gappers, lowFloat) {
 export async function runCatalystScan() {
   if (_cache && Date.now() - _cacheAt < CATALYST_CACHE_TTL) return _cache;
 
-  const [gappers, sec_filings, low_float] = await Promise.all([
+  const [gappers, sec_filings, low_float, fda_events] = await Promise.all([
     scanPreMarketGappers().catch(err => {
       console.warn('[catalyst] gapper scan failed:', err.message);
       return [];
@@ -251,6 +307,10 @@ export async function runCatalystScan() {
       console.warn('[catalyst] low-float scan failed:', err.message);
       return [];
     }),
+    scanFDACalendar().catch(err => {
+      console.warn('[catalyst] FDA scan failed:', err.message);
+      return [];
+    }),
   ]);
 
   const top_picks = buildTopPicks(gappers, low_float);
@@ -259,6 +319,7 @@ export async function runCatalystScan() {
     gappers,
     sec_filings,
     low_float,
+    fda_events,
     top_picks,
     scanned_at: new Date().toISOString(),
   };
@@ -269,7 +330,7 @@ export async function runCatalystScan() {
   console.log(
     `[catalyst] scan complete — ${gappers.length} gappers, ` +
     `${sec_filings.length} SEC filings, ${low_float.length} low-float, ` +
-    `${top_picks.length} top picks`
+    `${fda_events.length} FDA events, ${top_picks.length} top picks`
   );
 
   return result;

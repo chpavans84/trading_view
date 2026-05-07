@@ -26,7 +26,7 @@
     "research:download": "node --env-file=.env src/research/download-prices.js",
     "research:scores": "node --env-file=.env src/research/compute-scores.js",
     "research:backtest": "node --env-file=.env src/research/backtest.js",
-    "research:train":        "node --env-file=.env src/research/train-model.js",
+    "research:train": "node --env-file=.env src/research/train-model.js",
     "research:fundamentals": "node --env-file=.env src/research/download-fundamentals.js",
     "ollama:build": "node --env-file=.env src/research/create-modelfile.js"
   },
@@ -44,6 +44,7 @@
     "moomoo-api": "^10.3.6308",
     "node-cron": "^4.2.1",
     "node-pty": "^1.1.0",
+    "nodemailer": "^8.0.7",
     "pg": "^8.20.0",
     "resend": "^6.12.2",
     "ws": "^8.20.0",
