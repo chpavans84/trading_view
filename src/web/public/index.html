@@ -1475,7 +1475,6 @@
   <div class="nav-tabs">
     <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">Dashboard</button>
     <button class="tab" onclick="showPage('trades',this)">Trades</button>
-    <button class="tab" onclick="showPage('scores',this)">Scores</button>
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
@@ -1520,18 +1519,18 @@
     <div class="widget-tab-strip">
       <button class="widget-tab active" onclick="switchWidgetTab('positions')">Open Positions</button>
       <button class="widget-tab" onclick="switchWidgetTab('trades')">Recent Trades</button>
-      <button class="widget-tab" onclick="switchWidgetTab('strong-buys')">Strong Buys Today</button>
+      <button class="widget-tab" onclick="switchWidgetTab('catalysts')">🎯 Tomorrow's Catalysts</button>
       <button class="widget-tab" onclick="switchWidgetTab('intraday')">Intraday Picks</button>
       <button class="widget-tab" onclick="switchWidgetTab('watchlist')">❤️ Watchlist</button>
+      <button class="widget-tab" onclick="switchWidgetTab('cp')">📈 Trade Results</button>
       <div style="flex:1;min-width:8px"></div>
       <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
         <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
       </div>
       <div class="wta" id="wta-trades" style="display:none;align-items:center;gap:10px"></div>
-      <div class="wta" id="wta-strong-buys" style="display:none;align-items:center;gap:10px">
-        <span id="sbScanMeta" style="font-size:0.78rem;color:var(--text2)"></span>
-        <button class="refresh-btn" onclick="loadStrongBuys(true)">↻ Refresh</button>
-        <button class="doc-btn" onclick="openResearchDoc('strong_buys')" title="How this works">?</button>
+      <div class="wta" id="wta-catalysts" style="display:none;align-items:center;gap:10px">
+        <span id="tcMeta" style="font-size:0.78rem;color:var(--text2)"></span>
+        <button class="refresh-btn" onclick="loadTomorrowCatalysts(true)">↻ Refresh</button>
       </div>
       <div class="wta" id="wta-intraday" style="display:none;align-items:center;gap:10px">
         <span style="font-size:0.76rem;color:var(--muted)">daily $150–200 target</span>
@@ -1542,6 +1541,10 @@
       <div class="wta" id="wta-watchlist" style="display:none;align-items:center;gap:10px">
         <span style="font-size:0.76rem;color:var(--muted)">Open Stock Explorer → 🤍 to add</span>
         <button class="refresh-btn" onclick="loadDashboardWatchlist()">↻ Refresh</button>
+      </div>
+      <div class="wta" id="wta-cp" style="display:none;align-items:center;gap:8px">
+        <input type="date" id="cpDatePicker" style="background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:3px 8px;font-size:0.78rem;cursor:pointer" onchange="loadCatalystPerf()">
+        <button class="refresh-btn" onclick="loadCatalystPerf()">↻</button>
       </div>
     </div>
 
@@ -1573,8 +1576,8 @@
     <div class="widget-panel" id="widget-panel-trades">
       <div id="recentTradesTable"><div class="loading">Loading…</div></div>
     </div>
-    <div class="widget-panel" id="widget-panel-strong-buys">
-      <div id="sbBody"><div class="loading">Loading…</div></div>
+    <div class="widget-panel" id="widget-panel-catalysts">
+      <div id="tcBody"><div class="loading" style="padding:32px;text-align:center">Loading tomorrow's catalysts…</div></div>
     </div>
     <div class="widget-panel" id="widget-panel-intraday">
       <div id="idBody"><div class="loading">Loading…</div></div>
@@ -1600,6 +1603,9 @@
         <tbody id="wlBody"><tr><td colspan="14" class="loading" style="text-align:center;padding:20px">Loading…</td></tr></tbody>
         </table>
       </div>
+    </div>
+    <div class="widget-panel" id="widget-panel-cp">
+      <div id="cpBody"><div class="loading" style="padding:32px;text-align:center">Select a date to view results</div></div>
     </div>
   </div>
 
@@ -1637,29 +1643,6 @@
 </div>
 
 <!-- ── SCORES ─────────────────────────────────────────── -->
-<div class="page" id="page-scores">
-  <div id="scanProgress" style="display:none;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-      <span id="scanStatus" style="color:#3fb950;font-weight:600">Scanning…</span>
-      <span id="scanCounter" style="color:#8b949e;font-size:0.85rem"></span>
-    </div>
-    <div style="background:#21262d;border-radius:4px;height:6px;overflow:hidden">
-      <div id="scanBar" style="background:#238636;height:100%;width:0;transition:width 0.3s"></div>
-    </div>
-    <div id="scanLog" style="margin-top:10px;font-size:0.8rem;color:#8b949e;max-height:80px;overflow-y:auto"></div>
-  </div>
-  <div class="table-wrap" id="scoresTable">
-    <div class="table-head">
-      <h3>Conviction Score Log <button class="doc-btn" onclick="openResearchDoc('scores')" title="How this works">?</button></h3>
-      <div style="display:flex;gap:8px">
-        <button class="refresh-btn" id="runScanBtn" onclick="runScan()" style="background:#238636;color:#fff;border-color:#238636">▶ Run Scan</button>
-        <button class="refresh-btn" onclick="loadScores()">↻ Refresh</button>
-      </div>
-    </div>
-    <div class="loading">Loading...</div>
-  </div>
-</div>
-
 <!-- ── MARKET ─────────────────────────────────────────── -->
 <div class="page" id="page-market">
   <div class="grid-3" id="marketCards">
@@ -1816,6 +1799,99 @@
     .ecal-chips-wrap::-webkit-scrollbar { width:3px; }
     .ecal-chips-wrap::-webkit-scrollbar-thumb { background:var(--faint,#30363d); border-radius:2px; }
 
+    /* ── Earnings Preview ────────────────────────────── */
+    .ep-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:14px; }
+    .ep-card { background:#0d1117; border:1px solid #30363d; border-radius:12px; overflow:hidden; transition:border-color .15s; }
+    .ep-card:hover { border-color:#58a6ff55; }
+    .ep-card-head { padding:12px 14px 8px; border-bottom:1px solid #21262d; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+    .ep-sym  { font-size:1.05rem; font-weight:800; color:#58a6ff; cursor:pointer; }
+    .ep-sym:hover { text-decoration:underline; }
+    .ep-co   { font-size:0.75rem; color:#8b949e; margin-top:1px; }
+    .ep-date-chip { font-size:0.68rem; background:#161b22; border:1px solid #30363d; border-radius:6px; padding:3px 8px; color:#8b949e; white-space:nowrap; flex-shrink:0; }
+    .ep-trend { display:inline-flex; align-items:center; gap:5px; border-radius:20px; padding:3px 10px; font-size:0.72rem; font-weight:700; margin:6px 14px 0; }
+    .ep-trend.very-strong { background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.35); }
+    .ep-trend.strong      { background:rgba(88,166,255,0.12); color:#58a6ff; border:1px solid rgba(88,166,255,0.3); }
+    .ep-trend.neutral     { background:rgba(240,136,62,0.12); color:#f0883e; border:1px solid rgba(240,136,62,0.3); }
+    .ep-trend.weak        { background:rgba(248,81,73,0.1);   color:#f85149; border:1px solid rgba(248,81,73,0.3); }
+    .ep-trend.very-weak   { background:rgba(248,81,73,0.2);   color:#ff6b6b; border:1px solid rgba(248,81,73,0.5); }
+    .ep-section { padding:8px 14px; border-bottom:1px solid #21262d; }
+    .ep-section:last-child { border-bottom:none; }
+    .ep-label { font-size:0.62rem; color:#6e7681; text-transform:uppercase; letter-spacing:.06em; margin-bottom:5px; font-weight:600; }
+    .ep-quarters { display:flex; gap:6px; }
+    .ep-q { flex:1; border-radius:6px; padding:5px 4px; text-align:center; border:1px solid transparent; }
+    .ep-q.strong  { background:rgba(16,185,129,0.12); border-color:rgba(16,185,129,0.3); }
+    .ep-q.moderate{ background:rgba(88,166,255,0.1);  border-color:rgba(88,166,255,0.25); }
+    .ep-q.weak    { background:rgba(248,81,73,0.1);   border-color:rgba(248,81,73,0.3); }
+    .ep-q.unknown { background:#161b22; border-color:#30363d; }
+    .ep-q-period { font-size:0.6rem; color:#6e7681; font-weight:600; }
+    .ep-q-icon   { font-size:0.85rem; line-height:1.2; }
+    .ep-q-val    { font-size:0.65rem; font-weight:700; margin-top:1px; }
+    .ep-q.strong  .ep-q-val { color:#10b981; }
+    .ep-q.moderate .ep-q-val{ color:#58a6ff; }
+    .ep-q.weak    .ep-q-val { color:#f85149; }
+    .ep-q.unknown .ep-q-val { color:#6e7681; }
+    .ep-metrics { display:flex; flex-wrap:wrap; gap:10px; }
+    .ep-metric  { flex:1; min-width:80px; }
+    .ep-metric-label { font-size:0.62rem; color:#6e7681; margin-bottom:2px; }
+    .ep-metric-val   { font-size:0.82rem; font-weight:700; color:#e6edf3; }
+    .ep-news-item { font-size:0.73rem; color:#c9d1d9; line-height:1.4; padding:3px 0; border-bottom:1px solid #21262d22; }
+    .ep-news-item:last-child { border-bottom:none; }
+    .ep-news-item a { color:#8b949e; text-decoration:none; }
+    .ep-news-item a:hover { color:#58a6ff; text-decoration:underline; }
+    .ep-footer { display:flex; align-items:center; justify-content:space-between; padding:8px 14px; background:#0a0e14; }
+    .ep-price  { font-size:0.95rem; font-weight:700; color:#e6edf3; }
+    .ep-chg    { font-size:0.75rem; font-weight:600; }
+    .ep-score-pill { font-size:0.68rem; font-weight:700; border-radius:20px; padding:2px 9px; border:1px solid; }
+
+    /* ── Tomorrow's Catalysts ───────────────────────── */
+    .tc-sections { display:flex; flex-direction:column; gap:18px; }
+    .tc-section-hdr { font-size:0.78rem; font-weight:700; color:#8b949e; text-transform:uppercase; letter-spacing:.07em; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+    .tc-section-hdr span { font-size:0.7rem; background:#21262d; border:1px solid #30363d; border-radius:10px; padding:1px 8px; color:#8b949e; font-weight:500; text-transform:none; letter-spacing:0; }
+    .tc-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+    .tc-card { background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:12px 14px; transition:border-color .15s; }
+    .tc-card:hover { border-color:#58a6ff44; }
+    .tc-card-head { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:8px; }
+    .tc-sym { font-size:1rem; font-weight:800; color:#58a6ff; cursor:pointer; }
+    .tc-sym:hover { text-decoration:underline; }
+    .tc-co  { font-size:0.72rem; color:#8b949e; margin-top:1px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tc-badge-amc  { font-size:0.68rem; font-weight:700; background:rgba(163,113,247,0.15); color:#a371f7; border:1px solid rgba(163,113,247,0.4); border-radius:20px; padding:2px 9px; white-space:nowrap; }
+    .tc-badge-bmo  { font-size:0.68rem; font-weight:700; background:rgba(240,136,62,0.15);  color:#f0883e; border:1px solid rgba(240,136,62,0.4);  border-radius:20px; padding:2px 9px; white-space:nowrap; }
+    .tc-badge-drift{ font-size:0.68rem; font-weight:700; background:rgba(88,166,255,0.12);  color:#58a6ff; border:1px solid rgba(88,166,255,0.35); border-radius:20px; padding:2px 9px; white-space:nowrap; }
+    .tc-metrics { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:8px; }
+    .tc-metric { min-width:72px; }
+    .tc-metric-lbl { font-size:0.6rem; color:#6e7681; text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
+    .tc-metric-val { font-size:0.82rem; font-weight:700; color:#e6edf3; }
+    .tc-consensus { display:inline-block; font-size:0.68rem; font-weight:700; border-radius:20px; padding:2px 8px; border:1px solid; }
+    .tc-consensus.strong_buy  { background:rgba(16,185,129,0.15); color:#10b981; border-color:rgba(16,185,129,0.4); }
+    .tc-consensus.buy         { background:rgba(88,166,255,0.12); color:#58a6ff; border-color:rgba(88,166,255,0.3); }
+    .tc-consensus.hold        { background:rgba(240,136,62,0.12); color:#f0883e; border-color:rgba(240,136,62,0.3); }
+    .tc-consensus.sell,.tc-consensus.strong_sell { background:rgba(248,81,73,0.1); color:#f85149; border-color:rgba(248,81,73,0.3); }
+    .tc-news { font-size:0.71rem; color:#8b949e; line-height:1.4; margin-top:6px; border-top:1px solid #21262d; padding-top:6px; }
+    .tc-empty { padding:24px; text-align:center; color:#6e7681; font-size:0.83rem; }
+
+    /* ── Catalyst Performance (Trade Results) ────────── */
+    .cp-summary { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:18px; padding:12px 16px; background:#0d1117; border:1px solid #30363d; border-radius:10px; align-items:center; }
+    .cp-summary-stat { min-width:80px; }
+    .cp-summary-lbl  { font-size:0.62rem; color:#6e7681; text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
+    .cp-summary-val  { font-size:1rem; font-weight:800; }
+    .cp-note { font-size:0.72rem; color:#6e7681; margin-left:auto; }
+    .cp-grid  { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; }
+    .cp-card  { background:#0d1117; border:1px solid #30363d; border-radius:10px; padding:14px; transition:border-color .15s; }
+    .cp-card:hover { border-color:#58a6ff44; }
+    .cp-card-top { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:10px; }
+    .cp-sym   { font-size:1rem; font-weight:800; color:#58a6ff; cursor:pointer; }
+    .cp-sym:hover { text-decoration:underline; }
+    .cp-co    { font-size:0.72rem; color:#8b949e; margin-top:1px; }
+    .cp-badge-amc { font-size:0.65rem; font-weight:700; background:rgba(163,113,247,0.15); color:#a371f7; border:1px solid rgba(163,113,247,0.4); border-radius:12px; padding:2px 8px; }
+    .cp-badge-bmo { font-size:0.65rem; font-weight:700; background:rgba(240,136,62,0.15);  color:#f0883e; border:1px solid rgba(240,136,62,0.4);  border-radius:12px; padding:2px 8px; }
+    .cp-prices { display:flex; align-items:center; gap:6px; font-size:0.8rem; color:#8b949e; margin-bottom:8px; }
+    .cp-arrow  { color:#6e7681; font-size:0.7rem; }
+    .cp-result { display:flex; align-items:baseline; gap:10px; }
+    .cp-pct    { font-size:1.4rem; font-weight:800; line-height:1; }
+    .cp-pnl    { font-size:0.9rem; font-weight:700; }
+    .cp-1000   { font-size:0.68rem; color:#6e7681; margin-top:3px; }
+    .cp-empty  { padding:32px; text-align:center; color:#6e7681; font-size:0.83rem; }
+
     /* ── Earnings Reaction Analysis ─────────────────── */
     .er-sym-btn { background:var(--card-bg);border:1px solid var(--border);border-radius:5px;padding:3px 9px;color:var(--text2);font-size:0.75rem;cursor:pointer;transition:all .15s; }
     .er-sym-btn:hover,.er-sym-btn.active { background:var(--accent);border-color:var(--accent);color:#fff; }
@@ -1878,6 +1954,23 @@
 
     <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
 
+    <!-- ── Earnings Preview — deep weekly research ── -->
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div>
+          <h3 style="margin:0 0 2px;font-size:1rem;font-weight:700;color:var(--text)">📊 Earnings Preview — Next Week <button class="doc-btn" onclick="openResearchDoc('earnings_preview')" title="How this works">?</button></h3>
+          <div style="font-size:0.73rem;color:var(--text2)">Deep trend · last 4 quarters · analyst estimates · live news</div>
+        </div>
+        <button id="epRefreshBtn" onclick="loadEarningsPreview(true)"
+          style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻ Refresh</button>
+      </div>
+      <div id="epBody">
+        <div style="padding:32px;text-align:center;color:#6e7681;font-size:0.85rem">Click ↻ Refresh to load earnings preview…</div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
+
     <!-- ── Earnings Reaction Analysis ── -->
     <div style="margin-bottom:28px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
@@ -1918,7 +2011,7 @@
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
-        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">Forecast Lab <button class="doc-btn" onclick="openResearchDoc('forecast_lab')" title="How this works">?</button></h2>
+        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px;cursor:pointer;user-select:none" ondblclick="toggleFcMinimize()" title="Double-click to minimize/expand">Forecast Lab <button class="doc-btn" onclick="openResearchDoc('forecast_lab')" title="How this works">?</button><button class="fc-minimize-btn" id="fcMinBtn" onclick="toggleFcMinimize()" title="Minimize — shows top 5 rows">⊟</button></h2>
         <div style="font-size:0.78rem;color:#6e7681" id="fcMeta">Loading…</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -5159,7 +5252,11 @@ erDiagram
   text-align: center; padding: 6px 8px; font-size: 0.68rem; font-weight: 700;
   color: #6e7681; text-transform: uppercase; letter-spacing: .06em;
   border-bottom: 1px solid #30363d; white-space: nowrap;
+  position: sticky; top: 0; z-index: 2; background: #0d1117;
 }
+#fcBody.fc-minimized { max-height: 360px; overflow-y: auto; border: 1px solid #30363d; border-radius: 8px; }
+.fc-minimize-btn { background:none; border:1px solid #30363d; border-radius:6px; padding:3px 8px; color:#6e7681; font-size:0.75rem; cursor:pointer; margin-left:8px; transition:border-color .15s,color .15s; user-select:none; }
+.fc-minimize-btn:hover { border-color:#58a6ff; color:#58a6ff; }
 .fc-table thead tr:first-child th { border-bottom: none; }
 .fc-table thead tr:last-child th  { border-top: none; padding-top: 2px; }
 .fc-table th:first-child { text-align: left; }
@@ -5549,7 +5646,7 @@ erDiagram
 // ── Permissions ───────────────────────────────────────
 // Map permission key → page name used in showPage()
 const TAB_PAGE_MAP = {
-  dashboard: 'dashboard', trades: 'trades', scores: 'scores',
+  dashboard: 'dashboard', trades: 'trades',
   market: 'market', stats: 'stats', research: 'research',
   bot_rules: 'bot', admin_bot: 'admin', calendar: 'calendar',
 };
@@ -6607,6 +6704,50 @@ const WIDGET_DOCS = {
 
       <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Historical Accuracy</h4>
       <p>The table at the bottom tracks per-week accuracy over time. Direction accuracy (did we get up/down right?) is more meaningful than absolute error for trading decisions.</p>
+    `,
+  },
+
+  earnings_preview: {
+    title: 'Earnings Preview (Next Week) — How It Works',
+    body: `
+      <p>Earnings Preview deep-dives into the top 12 stocks (by market cap) reporting earnings in the next 7 days. Each card is generated fresh from live Yahoo Finance, SEC EDGAR, and analyst data.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Trend Badge</h4>
+      <p>The badge (🚀 Very Strong → ⚠️ Very Weak) is a composite score built from 6 signals:</p>
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem;margin-bottom:12px">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:7px 0;color:#e6edf3;font-weight:600;width:200px">EPS beat count (4 qtrs)</td><td style="padding:7px 0;color:#8b949e">Beat all 4 → +5 · 3 → +3 · 2 → +1 · 1 → 0 · 0 → −1</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:7px 0;color:#e6edf3;font-weight:600">Strong quarter count</td><td style="padding:7px 0;color:#8b949e">≥3 strong quarters → +2 · ≥2 → +1</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:7px 0;color:#e6edf3;font-weight:600">Weak quarter count</td><td style="padding:7px 0;color:#8b949e">≥3 weak quarters → −2 · ≥2 → −1</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:7px 0;color:#e6edf3;font-weight:600">Analyst consensus</td><td style="padding:7px 0;color:#8b949e">Strong Buy → +3 · Buy → +2 · Sell → −2 · Strong Sell → −3</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:7px 0;color:#e6edf3;font-weight:600">RSI</td><td style="padding:7px 0;color:#8b949e">&gt;65 (overbought) → +1 · &lt;35 (oversold) → −1</td></tr>
+        <tr><td style="padding:7px 0;color:#e6edf3;font-weight:600">Revenue growth</td><td style="padding:7px 0;color:#8b949e">&gt;15% YoY → +1 · negative → −1</td></tr>
+      </table>
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 0;width:120px"><span style="color:#10b981;font-weight:700">🚀 Very Strong</span></td><td style="padding:6px 0;color:#8b949e">Score ≥ 8</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 0"><span style="color:#58a6ff;font-weight:700">📈 Strong</span></td><td style="padding:6px 0;color:#8b949e">Score 4 – 7</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 0"><span style="color:#f0883e;font-weight:700">➡️ Neutral</span></td><td style="padding:6px 0;color:#8b949e">Score 1 – 3</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 0"><span style="color:#f85149;font-weight:700">📉 Weak</span></td><td style="padding:6px 0;color:#8b949e">Score −2 – 0</td></tr>
+        <tr><td style="padding:6px 0"><span style="color:#ff6b6b;font-weight:700">⚠️ Very Weak</span></td><td style="padding:6px 0;color:#8b949e">Score &lt; −2</td></tr>
+      </table>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Consensus vs Trend Conflict</h4>
+      <p><strong style="color:#e6edf3">When consensus says Strong Buy but trend badge shows Weak</strong> — trust the consensus for your decision. Consensus is forward-looking (analysts factor in the next quarter). The Weak badge often means the stock had rough past quarters but analysts already expect a turnaround. Check that revenue growth is also positive to confirm the thesis.</p>
+      <p><strong style="color:#e6edf3">When consensus is neutral/sell but trend shows Strong</strong> — the stock beat estimates consistently but analysts are cautious. This can happen after a big run-up where the price is seen as fully valued. Good for momentum plays, but watch the price target vs current price.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Last 4 Quarters (EPS boxes)</h4>
+      <p>Each box shows one quarter of EPS history from SEC EDGAR. Quality is rated based on year-over-year EPS growth:</p>
+      <ul style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:4px">
+        <li><strong style="color:#10b981">✓ Strong</strong> — EPS grew solidly YoY</li>
+        <li><strong style="color:#58a6ff">~ Moderate</strong> — EPS grew modestly YoY</li>
+        <li><strong style="color:#f85149">✗ Weak</strong> — EPS shrank YoY</li>
+        <li><strong style="color:#6e7681">? Unknown</strong> — No EDGAR data available (foreign-listed ADRs like BABA/BIDU/NIO, very new companies, or no XBRL filing). These stocks get 0 quarters → −1 from the beat-count signal, but a Strong Buy consensus still adds +3 to offset it.</li>
+      </ul>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Conviction Score (bottom-right pill)</h4>
+      <p>The live conviction score (0–100) from the full 14-signal scoring engine — RSI, MACD, EMA alignment, volume, analyst consensus, earnings proximity, and more. Grade A ≥70, B ≥55, C ≥40, F &lt;40. This is independent of the trend badge and reflects real-time technical + fundamental signals.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Cache &amp; Refresh</h4>
+      <p>Results are cached for 2 hours per day. Click <strong style="color:#e6edf3">↻ Refresh</strong> to force-reload all data fresh from Yahoo Finance and SEC EDGAR. Takes 20–30 seconds as it fetches up to 12 stocks in parallel.</p>
     `,
   },
 };
@@ -8174,7 +8315,7 @@ function setSource(src) {
   _dashSource = null;
   _posSortState = { col: null, dir: 'asc' };
   loadDashboard();
-  loadStrongBuys();
+  loadTomorrowCatalysts();
   loadIntradayPicks();
   loadPnl();
   if (document.getElementById('page-trades')?.classList.contains('active')) loadTrades();
@@ -8586,7 +8727,7 @@ function showPage(name, btn) {
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadStrongBuys(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, scores: loadScores, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); } };
   loaders[name]?.();
 }
 
@@ -8603,6 +8744,7 @@ function switchWidgetTab(name) {
   });
   if (name === 'watchlist') loadDashboardWatchlist();
   if (name === 'positions') loadPnl();
+  if (name === 'cp') initCatalystPerfTab();
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -8870,6 +9012,234 @@ async function loadStrongBuys(force = false) {
     </table>`;
 }
 
+// ── Tomorrow's Catalysts ──────────────────────────────
+async function loadTomorrowCatalysts(force = false) {
+  const body = document.getElementById('tcBody');
+  const meta = document.getElementById('tcMeta');
+  if (!body) return;
+
+  if (force) {
+    body.innerHTML = '<div class="loading" style="padding:32px;text-align:center">Loading catalysts…</div>';
+    if (meta) meta.textContent = 'Loading…';
+  }
+
+  const d = await api('/api/tomorrow-catalysts' + (force ? '?force=1' : ''), 60_000);
+  if (!d) {
+    body.innerHTML = '<div class="tc-empty">Failed to load — click ↻ Refresh to try again.</div>';
+    return;
+  }
+
+  const ts = d.generated_at ? new Date(d.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const total = (d.amc_tonight?.length || 0) + (d.bmo_tomorrow?.length || 0) + (d.pre_drift?.length || 0);
+  if (meta) meta.textContent = `${total} catalysts · ${ts}`;
+
+  renderTomorrowCatalysts(d);
+}
+
+function renderTomorrowCatalysts(data) {
+  const body = document.getElementById('tcBody');
+  if (!body) return;
+
+  function consensusLabel(c) {
+    return { strong_buy: 'Strong Buy', buy: 'Buy', hold: 'Hold', sell: 'Sell', strong_sell: 'Strong Sell' }[c] || (c || '—');
+  }
+
+  function tcCard(s) {
+    const price    = s.price    != null ? `$${(+s.price).toFixed(2)}` : '—';
+    const prePct   = s.pre_chg_pct != null ? `<span style="color:${s.pre_chg_pct >= 0 ? '#3fb950':'#f85149'};font-size:0.72rem">${s.pre_chg_pct >= 0 ? '+' : ''}${(+s.pre_chg_pct).toFixed(2)}% pre</span>` : '';
+    const epsEst   = s.eps_estimate != null ? `$${(+s.eps_estimate).toFixed(2)}` : '—';
+    const surprise = s.avg_surprise_pct != null ? `<span style="color:${s.avg_surprise_pct >= 0 ? '#3fb950':'#f85149'}">${s.avg_surprise_pct >= 0 ? '+' : ''}${(+s.avg_surprise_pct).toFixed(1)}%</span>` : '—';
+    const upside   = s.analyst_upside != null ? `<span style="color:#3fb950;font-size:0.75rem"> +${(+s.analyst_upside).toFixed(0)}%↑</span>` : '';
+    const target   = s.analyst_target != null ? `$${(+s.analyst_target).toFixed(0)}${upside}` : '—';
+    const cons     = s.analyst_consensus ? `<span class="tc-consensus ${s.analyst_consensus}">${consensusLabel(s.analyst_consensus)}</span>` : '—';
+    const dateStr  = s.date ? `<span style="font-size:0.68rem;color:#6e7681">${s.date}</span>` : '';
+
+    const newsHtml = s.top_news?.title
+      ? `<div class="tc-news">${s.top_news.title.length > 90 ? s.top_news.title.slice(0, 90) + '…' : s.top_news.title}</div>`
+      : '';
+
+    return `<div class="tc-card">
+      <div class="tc-card-head">
+        <div>
+          <div class="tc-sym sym-link" data-symbol="${s.symbol}">${s.symbol}</div>
+          <div class="tc-co">${s.company || ''}</div>
+        </div>
+        <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          ${dateStr}
+          <div style="font-size:0.85rem;font-weight:700;color:#e6edf3">${price} ${prePct}</div>
+        </div>
+      </div>
+      <div class="tc-metrics">
+        <div class="tc-metric"><div class="tc-metric-lbl">EPS Est</div><div class="tc-metric-val">${epsEst}</div></div>
+        <div class="tc-metric"><div class="tc-metric-lbl">Hist Surprise</div><div class="tc-metric-val">${surprise}</div></div>
+        <div class="tc-metric"><div class="tc-metric-lbl">Analyst PT</div><div class="tc-metric-val">${target}</div></div>
+        <div class="tc-metric"><div class="tc-metric-lbl">Consensus</div><div class="tc-metric-val">${cons}</div></div>
+      </div>
+      ${newsHtml}
+    </div>`;
+  }
+
+  function section(label, items) {
+    if (!items?.length) return '';
+    return `<div>
+      <div class="tc-section-hdr">${label} <span>${items.length} stock${items.length !== 1 ? 's' : ''}</span></div>
+      <div class="tc-cards">${items.map(tcCard).join('')}</div>
+    </div>`;
+  }
+
+  const html = `<div class="tc-sections">
+    ${section('AMC Tonight — Earnings after close', data.amc_tonight)}
+    ${section('BMO Tomorrow — Earnings before open', data.bmo_tomorrow)}
+    ${section('Pre-Drift Window — Earnings in 2–5 Days', data.pre_drift)}
+  </div>`;
+
+  const hasAny = (data.amc_tonight?.length || 0) + (data.bmo_tomorrow?.length || 0) + (data.pre_drift?.length || 0);
+  body.innerHTML = hasAny ? html : '<div class="tc-empty">No upcoming earnings catalysts found for tomorrow\'s window.</div>';
+
+  // Wire sym-link clicks
+  body.querySelectorAll('.sym-link').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => openExplorerForSymbol(el.dataset.symbol));
+  });
+}
+
+// ── Catalyst Performance (Trade Results) ─────────────
+let _cpDates = [];
+
+async function initCatalystPerfTab() {
+  // Load available dates, set picker to most recent, then load results
+  if (!_cpDates.length) {
+    const d = await api('/api/catalyst-performance/dates');
+    _cpDates = d?.dates ?? [];
+  }
+  const picker = document.getElementById('cpDatePicker');
+  if (picker && !picker.value && _cpDates.length) {
+    picker.value = _cpDates[0].date;
+  }
+  loadCatalystPerf();
+}
+
+async function loadCatalystPerf() {
+  const body   = document.getElementById('cpBody');
+  const picker = document.getElementById('cpDatePicker');
+  if (!body) return;
+  const date = picker?.value;
+  if (!date) {
+    body.innerHTML = '<div class="cp-empty">Select a date above to view results.</div>';
+    return;
+  }
+  body.innerHTML = '<div class="loading" style="padding:32px;text-align:center">Loading…</div>';
+  const d = await api(`/api/catalyst-performance?date=${date}`);
+  if (!d) { body.innerHTML = '<div class="cp-empty">Failed to load.</div>'; return; }
+  renderCatalystPerf(d);
+}
+
+function renderCatalystPerf(data) {
+  const body = document.getElementById('cpBody');
+  const { results = [], trade_date } = data;
+
+  if (!results.length) {
+    body.innerHTML = `<div class="cp-empty">No data for ${trade_date}. Results are computed at 10:05 AM ET on the next trading day.<br>
+      <button class="refresh-btn" style="margin-top:12px" onclick="triggerCatalystPerfRun('${trade_date}')">▶ Compute Now (Admin)</button>
+    </div>`;
+    return;
+  }
+
+  // Summary stats
+  const withData = results.filter(r => r.pnl_1000 != null);
+  const totalPnl = withData.reduce((s, r) => s + +r.pnl_1000, 0);
+  const wins     = withData.filter(r => +r.pnl_1000 > 0).length;
+  const avgPct   = withData.length ? (withData.reduce((s, r) => s + +r.change_pct, 0) / withData.length) : null;
+  const best     = withData.reduce((b, r) => (+r.pnl_1000 > +(b?.pnl_1000 || -Infinity) ? r : b), null);
+  const worst    = withData.reduce((b, r) => (+r.pnl_1000 < +(b?.pnl_1000 || Infinity)  ? r : b), null);
+
+  const pnlColor = totalPnl >= 0 ? '#3fb950' : '#f85149';
+  const pctColor = n => +n >= 0 ? '#3fb950' : '#f85149';
+
+  const nextDay = (() => {
+    const d = new Date(trade_date + 'T12:00:00Z');
+    let n = new Date(d.getTime() + 86400000);
+    while (n.getUTCDay() === 0 || n.getUTCDay() === 6) n = new Date(n.getTime() + 86400000);
+    return n.toISOString().split('T')[0];
+  })();
+
+  const summaryHtml = `
+    <div class="cp-summary">
+      <div class="cp-summary-stat">
+        <div class="cp-summary-lbl">Buy Date</div>
+        <div class="cp-summary-val" style="font-size:0.85rem;color:#e6edf3">${trade_date}</div>
+      </div>
+      <div class="cp-summary-stat">
+        <div class="cp-summary-lbl">Sell Date</div>
+        <div class="cp-summary-val" style="font-size:0.85rem;color:#e6edf3">${nextDay} open</div>
+      </div>
+      <div class="cp-summary-stat">
+        <div class="cp-summary-lbl">Stocks</div>
+        <div class="cp-summary-val" style="color:#e6edf3">${results.length}</div>
+      </div>
+      <div class="cp-summary-stat">
+        <div class="cp-summary-lbl">Win Rate</div>
+        <div class="cp-summary-val" style="color:${wins/withData.length>=0.5?'#3fb950':'#f85149'}">${wins}/${withData.length}</div>
+      </div>
+      <div class="cp-summary-stat">
+        <div class="cp-summary-lbl">Avg Move</div>
+        <div class="cp-summary-val" style="color:${pctColor(avgPct)}">${avgPct!=null?(avgPct>=0?'+':'')+avgPct.toFixed(2)+'%':'—'}</div>
+      </div>
+      <div class="cp-summary-stat">
+        <div class="cp-summary-lbl">Total P&L (×$1K each)</div>
+        <div class="cp-summary-val" style="color:${pnlColor}">${totalPnl>=0?'+':''}$${totalPnl.toFixed(0)}</div>
+      </div>
+      <div class="cp-note">Strategy: Buy at prev close · Sell at earnings-day open · $1,000 per stock</div>
+    </div>`;
+
+  const cards = results.map(r => {
+    const pct     = r.change_pct  != null ? +r.change_pct  : null;
+    const pnl     = r.pnl_1000    != null ? +r.pnl_1000    : null;
+    const color   = pct == null ? '#6e7681' : pct >= 0 ? '#3fb950' : '#f85149';
+    const pctStr  = pct  != null ? (pct  >= 0 ? '+' : '') + pct.toFixed(2)  + '%' : '—';
+    const pnlStr  = pnl  != null ? (pnl  >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2) : '—';
+    const entry   = r.entry_price != null ? '$' + (+r.entry_price).toFixed(2) : '—';
+    const exit    = r.exit_price  != null ? '$' + (+r.exit_price).toFixed(2)  : '—';
+    const badge   = r.bucket === 'amc'
+      ? `<span class="cp-badge-amc">AMC</span>`
+      : `<span class="cp-badge-bmo">BMO</span>`;
+    const noPrices = r.entry_price == null || r.exit_price == null;
+    return `<div class="cp-card">
+      <div class="cp-card-top">
+        <div>
+          <div class="cp-sym sym-link" data-symbol="${r.symbol}">${r.symbol}</div>
+          <div class="cp-co">${r.company || ''}</div>
+        </div>
+        ${badge}
+      </div>
+      <div class="cp-prices">
+        <span>${entry}</span>
+        <span class="cp-arrow">→</span>
+        <span>${exit}</span>
+        ${noPrices ? '<span style="font-size:0.68rem;color:#f0883e">price unavailable</span>' : ''}
+      </div>
+      <div class="cp-result">
+        <div class="cp-pct" style="color:${color}">${pctStr}</div>
+        <div class="cp-pnl" style="color:${color}">${pnlStr}</div>
+      </div>
+      <div class="cp-1000">on $1,000 invested</div>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = summaryHtml + `<div class="cp-grid">${cards}</div>`;
+
+  body.querySelectorAll('.sym-link').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => openExplorerForSymbol(el.dataset.symbol));
+  });
+}
+
+async function triggerCatalystPerfRun(date) {
+  const d = await api('/api/catalyst-performance/run', 30000, 'POST', { date });
+  if (d?.ok) loadCatalystPerf();
+  else alert('Run failed: ' + (d?.error || 'unknown error'));
+}
+
 // ── Intraday Picks ────────────────────────────────────
 const SETUP_COLOR = {
   'Gap & Go':          '#3fb950',
@@ -9006,12 +9376,12 @@ async function loadScores() {
   scores.sort((a, b) => (gradeOrder[a.grade] ?? 9) - (gradeOrder[b.grade] ?? 9) || b.score - a.score);
 
   document.getElementById('scoresTable').innerHTML = `
-    <div class="table-head">
-      <h3>Conviction Scores ${dateLabel ? `<span style="font-size:0.8rem;color:${isToday ? '#3fb950' : '#f0883e'};font-weight:400">● ${dateLabel}</span>` : ''} <button class="doc-btn" onclick="openResearchDoc('scores')" title="How this works">?</button></h3>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:0.75rem;color:#6e7681;background:#161b22;border:1px solid #21262d;border-radius:4px;padding:2px 8px">🌐 Market-wide · same for all users</span>
-        <button class="refresh-btn" onclick="loadScores()">↻ Refresh</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:0.85rem;font-weight:600;color:#e6edf3">
+        Conviction Scores
+        ${dateLabel ? `<span style="font-size:0.78rem;color:${isToday ? '#3fb950' : '#f0883e'};font-weight:400;margin-left:6px">● ${dateLabel}</span>` : ''}
       </div>
+      <span style="font-size:0.73rem;color:#6e7681;background:#161b22;border:1px solid #21262d;border-radius:4px;padding:2px 8px">🌐 Market-wide · same for all users</span>
     </div>
     ${scores.length === 0 ? '<div class="empty">No scores yet — starts recording once the scanner runs</div>' : `
     <table>
@@ -9033,6 +9403,27 @@ async function loadScores() {
 // ─── Earnings Calendar ────────────────────────────────────────────────────────
 // ── Forecast Lab ──────────────────────────────────────────────
 let _fcData = null;
+let _fcMinimized = false;
+
+function toggleFcMinimize() {
+  _fcMinimized = !_fcMinimized;
+  const body  = document.getElementById('fcBody');
+  const btn   = document.getElementById('fcMinBtn');
+  const stats = document.getElementById('fcStats');
+  const movers= document.getElementById('fcMovers');
+  if (_fcMinimized) {
+    body.classList.add('fc-minimized');
+    if (stats)  stats.style.display = 'none';
+    if (movers) movers.style.display = 'none';
+    if (btn) { btn.textContent = '⊞'; btn.title = 'Expand'; }
+  } else {
+    body.classList.remove('fc-minimized');
+    if (stats)  stats.style.display = '';
+    // movers only visible if it had content
+    if (movers && movers.dataset.hasContent === '1') movers.style.display = '';
+    if (btn) { btn.textContent = '⊟'; btn.title = 'Minimize — shows top 5 rows'; }
+  }
+}
 
 function fcFmt(n) { return n == null ? '—' : '$' + Number(n).toFixed(2); }
 function fcPct(n)  { return n == null ? '' : (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%'; }
@@ -9076,8 +9467,8 @@ async function loadForecast(force = false) {
 function renderFcMovers(movers) {
   const el = document.getElementById('fcMovers');
   if (!el) return;
-  if (!movers.length) { el.style.display = 'none'; return; }
-  el.style.display = '';
+  if (!movers.length) { el.style.display = 'none'; el.dataset.hasContent = '0'; return; }
+  el.style.display = ''; el.dataset.hasContent = '1';
   const gradeColor = { A: '#39d353', B: '#58a6ff', C: '#f0883e', F: '#f85149' };
   el.innerHTML = `
     <div style="font-size:0.78rem;font-weight:600;color:#8b949e;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em">
@@ -9588,8 +9979,167 @@ function renderEarningsCalendar() {
   grid.innerHTML = html;
 }
 
+// ── Earnings Preview ──────────────────────────────────────────────
+let _epLoaded = false;
+
+async function loadEarningsPreview(force = false) {
+  const body = document.getElementById('epBody');
+  const btn  = document.getElementById('epRefreshBtn');
+  if (!body) return;
+  body.innerHTML = '<div class="loading" style="padding:32px;text-align:center">Loading earnings preview… (this may take 20–30s)</div>';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading…'; }
+  try {
+    const data = await api(`/api/earnings-preview${force ? '?force=1' : ''}`, 60000);
+    if (data?.stocks) { renderEarningsPreview(data); _epLoaded = true; }
+    else body.innerHTML = '<div style="padding:24px;text-align:center;color:#f85149">No data returned. Try again.</div>';
+  } catch (err) {
+    body.innerHTML = `<div style="padding:24px;text-align:center;color:#f85149">Error: ${err.message}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+  }
+}
+
+function renderEarningsPreview(data) {
+  const body = document.getElementById('epBody');
+  if (!body) return;
+  if (!data.stocks || !data.stocks.length) {
+    body.innerHTML = '<div style="padding:24px;text-align:center;color:#8b949e">No earnings stocks found for next 7 days.</div>';
+    return;
+  }
+
+  const trendCls = l => ({'Very Strong':'very-strong','Strong':'strong','Neutral':'neutral','Weak':'weak','Very Weak':'very-weak'})[l] || 'neutral';
+  const trendIco = l => ({'Very Strong':'🚀','Strong':'📈','Neutral':'➡️','Weak':'📉','Very Weak':'⚠️'})[l] || '—';
+  const pctFmt = (v, dp=1) => v != null ? `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%` : '—';
+  const moneyFmt = v => {
+    if (v == null) return '—';
+    if (Math.abs(v) >= 1e9) return `$${(v/1e9).toFixed(1)}B`;
+    if (Math.abs(v) >= 1e6) return `$${(v/1e6).toFixed(0)}M`;
+    return `$${v.toFixed(0)}`;
+  };
+  const scoreColor = s => s >= 70 ? '#10b981' : s >= 50 ? '#f0883e' : '#f85149';
+  const gradeColor = g => ({A:'#10b981',B:'#58a6ff',C:'#f0883e',F:'#f85149'})[g] || '#8b949e';
+
+  let html = '<div class="ep-grid">';
+
+  for (const s of data.stocks) {
+    const tc = trendCls(s.trend_label);
+    const callStr = s.call_time && s.call_time !== '?' ? ` · ${s.call_time}` : '';
+
+    html += `<div class="ep-card">
+      <div class="ep-card-head">
+        <div>
+          <div class="ep-sym" onclick="openExplorerForSymbol('${s.symbol}')">${s.symbol}</div>
+          <div class="ep-co">${s.company || ''}</div>
+        </div>
+        <div class="ep-date-chip">${s.earnings_date || '—'}${callStr}</div>
+      </div>
+      <span class="ep-trend ${tc}">${trendIco(s.trend_label)} ${s.trend_label}</span>`;
+
+    // 4-quarter history
+    html += `<div class="ep-section">
+      <div class="ep-label">Last 4 Quarters (EPS)</div>
+      <div class="ep-quarters">`;
+    if (s.quarters && s.quarters.length) {
+      for (const q of s.quarters) {
+        const qc  = q.quality || 'unknown';
+        const ico = {strong:'✓', moderate:'~', weak:'✗'}[qc] || '?';
+        const val = q.actual != null ? `$${q.actual.toFixed(2)}` : '—';
+        const lbl = q.period || (q.end_date || '').slice(0, 7) || '—';
+        html += `<div class="ep-q ${qc}">
+          <div class="ep-q-period">${lbl}</div>
+          <div class="ep-q-icon">${ico}</div>
+          <div class="ep-q-val">${val}</div>
+        </div>`;
+      }
+    } else {
+      html += '<div style="color:#6e7681;font-size:0.75rem;padding:6px 0;width:100%">No history</div>';
+    }
+    html += '</div></div>';
+
+    // Analyst & financials
+    const epsRange = (s.eps_est_low != null && s.eps_est_high != null)
+      ? ` <span style="font-size:0.62rem;color:#6e7681">(${s.eps_est_low.toFixed(2)}–${s.eps_est_high.toFixed(2)})</span>`
+      : '';
+    const revGrowthColor = s.revenue_growth != null ? (s.revenue_growth > 0 ? '#10b981' : '#f85149') : '#8b949e';
+
+    html += `<div class="ep-section">
+      <div class="ep-label">Analyst Estimates &amp; Financials</div>
+      <div class="ep-metrics">
+        <div class="ep-metric">
+          <div class="ep-metric-label">EPS Est</div>
+          <div class="ep-metric-val">${s.eps_estimate != null ? '$' + s.eps_estimate.toFixed(2) : '—'}${epsRange}</div>
+        </div>
+        <div class="ep-metric">
+          <div class="ep-metric-label">Rev Est</div>
+          <div class="ep-metric-val">${moneyFmt(s.revenue_estimate)}</div>
+        </div>
+        <div class="ep-metric">
+          <div class="ep-metric-label">Rev Growth</div>
+          <div class="ep-metric-val" style="color:${revGrowthColor}">${pctFmt(s.revenue_growth)}</div>
+        </div>
+        <div class="ep-metric">
+          <div class="ep-metric-label">Gross Margin</div>
+          <div class="ep-metric-val">${pctFmt(s.gross_margins)}</div>
+        </div>
+        <div class="ep-metric">
+          <div class="ep-metric-label">Price Target</div>
+          <div class="ep-metric-val">${s.analyst_target != null ? '$' + s.analyst_target.toFixed(0) : '—'}</div>
+        </div>
+        <div class="ep-metric">
+          <div class="ep-metric-label">Consensus</div>
+          <div class="ep-metric-val" style="font-size:0.7rem">${({'strong_buy':'Strong Buy','buy':'Buy','sell':'Sell','strong_sell':'Strong Sell'})[s.analyst_consensus] || s.analyst_consensus || '—'}</div>
+        </div>
+      </div>
+    </div>`;
+
+    // Recent news
+    if (s.news && s.news.length) {
+      html += '<div class="ep-section"><div class="ep-label">Recent News</div>';
+      for (const n of s.news) {
+        const ago = n.published ? timeAgo(n.published) : '';
+        html += `<div class="ep-news-item">
+          <a href="${n.url || '#'}" target="_blank" rel="noopener">${n.title || 'Untitled'}</a>
+          ${ago ? `<span style="color:#6e7681;font-size:0.62rem;margin-left:4px">${ago}</span>` : ''}
+        </div>`;
+      }
+      html += '</div>';
+    }
+
+    // Footer: price + conviction score
+    const priceStr = s.price != null ? `$${s.price.toFixed(2)}` : '—';
+    const chgColor = s.change_pct != null ? (s.change_pct >= 0 ? '#10b981' : '#f85149') : '#8b949e';
+    const chgStr   = s.change_pct != null ? `${s.change_pct >= 0 ? '+' : ''}${s.change_pct.toFixed(2)}%` : '';
+    let scorePill = '';
+    if (s.conviction_score != null) {
+      const sc = scoreColor(s.conviction_score);
+      scorePill = `<span class="ep-score-pill" style="color:${sc};border-color:${sc}">
+        ${s.conviction_grade ? `<span style="color:${gradeColor(s.conviction_grade)}">${s.conviction_grade}</span> · ` : ''}${s.conviction_score}
+      </span>`;
+    }
+
+    html += `<div class="ep-footer">
+      <div>
+        <span class="ep-price">${priceStr}</span>
+        ${chgStr ? `<span class="ep-chg" style="color:${chgColor};margin-left:6px">${chgStr}</span>` : ''}
+      </div>
+      ${scorePill}
+    </div>`;
+
+    html += '</div>';  // end .ep-card
+  }
+
+  html += '</div>';  // end .ep-grid
+
+  const genAt = data.generated_at
+    ? new Date(data.generated_at).toLocaleTimeString('en-SG', {timeZone:'Asia/Singapore',hour12:false}) + ' SGT'
+    : '';
+  if (genAt) html += `<div style="font-size:0.68rem;color:#6e7681;text-align:right;margin-top:8px">Generated ${genAt} · ${data.stocks.length} stocks</div>`;
+
+  body.innerHTML = html;
+}
+
 // ── loadCalendar alias keeps showPage() loader working ────────────
-function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); loadEarningsCalendar(); loadEarningsReaction('NVDA'); }
+function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); loadEarningsCalendar(); loadEarningsReaction('NVDA'); loadEarningsPreview(); }
 
 // ── Earnings Reaction Analysis ─────────────────────────────────────
 let _erCurrentSym = 'NVDA';
@@ -9632,7 +10182,7 @@ async function loadEarningsReaction(sym, force = false) {
     `<span class="${v > 0 ? 'er-up' : v < 0 ? 'er-dn' : 'er-muted'}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
   const fmtPrice = v => v == null ? '—' : `$${v.toFixed(2)}`;
 
-  // grpCls is applied only to the first cell of each column group (for the left divider border)
+  // Full detail cell: Close + Volume + Chg% (3 cols)
   const dayCell = (bar, grpCls='') => {
     if (!bar) return `<td class="${grpCls}" colspan="3" style="text-align:center;color:var(--muted)">—</td>`;
     return `<td class="er-price ${grpCls}">${fmtPrice(bar.close)}</td>` +
@@ -9640,12 +10190,22 @@ async function loadEarningsReaction(sym, force = false) {
            `<td>${fmtPct(bar.pct_chg)}</td>`;
   };
 
-  // Compute averages over events that have the relevant data
+  // Compact pre-day cell: just Chg% (1 col)
+  const preCell = (bar, label) => {
+    if (!bar) return `<td style="padding:5px 7px;text-align:center;color:var(--muted);font-size:0.72rem" title="${label}">—</td>`;
+    return `<td style="padding:5px 7px;text-align:center;font-size:0.72rem;white-space:nowrap" title="${label} · $${bar.close?.toFixed(2)}">${fmtPct(bar.pct_chg)}</td>`;
+  };
+
   const avg = (arr, fn) => {
     const vals = arr.map(fn).filter(v => v != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
   const evs = data.events;
+
+  // Pre-day sub-headers: E-10 … E-1
+  const preSubHdrs = Array.from({length:10}, (_,i) =>
+    `<th style="color:#cdd9e5;font-size:0.63rem;padding:4px 7px">E-${10-i}</th>`
+  ).join('');
 
   let rows = evs.map(e => {
     const beat = e.surprise_pct != null ? e.surprise_pct > 0 : null;
@@ -9657,26 +10217,31 @@ async function loadEarningsReaction(sym, force = false) {
     const epsDetail = (e.eps_actual != null)
       ? `<div style="font-size:0.68rem;color:var(--text2);margin-top:2px">A:${e.eps_actual.toFixed(2)} E:${e.eps_estimate?.toFixed(2)??'—'}</div>`
       : '';
+    const preDays = e.pre_days || Array(10).fill(null);
+    const preCells = preDays.map((d, i) => preCell(d, `E-${10-i}`)).join('');
     return `<tr>
-      <td class="er-th-left" style="font-size:0.8rem;color:var(--text);font-weight:600">${e.earnings_date}</td>
+      <td class="er-th-left" style="font-size:0.8rem;color:var(--text);font-weight:600;white-space:nowrap">${e.earnings_date}</td>
       <td style="text-align:center">${epsBadge}${epsDetail}</td>
-      ${dayCell(e.prev_day)}
+      ${preCells}
       ${dayCell(e.earnings_day, 'er-group-e0')}
       ${dayCell(e.next_day,     'er-group-ep1')}
     </tr>`;
   }).join('');
 
   // Average row
-  const avgPrevPct  = avg(evs, e => e.prev_day?.pct_chg);
-  const avgPrevVol  = avg(evs, e => e.prev_day?.volume);
-  const avgE0Pct    = avg(evs, e => e.earnings_day?.pct_chg);
-  const avgE0Vol    = avg(evs, e => e.earnings_day?.volume);
-  const avgEp1Pct   = avg(evs, e => e.next_day?.pct_chg);
-  const avgEp1Vol   = avg(evs, e => e.next_day?.volume);
+  const avgPrePcts = Array.from({length:10}, (_,i) => avg(evs, e => e.pre_days?.[i]?.pct_chg));
+  const avgE0Pct   = avg(evs, e => e.earnings_day?.pct_chg);
+  const avgE0Vol   = avg(evs, e => e.earnings_day?.volume);
+  const avgEp1Pct  = avg(evs, e => e.next_day?.pct_chg);
+  const avgEp1Vol  = avg(evs, e => e.next_day?.volume);
+
+  const avgPreCells = avgPrePcts.map(v =>
+    `<td style="padding:5px 7px;text-align:center;font-size:0.72rem">${fmtPct(v)}</td>`
+  ).join('');
 
   const avgRow = `<tr class="er-avg">
     <td colspan="2" style="color:var(--text2);font-size:0.75rem">Avg (${evs.length} events)</td>
-    <td>—</td><td class="er-vol">${fmtVol(avgPrevVol)}</td><td>${fmtPct(avgPrevPct)}</td>
+    ${avgPreCells}
     <td class="er-group-e0">—</td><td class="er-vol">${fmtVol(avgE0Vol)}</td><td>${fmtPct(avgE0Pct)}</td>
     <td class="er-group-ep1">—</td><td class="er-vol">${fmtVol(avgEp1Vol)}</td><td>${fmtPct(avgEp1Pct)}</td>
   </tr>`;
@@ -9687,13 +10252,13 @@ async function loadEarningsReaction(sym, force = false) {
         <thead>
           <tr>
             <th class="er-th-left" rowspan="2">Date</th>
-            <th rowspan="2" style="color:#e6edf3">EPS vs Estimate</th>
-            <th class="er-group" colspan="3">Day Before</th>
-            <th class="er-group er-group-hdr-e0" colspan="3">Reaction Day (highest vol)</th>
+            <th rowspan="2" style="color:#e6edf3">EPS vs Est</th>
+            <th class="er-group" colspan="10">Last 10 Days Before Earnings (Chg%)</th>
+            <th class="er-group er-group-hdr-e0" colspan="3">Reaction Day</th>
             <th class="er-group er-group-hdr-ep1" colspan="3">Day After</th>
           </tr>
           <tr>
-            <th style="color:#cdd9e5">Close</th><th style="color:#cdd9e5">Volume</th><th style="color:#cdd9e5">Chg%</th>
+            ${preSubHdrs}
             <th class="er-sub-e0">Close</th><th class="er-sub-e0">Volume</th><th class="er-sub-e0">Chg%</th>
             <th class="er-sub-ep1">Close</th><th class="er-sub-ep1">Volume</th><th class="er-sub-ep1">Chg%</th>
           </tr>
@@ -10705,14 +11270,14 @@ document.addEventListener('dblclick', e => {
 
 // ── Init ──────────────────────────────────────────────
 loadDashboard();
-loadStrongBuys();              // initial load (uses 15-min cache on server)
+loadTomorrowCatalysts();       // initial load (1h cache on server)
 loadIntradayPicks();           // initial load (uses 10-min cache on server)
 initTicker(); // loads news in background for the ticker strip
 updateStatus();
 loadMarket();                  // populate hero banner market stats on load
 setInterval(refreshPositions, 3_000);   // positions live every 3s
 setInterval(loadDashboard, 30_000);     // full dashboard every 30s
-setInterval(loadStrongBuys, 15 * 60_000); // strong buys every 15 min
+setInterval(loadTomorrowCatalysts, 30 * 60_000); // catalysts every 30 min
 setInterval(loadIntradayPicks, 10 * 60_000); // intraday picks every 10 min
 setInterval(updateStatus, 60_000);
 setInterval(initTicker, 5 * 60_000);   // refresh ticker headlines every 5 min
