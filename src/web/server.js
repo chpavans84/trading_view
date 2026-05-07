@@ -232,10 +232,10 @@ app.use(helmet({
       defaultSrc:     ["'self'"],
       scriptSrc:      ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],   // inline <script> blocks + Chart.js CDN
       scriptSrcAttr:  ["'unsafe-inline'"],             // onclick/onchange/etc. attributes
-      styleSrc:       ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],  // xterm.css loaded from CDN
+      styleSrc:       ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
       imgSrc:         ["'self'", 'data:', 'https:'],
       connectSrc:     ["'self'", "https://cdn.jsdelivr.net"],
-      fontSrc:        ["'self'"],
+      fontSrc:        ["'self'", "https://fonts.gstatic.com"],
       objectSrc:      ["'none'"],
       frameAncestors: ["'none'"],
       baseUri:        ["'self'"],
