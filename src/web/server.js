@@ -1666,12 +1666,17 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
         const nextQTrend = yfTrend.find(t => t.period === '0q') || yfTrend[0] || null;
         const eps_estimate_yf = nextQTrend?.earningsEstimate?.avg ?? null;
 
-        // Current price
+        // Current price — gate pre/post on actual session state to avoid stale data
         const price = yf?.price?.regularMarketPrice ?? null;
-        const pre_price = yf?.price?.preMarketPrice ?? null;
-        const pre_chg_pct = yf?.price?.preMarketChangePercent != null && typeof yf.price.preMarketChangePercent !== 'object'
-          ? yf.price.preMarketChangePercent * 100
-          : null;
+        const tcMktState  = yf?.price?.marketState ?? '';
+        const tcIsPreSess  = tcMktState === 'PRE'  || tcMktState === 'PREPRE';
+        const tcIsPostSess = tcMktState === 'POST' || tcMktState === 'POSTPOST';
+        const pre_price   = tcIsPreSess  ? (yf?.price?.preMarketPrice  ?? null) : null;
+        const pre_chg_pct = tcIsPreSess  && yf?.price?.preMarketChangePercent != null && typeof yf.price.preMarketChangePercent !== 'object'
+          ? yf.price.preMarketChangePercent * 100 : null;
+        const post_price   = tcIsPostSess ? (yf?.price?.postMarketPrice ?? null) : null;
+        const post_chg_pct = tcIsPostSess && yf?.price?.postMarketChangePercent != null && typeof yf.price.postMarketChangePercent !== 'object'
+          ? yf.price.postMarketChangePercent * 100 : null;
 
         return {
           symbol:            sym,
@@ -1683,6 +1688,8 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
           price,
           pre_price,
           pre_chg_pct,
+          post_price,
+          post_chg_pct,
           analyst_consensus: score?.signals?.analyst_consensus ?? null,
           analyst_target:    score?.signals?.analyst_target    ?? null,
           analyst_upside:    score?.signals?.analyst_upside    ?? null,
@@ -2721,49 +2728,53 @@ async function fetchRVOL(symbol) {
 }
 
 async function fetchCurrentPrice(symbol) {
-  // Tier 1: Moomoo (real-time, includes pre/after-hours)
-  try {
-    const q = await getMoomooQuote(symbol);
-    if (q?.success && q.price != null) return { price: +q.price.toFixed(2), change_pct: q.change_pct ?? null, change: q.change ?? null, session: 'regular' };
-  } catch { /* fall through */ }
-  // Tier 2: Yahoo Finance quoteSummary — covers pre-market, regular, after-hours
-  try {
-    const data = await _yf.quoteSummary(symbol, { modules: ['price'] });
-    const p = data?.price;
-    if (!p) throw new Error('no price module');
-    // Pick the most current session price
-    const now = new Date();
-    const etHour = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).getHours();
-    let price, change, change_pct, session;
-    if (etHour < 9 || (etHour === 9 && new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).getMinutes() < 30)) {
-      // Pre-market (before 9:30 AM ET)
-      price      = p.preMarketPrice      ?? p.regularMarketPrice;
-      change     = p.preMarketChange     ?? p.regularMarketChange;
-      change_pct = p.preMarketChangePercent != null ? +(p.preMarketChangePercent * 100).toFixed(2) : null;
-      session    = p.preMarketPrice != null ? 'pre' : 'regular';
-    } else if (etHour >= 16) {
-      // After-hours (4 PM ET onwards)
-      price      = p.postMarketPrice     ?? p.regularMarketPrice;
-      change     = p.postMarketChange    ?? p.regularMarketChange;
-      change_pct = p.postMarketChangePercent != null ? +(p.postMarketChangePercent * 100).toFixed(2) : null;
-      session    = p.postMarketPrice != null ? 'post' : 'regular';
-    } else {
-      price      = p.regularMarketPrice;
-      change     = p.regularMarketChange;
-      change_pct = p.regularMarketChangePercent != null ? +(p.regularMarketChangePercent * 100).toFixed(2) : null;
-      session    = 'regular';
-    }
-    if (price == null) throw new Error('no price');
-    return {
-      price:          +price.toFixed(2),
-      change:         change != null ? +change.toFixed(2) : null,
-      change_pct,
-      session,
-      pre_price:      p.preMarketPrice      != null ? +p.preMarketPrice.toFixed(3)                          : null,
-      pre_change:     p.preMarketChange     != null ? +p.preMarketChange.toFixed(3)                         : null,
-      pre_change_pct: p.preMarketChangePercent != null ? +(p.preMarketChangePercent * 100).toFixed(2)       : null,
-    };
-  } catch { return null; }
+  // Run Moomoo and Yahoo Finance in parallel.
+  // Main price = regular-session price always (real-time from Moomoo during REGULAR,
+  // else last close from Yahoo). Extended hours shown as sub-lines only.
+  const [mmSettled, yfSettled] = await Promise.allSettled([
+    getMoomooQuote(symbol),
+    _yf.quoteSummary(symbol, { modules: ['price'] }),
+  ]);
+
+  const mm  = mmSettled.status === 'fulfilled' ? mmSettled.value : null;
+  const yfd = yfSettled.status === 'fulfilled' ? yfSettled.value : null;
+  const p   = yfd?.price;
+
+  const mktState   = p?.marketState ?? '';
+  const isPreSess  = mktState === 'PRE'  || mktState === 'PREPRE';
+  const isPostSess = mktState === 'POST' || mktState === 'POSTPOST';
+
+  // Extended hours sub-line prices.
+  // Prefer Moomoo real-time data; fall back to Yahoo Finance (gated on session).
+  const regularClose = mm?.price ?? p?.regularMarketPrice;
+  const postPriceRaw = isPostSess ? (mm?.after_market?.price ?? p?.postMarketPrice ?? null) : null;
+  const prePriceRaw  = isPreSess  ? (mm?.pre_market?.price  ?? p?.preMarketPrice  ?? null) : null;
+  const extFields = {
+    pre_price:       prePriceRaw  != null ? +prePriceRaw.toFixed(3)  : null,
+    pre_change:      prePriceRaw  != null && regularClose ? +(prePriceRaw  - regularClose).toFixed(3) : null,
+    pre_change_pct:  prePriceRaw  != null && regularClose ? +((prePriceRaw  - regularClose) / regularClose * 100).toFixed(2) : null,
+    post_price:      postPriceRaw != null ? +postPriceRaw.toFixed(3) : null,
+    post_change:     postPriceRaw != null && regularClose ? +(postPriceRaw - regularClose).toFixed(3) : null,
+    post_change_pct: postPriceRaw != null && regularClose ? +((postPriceRaw - regularClose) / regularClose * 100).toFixed(2) : null,
+  };
+
+  // Main price: Moomoo real-time during REGULAR; otherwise Yahoo regular-session close.
+  if (mktState === 'REGULAR' && mm?.success && mm.price != null) {
+    return { price: +mm.price.toFixed(2), change: mm.change ?? null, change_pct: mm.change_pct ?? null, session: 'regular', ...extFields };
+  }
+
+  if (!p) {
+    // Yahoo failed entirely — use Moomoo curPrice as best-effort fallback
+    if (mm?.success && mm.price != null) return { price: +mm.price.toFixed(2), change: mm.change ?? null, change_pct: mm.change_pct ?? null, session: 'regular', ...extFields };
+    return null;
+  }
+
+  // Non-regular session: show the last regular close as the main price
+  const price      = p.regularMarketPrice;
+  const change     = p.regularMarketChange;
+  const change_pct = p.regularMarketChangePercent != null ? +(p.regularMarketChangePercent * 100).toFixed(2) : null;
+  if (price == null) return null;
+  return { price: +price.toFixed(2), change: change != null ? +change.toFixed(2) : null, change_pct, session: 'regular', ...extFields };
 }
 
 function classifySetup({ rvol, atr_pct, change_pct, rsi, short_float_pct, rs_signal }) {
@@ -3564,7 +3575,7 @@ app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase().trim();
     const q = await fetchCurrentPrice(symbol);
-    if (q) return res.json({ symbol, mid: q.price, price: q.price, change: q.change ?? null, change_pct: q.change_pct ?? null, session: q.session ?? 'regular', pre_price: q.pre_price ?? null, pre_change: q.pre_change ?? null, pre_change_pct: q.pre_change_pct ?? null });
+    if (q) return res.json({ symbol, mid: q.price, price: q.price, change: q.change ?? null, change_pct: q.change_pct ?? null, session: q.session ?? 'regular', pre_price: q.pre_price ?? null, pre_change: q.pre_change ?? null, pre_change_pct: q.pre_change_pct ?? null, post_price: q.post_price ?? null, post_change: q.post_change ?? null, post_change_pct: q.post_change_pct ?? null });
     const alpaca = await getLatestPrice(symbol);
     res.json(alpaca);
   } catch (err) {
@@ -3584,13 +3595,345 @@ app.get('/api/quotes/batch', requireAuth, async (req, res) => {
     symbols.forEach((sym, i) => {
       const r = results[i];
       quotes[sym] = r.status === 'fulfilled' && r.value
-        ? { price: r.value.price, change: r.value.change ?? null, change_pct: r.value.change_pct ?? null, session: r.value.session ?? 'regular' }
+        ? { price: r.value.price, change: r.value.change ?? null, change_pct: r.value.change_pct ?? null, session: r.value.session ?? 'regular',
+            pre_price: r.value.pre_price ?? null, pre_change: r.value.pre_change ?? null, pre_change_pct: r.value.pre_change_pct ?? null,
+            post_price: r.value.post_price ?? null, post_change: r.value.post_change ?? null, post_change_pct: r.value.post_change_pct ?? null }
         : null;
     });
     res.json({ quotes });
   } catch (err) {
     console.error('[quotes/batch]', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ── AI Ask / Global Search ────────────────────────────────────────────────────
+const _askCache = new Map(); // query.lower → { data, ts }
+const ASK_CACHE_TTL = 15 * 60 * 1000;
+
+const _GS_COMPANY_MAP = {
+  'nvidia':'NVDA','apple':'AAPL','microsoft':'MSFT','amazon':'AMZN','alphabet':'GOOGL',
+  'google':'GOOGL','meta':'META','facebook':'META','tesla':'TSLA','netflix':'NFLX',
+  'oracle':'ORCL','amd':'AMD','intel':'INTC','qualcomm':'QCOM','broadcom':'AVGO',
+  'micron':'MU','tsmc':'TSM','supermicro':'SMCI','marvell':'MRVL','salesforce':'CRM',
+  'servicenow':'NOW','adobe':'ADBE','cisco':'CSCO','jpmorgan':'JPM','goldman':'GS',
+  'blackrock':'BLK','visa':'V','mastercard':'MA','paypal':'PYPL','coinbase':'COIN',
+  'palantir':'PLTR','datadog':'DDOG','snowflake':'SNOW','cloudflare':'NET',
+  'crowdstrike':'CRWD','palo alto':'PANW','uber':'UBER','lyft':'LYFT','airbnb':'ABNB',
+  'doordash':'DASH','boeing':'BA','lockheed':'LMT','walmart':'WMT','costco':'COST',
+  'nike':'NKE','disney':'DIS','exxon':'XOM','chevron':'CVX','starbucks':'SBUX',
+  'arm':'ARM','c3ai':'AI','uipath':'PATH','palantir':'PLTR',
+};
+
+const _GS_STOP = new Set([
+  'A','AN','THE','IS','IN','ON','FOR','TO','OF','AT','BY','OR','AND','NOT','ARE',
+  'WAS','BE','AS','IT','ITS','BUY','SELL','HOLD','CEO','IPO','ETF','EPS','RSI',
+  'VIX','SEC','FDA','AI','US','UK','EU','ANY','HAS','GET','WHY','HOW','ALL','DO',
+  'SO','IF','NO','YES','MY','PM','AM','YF','SP','TM','PP','MM','BB','MA','PE',
+]);
+
+function _gsExtractTicker(query) {
+  const lower = query.toLowerCase();
+  // Company name map (sorted longest first to avoid partial matches)
+  const names = Object.keys(_GS_COMPANY_MAP).sort((a,b) => b.length - a.length);
+  for (const name of names) {
+    if (lower.includes(name)) return _GS_COMPANY_MAP[name];
+  }
+  // All-caps ticker words
+  const words = query.match(/\b[A-Z]{2,5}\b/g) || [];
+  for (const w of words) {
+    if (!_GS_STOP.has(w)) return w;
+  }
+  return null;
+}
+
+app.get('/api/ask', requireAuth, async (req, res) => {
+  try {
+    const rawQuery = (req.query.q || '').trim();
+    if (!rawQuery) return res.status(400).json({ error: 'q required' });
+
+    const cacheKey = rawQuery.toLowerCase();
+    const cached = _askCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < ASK_CACHE_TTL) return res.json(cached.data);
+
+    // Extract ticker from natural language or use as-is if looks like a ticker
+    const sym = _gsExtractTicker(rawQuery) || rawQuery.toUpperCase().replace(/[^A-Z0-9.]/g,'').slice(0,6);
+
+    const [priceRes, yfRes, scoreRes, newsRes] = await Promise.allSettled([
+      fetchCurrentPrice(sym),
+      _yf.quoteSummary(sym, { modules: ['price', 'financialData', 'defaultKeyStatistics', 'calendarEvents', 'summaryProfile', 'summaryDetail'] }),
+      getConvictionScore({ symbol: sym, positions: [] }),
+      _mergedSymbolNews(sym, 5),
+    ]);
+
+    const q   = priceRes.status === 'fulfilled' ? priceRes.value : null;
+    const yfd = yfRes.status    === 'fulfilled' ? yfRes.value    : null;
+    const sc  = scoreRes.status === 'fulfilled' ? scoreRes.value  : null;
+    const news = newsRes.status === 'fulfilled' ? newsRes.value   : [];
+
+    const p  = yfd?.price;
+    const fd = yfd?.financialData;
+    const ks = yfd?.defaultKeyStatistics;
+    const cal = yfd?.calendarEvents;
+    const sp = yfd?.summaryProfile;
+    const sd = yfd?.summaryDetail;
+
+    // Build signal badges
+    const rawSig = sc?.signals ?? {};
+    const sigBadges = [];
+    if (rawSig.rsi != null) {
+      if (rawSig.rsi < 35)      sigBadges.push({ label: `RSI ${rawSig.rsi.toFixed(0)} Oversold`, bull: true });
+      else if (rawSig.rsi > 65) sigBadges.push({ label: `RSI ${rawSig.rsi.toFixed(0)} Overbought`, bull: false });
+      else                       sigBadges.push({ label: `RSI ${rawSig.rsi.toFixed(0)} Neutral`, bull: null });
+    }
+    if (rawSig.macd_hist != null) sigBadges.push({ label: rawSig.macd_hist > 0 ? 'MACD Bull' : 'MACD Bear', bull: rawSig.macd_hist > 0 });
+    if (rawSig.current_price != null && rawSig.ema20 != null)
+      sigBadges.push({ label: rawSig.current_price > rawSig.ema20 ? 'Above EMA20' : 'Below EMA20', bull: rawSig.current_price > rawSig.ema20 });
+    if (rawSig.rvol != null && rawSig.rvol > 1.5) sigBadges.push({ label: `RVOL ${rawSig.rvol.toFixed(1)}x High`, bull: true });
+    if (rawSig.rs_signal)  sigBadges.push({ label: rawSig.rs_signal, bull: rawSig.rs_signal.toLowerCase().includes('strong') });
+    if (rawSig.analyst_consensus) sigBadges.push({ label: rawSig.analyst_consensus, bull: ['Buy','Strong Buy','Overweight'].includes(rawSig.analyst_consensus) });
+
+    // Earnings date
+    let earningsDate = null;
+    try {
+      const dates = cal?.earnings?.earningsDate;
+      if (Array.isArray(dates) && dates.length) {
+        const d = dates[0] instanceof Date ? dates[0] : new Date(dates[0]);
+        if (!isNaN(d)) earningsDate = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+      }
+    } catch {}
+
+    const epsEst    = fd?.earningsPerShare ?? ks?.forwardEps ?? null;
+    const price     = q?.price ?? (p?.regularMarketPrice ?? null);
+    const changePct = q?.change_pct ?? null;
+    const company   = p?.longName ?? p?.shortName ?? '';
+    const marketCap = p?.marketCap ?? null;
+    const pe        = sd?.trailingPE ?? p?.trailingPE ?? ks?.trailingPE ?? null;
+    const beta      = sd?.beta       ?? p?.beta       ?? ks?.beta       ?? null;
+    const wk52h     = sd?.fiftyTwoWeekHigh ?? p?.fiftyTwoWeekHigh ?? null;
+    const wk52l     = sd?.fiftyTwoWeekLow  ?? p?.fiftyTwoWeekLow  ?? null;
+    const analystRating = rawSig.analyst_consensus ?? fd?.recommendationKey?.replace(/_/g,' ') ?? null;
+    const targetPrice   = rawSig.analyst_target    ?? fd?.targetMeanPrice   ?? null;
+
+    const formattedNews = news.map(a => ({
+      headline:     a.title || a.headline || '',
+      url:          a.url   || '',
+      published_at: a.published ?? a.published_at ?? null,
+    }));
+
+    // ── Build Claude Haiku context & answer ──────────────────────────────────
+    let aiAnswer = null;
+    if (process.env.ANTHROPIC_API_KEY) {
+      try {
+        const newsLines = formattedNews.slice(0, 5).map((n, i) => `${i+1}. ${n.headline}`).join('\n');
+        const priceStr  = price != null ? `$${price.toFixed(2)}${changePct != null ? ` (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}% today)` : ''}` : 'N/A';
+        const mcapStr   = marketCap ? `$${(marketCap / 1e9).toFixed(1)}B` : 'N/A';
+        const context   = [
+          `Symbol: ${sym}`,
+          `Company: ${company || sym}`,
+          `Price: ${priceStr}`,
+          `Market Cap: ${mcapStr}`,
+          `P/E: ${pe != null ? pe.toFixed(1) : 'N/A'}  Beta: ${beta != null ? beta.toFixed(2) : 'N/A'}`,
+          `52W Range: ${wk52l != null ? '$'+wk52l.toFixed(2) : 'N/A'} – ${wk52h != null ? '$'+wk52h.toFixed(2) : 'N/A'}`,
+          `Analyst: ${analystRating || 'N/A'}  Target: ${targetPrice != null ? '$'+targetPrice.toFixed(2) : 'N/A'}`,
+          `Conviction Score: ${sc?.score != null ? sc.score+'/100 (grade '+sc.grade+')' : 'N/A'}`,
+          `RSI: ${rawSig.rsi != null ? rawSig.rsi.toFixed(1) : 'N/A'}`,
+          `MACD: ${rawSig.macd_hist != null ? (rawSig.macd_hist > 0 ? 'Bullish histogram' : 'Bearish histogram') : 'N/A'}`,
+          `Upcoming Earnings: ${earningsDate || 'Not scheduled'}${epsEst != null ? '  Est EPS: $'+epsEst.toFixed(2) : ''}`,
+          sp?.longBusinessSummary ? `Business: ${sp.longBusinessSummary.slice(0, 300)}…` : '',
+          newsLines ? `Recent News:\n${newsLines}` : '',
+        ].filter(Boolean).join('\n');
+
+        const msg = await _anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 280,
+          messages: [{
+            role: 'user',
+            content: `User asked: "${rawQuery}"\n\nCurrent data for ${sym}:\n${context}\n\nAnswer their specific question in 3–5 sentences. Be direct and data-driven. Start with the most important insight for their question. No fluff, no disclaimers.`,
+          }],
+        });
+        aiAnswer = msg.content[0]?.text?.trim() || null;
+      } catch (e) {
+        console.warn('[ask] Haiku failed:', e.message);
+      }
+    }
+
+    const data = {
+      sym,
+      company,
+      exchange:         p?.exchangeName ?? p?.fullExchangeName ?? '',
+      sector:           sp?.sector ?? '',
+      price,
+      change:           q?.change ?? null,
+      change_pct:       changePct,
+      session:          q?.session ?? 'regular',
+      pre_price:        q?.pre_price ?? null,
+      pre_change_pct:   q?.pre_change_pct ?? null,
+      post_price:       q?.post_price ?? null,
+      post_change_pct:  q?.post_change_pct ?? null,
+      market_cap:       marketCap,
+      pe_ratio:         pe,
+      beta,
+      wk52_high:        wk52h,
+      wk52_low:         wk52l,
+      analyst_rating:   analystRating,
+      target_price:     targetPrice,
+      conviction_score: sc?.score ?? null,
+      conviction_grade: sc?.grade ?? null,
+      signals:          sigBadges.filter(s => s.bull != null),
+      earnings_date:    earningsDate,
+      eps_estimate:     epsEst,
+      news:             formattedNews,
+      ai_answer:        aiAnswer,
+    };
+
+    _askCache.set(cacheKey, { data, ts: Date.now() });
+    res.json(data);
+  } catch (err) {
+    console.error('[ask]', err);
+    res.status(500).json({ error: 'Research failed. Please try again.' });
+  }
+});
+
+// ── Mini chart — 45 days of daily OHLCV for the search card ──────────────────
+const _miniChartCache = new Map(); // sym → { bars, ts }
+const MINI_CHART_TTL  = 30 * 60 * 1000; // 30 min
+
+app.get('/api/mini-chart', requireAuth, async (req, res) => {
+  try {
+    const sym = (req.query.symbol || '').toUpperCase().trim();
+    if (!sym) return res.status(400).json({ error: 'symbol required' });
+
+    const cached = _miniChartCache.get(sym);
+    if (cached && Date.now() - cached.ts < MINI_CHART_TTL) return res.json({ symbol: sym, bars: cached.bars });
+
+    const period1 = new Date();
+    period1.setDate(period1.getDate() - 50); // 50 calendar days ≈ ~35 trading days
+
+    const rows = await _yf.historical(sym, {
+      period1: period1.toISOString().split('T')[0],
+      period2: new Date().toISOString().split('T')[0],
+      interval: '1d',
+    });
+
+    const bars = rows
+      .filter(r => r.open != null && r.high != null && r.low != null && r.close != null)
+      .map(r => ({
+        time:  (r.date instanceof Date ? r.date : new Date(r.date)).toISOString().split('T')[0],
+        open:  +r.open.toFixed(2),
+        high:  +r.high.toFixed(2),
+        low:   +r.low.toFixed(2),
+        close: +r.close.toFixed(2),
+      }))
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    _miniChartCache.set(sym, { bars, ts: Date.now() });
+    res.json({ symbol: sym, bars });
+  } catch (err) {
+    console.error('[mini-chart]', err.message);
+    res.json({ symbol: req.query.symbol || '', bars: [] });
+  }
+});
+
+// ── Legacy /api/search alias ──────────────────────────────────────────────────
+const _searchCache = new Map(); // sym → { data, ts }
+const SEARCH_CACHE_TTL = 5 * 60 * 1000;
+
+app.get('/api/search', requireAuth, async (req, res) => {
+  try {
+    const sym = (req.query.q || '').toUpperCase().trim();
+    if (!sym) return res.status(400).json({ error: 'q required' });
+
+    const cached = _searchCache.get(sym);
+    if (cached && Date.now() - cached.ts < SEARCH_CACHE_TTL) return res.json(cached.data);
+
+    const [priceRes, yfRes, scoreRes, newsRes] = await Promise.allSettled([
+      fetchCurrentPrice(sym),
+      _yf.quoteSummary(sym, { modules: ['price', 'financialData', 'defaultKeyStatistics', 'calendarEvents', 'summaryProfile', 'summaryDetail'] }),
+      getConvictionScore({ symbol: sym, positions: [] }),
+      _mergedSymbolNews(sym, 3),
+    ]);
+
+    const q    = priceRes.status === 'fulfilled' ? priceRes.value : null;
+    const yfd  = yfRes.status    === 'fulfilled' ? yfRes.value    : null;
+    const sc   = scoreRes.status === 'fulfilled' ? scoreRes.value  : null;
+    const news = newsRes.status  === 'fulfilled' ? newsRes.value   : [];
+
+    const p    = yfd?.price;
+    const fd   = yfd?.financialData;
+    const ks   = yfd?.defaultKeyStatistics;
+    const cal  = yfd?.calendarEvents;
+    const sp   = yfd?.summaryProfile;
+    const sd   = yfd?.summaryDetail;
+
+    // Build technical signal badges from conviction signals
+    const rawSig = sc?.signals ?? {};
+    const sigBadges = [];
+    if (rawSig.rsi != null) {
+      if (rawSig.rsi < 35)      sigBadges.push({ label: `RSI ${rawSig.rsi.toFixed(0)} Oversold`, bull: true });
+      else if (rawSig.rsi > 65) sigBadges.push({ label: `RSI ${rawSig.rsi.toFixed(0)} Overbought`, bull: false });
+      else                       sigBadges.push({ label: `RSI ${rawSig.rsi.toFixed(0)}`, bull: null });
+    }
+    if (rawSig.macd_hist != null) sigBadges.push({ label: rawSig.macd_hist > 0 ? 'MACD Bull' : 'MACD Bear', bull: rawSig.macd_hist > 0 });
+    if (rawSig.current_price != null && rawSig.ema20 != null)
+      sigBadges.push({ label: rawSig.current_price > rawSig.ema20 ? 'Above EMA20' : 'Below EMA20', bull: rawSig.current_price > rawSig.ema20 });
+    if (rawSig.rvol != null && rawSig.rvol > 1.5) sigBadges.push({ label: `RVOL ${rawSig.rvol.toFixed(1)}x`, bull: true });
+    if (rawSig.rs_signal)  sigBadges.push({ label: rawSig.rs_signal, bull: rawSig.rs_signal.toLowerCase().includes('strong') });
+    if (rawSig.analyst_consensus) sigBadges.push({ label: rawSig.analyst_consensus, bull: ['Buy','Strong Buy','Overweight'].includes(rawSig.analyst_consensus) });
+
+    // Earnings date
+    let earningsDate = null;
+    try {
+      const dates = cal?.earnings?.earningsDate;
+      if (Array.isArray(dates) && dates.length) {
+        const d = dates[0] instanceof Date ? dates[0] : new Date(dates[0]);
+        if (!isNaN(d)) earningsDate = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+      }
+    } catch {}
+
+    // EPS estimate
+    const epsEst = fd?.earningsPerShare ?? ks?.forwardEps ?? null;
+
+    // News shape: { headline, url, published_at (unix ts or ISO string) }
+    const formattedNews = news.map(a => ({
+      headline:     a.title || a.headline || '',
+      url:          a.url || '',
+      published_at: a.published ?? a.published_at ?? null,
+    }));
+
+    const data = {
+      symbol: sym,
+      company:          p?.longName ?? p?.shortName ?? '',
+      exchange:         p?.exchangeName ?? p?.fullExchangeName ?? '',
+      sector:           sp?.sector ?? '',
+      price:            q?.price ?? (p?.regularMarketPrice ?? null),
+      change:           q?.change ?? null,
+      change_pct:       q?.change_pct ?? null,
+      session:          q?.session ?? 'regular',
+      pre_price:        q?.pre_price ?? null,
+      pre_change_pct:   q?.pre_change_pct ?? null,
+      post_price:       q?.post_price ?? null,
+      post_change_pct:  q?.post_change_pct ?? null,
+      market_cap:       p?.marketCap ?? null,
+      pe_ratio:         sd?.trailingPE ?? p?.trailingPE ?? ks?.trailingPE ?? null,
+      beta:             sd?.beta ?? p?.beta ?? ks?.beta ?? null,
+      wk52_high:        sd?.fiftyTwoWeekHigh ?? p?.fiftyTwoWeekHigh ?? null,
+      wk52_low:         sd?.fiftyTwoWeekLow  ?? p?.fiftyTwoWeekLow  ?? null,
+      analyst_rating:   rawSig.analyst_consensus ?? fd?.recommendationKey?.replace(/_/g,' ') ?? null,
+      target_price:     rawSig.analyst_target     ?? fd?.targetMeanPrice   ?? null,
+      conviction_score: sc?.score ?? null,
+      conviction_grade: sc?.grade ?? null,
+      signals:          sigBadges.filter(s => s.bull != null),
+      earnings_date:    earningsDate,
+      eps_estimate:     epsEst,
+      news:             formattedNews,
+    };
+
+    _searchCache.set(sym, { data, ts: Date.now() });
+    res.json(data);
+  } catch (err) {
+    console.error('[search]', err);
+    res.status(500).json({ error: 'Search failed. Please try again.' });
   }
 });
 
