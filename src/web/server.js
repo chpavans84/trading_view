@@ -174,11 +174,11 @@ async function migrateUsersToDb() {
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
 const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist'];
-const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer'];
+const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
 
 const DEFAULT_PERMISSIONS = {
   admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist'], widgets: ['alpaca_live', 'chat', 'stock_explorer'] },
+  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
 };
 
 function getPermissions(user) {
@@ -230,7 +230,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:     ["'self'"],
-      scriptSrc:      ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],   // inline <script> blocks + Chart.js CDN
+      scriptSrc:      ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://static.cloudflareinsights.com"],   // inline <script> blocks + Chart.js CDN
       scriptSrcAttr:  ["'unsafe-inline'"],             // onclick/onchange/etc. attributes
       styleSrc:       ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
       imgSrc:         ["'self'", 'data:', 'https:'],
@@ -5556,7 +5556,7 @@ app.get('/api/benzinga/options', requireAuth, async (req, res) => {
 let _newsAnalysisCache = null;
 let _newsAnalysisCacheAt = 0;
 app.get('/api/news/analysis', requireAuth, async (req, res) => {
-  if (_newsAnalysisCache && Date.now() - _newsAnalysisCacheAt < 10 * 60_000) {
+  if (_newsAnalysisCache && Date.now() - _newsAnalysisCacheAt < 60 * 60_000) {
     return res.json(_newsAnalysisCache);
   }
   try {
@@ -5597,6 +5597,126 @@ Reply ONLY as a JSON array — no prose, no markdown fences:
   } catch (e) {
     console.error('[news/analysis]', e.message);
     res.json([]);
+  }
+});
+
+// ── AI Notifications — personalized portfolio alerts every 5 min ──
+const _notifCache = new Map(); // username → { data, ts }
+const NOTIF_TTL = 5 * 60_000;
+
+app.get('/api/notifications', requireAuth, async (req, res) => {
+  const username = req.session.username;
+  if (req.query.force !== '1') {
+    const hit = _notifCache.get(username);
+    if (hit && Date.now() - hit.ts < NOTIF_TTL) return res.json(hit.data);
+  }
+  try {
+    // 1. Portfolio — Moomoo first, fall back to Alpaca paper
+    let positions = [];
+    try {
+      const raw = await getMoomooPositions();
+      if (Array.isArray(raw) && raw.length) {
+        positions = raw.map(p => ({
+          symbol:          p.code || p.symbol,
+          qty:             parseFloat(p.qty || p.quantity || 0),
+          current_price:   parseFloat(p.current_price || p.price || 0),
+          unrealized_pl:   parseFloat(p.pl_val || p.unrealized_pl || 0),
+          unrealized_plpc: parseFloat(p.pl_ratio || p.unrealized_plpc || 0),
+          market_value:    parseFloat(p.market_val || p.market_value || 0),
+          cost_basis:      parseFloat(p.cost_price || p.avg_cost || 0),
+        }));
+      }
+    } catch (_) {}
+    if (!positions.length) {
+      try {
+        const raw = await getPositions();
+        if (Array.isArray(raw) && raw.length) {
+          positions = raw.map(p => ({
+            symbol:          p.symbol,
+            qty:             parseFloat(p.qty || 0),
+            current_price:   parseFloat(p.current_price || 0),
+            unrealized_pl:   parseFloat(p.unrealized_pl || 0),
+            unrealized_plpc: parseFloat(p.unrealized_plpc || 0),
+            market_value:    parseFloat(p.market_value || 0),
+            cost_basis:      parseFloat(p.avg_entry_price || 0),
+          }));
+        }
+      } catch (_) {}
+    }
+
+    // 2. Conviction scores for top 6 positions by market value
+    const topSyms = [...positions]
+      .sort((a, b) => Math.abs(b.market_value) - Math.abs(a.market_value))
+      .slice(0, 6).map(p => p.symbol);
+    const scoreRes = await Promise.allSettled(topSyms.map(s => getConvictionScore(s).then(sc => ({ s, sc }))));
+    const scores = {};
+    for (const r of scoreRes) {
+      if (r.status === 'fulfilled' && r.value?.sc) scores[r.value.s] = r.value.sc;
+    }
+
+    // 3. Recent news headlines
+    const newsLines = (_newsAnalysisCache || []).slice(0, 5).map(n =>
+      `[${(n.tickers || []).slice(0, 3).join(',') || 'MKT'}] ${n.impact || n.title || ''}`
+    );
+    if (!newsLines.length && isBenzingaConfigured()) {
+      try {
+        const bz = await getBzNews({ limit: 5 });
+        (bz?.articles || []).forEach(a => newsLines.push(`[${(a.tickers||[]).slice(0,3).join(',')||'MKT'}] ${a.title}`));
+      } catch (_) {}
+    }
+
+    // 4. Market regime
+    let regime = 'unknown';
+    try { regime = (await getMarketRegime())?.regime || 'unknown'; } catch (_) {}
+
+    // 5. Build prompt
+    const posText = positions.slice(0, 8).map(p => {
+      const plPct  = (p.unrealized_plpc * (Math.abs(p.unrealized_plpc) > 1 ? 1 : 100)).toFixed(1);
+      const sc     = scores[p.symbol];
+      return `${p.symbol}: ${p.qty}sh @ $${p.current_price.toFixed(2)}, P&L ${plPct}%, grade ${sc?.grade || '?'}, RSI ${sc?.rsi?.toFixed(0) || '?'}`;
+    }).join('\n') || 'No open positions';
+
+    const newsText = newsLines.join('\n') || 'No recent news';
+
+    const msg = await _anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 900,
+      messages: [{
+        role: 'user',
+        content: `You are an AI trading assistant for a personal trading dashboard. Generate 4-6 personalized notifications based on the data.
+
+PORTFOLIO:
+${posText}
+
+RECENT NEWS:
+${newsText}
+
+MARKET REGIME: ${regime}
+
+Return ONLY a JSON array — no prose, no markdown. Each item:
+{"type":"ALERT"|"NEWS"|"IDEA"|"INFO","title":"<60 chars","body":"<110 chars with specific numbers","symbol":"TICKER or null","action":"SELL"|"BUY"|"WATCH"|"HOLD"|"READ"|null,"priority":"high"|"medium"|"low"}
+
+Rules:
+- ALERT: urgent action — RSI>70 held stock→SELL, RSI<30→consider adding, grade F→review, large unrealized gain >15%→protect profit
+- NEWS: news relevant to a held stock (match symbol to tickers)
+- IDEA: high conviction A-grade stocks NOT in portfolio
+- INFO: market regime insight, sector rotation, VIX context
+- Always include specific numbers (price, %, RSI)
+- Prioritize high-impact items first`,
+      }],
+    });
+
+    const raw  = msg.content[0]?.text || '[]';
+    const json = raw.match(/\[[\s\S]*\]/)?.[0] || '[]';
+    let notifications = [];
+    try { notifications = JSON.parse(json).slice(0, 6); } catch (_) {}
+
+    const data = { notifications, generated_at: new Date().toISOString(), positions_count: positions.length };
+    _notifCache.set(username, { data, ts: Date.now() });
+    res.json(data);
+  } catch (e) {
+    console.error('[notifications]', e.message);
+    res.json({ notifications: [], generated_at: new Date().toISOString() });
   }
 });
 

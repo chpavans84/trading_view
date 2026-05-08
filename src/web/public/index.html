@@ -115,7 +115,7 @@
     background: var(--nav-bg);
     border-bottom: 1px solid var(--border);
     display: flex; align-items: stretch; justify-content: flex-start;
-    padding: 0 16px; height: 42px; position: sticky; top: 28px; z-index: 100;
+    padding: 0 16px; height: 42px; position: sticky; top: 56px; z-index: 100;
     overflow: visible;
   }
 
@@ -123,7 +123,7 @@
   #market-hero {
     width: 100%;
     height: 112px;
-    margin-top: 28px;
+    margin-top: 56px;
     position: relative;
     overflow: visible;
     z-index: 850;
@@ -244,13 +244,8 @@
     .hero-controls .nav-clocks { display: none; }
   }
 
-  /* News ticker bar under nav */
-  #newsTicker {
-    position: sticky; top: 70px; z-index: 99;
-    background: var(--ticker-bg); border-bottom: 1px solid var(--surface);
-    display: flex; align-items: center; height: 36px; overflow: hidden;
-    padding: 0 16px; gap: 10px;
-  }
+  /* News ticker bar under nav — hidden (content moved to fixed second row) */
+  #newsTicker { display: none !important; }
   #newsTicker .ntk-label {
     font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em;
     text-transform: uppercase; color: #fff; background: #f0883e;
@@ -420,7 +415,51 @@
   .source-select.src-alpaca { border-color: #1f6feb; color: #58a6ff; }
   .source-select.src-live    { border-color: #b91c1c; color: #f85149; }
   .source-select.src-moomoo  { border-color: #238636; color: #3fb950; }
-  main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+  :root { --explorer-w: 0px; --news-w: 0px; --notif-w: 0px; }
+
+  main {
+    max-width: 1400px; margin: 0 auto; padding: 24px;
+    transition: margin-right 0.3s cubic-bezier(0.4,0,0.2,1),
+                margin-left  0.3s cubic-bezier(0.4,0,0.2,1),
+                max-width    0.3s cubic-bezier(0.4,0,0.2,1);
+  }
+
+  /* Push main content — notif panel only */
+  body.notif-open main {
+    max-width: none;
+    margin-right: var(--notif-w);
+    margin-left: 24px;
+  }
+
+  /* Push main content right when news drawer (right side) is open */
+  body.news-open main {
+    max-width: none;
+    margin-right: calc(var(--news-w) + var(--notif-w));
+    margin-left: 24px;
+  }
+
+  /* Push main content right when explorer is on right side */
+  body.explorer-open main {
+    max-width: none;
+    margin-right: calc(var(--explorer-w) + var(--news-w) + var(--notif-w));
+    margin-left: 24px;
+  }
+
+  /* Push main content right when explorer is on left side */
+  body.explorer-left main {
+    max-width: none;
+    margin-left: calc(var(--explorer-w) + 24px);
+    margin-right: calc(var(--news-w) + var(--notif-w));
+  }
+
+  /* Chat FAB/widget — stay clear of all right panels */
+  body.notif-open .chat-fab    { right: calc(var(--notif-w) + 16px) !important; }
+  body.notif-open .chat-widget { right: calc(var(--notif-w) + 16px) !important; }
+  body.news-open .chat-fab     { right: calc(var(--news-w) + var(--notif-w) + 16px) !important; }
+  body.news-open .chat-widget  { right: calc(var(--news-w) + var(--notif-w) + 16px) !important; }
+  body.explorer-open .chat-fab    { right: calc(var(--explorer-w) + var(--news-w) + var(--notif-w) + 16px) !important; }
+  body.explorer-open .chat-widget { right: calc(var(--explorer-w) + var(--news-w) + var(--notif-w) + 16px) !important; }
+
   .page { display: none; }
   .page.active { display: block; }
 
@@ -569,28 +608,43 @@
   /* Floating Stock Explorer */
   .float-explorer {
     position: fixed;
-    top: 60px; right: 16px;
-    width: min(700px, calc(100vw - 32px));
-    max-height: calc(100vh - 76px);
+    top: 98px; right: 0;
+    width: clamp(360px, 33vw, 520px);
+    height: calc(100vh - 98px);
+    max-height: calc(100vh - 98px);
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    box-shadow: 0 28px 80px rgba(0,0,0,0.65), 0 0 0 1px rgba(88,166,255,0.06);
-    z-index: 1500;
+    border-right: none;
+    border-radius: 0 0 0 14px;
+    box-shadow: -6px 0 40px rgba(0,0,0,0.55);
+    z-index: 900;
     display: none;
     flex-direction: column;
     overflow: hidden;
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+    transform: translateX(100%);
   }
-  .float-explorer.open { display: flex; }
+  .float-explorer.open { display: flex; transform: translateX(0); }
+  /* When docked to the left side */
+  .float-explorer.dock-left {
+    left: 0; right: auto;
+    border-right: 1px solid var(--border);
+    border-left: none;
+    border-radius: 0 0 14px 0;
+    box-shadow: 6px 0 40px rgba(0,0,0,0.55);
+    transform: translateX(-100%);
+  }
+  .float-explorer.dock-left.open { transform: translateX(0); }
   .float-explorer-header {
-    display: flex; align-items: center; gap: 10px;
-    padding: 11px 16px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 12px;
     border-bottom: 1px solid var(--border);
     cursor: grab; user-select: none; flex-shrink: 0;
     background: var(--bg2);
+    overflow: visible;
   }
   .float-explorer-header:active { cursor: grabbing; }
-  .float-explorer-title { font-size: 0.9rem; font-weight: 600; color: var(--text); flex: 1; }
+  .float-explorer-title { display: none; }
   .float-explorer-close {
     background: none; border: none; cursor: pointer;
     color: var(--text2); font-size: 1rem; padding: 2px 6px; border-radius: 4px;
@@ -806,7 +860,8 @@
   .grade-B { background:rgba(26,35,50,0.85);color:#58a6ff;box-shadow:0 0 6px rgba(88,166,255,0.2); }
   .grade-C { background:rgba(45,42,31,0.85);color:#d29922;box-shadow:0 0 6px rgba(210,153,34,0.2); }
   .grade-F { background:rgba(45,19,24,0.85);color:#f85149;box-shadow:0 0 6px rgba(248,81,73,0.2); }
-  .chat-fab { position: fixed; bottom: 28px; right: 28px; width: 56px; height: 56px; border-radius: 50%; background: #238636; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 300; transition: transform 0.2s, right 0.3s cubic-bezier(0.4,0,0.2,1); display: flex; align-items: center; justify-content: center; }
+  .chat-fab { display: none !important; } /* replaced by nav AI Analyst button */
+  .chat-fab-hidden { position: fixed; bottom: 28px; right: 28px; width: 56px; height: 56px; border-radius: 50%; background: #238636; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 300; transition: transform 0.2s, right 0.3s cubic-bezier(0.4,0,0.2,1); display: flex; align-items: center; justify-content: center; }
   .chat-fab:hover { transform: scale(1.1); background: #2ea043; }
   .chat-fab .chat-fab-badge { position: absolute; top: -4px; right: -4px; background: #f85149; border-radius: 50%; width: 18px; height: 18px; font-size: 0.65rem; display: none; align-items: center; justify-content: center; }
   .chat-widget { position: fixed; bottom: 96px; right: 28px; width: min(380px, calc(100vw - 32px)); height: 560px; background: #161b22; border: 1px solid rgba(48,54,61,0.8); border-top: 1px solid rgba(255,255,255,0.06); border-radius: 16px; box-shadow: 0 16px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(88,166,255,0.05); z-index: 300; display: none; flex-direction: column; overflow: hidden; min-width: 300px; min-height: 300px; max-width: calc(100vw - 32px); max-height: calc(100vh - 120px); transition: right 0.3s cubic-bezier(0.4,0,0.2,1); }
@@ -827,9 +882,9 @@
 
   /* ── Floating News Drawer ─────────────────────────────────────────────── */
   #newsDrawer {
-    position: fixed; right: -302px; top: 76px; bottom: 30px; width: 300px;
+    position: fixed; right: -302px; top: 56px; bottom: 0; width: 300px;
     background: #0f1c2e; border-left: 1px solid rgba(255,255,255,0.1);
-    z-index: 800; display: flex; flex-direction: column;
+    z-index: 901; display: flex; flex-direction: column;
     transition: right 0.3s cubic-bezier(0.4,0,0.2,1);
     box-shadow: -4px 0 24px rgba(0,0,0,0.55);
   }
@@ -871,20 +926,89 @@
   .htk-sym:hover { background: rgba(56,189,248,0.28); color: #93c5fd; }
   .htk-sym-up   { border-color: rgba(16,185,129,0.3); }
   .htk-sym-down { border-color: rgba(244,63,94,0.3);  }
+  /* Fresh news (5–20 min old) — green */
+  .htk-item.htk-fresh .htk-impact { color: #22c55e; font-weight: 600; }
+  /* Hot news overrides fresh — always red */
+  .htk-item.htk-hot { padding: 0 32px; }
+  .htk-item.htk-hot .htk-impact {
+    font-size: 0.85rem; font-weight: 700; color: #ef4444;
+    text-shadow: 0 0 8px rgba(239,68,68,0.45);
+  }
+  .htk-hot-badge {
+    font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em;
+    color: #ef4444; border: 1px solid rgba(239,68,68,0.55);
+    background: rgba(239,68,68,0.12); border-radius: 3px;
+    padding: 1px 5px; flex-shrink: 0;
+  }
   @keyframes heroScroll {
     0%   { transform: translateX(0); }
     100% { transform: translateX(-50%); }
   }
-  /* News toggle button inside hero-controls */
-  #newsDrawerToggle {
-    background: rgba(14,165,233,0.15); color: #38bdf8;
-    border: 1px solid rgba(14,165,233,0.4); border-radius: 6px;
-    padding: 5px 10px; font-size: 0.72rem; font-weight: 700;
-    cursor: pointer; white-space: nowrap; flex-shrink: 0;
-    transition: background 0.15s, transform 0.1s;
+  @keyframes heroScrollRev {
+    0%   { transform: translateX(-50%); }
+    100% { transform: translateX(0); }
   }
-  #newsDrawerToggle:hover  { background: rgba(14,165,233,0.28); }
-  #newsDrawerToggle:active { transform: scale(0.95); }
+  /* Second fixed ticker row — left-to-right scroll */
+  #heroNewsTicker2 {
+    position: fixed; top: 28px; left: 0; right: 0; height: 28px;
+    background: rgba(10,16,28,0.97);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    overflow: hidden; z-index: 2000;
+    display: flex; align-items: center;
+  }
+  #heroTickerTrack2 {
+    display: flex; align-items: center; white-space: nowrap;
+    animation: heroScrollRev 100s linear infinite;
+    will-change: transform;
+  }
+  #heroTickerTrack2:hover { animation-play-state: paused; }
+
+  /* ── Stock price ticker (between market-hero and nav) ── */
+  #stockTicker {
+    background: rgba(8,13,23,0.97);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    overflow: hidden; height: 34px;
+    display: flex; align-items: center;
+  }
+  #stockTickerTrack {
+    display: flex; align-items: center; white-space: nowrap;
+    animation: stockTickerScroll 45s linear infinite;
+    will-change: transform;
+  }
+  #stockTickerTrack:hover { animation-play-state: paused; }
+  @keyframes stockTickerScroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  .stk-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 10px 2px 8px; margin-right: 4px;
+    border-radius: 4px; border: 1px solid transparent;
+    font-size: 0.72rem; font-weight: 600; color: #e2e8f0;
+    background: rgba(255,255,255,0.04);
+    cursor: pointer; transition: background 0.2s;
+  }
+  .stk-chip:hover { background: rgba(255,255,255,0.09); }
+  .stk-chip .stk-sym { color: #94a3b8; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em; }
+  .stk-chip .stk-price { color: #e2e8f0; }
+  .stk-chip .stk-chg { font-size: 0.68rem; }
+  .stk-chip .stk-chg.up   { color: #22c55e; }
+  .stk-chip .stk-chg.down { color: #ef4444; }
+  @keyframes stkBlinkUp {
+    0%   { background: rgba(34,197,94,0.28); border-color: rgba(34,197,94,0.7); }
+    60%  { background: rgba(34,197,94,0.10); border-color: rgba(34,197,94,0.3); }
+    100% { background: rgba(255,255,255,0.04); border-color: transparent; }
+  }
+  @keyframes stkBlinkDown {
+    0%   { background: rgba(239,68,68,0.28); border-color: rgba(239,68,68,0.7); }
+    60%  { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.3); }
+    100% { background: rgba(255,255,255,0.04); border-color: transparent; }
+  }
+  .stk-chip.blink-up   { animation: stkBlinkUp   1.2s ease-out forwards; }
+  .stk-chip.blink-down { animation: stkBlinkDown 1.2s ease-out forwards; }
+
+  /* News toggle button inside hero-controls */
+  #newsDrawerToggle.active { background: rgba(14,165,233,0.2); color: #38bdf8; border-color: rgba(14,165,233,0.5); }
   .nd-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -1176,7 +1300,7 @@
   .featured-link:hover { gap: 8px; }
 
   /* News layout: main feed + sidebar */
-  .home-layout { display: grid; grid-template-columns: 1fr 300px; gap: 20px; padding: 20px 32px 32px; max-width: 1600px; }
+  .home-layout { display: grid; grid-template-columns: 1fr 300px; gap: 20px; padding: 20px 32px 32px; }
   @media (max-width: 1000px) { .home-layout { grid-template-columns: 1fr; } }
 
   /* Story grid */
@@ -1402,15 +1526,22 @@
       font-size: 10px !important;
     }
 
-    /* ── Stock Explorer: full-screen bottom sheet ── */
+    /* ── Stock Explorer: full-screen bottom sheet on mobile (no push) ── */
+    body.explorer-open main  { margin-right: 0 !important; max-width: 1400px !important; margin-left: auto !important; }
+    body.explorer-open .chat-fab    { right: 16px !important; }
+    body.explorer-open .chat-widget { right: 0 !important; }
+    body.explorer-left main  { margin-left: auto !important; margin-right: 0 !important; max-width: 1400px !important; }
+    body.notif-open main     { margin-right: 0 !important; max-width: 1400px !important; margin-left: auto !important; }
+    body.news-open main      { margin-right: 0 !important; max-width: 1400px !important; margin-left: auto !important; }
     .float-explorer {
-      top: auto !important;
-      bottom: 44px !important;   /* above disclaimer footer */
+      top: auto !important; transform: none !important;
+      bottom: 44px !important;
       left: 0 !important;
       right: 0 !important;
       width: 100vw !important;
       max-height: 85vh !important;
       border-radius: 16px 16px 0 0 !important;
+      border-right: 1px solid var(--border) !important;
       border-bottom: none !important;
     }
     /* Disable drag handle grab cursor on mobile */
@@ -1515,9 +1646,11 @@
     .card { padding: 12px; }
     .tc-card, .ep-card, .cp-card { padding: 12px; }
 
-    /* ── Hero AI ticker: stays fixed at top on small screens too ── */
+    /* ── Hero AI tickers: two fixed rows on small screens too ── */
     #heroNewsTicker { height: 24px; }
-    #market-hero { margin-top: 24px; }
+    #heroNewsTicker2 { top: 24px; height: 24px; }
+    #market-hero { margin-top: 48px; }
+    #newsDrawer { top: 48px; }
   }
 
   /* Extra-tight adjustments for phones under 480px */
@@ -1533,8 +1666,188 @@
     .ep-q { min-width: 40px; }
   }
 
+  /* ═══════════════════════════════════════════════════════════════════
+     TABLET / SMALL LAPTOP  769px – 1024px
+     Fills the gap between mobile (≤768px) and full desktop.
+  ═══════════════════════════════════════════════════════════════════ */
+  @media (min-width: 769px) and (max-width: 1024px) {
+    /* Hero: hide SGT clock to save space; keep ET */
+    #clockSGT { display: none; }
+    .nav-clock-divider { display: none; }
+
+    /* Hero: tighter padding */
+    #market-hero { padding: 0 16px; gap: 12px; }
+
+    /* Main content: tighter padding */
+    main { padding: 16px; }
+
+    /* Research tab: 4-col → 3-col */
+    #researchCards { grid-template-columns: repeat(3, 1fr) !important; }
+
+    /* Scores tab: conviction cards tighter */
+    .scores-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+
+    /* Earnings calendar: allow horizontal scroll on tablet */
+    .ecal-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Trades table: hide less critical columns (score, strategy) */
+    table.trades-table th:nth-child(7),
+    table.trades-table td:nth-child(7),
+    table.trades-table th:nth-child(8),
+    table.trades-table td:nth-child(8) { display: none; }
+
+    /* Global search panel: slightly narrower */
+    #gsPanelWrap { width: min(560px, calc(100vw - 32px)); }
+
+    /* Hero subtitle: hide on tight screens */
+    .hero-subtitle { display: none; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     LARGE SCREENS  ≥ 1440px
+     Give content room to breathe on wide monitors.
+  ═══════════════════════════════════════════════════════════════════ */
+  @media (min-width: 1440px) {
+    main { max-width: 1700px; padding: 28px 36px; }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+    .home-layout { max-width: 1700px; margin: 0 auto; }
+    #gsPanelWrap { width: 720px; }
+    .chat-widget { width: 420px; height: 600px; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     LARGE MONITORS  ≥ 1920px  (27-inch 1080p+, 34-inch ultrawide)
+     Scale root font size so all rem values grow proportionally.
+     Expand max-width to fill the wide canvas.
+  ═══════════════════════════════════════════════════════════════════ */
+  @media (min-width: 1920px) {
+    html { font-size: 17px; }
+    main { max-width: 1880px; padding: 28px 40px; }
+    .home-layout { max-width: 1880px; margin: 0 auto; }
+    th  { padding: 11px 18px; }
+    td  { padding: 12px 18px; }
+    .card { padding: 22px; }
+    .card-value { font-size: 2rem; }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    #gsPanelWrap { width: 800px; }
+    .chat-widget { width: 460px; height: 640px; }
+    #market-hero { height: 120px; }
+    .hero-title { font-size: 1.9rem; }
+    .movers { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+    .ecal-grid { max-width: 100%; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     ULTRAWIDE / QHD  ≥ 2560px  (34-inch at native or QHD 27-inch)
+  ═══════════════════════════════════════════════════════════════════ */
+  @media (min-width: 2560px) {
+    html { font-size: 19px; }
+    main { max-width: min(2500px, 94vw); padding: 32px 48px; }
+    .home-layout { max-width: min(2500px, 94vw); margin: 0 auto; }
+    th  { padding: 13px 20px; }
+    td  { padding: 14px 20px; }
+    .card { padding: 26px; }
+    .card-value { font-size: 2.2rem; }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    #gsPanelWrap { width: 900px; }
+    nav { height: 48px; }
+    #market-hero { height: 128px; margin-top: 56px; }
+    .hero-title { font-size: 2.1rem; }
+    .movers { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    .ecal-grid { max-width: 100%; grid-template-columns: repeat(7, 1fr); }
+    .float-explorer { width: 560px !important; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     4K / SUPER-ULTRAWIDE  ≥ 3200px
+  ═══════════════════════════════════════════════════════════════════ */
+  @media (min-width: 3200px) {
+    html { font-size: 21px; }
+    main { max-width: min(3100px, 96vw); padding: 36px 56px; }
+    .home-layout { max-width: min(3100px, 96vw); }
+    th  { padding: 14px 22px; }
+    td  { padding: 15px 22px; }
+    .card { padding: 28px; }
+    .card-value { font-size: 2.4rem; }
+    #gsPanelWrap { width: 1000px; }
+    .float-explorer { width: 640px !important; }
+  }
+
   /* ── Global Search ──────────────────────────────────────────────────────── */
-  .nav-search { margin-left: auto; display: flex; align-items: center; padding: 0 6px; flex-shrink: 0; }
+  .nav-search { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; padding: 0 6px; height: 42px; flex-shrink: 0; }
+  .nav-bot { margin-left: auto; display: flex; align-items: center; padding: 0 8px; flex-shrink: 0; }
+  .nav-analyst-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 14px; height: 30px; border-radius: 6px;
+    background: rgba(35,134,54,0.2); border: 1px solid rgba(35,134,54,0.55);
+    color: #3fb950; font-size: 0.78rem; font-weight: 600;
+    cursor: pointer; transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+  .nav-analyst-btn:hover { background: rgba(35,134,54,0.35); border-color: #3fb950; }
+  .nav-analyst-btn.active { background: rgba(35,134,54,0.4); border-color: #3fb950; color: #56d364; }
+
+  /* ── AI Notification Center ── */
+  .nav-notif-btn { position:relative; display:inline-flex; align-items:center; justify-content:center; width:32px; height:30px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); color:#8b949e; font-size:0.95rem; cursor:pointer; margin-right:6px; transition:background .15s,color .15s; }
+  .nav-notif-btn:hover,.nav-notif-btn.active { background:rgba(255,255,255,0.1); color:#e6edf3; border-color:rgba(255,255,255,0.18); }
+  #notifBadge { position:absolute; top:-4px; right:-4px; background:#f85149; color:#fff; font-size:0.58rem; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:none; align-items:center; justify-content:center; padding:0 3px; line-height:1; }
+  #notifPanel { position:fixed; right:var(--explorer-w,0px); top:98px; width:348px; height:calc(100vh - 98px); background:rgba(9,13,20,0.97); backdrop-filter:blur(20px); border-left:1px solid rgba(255,255,255,0.08); z-index:902; transform:translateX(100%); transition:transform .28s cubic-bezier(.4,0,.2,1),right .3s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; overflow:hidden; }
+  #notifPanel.open { transform:translateX(0); }
+  .np-head { display:flex; align-items:center; gap:6px; padding:11px 14px; border-bottom:1px solid rgba(255,255,255,0.07); flex-shrink:0; }
+  .np-title { font-size:0.85rem; font-weight:700; color:#e6edf3; flex:1; }
+  .np-btn { background:none; border:1px solid rgba(255,255,255,0.1); border-radius:5px; color:#8b949e; padding:3px 8px; font-size:0.73rem; cursor:pointer; }
+  .np-btn:hover { color:#e6edf3; border-color:rgba(255,255,255,0.22); }
+  .np-status { font-size:0.7rem; color:#6e7681; padding:5px 14px 4px; border-bottom:1px solid rgba(255,255,255,0.05); flex-shrink:0; display:flex; align-items:center; gap:8px; }
+  .np-status-dot { width:6px; height:6px; border-radius:50%; background:#3fb950; animation:npPulse 2s ease-in-out infinite; }
+  @keyframes npPulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  #notifList { flex:1; overflow-y:auto; padding:6px 0 12px; }
+  #notifList::-webkit-scrollbar { width:3px; }
+  #notifList::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:2px; }
+  .np-empty { text-align:center; color:#6e7681; font-size:0.82rem; padding:40px 24px; line-height:1.7; }
+  .notif-card { margin:5px 10px; padding:11px 13px; background:rgba(22,27,34,0.9); border-radius:12px; border:1px solid rgba(255,255,255,0.06); border-left:3px solid #30363d; animation:ncFadeIn .2s ease-out; }
+  .notif-card:hover { background:rgba(28,34,44,0.95); }
+  @keyframes ncFadeIn { from{opacity:0;transform:translateX(14px)} to{opacity:1;transform:none} }
+  .notif-alert { border-left-color:#f85149; }
+  .notif-news  { border-left-color:#58a6ff; }
+  .notif-idea  { border-left-color:#3fb950; }
+  .notif-info  { border-left-color:#e3b341; }
+  .nc-top { display:flex; align-items:center; gap:5px; margin-bottom:5px; }
+  .nc-icon { font-size:0.82rem; }
+  .nc-badge { font-size:0.62rem; font-weight:700; letter-spacing:.04em; padding:1px 5px; border-radius:3px; background:rgba(255,255,255,0.07); color:#8b949e; }
+  .notif-alert .nc-badge { background:rgba(248,81,73,.15); color:#f85149; }
+  .notif-news  .nc-badge { background:rgba(88,166,255,.15); color:#58a6ff; }
+  .notif-idea  .nc-badge { background:rgba(63,185,80,.15); color:#3fb950; }
+  .notif-info  .nc-badge { background:rgba(227,179,65,.15); color:#e3b341; }
+  .nc-prio { width:6px; height:6px; border-radius:50%; display:inline-block; }
+  .nc-prio.high { background:#f85149; }
+  .nc-prio.med  { background:#e3b341; }
+  .nc-dismiss { margin-left:auto; background:none; border:none; color:#6e7681; cursor:pointer; font-size:0.78rem; padding:0 2px; line-height:1; }
+  .nc-dismiss:hover { color:#e6edf3; }
+  .nc-title { font-size:0.88rem; font-weight:700; color:#e6edf3; line-height:1.35; margin-bottom:5px; }
+  .nc-body  { font-size:0.76rem; color:#8b949e; line-height:1.45; margin-bottom:7px; }
+  .nc-age   { font-size:0.67rem; color:#6e7681; white-space:nowrap; margin-left:auto; margin-right:4px; }
+  .nc-foot  { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .nc-sym   { font-size:0.7rem; font-weight:700; color:#58a6ff; background:rgba(88,166,255,.1); border:1px solid rgba(88,166,255,.2); border-radius:3px; padding:1px 5px; cursor:pointer; }
+  .nc-sym:hover { background:rgba(88,166,255,.2); }
+  .nc-act   { font-size:0.7rem; font-weight:700; padding:2px 8px; border-radius:4px; cursor:pointer; border:1px solid; }
+  .notif-alert .nc-act { color:#f85149; border-color:rgba(248,81,73,.4); background:rgba(248,81,73,.1); }
+  .notif-idea  .nc-act { color:#3fb950; border-color:rgba(63,185,80,.4); background:rgba(63,185,80,.1); }
+  .notif-news  .nc-act { color:#58a6ff; border-color:rgba(88,166,255,.4); background:rgba(88,166,255,.1); }
+  .notif-info  .nc-act { color:#e3b341; border-color:rgba(227,179,65,.4); background:rgba(227,179,65,.1); }
+  /* Toast stack */
+  #notifToastStack { position:fixed; bottom:24px; right:16px; z-index:2100; display:flex; flex-direction:column-reverse; gap:8px; pointer-events:none; max-width:310px; }
+  .nc-toast { background:rgba(10,14,20,0.97); backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:11px 13px; pointer-events:all; animation:toastIn .3s cubic-bezier(.34,1.56,.64,1); transition:opacity .3s,transform .3s; box-shadow:0 8px 32px rgba(0,0,0,0.45); }
+  .nc-toast.toast-out { opacity:0; transform:translateX(30px); }
+  @keyframes toastIn { from{opacity:0;transform:translateX(40px) scale(.94)} to{opacity:1;transform:none scale(1)} }
+  .nc-toast-alert { border-left:3px solid #f85149; }
+  .nc-toast-news  { border-left:3px solid #58a6ff; }
+  .nc-toast-idea  { border-left:3px solid #3fb950; }
+  .nc-toast-info  { border-left:3px solid #e3b341; }
+  .nc-toast-top   { display:flex; align-items:center; justify-content:space-between; margin-bottom:3px; font-size:0.72rem; color:#8b949e; }
+  .nc-toast-top button { background:none; border:none; color:#6e7681; cursor:pointer; font-size:0.8rem; padding:0; }
+  .nc-toast-title { font-size:0.79rem; font-weight:600; color:#e6edf3; margin-bottom:2px; }
+  .nc-toast-body  { font-size:0.72rem; color:#8b949e; }
+  @media (max-width:768px) { #notifPanel { width:100%; top:56px; height:calc(100vh - 56px); } #notifToastStack { right:8px; max-width:calc(100vw - 16px); } }
   /* Rainbow border wrapper */
   .gs-rainbow-wrap {
     position: relative;
@@ -1576,7 +1889,7 @@
     display: flex; align-items: center; gap: 6px;
     background: #0d1117;
     border: none; border-radius: 22px;
-    padding: 5px 11px; cursor: text;
+    padding: 5px 18px; cursor: text;
   }
   .gs-input-wrap:focus-within { background: #111623; }
   #gsInput {
@@ -1592,7 +1905,7 @@
   #gsOverlay.open { display: block; }
   /* Rainbow wrapper carries the animated border */
   #gsPanelWrap {
-    display: none; position: fixed; top: 68px; left: 50%; transform: translateX(-50%);
+    display: none; position: fixed; top: 102px; left: 50%; transform: translateX(-50%);
     width: 680px; max-width: calc(100vw - 32px);
     padding: 2px; border-radius: 16px;
     animation: gs-rainbow-glow 5s linear infinite;
@@ -1724,7 +2037,7 @@
   .gs-panel-close:hover { color: #e6edf3; background: rgba(255,255,255,0.07); }
   /* Nav trigger pill: clickable label, no real input */
   #gsNavTrigger { cursor: pointer; }
-  .gs-nav-label { color: #6e7681; font-size: 0.8rem; font-weight: 500; white-space: nowrap; }
+  .gs-nav-label { color: #6e7681; font-size: 0.8rem; font-weight: 500; white-space: nowrap; min-width: 88px; text-align: center; display: inline-block; transition: opacity 0.18s ease; }
   #gsNavTrigger.gs-hidden { display: none !important; }
   /* Mini candlestick chart in search card */
   .gs-mini-chart { height: 180px; width: 100%; margin: 10px 0 2px; border-radius: 8px; overflow: hidden; }
@@ -1750,6 +2063,10 @@
 <!-- AI news ticker — fixed strip at very top of viewport -->
 <div id="heroNewsTicker">
   <div id="heroTickerTrack"><span style="color:#484f58;font-size:0.72rem;padding:0 20px">Loading market news…</span></div>
+</div>
+<!-- Second fixed news row — same data, left-to-right scroll -->
+<div id="heroNewsTicker2">
+  <div id="heroTickerTrack2"><span style="color:#484f58;font-size:0.72rem;padding:0 20px">Loading market news…</span></div>
 </div>
 
 <div id="market-hero">
@@ -1778,7 +2095,7 @@
   </div>
   <!-- Controls: clocks, broker selector, status, user menu — pushed to right -->
   <div class="hero-controls">
-    <button id="newsDrawerToggle">📰 News</button>
+
     <div class="nav-clocks" id="navClocks">
       <div class="nav-clock" id="clockSGT">
         <span class="nav-clock-label">SGT</span>
@@ -1846,10 +2163,14 @@
   </div>
 </div>
 
+<!-- Stock price ticker -->
+<div id="stockTicker">
+  <div id="stockTickerTrack"><span style="color:#484f58;font-size:0.72rem;padding:0 20px">Loading prices…</span></div>
+</div>
+
 <nav>
   <div class="nav-tabs">
     <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">Dashboard</button>
-    <button class="tab" onclick="showPage('trades',this)">Trades</button>
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
@@ -1863,10 +2184,17 @@
     <div class="gs-rainbow-wrap" onclick="gsOpen()" role="button" tabindex="0" aria-label="Open Global Search" onkeydown="if(event.key==='Enter'||event.key===' ')gsOpen()">
       <div class="gs-input-wrap">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="#8b949e"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zm-5.242 1.656a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
-        <span class="gs-nav-label">Global Search</span>
+        <span class="gs-nav-label" id="gsNavLabel">दृष्टि</span>
         <span class="gs-kbd">/</span>
       </div>
     </div>
+  </div>
+  <div class="nav-bot">
+    <button class="nav-notif-btn" id="newsDrawerToggle" title="Live Market News">📰</button>
+    <button class="nav-notif-btn" id="navNotifBtn" onclick="toggleNotifPanel()" title="AI Notifications">
+      🔔<span id="notifBadge"></span>
+    </button>
+    <button class="nav-analyst-btn" onclick="toggleChat()" title="AI Trading Analyst">🤖 AKSHAYA AI</button>
   </div>
 </nav>
 
@@ -1907,6 +2235,7 @@
       <button class="widget-tab" onclick="switchWidgetTab('intraday')">Intraday Picks</button>
       <button class="widget-tab" onclick="switchWidgetTab('watchlist')">❤️ Watchlist</button>
       <button class="widget-tab" onclick="switchWidgetTab('cp')">📈 Trade Results</button>
+      <button class="widget-tab" onclick="switchWidgetTab('tradehistory')">📋 Trade History</button>
       <div style="flex:1;min-width:8px"></div>
       <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
         <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
@@ -1926,6 +2255,7 @@
         <span style="font-size:0.76rem;color:var(--muted)">Open Stock Explorer → 🤍 to add</span>
         <button class="refresh-btn" onclick="loadDashboardWatchlist()">↻ Refresh</button>
       </div>
+      <div class="wta" id="wta-tradehistory" style="display:none;align-items:center;gap:8px"></div>
       <div class="wta" id="wta-cp" style="display:none;align-items:center;gap:8px">
         <input type="date" id="cpDatePicker" style="background:#161b22;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:3px 8px;font-size:0.78rem;cursor:pointer" onchange="loadCatalystPerf()">
         <button class="refresh-btn" onclick="loadCatalystPerf()">↻</button>
@@ -1991,6 +2321,22 @@
     <div class="widget-panel" id="widget-panel-cp">
       <div id="cpBody"><div class="loading" style="padding:32px;text-align:center">Select a date to view results</div></div>
     </div>
+    <div class="widget-panel" id="widget-panel-tradehistory">
+      <div class="table-wrap" id="tradesTable">
+        <div class="table-head">
+          <h3>Trade History <button class="doc-btn" onclick="openResearchDoc('trades')" title="How this works">?</button></h3>
+          <div style="display:flex;gap:8px">
+            <select id="tradeFilter" onchange="loadTrades()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+              <option value="">All</option>
+              <option value="open">Open</option>
+              <option value="closed">Closed</option>
+            </select>
+            <button class="refresh-btn" onclick="loadTrades()">↻ Refresh</button>
+          </div>
+        </div>
+        <div class="loading">Loading...</div>
+      </div>
+    </div>
   </div>
 
   <!-- Moomoo Portfolio Risk Panel — shown only when source = moomoo -->
@@ -2008,23 +2354,6 @@
 
 </div>
 
-<!-- ── TRADES ─────────────────────────────────────────── -->
-<div class="page" id="page-trades">
-  <div class="table-wrap" id="tradesTable">
-    <div class="table-head">
-      <h3>Trade History <button class="doc-btn" onclick="openResearchDoc('trades')" title="How this works">?</button></h3>
-      <div style="display:flex;gap:8px">
-        <select id="tradeFilter" onchange="loadTrades()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
-          <option value="">All</option>
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-        </select>
-        <button class="refresh-btn" onclick="loadTrades()">↻ Refresh</button>
-      </div>
-    </div>
-    <div class="loading">Loading...</div>
-  </div>
-</div>
 
 <!-- ── SCORES ─────────────────────────────────────────── -->
 <!-- ── MARKET ─────────────────────────────────────────── -->
@@ -2163,7 +2492,7 @@
 <!-- ═══════════════════════ EARNINGS CALENDAR PAGE ═══════════════════════ -->
 <div class="page" id="page-calendar">
   <style>
-    .ecal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-bottom:28px; max-width:910px; }
+    .ecal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; margin-bottom:28px; }
     .ecal-day { background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:8px 6px; min-height:110px; }
     .ecal-day.ecal-today { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
     .ecal-day.ecal-weekend { opacity:0.55; }
@@ -2184,7 +2513,7 @@
     .ecal-chips-wrap::-webkit-scrollbar-thumb { background:var(--faint,#30363d); border-radius:2px; }
 
     /* ── Earnings Preview ────────────────────────────── */
-    .ep-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:14px; }
+    .ep-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; }
     .ep-card { background:#0d1117; border:1px solid #30363d; border-radius:12px; overflow:hidden; transition:border-color .15s; }
     .ep-card:hover { border-color:#58a6ff55; }
     .ep-card-head { padding:12px 14px 8px; border-bottom:1px solid #21262d; display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
@@ -2306,7 +2635,7 @@
     .er-group-ep1{ border-left:2px solid rgba(63,185,80,.25); }
   </style>
 
-  <div style="max-width:1300px">
+  <div>
 
     <!-- Earnings Calendar -->
     <div style="margin-bottom:28px">
@@ -2321,7 +2650,7 @@
           <button onclick="loadEarningsCalendar(true)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
         </div>
       </div>
-      <div style="position:relative;margin-bottom:12px;max-width:910px">
+      <div style="position:relative;margin-bottom:12px">
         <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:#8b949e" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="earningsCalSearch" type="text" placeholder="Search ticker or company…"
           style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 34px 8px 32px;color:#e6edf3;font-size:0.83rem;outline:none;transition:border-color .15s"
@@ -2466,7 +2795,7 @@
 
 <!-- ═══════════════════════ RESEARCH PAGE ═══════════════════════ -->
 <div class="page" id="page-research">
-  <div style="max-width:1200px">
+  <div>
 
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
@@ -2709,7 +3038,7 @@
 </div>
 
 <div class="page" id="page-users">
-  <div style="max-width:1100px">
+  <div>
 
     <!-- ── Sub-nav tabs ── -->
     <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid #21262d;padding-bottom:0">
@@ -2921,7 +3250,7 @@
     .sector-cb.checked { color:#f85149; }
   </style>
 
-  <div style="max-width:1100px;padding-bottom:40px">
+  <div style="padding-bottom:40px">
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
       <div>
@@ -5961,6 +6290,27 @@ erDiagram
   <div class="nd-footer-bar">Auto-refreshes every 90s · Benzinga</div>
 </div>
 
+<!-- ── AI Notification Center ── -->
+<div id="notifPanel">
+  <div class="np-head">
+    <span class="np-title">🔔 AI Insights</span>
+    <button class="doc-btn" onclick="openResearchDoc('notifications')" title="How this works" style="margin-left:2px;margin-right:4px">?</button>
+    <button class="np-btn" id="notifRefreshBtn" onclick="fetchNotifications(true)" title="Refresh now">↻</button>
+    <button class="np-btn" onclick="clearAllNotifs()">Clear</button>
+    <button class="np-btn" onclick="closeNotifPanel()">✕</button>
+  </div>
+  <div class="np-status">
+    <span class="np-status-dot"></span>
+    <span id="notifStatusText">Initializing…</span>
+  </div>
+  <div id="notifList">
+    <div class="np-empty">Loading AI insights…<br>Analyzing your portfolio.</div>
+  </div>
+</div>
+
+<!-- Toast notification stack -->
+<div id="notifToastStack"></div>
+
 <button class="chat-fab" id="chatFab" onclick="toggleChat()" title="AI Trading Analyst">🤖</button>
 
 <!-- ── Report Issue Modal ────────────────────────────── -->
@@ -6090,6 +6440,12 @@ function applyPermissions(perms) {
   const showExplorer = widgets.includes('stock_explorer');
   if (explorerTab) explorerTab.style.display = showExplorer ? '' : 'none';
   if (!showExplorer) closeFloatExplorer();
+
+  // AI Notifications
+  const notifBtn = document.getElementById('navNotifBtn');
+  const showNotif = widgets.includes('notifications');
+  if (notifBtn) notifBtn.style.display = showNotif ? '' : 'none';
+  if (!showNotif) { document.getElementById('notifPanel')?.classList.remove('open'); }
 }
 
 // ── Auth check ────────────────────────────────────────
@@ -7132,6 +7488,56 @@ const WIDGET_DOCS = {
 
       <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Cache &amp; Refresh</h4>
       <p>Results are cached for 2 hours per day. Click <strong style="color:#e6edf3">↻ Refresh</strong> to force-reload all data fresh from Yahoo Finance and SEC EDGAR. Takes 20–30 seconds as it fetches up to 12 stocks in parallel.</p>
+    `,
+  },
+  notifications: {
+    title: '🔔 AI Insights — How It Works',
+    body: `
+      <p>AI Insights is a personalized notification engine that monitors your live portfolio, real-time technical signals, and market news — then delivers actionable alerts every 5 minutes powered by Claude AI.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Notification Types</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem;margin-bottom:12px">
+        <tr style="border-bottom:1px solid #21262d">
+          <td style="padding:8px 0;width:80px"><span style="color:#f85149;font-weight:700">🚨 ALERT</span></td>
+          <td style="padding:8px 0;color:#8b949e">Urgent portfolio action. Triggered when RSI &gt; 70 (overbought) or &lt; 30 (oversold) on a held position, conviction grade drops to F, or an unrealized gain/loss crosses a meaningful threshold. Includes a suggested action: <strong style="color:#e6edf3">SELL</strong>, <strong style="color:#e6edf3">BUY</strong>, or <strong style="color:#e6edf3">HOLD</strong>.</td>
+        </tr>
+        <tr style="border-bottom:1px solid #21262d">
+          <td style="padding:8px 0"><span style="color:#58a6ff;font-weight:700">📰 NEWS</span></td>
+          <td style="padding:8px 0;color:#8b949e">A breaking headline directly relevant to a stock you hold. AI matches incoming Benzinga/Yahoo news against your portfolio tickers and summarises the potential impact on your position.</td>
+        </tr>
+        <tr style="border-bottom:1px solid #21262d">
+          <td style="padding:8px 0"><span style="color:#3fb950;font-weight:700">💡 IDEA</span></td>
+          <td style="padding:8px 0;color:#8b949e">A high-conviction opportunity in a stock <em>not</em> currently in your portfolio. Generated when the AI conviction engine gives a stock an A-grade score and the market context is favourable.</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0"><span style="color:#e3b341;font-weight:700">ℹ️ INFO</span></td>
+          <td style="padding:8px 0;color:#8b949e">Market-wide context: VIX level, regime shift (bull/bear/choppy), sector rotation, or a broad macro observation relevant to your trading style.</td>
+        </tr>
+      </table>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Data Sources</h4>
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem;margin-bottom:12px">
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 0;color:#e6edf3;font-weight:600;width:180px">Portfolio positions</td><td style="padding:6px 0;color:#8b949e">Live from Moomoo (primary) or Alpaca Paper — symbol, quantity, current price, P&amp;L %</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 0;color:#e6edf3;font-weight:600">Conviction scores</td><td style="padding:6px 0;color:#8b949e">Full 14-signal scoring engine run on your top 6 holdings by value — RSI, MACD, EMA, volume, analyst consensus</td></tr>
+        <tr style="border-bottom:1px solid #21262d"><td style="padding:6px 0;color:#e6edf3;font-weight:600">Market news</td><td style="padding:6px 0;color:#8b949e">Latest 5 Benzinga headlines already cached from the News drawer (no extra API call)</td></tr>
+        <tr><td style="padding:6px 0;color:#e6edf3;font-weight:600">Market regime</td><td style="padding:6px 0;color:#8b949e">VIX + sector performance composite — bull / bear / choppy / high-volatility</td></tr>
+      </table>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Priority Levels</h4>
+      <ul style="color:#8b949e;padding-left:20px;margin:0;display:flex;flex-direction:column;gap:6px">
+        <li><strong style="color:#f85149">● High</strong> — Shows a toast popup bottom-right AND appears in the panel. Requires attention soon (e.g. overbought sell signal, grade F holding).</li>
+        <li><strong style="color:#e3b341">● Medium</strong> — Shows a toast popup. Good to know but not urgent (e.g. relevant news, moderate momentum signal).</li>
+        <li><strong style="color:#6e7681">● Low</strong> — Panel only, no popup. Background context (e.g. market regime info, mild sector rotation).</li>
+      </ul>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Action Buttons</h4>
+      <p>Each alert card with a <strong style="color:#e6edf3">SELL / BUY / WATCH / HOLD</strong> button opens the Stock Explorer pre-loaded for that symbol so you can review the live chart, full technicals, and news before acting. The button is a suggestion — no trade is placed automatically.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Refresh Cadence</h4>
+      <p>The panel auto-refreshes every <strong style="color:#e6edf3">5 minutes</strong>. The server caches results per user so rapid re-opens don't burn Claude API credits. Click <strong style="color:#e6edf3">↻</strong> in the panel header to force an immediate fresh analysis. The countdown "next in X:XX" in the status bar shows time until the next auto-refresh.</p>
+
+      <h4 style="color:#58a6ff;margin:20px 0 8px;font-size:0.92rem">Auto-Close</h4>
+      <p>The panel closes automatically <strong style="color:#e6edf3">1.5 seconds</strong> after your cursor leaves it — keeping the dashboard clean while you work. Move your cursor back in to cancel the close.</p>
     `,
   },
 };
@@ -8701,7 +9107,6 @@ function setSource(src) {
   loadTomorrowCatalysts();
   loadIntradayPicks();
   loadPnl();
-  if (document.getElementById('page-trades')?.classList.contains('active')) loadTrades();
   // Show/hide Moomoo risk panel
   const riskPanel = document.getElementById('moomooRiskPanel');
   if (riskPanel) {
@@ -9110,7 +9515,7 @@ function showPage(name, btn) {
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, trades: loadTrades, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); } };
   loaders[name]?.();
 }
 
@@ -9128,6 +9533,7 @@ function switchWidgetTab(name) {
   if (name === 'watchlist') loadDashboardWatchlist();
   if (name === 'positions') loadPnl();
   if (name === 'cp') initCatalystPerfTab();
+  if (name === 'tradehistory') loadTrades();
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -14591,7 +14997,9 @@ let _chatOpenAt = 0;
 function toggleChat() {
   const widget = document.getElementById('chatWidget');
   const fab    = document.getElementById('chatFab');
+  const navBtn = document.querySelector('.nav-analyst-btn');
   const isOpen = widget.classList.toggle('open');
+  if (navBtn) navBtn.classList.toggle('active', isOpen);
   if (isOpen) {
     _chatOpenAt = Date.now();
     restoreChatSize();
@@ -14607,7 +15015,7 @@ function toggleChat() {
     updateAnalystState();
     if (window.innerWidth <= 768) {
       _applyChatMobileSize();
-      fab.style.display = 'none';
+      if (fab) fab.style.display = 'none';
     }
     document.getElementById('chatMessages').scrollTop = 9999;
     document.getElementById('chatInput').focus();
@@ -14615,7 +15023,7 @@ function toggleChat() {
     widget.style.height = '';
     widget.style.maxHeight = '';
     widget.style.bottom = '';
-    fab.style.display = '';
+    if (fab) fab.style.display = '';
   }
 }
 
@@ -15263,8 +15671,6 @@ function exploreSymbol(sym) {
 <div class="float-explorer" id="floatExplorer">
   <!-- Drag handle / header -->
   <div class="float-explorer-header" id="floatExplorerHeader">
-    <span style="font-size:1rem">🔍</span>
-    <span class="float-explorer-title">Stock Explorer</span>
     <div class="explorer-search-wrap" id="explorerSearchWrap" style="flex:1;max-width:380px">
       <span class="explorer-search-icon">🔍</span>
       <input id="explorerSymbol" type="text" placeholder="Ticker or company name…" autocomplete="off" spellcheck="false"
@@ -15281,7 +15687,7 @@ function exploreSymbol(sym) {
   </div>
 
   <!-- Quick Trade Panel -->
-  <div id="qtPanel" style="display:none;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card-bg)">
+  <div id="qtPanel" style="display:none;padding:14px 16px;border-bottom:1px solid var(--border);background:var(--card-bg);flex-shrink:0;overflow-y:auto;max-height:50vh">
     <style>
       .qt-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px; }
       .qt-field { display:flex; flex-direction:column; gap:4px; }
@@ -15861,13 +16267,29 @@ function calEarningClick(symbol) {
 function openFloatExplorer() {
   _explorerOpenAt = Date.now();
   const panel = document.getElementById('floatExplorer');
-  // On mobile the explorer is a CSS bottom sheet — clear any saved desktop position
-  if (window.innerWidth <= 768) {
-    panel.style.right = '';
-    panel.style.top   = '';
+
+  // If already open, preserve current dock position — just ensure focus
+  if (panel.classList.contains('open')) {
+    loadExplorerSymbols();
+    document.getElementById('explorerSymbol').focus();
+    return;
   }
+
+  // First open: default to LEFT side
+  panel.classList.add('dock-left');
+  panel.style.left  = '0';
+  panel.style.right = 'auto';
   panel.classList.add('open');
   document.getElementById('tab-explorer').classList.add('active');
+  if (window.innerWidth > 768) {
+    document.body.classList.remove('explorer-open');
+    document.body.classList.add('explorer-left');
+    requestAnimationFrame(() => {
+      const w = panel.offsetWidth || 400;
+      document.documentElement.style.setProperty('--explorer-w', w + 'px');
+      _explorerSyncTop();
+    });
+  }
   loadExplorerSymbols();
   document.getElementById('explorerSymbol').focus();
 }
@@ -15876,12 +16298,23 @@ function openExplorerForSymbol(sym) {
   const input = document.getElementById('explorerSymbol');
   if (!input || !sym) return;
   input.value = sym.toUpperCase();
-  openFloatExplorer();
+  const panel = document.getElementById('floatExplorer');
+  if (!panel.classList.contains('open')) openFloatExplorer();
   loadStockExplorer();
 }
 function closeFloatExplorer() {
-  document.getElementById('floatExplorer').classList.remove('open');
+  const panel = document.getElementById('floatExplorer');
+  panel.classList.remove('open', 'dock-left');
+  panel.style.left  = '';
+  panel.style.right = '';
   document.getElementById('tab-explorer').classList.remove('active');
+  document.body.classList.remove('explorer-open', 'explorer-left');
+  document.documentElement.style.setProperty('--explorer-w', '0px');
+  // Reset news drawer to sit flush right
+  if (typeof _newsDrawerOpen !== 'undefined' && _newsDrawerOpen) {
+    const drawer = document.getElementById('newsDrawer');
+    if (drawer) drawer.style.right = '0px';
+  }
 }
 function toggleFloatExplorer() {
   const panel = document.getElementById('floatExplorer');
@@ -15889,11 +16322,13 @@ function toggleFloatExplorer() {
   else openFloatExplorer();
 }
 
-// Click-outside to minimize Explorer
+// Click-outside to close Explorer — disabled in docked mode (either side)
 document.addEventListener('mousedown', function(e) {
   const panel = document.getElementById('floatExplorer');
   if (!panel || !panel.classList.contains('open')) return;
-  if (Date.now() - _explorerOpenAt < 250) return; // ignore the click that opened it
+  if (document.body.classList.contains('explorer-open')) return;
+  if (document.body.classList.contains('explorer-left')) return;
+  if (Date.now() - _explorerOpenAt < 250) return;
   if (!panel.contains(e.target)) closeFloatExplorer();
 });
 
@@ -16069,80 +16504,172 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// ── Drag to reposition ─────────────────────────────────────────────────────
+// ── Explorer top sync — keeps docked panel below the visible nav ───────────
+// The nav sits below the market-hero when unscrolled (~210px from top with dual ticker)
+// and sticks at 98px (56px dual-ticker + 42px nav) after scrolling past it.
+// getBoundingClientRect().bottom gives the correct value in both states.
+function _explorerSyncTop() {
+  const panel = document.getElementById('floatExplorer');
+  if (!panel || !panel.classList.contains('open')) return;
+  const isDocked = document.body.classList.contains('explorer-open') ||
+                   document.body.classList.contains('explorer-left');
+  if (!isDocked) return; // floating during drag — leave top alone
+  const nav = document.querySelector('nav');
+  if (!nav) return;
+  const top = Math.max(56, Math.ceil(nav.getBoundingClientRect().bottom));
+  const h   = (window.innerHeight - top) + 'px';
+  panel.style.top       = top + 'px';
+  panel.style.height    = h;
+  panel.style.maxHeight = h;
+}
+window.addEventListener('scroll', _explorerSyncTop, { passive: true });
+
+// Sync notification panel + news drawer to always start below the nav
+function _sidePanelSyncTop() {
+  const nav = document.querySelector('nav');
+  if (!nav) return;
+  const top = Math.max(56, Math.ceil(nav.getBoundingClientRect().bottom));
+  const h   = (window.innerHeight - top) + 'px';
+  const np  = document.getElementById('notifPanel');
+  if (np) { np.style.top = top + 'px'; np.style.height = h; }
+  const nd  = document.getElementById('newsDrawer');
+  if (nd)  { nd.style.top = top + 'px'; nd.style.bottom = '0'; }
+}
+window.addEventListener('scroll',  _sidePanelSyncTop, { passive: true });
+window.addEventListener('resize',  _sidePanelSyncTop, { passive: true });
+requestAnimationFrame(_sidePanelSyncTop);
+
+// ── Drag to reposition / side-snap ────────────────────────────────────────
 (function() {
   const panel  = document.getElementById('floatExplorer');
   const handle = document.getElementById('floatExplorerHeader');
-  let dragging = false, startX, startY, startRight, startBottom;
+  let dragging = false, startX, startY, startLeft, startTop;
 
-  // Clamp panel fully within the current viewport (handles screen/window size changes)
+  // Re-sync on resize / monitor change
   function clampExplorer() {
     if (!panel.classList.contains('open')) return;
-    if (window.innerWidth <= 768) return; // mobile: CSS bottom-sheet handles positioning
-    requestAnimationFrame(() => {
-      const rect = panel.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      let right = parseFloat(panel.style.right) || 16;
-      let top   = parseFloat(panel.style.top)   || 60;
-      // Left edge off-screen → slide right until fully visible
-      if (rect.left < 0) right = Math.max(0, vw - rect.width);
-      // Right edge off-screen → pin to right edge
-      if (rect.right > vw) right = 0;
-      // Vertical bounds
-      top = Math.min(Math.max(56, top), Math.max(56, vh - 120));
-      panel.style.right = right + 'px';
-      panel.style.top   = top   + 'px';
-    });
+    if (window.innerWidth <= 768) {
+      panel.style.left  = '';
+      panel.style.right = '';
+      panel.style.top   = '';
+      document.body.classList.remove('explorer-open', 'explorer-left');
+      document.documentElement.style.setProperty('--explorer-w', '0px');
+      return;
+    }
+    if (document.body.classList.contains('explorer-left')) {
+      panel.style.left  = '0';
+      panel.style.right = 'auto';
+      requestAnimationFrame(() => {
+        const w = panel.offsetWidth || 400;
+        document.documentElement.style.setProperty('--explorer-w', w + 'px');
+        _explorerSyncTop();
+      });
+      return;
+    }
+    if (document.body.classList.contains('explorer-open')) {
+      panel.style.right = '0';
+      panel.style.left  = '';
+      requestAnimationFrame(() => {
+        const w = panel.offsetWidth || 400;
+        document.documentElement.style.setProperty('--explorer-w', w + 'px');
+        if (typeof _newsDrawerOpen !== 'undefined' && _newsDrawerOpen) {
+          const drawer = document.getElementById('newsDrawer');
+          if (drawer) drawer.style.right = w + 'px';
+        }
+        _explorerSyncTop();
+      });
+      return;
+    }
   }
 
-  // Restore last saved position then immediately clamp to current viewport
-  try {
-    const saved = JSON.parse(localStorage.getItem('explorerPos') || 'null');
-    if (saved) {
-      panel.style.right = (saved.right || 16) + 'px';
-      panel.style.top   = (saved.top   || 60) + 'px';
-      clampExplorer();
-    }
-  } catch {}
-
-  // Re-clamp whenever the browser window is resized or the screen changes
+  try { localStorage.removeItem('explorerPos'); } catch {}
   window.addEventListener('resize', clampExplorer);
 
   handle.addEventListener('mousedown', e => {
     if (e.target.closest('input,button,.explorer-search-wrap')) return;
-    dragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
+    if (window.innerWidth <= 768) return;
+
+    const isDocked = document.body.classList.contains('explorer-open') ||
+                     document.body.classList.contains('explorer-left');
+
     const rect = panel.getBoundingClientRect();
-    startRight  = window.innerWidth - rect.right;
-    startBottom = rect.top;
+
+    if (isDocked) {
+      // Undock: remove push classes so content re-centres, keep panel visible in place
+      document.body.classList.remove('explorer-open', 'explorer-left');
+      document.documentElement.style.setProperty('--explorer-w', '0px');
+      // Reset news drawer to right edge
+      if (typeof _newsDrawerOpen !== 'undefined' && _newsDrawerOpen) {
+        const drawer = document.getElementById('newsDrawer');
+        if (drawer) drawer.style.right = '0px';
+      }
+      // Disable CSS transition so the panel doesn't animate during drag
+      panel.style.transition = 'none';
+      // Position at current location using left-based coordinates
+      panel.style.left  = rect.left + 'px';
+      panel.style.right = 'auto';
+      panel.style.top   = rect.top  + 'px';
+    }
+
+    dragging  = true;
+    startX    = e.clientX;
+    startY    = e.clientY;
+    startLeft = parseFloat(panel.style.left) || rect.left;
+    startTop  = parseFloat(panel.style.top)  || rect.top;
     e.preventDefault();
   });
 
   document.addEventListener('mousemove', e => {
     if (!dragging) return;
-    const dx  = startX - e.clientX;
+    const dx  = e.clientX - startX;
     const dy  = e.clientY - startY;
     const vw  = window.innerWidth;
     const vh  = window.innerHeight;
-    const pw  = panel.getBoundingClientRect().width || 700;
-    // Clamp right so panel never slides off either edge
-    const newRight = Math.min(Math.max(0, startRight + dx), Math.max(0, vw - pw));
-    const newTop   = Math.min(Math.max(56, startBottom + dy), vh - 120);
-    panel.style.right = newRight + 'px';
-    panel.style.top   = newTop   + 'px';
+    const pw  = panel.offsetWidth || 400;
+    const newLeft = Math.min(Math.max(0, startLeft + dx), vw - pw);
+    const newTop  = Math.min(Math.max(28, startTop  + dy), vh - 120);
+    panel.style.left = newLeft + 'px';
+    panel.style.top  = newTop  + 'px';
   });
 
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
-    try {
-      localStorage.setItem('explorerPos', JSON.stringify({
-        right: parseFloat(panel.style.right) || 16,
-        top:   parseFloat(panel.style.top)   || 60,
-      }));
-    } catch {}
+    panel.style.transition = ''; // restore CSS transitions
+
+    const rect   = panel.getBoundingClientRect();
+    const center = rect.left + rect.width / 2;
+    const vw     = window.innerWidth;
+
+    if (center < vw / 2) {
+      // Snap to LEFT side — content pushes right
+      panel.classList.add('dock-left');
+      panel.style.left  = '0';
+      panel.style.right = 'auto';
+      document.body.classList.remove('explorer-open');
+      document.body.classList.add('explorer-left');
+      requestAnimationFrame(() => {
+        const w = panel.offsetWidth || 400;
+        document.documentElement.style.setProperty('--explorer-w', w + 'px');
+        _explorerSyncTop();
+      });
+    } else {
+      // Snap to RIGHT side — content pushes left
+      panel.classList.remove('dock-left');
+      panel.style.left  = '';
+      panel.style.right = '0';
+      document.body.classList.remove('explorer-left');
+      document.body.classList.add('explorer-open');
+      requestAnimationFrame(() => {
+        const w = panel.offsetWidth || 400;
+        document.documentElement.style.setProperty('--explorer-w', w + 'px');
+        if (typeof _newsDrawerOpen !== 'undefined' && _newsDrawerOpen) {
+          const drawer = document.getElementById('newsDrawer');
+          if (drawer) drawer.style.right = w + 'px';
+        }
+        _explorerSyncTop();
+      });
+    }
   });
 })();
 
@@ -16434,28 +16961,49 @@ function toggleNewsDrawer() {
   _newsDrawerOpen = !_newsDrawerOpen;
   const isMobile = window.innerWidth <= 768;
 
+  // News drawer sits to the left of a right-docked explorer only
+  const explorerOnRight = !isMobile && document.body.classList.contains('explorer-open');
+  const explorerW = explorerOnRight
+    ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--explorer-w')) || 0)
+    : 0;
+  const NEWS_W = 300;
+
+  const notifOpen = document.getElementById('notifPanel')?.classList.contains('open');
+  const notifW = (!isMobile && notifOpen) ? 348 : 0;
+
   if (_newsDrawerOpen) {
     drawer.classList.add('open');
-    // Desktop: slide in from right. Mobile: translateY handled by CSS .open class.
-    if (!isMobile) drawer.style.right = '0';
-    toggle.textContent = '✕ Close';
+    if (!isMobile) {
+      drawer.style.right = (explorerW + notifW) + 'px';
+      document.documentElement.style.setProperty('--news-w', NEWS_W + 'px');
+      document.body.classList.add('news-open');
+    }
+    toggle.classList.add('active');
     loadNewsDrawer();
     _newsDrawerInterval = setInterval(() => loadNewsDrawer(), 90_000);
   } else {
     drawer.classList.remove('open');
-    if (!isMobile) drawer.style.right = '-302px';
-    toggle.textContent = '📰 News';
+    if (!isMobile) {
+      drawer.style.right = '-302px';
+      document.documentElement.style.setProperty('--news-w', '0px');
+      document.body.classList.remove('news-open');
+    }
+    toggle.classList.remove('active');
     clearInterval(_newsDrawerInterval);
     _newsDrawerInterval = null;
   }
-
-  // Only shift chat on desktop (mobile news drawer slides up, doesn't overlap chat)
-  if (!isMobile) {
-    const chatRight = _newsDrawerOpen ? '336px' : '28px';
-    if (chatFab)    chatFab.style.right    = chatRight;
-    if (chatWidget) chatWidget.style.right = chatRight;
-  }
 }
+
+// Auto-close news drawer when cursor leaves it
+(function _newsAutoClose() {
+  const drawer = document.getElementById('newsDrawer');
+  if (!drawer) return;
+  let _ndLeaveTimer = null;
+  drawer.addEventListener('mouseleave', () => {
+    _ndLeaveTimer = setTimeout(() => { if (_newsDrawerOpen) toggleNewsDrawer(); }, 1500);
+  });
+  drawer.addEventListener('mouseenter', () => clearTimeout(_ndLeaveTimer));
+})();
 
 // Wire toggle and analyze via event delegation
 (function() {
@@ -16486,64 +17034,433 @@ function toggleNewsDrawer() {
 
 let _heroTickerTimer = null;
 
+function _isHotNews(title, impact) {
+  const text = ((title || '') + ' ' + (impact || '')).toLowerCase();
+  return /\binvest(ed|s|ing|ment)|\bacquir(e|ed|es|ing|ition)|\bmerger\b|\bpartnersh(ip)?|\bdeal\b|\bcontract\b|\bfund(ing|ed)?\b|\brais(ed|es|ing)\b|\$\s*\d|\bbillion\b|\bmillion\b|\beat(s|en)?\b|\bsurg(e|ed|ing)|\bsoar(s|ed|ing)?\b|\bjump(s|ed|ing)?\b|\brecord\b|\bipo\b|\bbuyout\b|\btakeover\b|\bspin.?off\b|\bstrategic\b|\bjoint\s+venture\b|\bcollabor/.test(text);
+}
+
 async function loadHeroNewsTicker() {
   const track = document.getElementById('heroTickerTrack');
   if (!track) return;
 
-  try {
-    const res  = await fetch('/api/news/analysis');
-    const data = res.ok ? await res.json() : [];
+  // Fetch both sources in parallel
+  const [r1, r2] = await Promise.all([
+    fetch('/api/news/analysis').catch(() => null),
+    fetch('/api/benzinga/news?limit=16').catch(() => null)
+  ]);
 
-    if (data.length) {
-      _renderHeroTicker(track, data.map(item => {
-        const up   = (item.up   || []).slice(0, 3);
-        const down = (item.down || []).slice(0, 3);
-        const upParts   = up.map(t =>
-          `<span class="htk-arrow-up">▲</span><span class="htk-sym htk-sym-up" onclick="openExplorerForSymbol('${t}')" title="Open ${t} in Explorer">${t}</span>`
-        ).join('');
-        const downParts = down.map(t =>
-          `<span class="htk-arrow-down">▼</span><span class="htk-sym htk-sym-down" onclick="openExplorerForSymbol('${t}')" title="Open ${t} in Explorer">${t}</span>`
-        ).join('');
-        const impact = (item.impact || item.title || '').replace(/</g,'&lt;');
-        const ts     = item.published_at ? `<span class="htk-time">${_ndRelTime(new Date(item.published_at))}</span>` : '';
-        return `<span class="htk-item">${upParts}${downParts}<span class="htk-impact">${impact}</span>${ts}</span>`;
-      }));
-      return;
-    }
-  } catch { /* fall through */ }
+  const aiData = (r1?.ok ? await r1.json().catch(() => []) : []) || [];
+  const bzArts = ((r2?.ok ? await r2.json().catch(() => ({})) : {})?.articles) || [];
 
-  // Fallback: plain news headlines with sentiment coloring
-  try {
-    const res2 = await fetch('/api/benzinga/news?limit=8');
-    if (!res2.ok) throw new Error();
-    const arts = (await res2.json())?.articles ?? [];
-    _renderHeroTicker(track, arts.map(a => {
-      const s      = (a.sentiment || '').toLowerCase();
-      const arrow  = s === 'bullish' ? `<span class="htk-arrow-up">▲</span>` : s === 'bearish' ? `<span class="htk-arrow-down">▼</span>` : '';
-      const syms   = (a.tickers || []).slice(0, 2).map(t =>
-        `<span class="htk-sym" onclick="openExplorerForSymbol('${t}')" title="Open ${t} in Explorer">${t}</span>`
+  // Row 1: AI-analyzed items (most recent, with impact arrows + tickers)
+  const seenTitles = new Set();
+  const row1 = aiData.map(item => {
+    const key = (item.impact || item.title || '').toLowerCase().slice(0, 50);
+    seenTitles.add(key);
+    const up   = (item.up   || []).slice(0, 3);
+    const down = (item.down || []).slice(0, 3);
+    const upParts   = up.map(t =>
+      `<span class="htk-arrow-up">▲</span><span class="htk-sym htk-sym-up" onclick="openExplorerForSymbol('${t}')" title="${t}">${t}</span>`
+    ).join('');
+    const downParts = down.map(t =>
+      `<span class="htk-arrow-down">▼</span><span class="htk-sym htk-sym-down" onclick="openExplorerForSymbol('${t}')" title="${t}">${t}</span>`
+    ).join('');
+    const impact = (item.impact || item.title || '').replace(/</g,'&lt;');
+    const ts     = item.published_at ? `<span class="htk-time">${_ndRelTime(new Date(item.published_at))}</span>` : '';
+    const hot    = _isHotNews(item.title, item.impact);
+    const badge  = hot ? `<span class="htk-hot-badge">HOT</span>` : '';
+    const ageMin = item.published_at ? (Date.now() - new Date(item.published_at).getTime()) / 60000 : 999;
+    const fresh  = !hot && ageMin >= 5 && ageMin < 20;
+    const cls    = hot ? ' htk-hot' : fresh ? ' htk-fresh' : '';
+    const tsAttr = item.published_at ? ` data-ts="${item.published_at}"` : '';
+    return `<span class="htk-item${cls}"${tsAttr}>${badge}${upParts}${downParts}<span class="htk-impact">${impact}</span>${ts}</span>`;
+  });
+
+  // Row 2: Benzinga articles — skip anything already in row 1 (dedup by title prefix)
+  const row2 = bzArts
+    .filter(a => {
+      const key = (a.title || '').toLowerCase().slice(0, 50);
+      if (seenTitles.has(key)) return false;
+      seenTitles.add(key);
+      return true;
+    })
+    .map(a => {
+      const s     = (a.sentiment || '').toLowerCase();
+      const arrow = s === 'bullish' ? `<span class="htk-arrow-up">▲</span>` : s === 'bearish' ? `<span class="htk-arrow-down">▼</span>` : '';
+      const syms  = (a.tickers || []).slice(0, 2).map(t =>
+        `<span class="htk-sym" onclick="openExplorerForSymbol('${t}')" title="${t}">${t}</span>`
       ).join('');
-      const title  = (a.title || '').replace(/</g,'&lt;');
-      const ts     = a.published_at ? `<span class="htk-time">${_ndRelTime(new Date(a.published_at))}</span>` : '';
+      const title = (a.title || '').replace(/</g,'&lt;');
+      const ts    = a.published_at ? `<span class="htk-time">${_ndRelTime(new Date(a.published_at))}</span>` : '';
       return `<span class="htk-item">${arrow}${syms}<span class="htk-impact">${title}</span>${ts}</span>`;
-    }));
-  } catch { /* ignore */ }
+    });
+
+  // If AI source failed, split Benzinga into two unique halves
+  if (!row1.length && row2.length) {
+    const mid = Math.ceil(row2.length / 2);
+    _renderHeroTicker(track, row2.slice(0, mid), row2.slice(mid));
+    return;
+  }
+
+  if (row1.length) _renderHeroTicker(track, row1, row2);
 }
 
-function _renderHeroTicker(track, segments) {
+// segments  → row 1 (newest, right-to-left)
+// segments2 → row 2 (older,  left-to-right)
+function _renderHeroTicker(track, segments, segments2) {
   if (!segments.length) return;
-  // Duplicate for seamless infinite scroll
   const html = segments.join('');
   track.innerHTML = html + html;
-  // Adjust animation speed based on content width
   const totalWidth = track.scrollWidth / 2;
-  const speed = Math.max(30, Math.min(90, totalWidth / 8)); // px/s range 30–90s
+  const speed = Math.max(30, Math.min(90, totalWidth / 8));
   track.style.animationDuration = speed + 's';
+
+  const track2 = document.getElementById('heroTickerTrack2');
+  if (track2 && segments2 && segments2.length) {
+    const html2 = segments2.join('');
+    track2.innerHTML = html2 + html2;
+    // Calculate speed from row 2's own content width so more items don't scroll faster
+    requestAnimationFrame(() => {
+      const w2 = track2.scrollWidth / 2;
+      const speed2 = Math.max(50, Math.min(140, w2 / 8));
+      track2.style.animationDuration = speed2 + 's';
+    });
+  }
 }
 
-// Load immediately and refresh every 10 min
+// Load immediately and refresh every 60 min (hot headlines persist 1 hr)
 loadHeroNewsTicker();
-setInterval(loadHeroNewsTicker, 10 * 60_000);
+setInterval(loadHeroNewsTicker, 60 * 60_000);
+
+// Recolor ticker items every 60s as they age: 5–20 min = green, else white
+function _updateTickerColors() {
+  const now = Date.now();
+  document.querySelectorAll('#heroTickerTrack .htk-item[data-ts]').forEach(el => {
+    if (el.classList.contains('htk-hot')) return;
+    const age = (now - new Date(el.dataset.ts).getTime()) / 60000;
+    if (age >= 5 && age < 20) el.classList.add('htk-fresh');
+    else                       el.classList.remove('htk-fresh');
+  });
+}
+setInterval(_updateTickerColors, 60_000);
+
+// ── Stock price ticker ────────────────────────────────────────────────────────
+const _stkSyms = ['SPY','QQQ','NVDA','AAPL','TSLA','MSFT','AMZN','META','PLTR','MRVL','AMD','GOOGL','NFLX','AVGO','SMCI','SOXL'];
+const _stkLastPrice = {};
+let _stkBuilt = false;
+
+async function refreshStockTicker() {
+  const track = document.getElementById('stockTickerTrack');
+  if (!track) return;
+  try {
+    const r = await fetch('/api/quotes/batch?symbols=' + _stkSyms.join(','));
+    if (!r.ok) return;
+    const { quotes } = await r.json();
+
+    if (!_stkBuilt) {
+      const items = _stkSyms.map(sym => {
+        const q = quotes[sym];
+        const price = q?.price != null ? q.price.toFixed(2) : '--';
+        const pct = q?.change_pct ?? null;
+        const dir = pct == null ? '' : pct >= 0 ? 'up' : 'down';
+        const arrow = pct == null ? '' : pct >= 0 ? '▲' : '▼';
+        const pctStr = pct != null ? `${arrow}${Math.abs(pct).toFixed(2)}%` : '';
+        return `<span class="stk-chip" data-sym="${sym}" onclick="openExplorerForSymbol('${sym}')">` +
+          `<span class="stk-sym">${sym}</span>` +
+          `<span class="stk-price">$${price}</span>` +
+          (pct != null ? `<span class="stk-chg ${dir}">${pctStr}</span>` : '') +
+          `</span>`;
+      });
+      const html = items.join('');
+      track.innerHTML = html + html;
+      requestAnimationFrame(() => {
+        const totalWidth = track.scrollWidth / 2;
+        const speed = Math.max(25, Math.min(70, totalWidth / 10));
+        track.style.animationDuration = speed + 's';
+      });
+      _stkBuilt = true;
+      _stkSyms.forEach(sym => { if (quotes[sym]?.price != null) _stkLastPrice[sym] = quotes[sym].price; });
+    } else {
+      track.querySelectorAll('.stk-chip[data-sym]').forEach(chip => {
+        const sym = chip.dataset.sym;
+        const q = quotes[sym];
+        if (!q || q.price == null) return;
+        const prev = _stkLastPrice[sym];
+        const priceEl = chip.querySelector('.stk-price');
+        const chgEl = chip.querySelector('.stk-chg');
+        if (priceEl) priceEl.textContent = '$' + q.price.toFixed(2);
+        const pct = q.change_pct ?? null;
+        if (chgEl && pct != null) {
+          const dir = pct >= 0 ? 'up' : 'down';
+          chgEl.textContent = (pct >= 0 ? '▲' : '▼') + Math.abs(pct).toFixed(2) + '%';
+          chgEl.className = `stk-chg ${dir}`;
+        }
+        if (prev != null && Math.abs(q.price - prev) > 0.001) {
+          chip.classList.remove('blink-up', 'blink-down');
+          void chip.offsetWidth;
+          chip.classList.add(q.price > prev ? 'blink-up' : 'blink-down');
+        }
+        _stkLastPrice[sym] = q.price;
+      });
+    }
+  } catch (_) { /* ignore */ }
+}
+
+refreshStockTicker();
+setInterval(refreshStockTicker, 15_000);
+
+// ── AI Notification Center ────────────────────────────────────────────────────
+const _NOTIF_INTERVAL = 5 * 60_000;
+let _notifAllData    = [];
+let _notifPrevTitles = new Set();
+let _notifUnread     = 0;
+let _notifNextAt     = 0;
+let _notifCountdownTimer = null;
+let _notifFirstLoad  = true; // suppress toasts on the initial page-load fetch
+
+const _NOTIF_ICONS   = { ALERT:'🚨', NEWS:'📰', IDEA:'💡', INFO:'ℹ️' };
+const _NOTIF_LABELS  = { ALERT:'ALERT', NEWS:'NEWS', IDEA:'IDEA', INFO:'INFO' };
+
+async function fetchNotifications(force = false) {
+  const statusEl = document.getElementById('notifStatusText');
+  if (statusEl) statusEl.textContent = 'Fetching insights…';
+  try {
+    const url = force ? '/api/notifications?force=1' : '/api/notifications';
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { notifications = [], generated_at } = await r.json();
+
+    // Detect new items vs previous set; stamp arrival time on new ones
+    const now = Date.now();
+    const incoming = notifications.map(n => {
+      const existing = _notifAllData.find(p => p.title === n.title);
+      return existing ? existing : { ...n, _at: now };
+    });
+    const newOnes  = incoming.filter(n => !_notifPrevTitles.has(n.title));
+    _notifPrevTitles = new Set(incoming.map(n => n.title));
+    _notifAllData    = incoming;
+    _notifNextAt     = Date.now() + _NOTIF_INTERVAL;
+
+    // Show toasts for new high/medium priority items — skip on first page load
+    if (!_notifFirstLoad) {
+      newOnes.filter(n => n.priority !== 'low').forEach(showNotifToast);
+    }
+    _notifFirstLoad = false;
+
+    // Increment unread if panel is closed
+    const panel = document.getElementById('notifPanel');
+    if (!panel?.classList.contains('open') && newOnes.length) {
+      _notifUnread += newOnes.length;
+      _updateNotifBadge();
+    }
+
+    _renderNotifList(incoming);
+    const ts = generated_at ? new Date(generated_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
+    if (statusEl) statusEl.textContent = `Updated ${ts} · ${incoming.length} insights`;
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Refresh failed — retrying soon';
+  }
+}
+
+function _renderNotifList(items) {
+  const list = document.getElementById('notifList');
+  if (!list) return;
+  if (!items.length) {
+    list.innerHTML = '<div class="np-empty">No insights yet.<br>Generating your personalized alerts…</div>';
+    return;
+  }
+  list.innerHTML = items.map(_renderNotifCard).join('');
+}
+
+function _relTime(ts) {
+  if (!ts) return 'just now';
+  const secs = Math.floor((Date.now() - ts) / 1000);
+  if (secs < 60)  return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60)  return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  return hrs === 1 ? '1 hr ago' : `${hrs} hrs ago`;
+}
+
+function _renderNotifCard(n) {
+  const icon   = _NOTIF_ICONS[n.type]  || 'ℹ️';
+  const label  = _NOTIF_LABELS[n.type] || n.type;
+  const type   = (n.type || 'info').toLowerCase();
+  const prioEl = n.priority === 'high' ? '<span class="nc-prio high"></span>'
+               : n.priority === 'medium' ? '<span class="nc-prio med"></span>' : '';
+  const sym    = n.symbol ? `<span class="nc-sym" onclick="openExplorerForSymbol('${n.symbol}')">${n.symbol}</span>` : '';
+  const act    = n.action ? `<button class="nc-act" onclick="_notifAct('${n.symbol||''}','${n.action}')">${n.action}</button>` : '';
+  const titleAttr = (n.title || '').replace(/"/g,'&quot;');
+  const atAttr    = n._at || 0;
+  return `<div class="notif-card notif-${type}" data-ntitle="${titleAttr}" data-at="${atAttr}">
+  <div class="nc-top">
+    <span class="nc-icon">${icon}</span>
+    <span class="nc-badge">${label}</span>${prioEl}
+    <span class="nc-age">${_relTime(n._at)}</span>
+    <button class="nc-dismiss" onclick="_dismissNotif(this)" title="Dismiss">✕</button>
+  </div>
+  <div class="nc-title">${n.title || ''}</div>
+  <div class="nc-body">${n.body || ''}</div>
+  <div class="nc-foot">${sym}${act}</div>
+</div>`;
+}
+
+// Refresh relative timestamps on visible cards every 30s
+setInterval(() => {
+  document.querySelectorAll('#notifList .notif-card[data-at]').forEach(card => {
+    const at  = parseInt(card.dataset.at, 10);
+    const age = card.querySelector('.nc-age');
+    if (age && at) age.textContent = _relTime(at);
+  });
+}, 30_000);
+
+function showNotifToast(n) {
+  const stack = document.getElementById('notifToastStack');
+  if (!stack) return;
+  const type  = (n.type || 'info').toLowerCase();
+  const icon  = _NOTIF_ICONS[n.type] || 'ℹ️';
+  const toast = document.createElement('div');
+  toast.className = `nc-toast nc-toast-${type}`;
+  toast.innerHTML = `
+    <div class="nc-toast-top">
+      <span>${icon} <strong>${n.type}</strong>${n.symbol ? ` · ${n.symbol}` : ''}</span>
+      <button onclick="this.closest('.nc-toast').remove()">✕</button>
+    </div>
+    <div class="nc-toast-title">${n.title || ''}</div>
+    <div class="nc-toast-body">${n.body || ''}</div>`;
+  stack.appendChild(toast);
+  setTimeout(() => toast.classList.add('toast-out'), 5400);
+  setTimeout(() => toast.remove(), 5750);
+}
+
+let _notifIsClosing = false;
+
+function closeNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (panel?.classList.contains('open')) toggleNotifPanel();
+}
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  const btn   = document.getElementById('navNotifBtn');
+  if (!panel) return;
+  const currentlyOpen = panel.classList.contains('open');
+  // During close animation, block re-open attempts (e.g. from auto-close + click race)
+  if (_notifIsClosing && !currentlyOpen) return;
+  const open  = panel.classList.toggle('open');
+  btn?.classList.toggle('active', open);
+  if (!open) {
+    _notifIsClosing = true;
+    setTimeout(() => { _notifIsClosing = false; }, 310);
+  }
+  const NOTIF_W = 348;
+  document.documentElement.style.setProperty('--notif-w', open ? NOTIF_W + 'px' : '0px');
+  if (!open) {
+    // Instantly collapse content push so it doesn't "chase" the sliding panel
+    const mainEl = document.querySelector('main');
+    if (mainEl) {
+      const prev = mainEl.style.transition;
+      mainEl.style.transition = 'none';
+      document.body.classList.remove('notif-open');
+      requestAnimationFrame(() => { mainEl.style.transition = prev; });
+    } else {
+      document.body.classList.remove('notif-open');
+    }
+  } else {
+    document.body.classList.add('notif-open');
+  }
+  // Reposition news drawer so it doesn't overlap
+  const drawer = document.getElementById('newsDrawer');
+  if (drawer && _newsDrawerOpen) {
+    const explorerW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--explorer-w')) || 0;
+    drawer.style.right = (explorerW + (open ? NOTIF_W : 0)) + 'px';
+  }
+  if (open) {
+    _notifUnread = 0;
+    _updateNotifBadge();
+    _renderNotifList(_notifAllData);
+  }
+}
+
+function _updateNotifBadge() {
+  const badge = document.getElementById('notifBadge');
+  if (!badge) return;
+  badge.textContent = _notifUnread > 9 ? '9+' : _notifUnread;
+  badge.style.display = _notifUnread > 0 ? 'flex' : 'none';
+}
+
+function clearAllNotifs() {
+  _notifAllData    = [];
+  _notifPrevTitles = new Set();
+  const list = document.getElementById('notifList');
+  if (list) list.innerHTML = '<div class="np-empty">Cleared. Next batch in a few minutes.</div>';
+}
+
+function _dismissNotif(btn) {
+  const card  = btn.closest('.notif-card');
+  const title = card?.dataset.ntitle;
+  if (title) {
+    _notifAllData    = _notifAllData.filter(n => n.title !== title);
+    _notifPrevTitles.delete(title);
+  }
+  card?.remove();
+}
+
+function _notifAct(symbol, action) {
+  if (symbol && ['SELL','BUY','WATCH','HOLD'].includes(action)) openExplorerForSymbol(symbol);
+}
+
+function _startNotifCountdown() {
+  clearInterval(_notifCountdownTimer);
+  _notifCountdownTimer = setInterval(() => {
+    const statusEl = document.getElementById('notifStatusText');
+    if (!statusEl) return;
+    const secs = Math.max(0, Math.round((_notifNextAt - Date.now()) / 1000));
+    if (secs <= 0) return;
+    const m = Math.floor(secs / 60), s = secs % 60;
+    const txt = statusEl.textContent.replace(/· next in .*/i, '').trim();
+    statusEl.textContent = txt + ` · next in ${m}:${String(s).padStart(2,'0')}`;
+  }, 5000);
+}
+
+// Auto-close panel when mouse leaves it
+(function _notifAutoClose() {
+  const panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  let _leaveTimer = null;
+  panel.addEventListener('mouseleave', () => {
+    _leaveTimer = setTimeout(() => closeNotifPanel(), 1500);
+  });
+  panel.addEventListener('mouseenter', () => { clearTimeout(_leaveTimer); });
+})();
+
+// Start: initial fetch after 4s (let page settle), then every 5 min
+setTimeout(() => {
+  fetchNotifications();
+  _startNotifCountdown();
+  setInterval(() => { fetchNotifications(); _startNotifCountdown(); }, _NOTIF_INTERVAL);
+}, 4000);
+
+// ── Global Search label — rotating native scripts (1 word/sec) ───────────────
+const _gsWords = [
+  'दृष्टि','رؤية','بینش','نظر','Vision','Mirada','Regard','Sguardo',
+  'Visão','Blick','Взор','Зір','Όραμα','Wzrok','Görüş','洞察',
+  '통찰','慧眼','Nhãn','สายตา','Wawasan','Pandang','Maono','பார்வை',
+  'חָזוֹן','Näky','Syn','Látás','Pananaw','ታይት'
+];
+let _gsWordIdx = 0;
+(function _rotateGsLabel() {
+  const el = document.getElementById('gsNavLabel');
+  if (el) {
+    el.style.opacity = '0';
+    setTimeout(() => {
+      _gsWordIdx = (_gsWordIdx + 1) % _gsWords.length;
+      el.textContent = _gsWords[_gsWordIdx];
+      el.style.opacity = '1';
+    }, 180);
+  }
+  setTimeout(_rotateGsLabel, 1000);
+})();
 
 async function loadNewsDrawer(force = false) {
   if (!_newsDrawerOpen && !force) return;
