@@ -1834,6 +1834,7 @@
   .notif-idea  .nc-act { color:#3fb950; border-color:rgba(63,185,80,.4); background:rgba(63,185,80,.1); }
   .notif-news  .nc-act { color:#58a6ff; border-color:rgba(88,166,255,.4); background:rgba(88,166,255,.1); }
   .notif-info  .nc-act { color:#e3b341; border-color:rgba(227,179,65,.4); background:rgba(227,179,65,.1); }
+  .nc-disclaimer { font-size:0.63rem; color:#6e7681; margin-top:6px; padding:4px 6px; background:rgba(255,255,255,0.03); border-radius:4px; border-left:2px solid #30363d; line-height:1.4; }
   /* Toast stack */
   #notifToastStack { position:fixed; bottom:24px; right:16px; z-index:2100; display:flex; flex-direction:column-reverse; gap:8px; pointer-events:none; max-width:310px; }
   .nc-toast { background:rgba(10,14,20,0.97); backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:11px 13px; pointer-events:all; animation:toastIn .3s cubic-bezier(.34,1.56,.64,1); transition:opacity .3s,transform .3s; box-shadow:0 8px 32px rgba(0,0,0,0.45); }
@@ -17302,6 +17303,7 @@ function _renderNotifCard(n) {
   <div class="nc-title">${n.title || ''}</div>
   <div class="nc-body">${n.body || ''}</div>
   <div class="nc-foot">${sym}${act}</div>
+  <div class="nc-disclaimer">⚠️ AI Opinion Only — Not a trade signal. Based on historical patterns, not real-time data.</div>
 </div>`;
 }
 
@@ -17407,7 +17409,7 @@ function _dismissNotif(btn) {
 }
 
 function _notifAct(symbol, action) {
-  if (symbol && ['SELL','BUY','WATCH','HOLD'].includes(action)) openExplorerForSymbol(symbol);
+  if (symbol && ['REVIEW','MONITOR','WATCH','READ'].includes(action)) openExplorerForSymbol(symbol);
 }
 
 function _startNotifCountdown() {

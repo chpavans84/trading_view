@@ -5683,7 +5683,9 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
       max_tokens: 900,
       messages: [{
         role: 'user',
-        content: `You are an AI trading assistant for a personal trading dashboard. Generate 4-6 personalized notifications based on the data.
+        content: `You are a market observation assistant for a personal trading dashboard. Generate 4-6 personalized market observations based on the data. These are observations only — NOT trade signals or instructions.
+
+IMPORTANT: Do NOT use the words BUY, SELL, or any trade directive language. You are flagging conditions for the user to research, not telling them what to do. You have no real-time data and your knowledge may be outdated.
 
 PORTFOLIO:
 ${posText}
@@ -5694,15 +5696,16 @@ ${newsText}
 MARKET REGIME: ${regime}
 
 Return ONLY a JSON array — no prose, no markdown. Each item:
-{"type":"ALERT"|"NEWS"|"IDEA"|"INFO","title":"<60 chars","body":"<110 chars with specific numbers","symbol":"TICKER or null","action":"SELL"|"BUY"|"WATCH"|"HOLD"|"READ"|null,"priority":"high"|"medium"|"low"}
+{"type":"ALERT"|"NEWS"|"IDEA"|"INFO","title":"<60 chars","body":"<110 chars with specific numbers","symbol":"TICKER or null","action":"REVIEW"|"MONITOR"|"WATCH"|"READ"|null,"priority":"high"|"medium"|"low"}
 
 Rules:
-- ALERT: urgent action — RSI>70 held stock→SELL, RSI<30→consider adding, grade F→review, large unrealized gain >15%→protect profit
-- NEWS: news relevant to a held stock (match symbol to tickers)
-- IDEA: high conviction A-grade stocks NOT in portfolio
-- INFO: market regime insight, sector rotation, VIX context
+- ALERT: notable condition worth reviewing — RSI>70 in held stock (extended, consider reviewing), RSI<30 (oversold territory), grade F (deteriorating signals), unrealized gain >15% (large open profit — worth monitoring)
+- NEWS: news relevant to a held stock — describe the event and potential relevance, no directional prediction
+- IDEA: A-grade stocks with strong signals NOT in portfolio — flag for research only, not as entry suggestions
+- INFO: market regime insight, sector rotation, VIX context — factual observations
 - Always include specific numbers (price, %, RSI)
-- Prioritize high-impact items first`,
+- Never use directive language ("you should", "consider buying", "take profit", "cut losses")
+- Prioritize high-impact observations first`,
       }],
     });
 
