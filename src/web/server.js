@@ -7009,7 +7009,7 @@ app.get('/api/graph/premarket', requireAuth, async (req, res) => {
 
 app.get('/api/graph/earnings-cascade', requireAuth, async (req, res) => {
   try {
-    const days   = Math.min(7, parseInt(req.query.days) || 3);
+    const days   = Math.min(60, parseInt(req.query.days) || 30);
     const result = await runEarningsCascadeScan({ daysAhead: days });
     res.json({ ok: true, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }

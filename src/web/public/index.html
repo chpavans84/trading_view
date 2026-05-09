@@ -615,9 +615,10 @@
       </div>
       <div style="display:flex;align-items:center;gap:8px">
         <select id="sc-days" onchange="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 10px;color:#e6edf3;font-size:0.83rem">
-          <option value="3">Next 3 days</option>
-          <option value="7" selected>Next 7 days</option>
+          <option value="7">Next 7 days</option>
           <option value="14">Next 14 days</option>
+          <option value="30" selected>Next 30 days</option>
+          <option value="60">Next 60 days</option>
         </select>
         <button onclick="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:6px 14px;color:#e6edf3;cursor:pointer;font-size:0.85rem">↻ Refresh</button>
       </div>
@@ -8528,13 +8529,14 @@ function scShowDetail(idx) {
     return;
   }
   const rows = a.sympathy.slice(0, 8).map(s => {
-    const hops = s.hops === 1 ? 'direct' : `${s.hops} hops`;
+    const relLabel  = (s.rel_type || 'connected').replace(/_/g, ' ').toLowerCase();
+    const strength  = s.strength != null ? `${Number(s.strength).toFixed(0)}%` : '';
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #21262d">
       <div>
         <span style="font-weight:700;color:#e6edf3;font-size:0.9rem">${s.ticker}</span>
-        <span style="font-size:0.78rem;color:#8b949e;margin-left:8px">${s.relationship}</span>
+        <span style="font-size:0.78rem;color:#8b949e;margin-left:8px">${relLabel}</span>
       </div>
-      <span style="font-size:0.75rem;background:#21262d;color:#8b949e;padding:2px 8px;border-radius:4px">${hops}</span>
+      ${strength ? `<span style="font-size:0.75rem;background:#21262d;color:#8b949e;padding:2px 8px;border-radius:4px">${strength}</span>` : ''}
     </div>`;
   }).join('');
   const watchlist = a.sympathy.slice(0, 5).map(s => s.ticker).join(', ');

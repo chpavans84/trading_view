@@ -64,8 +64,8 @@ function formatAlert(ticker, daysUntil, date, sympathy) {
   if (sympathy.length > 0) {
     msg += `👥 Connected stocks to watch:\n`;
     for (const s of sympathy.slice(0, 6)) {
-      const hops = s.hops === 1 ? 'direct' : `${s.hops} hops`;
-      msg += `  • ${s.ticker} — ${s.relationship} (${hops})\n`;
+      const relLabel = (s.rel_type || 'connected').replace(/_/g, ' ').toLowerCase();
+      msg += `  • ${s.ticker} — ${relLabel}\n`;
     }
     const watchlist = sympathy.slice(0, 5).map(s => s.ticker).join(', ');
     msg += `📋 Watch: ${watchlist}`;
