@@ -13,6 +13,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "dev": "nodemon --env-file=.env src/web/server.js",
     "tv": "node src/cli/index.js",
     "test": "node --test tests/e2e.test.js tests/pine_analyze.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
@@ -51,5 +52,8 @@
     "resend": "^6.12.2",
     "ws": "^8.20.0",
     "yahoo-finance2": "^3.14.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }
