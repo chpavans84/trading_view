@@ -36,6 +36,7 @@ import { getAccounts, getFunds, getPositions as getMoomooPositions, getOrders as
 import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, placeTigerOrder } from '../core/tiger.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
+import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRisk, getGraphStats } from '../core/graph.js';
 import { getStockPrediction } from '../core/predictor.js';
 import YahooFinance from 'yahoo-finance2';
 const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
@@ -6883,6 +6884,41 @@ httpServer.on('error', (err) => {
     process.exit(1);
   }
   throw err;
+});
+
+// ─── Company Graph API ────────────────────────────────────────────────────────
+
+app.get('/api/graph/contagion/:ticker', requireAuth, async (req, res) => {
+  try {
+    if (!isGraphConfigured()) return res.json({ available: false, reason: 'Neo4j not configured' });
+    const eventPct = parseFloat(req.query.event_pct ?? '-10');
+    const impacts  = await getContagionImpact(req.params.ticker.toUpperCase(), eventPct);
+    res.json({ available: true, ticker: req.params.ticker.toUpperCase(), event_pct: eventPct, impacts });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/graph/sympathy/:ticker', requireAuth, async (req, res) => {
+  try {
+    if (!isGraphConfigured()) return res.json({ available: false });
+    const peers = await getSympathyTrades(req.params.ticker.toUpperCase());
+    res.json({ available: true, ticker: req.params.ticker.toUpperCase(), peers });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/graph/risk/:ticker', requireAuth, async (req, res) => {
+  try {
+    if (!isGraphConfigured()) return res.json({ available: false });
+    const risk = await getSystemicRisk(req.params.ticker.toUpperCase());
+    res.json({ available: true, ...risk });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/graph/stats', requireAuth, async (req, res) => {
+  try {
+    if (!isGraphConfigured()) return res.json({ available: false });
+    const stats = await getGraphStats();
+    res.json({ available: true, ...stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 httpServer.listen(PORT, () => {
