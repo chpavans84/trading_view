@@ -16951,6 +16951,8 @@ applyTheme(localStorage.getItem('theme') || 'vexai', false);
 let _newsDrawerOpen = false;
 let _newsDrawerInterval = null;
 let _newsDrawerLastFetch = 0;
+let _newsSeenTitles = new Set();
+let _newsFirstLoad = true;
 
 function toggleNewsDrawer() {
   const drawer     = document.getElementById('newsDrawer');
@@ -16995,15 +16997,16 @@ function toggleNewsDrawer() {
   }
 }
 
-// Auto-close news drawer when cursor leaves it
+// Close news drawer on click outside
 (function _newsAutoClose() {
-  const drawer = document.getElementById('newsDrawer');
+  const drawer  = document.getElementById('newsDrawer');
+  const toggler = document.getElementById('newsDrawerToggle');
   if (!drawer) return;
-  let _ndLeaveTimer = null;
-  drawer.addEventListener('mouseleave', () => {
-    _ndLeaveTimer = setTimeout(() => { if (_newsDrawerOpen) toggleNewsDrawer(); }, 1500);
-  });
-  drawer.addEventListener('mouseenter', () => clearTimeout(_ndLeaveTimer));
+  document.addEventListener('click', (e) => {
+    if (_newsDrawerOpen && !drawer.contains(e.target) && !toggler?.contains(e.target)) {
+      toggleNewsDrawer();
+    }
+  }, true);
 })();
 
 // Wire toggle and analyze via event delegation
@@ -17242,8 +17245,10 @@ async function fetchNotifications(force = false) {
     _notifAllData    = incoming;
     _notifNextAt     = Date.now() + _NOTIF_INTERVAL;
 
-    // Show toasts for new high/medium priority items — skip on first page load
-    if (!_notifFirstLoad) {
+    // Show toasts for new items; on first load show high-priority only (max 2)
+    if (_notifFirstLoad) {
+      newOnes.filter(n => n.priority === 'high').slice(0, 2).forEach(showNotifToast);
+    } else {
       newOnes.filter(n => n.priority !== 'low').forEach(showNotifToast);
     }
     _notifFirstLoad = false;
@@ -17270,7 +17275,8 @@ function _renderNotifList(items) {
     list.innerHTML = '<div class="np-empty">No insights yet.<br>Generating your personalized alerts…</div>';
     return;
   }
-  list.innerHTML = items.map(_renderNotifCard).join('');
+  list.innerHTML = items.map(_renderNotifCard).join('') +
+    '<div class="nc-disclaimer" style="margin:8px 10px 4px;">⚠️ AI observations only — not trade signals. Based on historical patterns, not real-time data.</div>';
 }
 
 function _relTime(ts) {
@@ -17303,7 +17309,6 @@ function _renderNotifCard(n) {
   <div class="nc-title">${n.title || ''}</div>
   <div class="nc-body">${n.body || ''}</div>
   <div class="nc-foot">${sym}${act}</div>
-  <div class="nc-disclaimer">⚠️ AI Opinion Only — Not a trade signal. Based on historical patterns, not real-time data.</div>
 </div>`;
 }
 
@@ -17425,15 +17430,16 @@ function _startNotifCountdown() {
   }, 5000);
 }
 
-// Auto-close panel when mouse leaves it
+// Close notifications panel on click outside
 (function _notifAutoClose() {
-  const panel = document.getElementById('notifPanel');
+  const panel  = document.getElementById('notifPanel');
+  const toggler = document.getElementById('navNotifBtn');
   if (!panel) return;
-  let _leaveTimer = null;
-  panel.addEventListener('mouseleave', () => {
-    _leaveTimer = setTimeout(() => closeNotifPanel(), 1500);
-  });
-  panel.addEventListener('mouseenter', () => { clearTimeout(_leaveTimer); });
+  document.addEventListener('click', (e) => {
+    if (panel.classList.contains('open') && !panel.contains(e.target) && !toggler?.contains(e.target)) {
+      closeNotifPanel();
+    }
+  }, true);
 })();
 
 // Start: initial fetch after 4s (let page settle), then every 5 min
@@ -17524,6 +17530,17 @@ async function loadNewsDrawer(force = false) {
         timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
       });
     }
+
+    // Toast for new news articles (skip first load to avoid spam)
+    if (!_newsFirstLoad) {
+      const newArticles = articles.filter(a => a.title && !_newsSeenTitles.has(a.title));
+      newArticles.slice(0, 2).forEach(a => {
+        const tickers = (a.tickers || []).slice(0, 2).join(', ');
+        showNotifToast({ type: 'NEWS', priority: 'medium', title: tickers || 'Market News', body: (a.title || '').slice(0, 110), symbol: a.tickers?.[0] || null, action: null });
+      });
+    }
+    articles.forEach(a => { if (a.title) _newsSeenTitles.add(a.title); });
+    _newsFirstLoad = false;
 
   } catch (e) {
     container.innerHTML = `<div class="nd-status">Could not load news.<br><small style="color:var(--muted)">${e.message}</small></div>`;
@@ -18069,6 +18086,10 @@ function analyzeNewsItem(ticker, headline) {
     <div id="gsSuggestList"></div>
     <div id="gsCardArea"></div>
   </div>
+</div>
+
+<div style="position:fixed;bottom:0;left:0;right:0;background:#0a0a0a;border-top:1px solid #1e1e1e;padding:5px 16px;text-align:center;font-size:11px;color:#444;z-index:500;pointer-events:none;">
+  For informational purposes only. Not financial advice. Past performance does not guarantee future results. Do your own research before making any investment decisions.
 </div>
 
 </body>
