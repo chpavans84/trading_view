@@ -45,6 +45,16 @@
       <div class="hero-market-val" id="heroBtc">—</div>
     </div>
   </div>
+  <!-- Global search — floated in hero bar, never overlaps nav tabs -->
+  <div class="nav-search" id="gsNavTrigger">
+    <div class="gs-rainbow-wrap" onclick="gsOpen()" role="button" tabindex="0" aria-label="Open Global Search" onkeydown="if(event.key==='Enter'||event.key===' ')gsOpen()">
+      <div class="gs-input-wrap">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="#8b949e"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zm-5.242 1.656a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
+        <span class="gs-nav-label" id="gsNavLabel">दृष्टि</span>
+        <span class="gs-kbd">/</span>
+      </div>
+    </div>
+  </div>
   <!-- Controls: clocks, broker selector, status, user menu — pushed to right -->
   <div class="hero-controls">
 
@@ -131,15 +141,6 @@
     <button class="tab" id="tab-stats" onclick="showPage('stats',this)" style="display:none">Stats</button>
     <button class="tab" id="tab-users" onclick="showPage('users',this)" style="display:none">Users</button>
     <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">🔐 Admin</button>
-  </div>
-  <div class="nav-search" id="gsNavTrigger">
-    <div class="gs-rainbow-wrap" onclick="gsOpen()" role="button" tabindex="0" aria-label="Open Global Search" onkeydown="if(event.key==='Enter'||event.key===' ')gsOpen()">
-      <div class="gs-input-wrap">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="#8b949e"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zm-5.242 1.656a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
-        <span class="gs-nav-label" id="gsNavLabel">दृष्टि</span>
-        <span class="gs-kbd">/</span>
-      </div>
-    </div>
   </div>
   <div class="nav-bot">
     <button class="nav-notif-btn" id="newsDrawerToggle" title="Live Market News">📰</button>
@@ -3876,7 +3877,7 @@ function applyPermissions(perms) {
   const notifBtn = document.getElementById('navNotifBtn');
   const showNotif = widgets.includes('notifications');
   if (notifBtn) notifBtn.style.display = showNotif ? '' : 'none';
-  if (!showNotif) { document.getElementById('notifPanel')?.classList.remove('open'); }
+  if (!showNotif) closeNotifPanel();
 }
 
 // ── Auth check ────────────────────────────────────────
@@ -7064,6 +7065,21 @@ async function loadDashboard() {
         <div class="card-value neu" id="dv-scores">—</div>
         <div class="card-sub">Conviction scores run</div>
       </div>` : ''}
+      <div class="card">
+        <div class="card-label">Position P&L</div>
+        <div class="card-value neu" id="dv-position-pnl">—</div>
+        <div class="card-sub">Unrealized on open positions</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Today P&L</div>
+        <div class="card-value neu" id="dv-today-pnl">—</div>
+        <div class="card-sub" id="ds-today-pnl">Daily equity delta</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Total Cash</div>
+        <div class="card-value neu" id="dv-cash">—</div>
+        <div class="card-sub">Cash in account</div>
+      </div>
       `;
 
     document.getElementById('positionsTable').innerHTML = `
@@ -7100,6 +7116,14 @@ async function loadDashboard() {
   liveVal('dv-vix', vixVal ?? '—', vixVal > 25 ? 'neg' : 'pos');
   liveText('ds-vix', (d.sentiment?.fear_greed?.label ?? '—') + ' ' + (d.sentiment?.fear_greed?.emoji ?? ''));
   if (!isRealAcct) liveVal('dv-scores', String(d.scores_today ?? '—'));
+
+  const positionPnl = d.account?.unrealized_pl;
+  const todayPnlVal = pnl?.pnl ?? null;
+  const cashVal     = d.account?.cash;
+  liveVal('dv-position-pnl', positionPnl != null ? (positionPnl >= 0 ? '+' : '-') + fmtDollar(Math.abs(positionPnl)) : '—', colorClass(positionPnl));
+  liveVal('dv-today-pnl',    todayPnlVal != null ? (todayPnlVal >= 0 ? '+' : '-') + fmtDollar(Math.abs(todayPnlVal))  : '—', colorClass(todayPnlVal));
+  liveText('ds-today-pnl', !isRealAcct ? 'Target: $500  |  Limit: -$600' : 'Daily equity delta');
+  liveVal('dv-cash', cashVal != null ? '$' + Number(cashVal).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}) : '—');
 
   // ── Positions table body only ─────────────────────────────────────────────
   const totalUnrPL = d.account?.unrealized_pl;
@@ -14700,28 +14724,29 @@ function toggleNotifPanel() {
   const btn   = document.getElementById('navNotifBtn');
   if (!panel) return;
   const currentlyOpen = panel.classList.contains('open');
-  // During close animation, block re-open attempts (e.g. from auto-close + click race)
   if (_notifIsClosing && !currentlyOpen) return;
   const open  = panel.classList.toggle('open');
   btn?.classList.toggle('active', open);
+  const NOTIF_W = 348;
   if (!open) {
     _notifIsClosing = true;
-    setTimeout(() => { _notifIsClosing = false; }, 310);
-  }
-  const NOTIF_W = 348;
-  document.documentElement.style.setProperty('--notif-w', open ? NOTIF_W + 'px' : '0px');
-  if (!open) {
-    // Instantly collapse content push so it doesn't "chase" the sliding panel
+    // Collapse body class + disable main's transition FIRST, before touching --notif-w.
+    // This prevents the "chase" effect where main animates its margin toward the sliding panel.
     const mainEl = document.querySelector('main');
     if (mainEl) {
-      const prev = mainEl.style.transition;
       mainEl.style.transition = 'none';
       document.body.classList.remove('notif-open');
-      requestAnimationFrame(() => { mainEl.style.transition = prev; });
+      requestAnimationFrame(() => { mainEl.style.transition = ''; });
     } else {
       document.body.classList.remove('notif-open');
     }
+    // Reset the CSS var only after the panel slide animation is done
+    setTimeout(() => {
+      document.documentElement.style.setProperty('--notif-w', '0px');
+      _notifIsClosing = false;
+    }, 310);
   } else {
+    document.documentElement.style.setProperty('--notif-w', NOTIF_W + 'px');
     document.body.classList.add('notif-open');
   }
   // Reposition news drawer so it doesn't overlap
