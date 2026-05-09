@@ -14730,21 +14730,19 @@ function toggleNotifPanel() {
   const NOTIF_W = 348;
   if (!open) {
     _notifIsClosing = true;
-    // Collapse body class + disable main's transition FIRST, before touching --notif-w.
-    // This prevents the "chase" effect where main animates its margin toward the sliding panel.
     const mainEl = document.querySelector('main');
-    if (mainEl) {
-      mainEl.style.transition = 'none';
-      document.body.classList.remove('notif-open');
-      requestAnimationFrame(() => { mainEl.style.transition = ''; });
-    } else {
-      document.body.classList.remove('notif-open');
-    }
-    // Reset the CSS var only after the panel slide animation is done
-    setTimeout(() => {
-      document.documentElement.style.setProperty('--notif-w', '0px');
+    // Freeze main's margin transition before any layout class changes fire.
+    if (mainEl) mainEl.style.transition = 'none';
+    // Remove layout class and reset CSS var in the same task so the browser
+    // sees both as one atomic change — no transition can fire between them.
+    document.body.classList.remove('notif-open');
+    document.documentElement.style.setProperty('--notif-w', '0px');
+    // Double rAF: first frame commits the layout, second re-enables transition.
+    // Avoids setTimeout race conditions that break when Chrome is minimized/restored.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (mainEl) mainEl.style.transition = '';
       _notifIsClosing = false;
-    }, 310);
+    }));
   } else {
     document.documentElement.style.setProperty('--notif-w', NOTIF_W + 'px');
     document.body.classList.add('notif-open');
