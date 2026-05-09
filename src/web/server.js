@@ -32,7 +32,7 @@ import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, 
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews, getEarnings } from '../core/news.js';
-import { getAccounts, getFunds, getPositions as getMoomooPositions, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
+import { getAccounts, getFunds, getPositions as getMoomooPositions, getMoomooTodayPnL, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
 import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, placeTigerOrder } from '../core/tiger.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
@@ -2993,13 +2993,58 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
     const pnlUser = await getUser(req.session.username);
     const pnlAdmin = pnlUser?.role === 'admin';
 
-    // Real-money accounts (moomoo, tiger, alpaca_live) — live snapshot + DB-stored daily history
-    if (source === 'moomoo' || source === 'tiger' || source === 'alpaca_live') {
+    // Moomoo — live PLOfDay (sum across positions) + history from daily_pnl table
+    if (source === 'moomoo') {
+      console.log(`[pnl] source=moomoo username=${req.session.username}`);
+      const [accountResult, livePnlResult] = await Promise.allSettled([
+        getAccountData('moomoo', req.session.username),
+        getMoomooTodayPnL(),
+      ]);
+      const account  = accountResult.status  === 'fulfilled' ? accountResult.value.account   : null;
+      const livePnl  = livePnlResult.status  === 'fulfilled' ? livePnlResult.value            : { available: false };
+
+      // Persist snapshot so account overview cards stay up to date
+      if (account && isDbAvailable()) {
+        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+        upsertAccountSnapshot({
+          date:            todayStr,
+          source:          'moomoo',
+          username:        req.session.username,
+          portfolio_value: account.portfolio_value ?? null,
+          realized_pl:     account.realized_pl    ?? null,
+          unrealized_pl:   account.unrealized_pl  ?? null,
+        }).catch(() => {});
+      }
+
+      // History comes from daily_pnl table (accurate PLOfDay stored by EOD cron)
+      const pnlRows = isDbAvailable()
+        ? await getDailyPnlHistory({ days, username: req.session.username, source: 'moomoo' })
+        : [];
+      const history = (pnlRows ?? []).map(r => ({
+        date:           r.date instanceof Date
+          ? r.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+          : String(r.date).slice(0, 10),
+        pnl:            parseFloat(r.realized_pnl ?? 0),
+        unrealized_pl:  parseFloat(r.unrealized_pnl ?? 0),
+        total_trades:   parseInt(r.total_trades   ?? 0),
+        winning_trades: parseInt(r.winning_trades ?? 0),
+      }));
+
+      const todayPnl = livePnl.available ? livePnl.pnl : null;
+      console.log(`[pnl] moomoo live today_pl=${todayPnl} history=${history.length}`);
+      return res.json({
+        today:   { pnl: todayPnl ?? 0, available: livePnl.available, live: true },
+        account: account ?? null,
+        history,
+      });
+    }
+
+    // Tiger / alpaca_live — live snapshot + equity-delta history from account_daily_snapshots
+    if (source === 'tiger' || source === 'alpaca_live') {
       console.log(`[pnl] source=${source} username=${req.session.username}`);
       const { account } = await getAccountData(source, req.session.username);
       console.log(`[pnl] account=${account ? JSON.stringify({ pv: account.portfolio_value, unreal: account.unrealized_pl }) : 'null'}`);
 
-      // Persist today's snapshot so history accumulates over time
       if (account && isDbAvailable()) {
         const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
         upsertAccountSnapshot({
@@ -3012,7 +3057,6 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
         }).catch(() => {});
       }
 
-      // Build daily P&L history from stored snapshots (day-over-day realized_pl change)
       const snapshots = isDbAvailable()
         ? await getAccountSnapshots({ source, username: req.session.username, days })
         : [];
@@ -3027,7 +3071,6 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
         const equityDelta = curr.portfolio_value != null && prev.portfolio_value != null
           ? +( parseFloat(curr.portfolio_value) - parseFloat(prev.portfolio_value) ).toFixed(2)
           : null;
-        // Tiger (and some other brokers) don't report realized_pl — fall back to equity delta
         const pnl = (realDelta !== null && realDelta !== 0) ? realDelta : (equityDelta ?? 0);
         history.push({
           date:           curr.date instanceof Date
@@ -6488,6 +6531,28 @@ cron.schedule('*/5 16-21 * * 1-5', async () => {
       { env: process.env, cwd: _PROJECT_ROOT, timeout: 15 * 60 * 1000 });
     console.log('[research] Price download complete');
   } catch (err) { console.error('[research] download-prices error:', err.message); }
+});
+
+// 4:35 PM ET — store Moomoo daily PLOfDay so P&L history is accurate (no deposit skew)
+cron.schedule('*/5 16-21 * * 1-5', async () => {
+  const et   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (mins < 16 * 60 + 35 || mins >= 16 * 60 + 40) return;
+  try {
+    const result = await getMoomooTodayPnL();
+    if (!result.available) { console.log('[moomoo-pnl] OpenD not reachable — skipping EOD store'); return; }
+    const todayStr = et.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    await upsertDailyPnl({
+      date:           todayStr,
+      realized_pnl:   result.pnl,
+      unrealized_pnl: 0,
+      total_trades:   0,
+      winning_trades: 0,
+      username:       'admin',
+      source:         'moomoo',
+    });
+    console.log(`[moomoo-pnl] stored daily P&L ${result.pnl} for ${todayStr}`);
+  } catch (err) { console.error('[moomoo-pnl] EOD cron error:', err.message); }
 });
 
 // 5:30 PM ET  = 5:30 AM SGT  — recompute conviction scores for new dates

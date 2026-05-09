@@ -248,6 +248,13 @@ DO $$ BEGIN
     EXCEPTION WHEN others THEN NULL; END;
     ALTER TABLE daily_pnl ADD CONSTRAINT daily_pnl_date_username_key UNIQUE (date, username);
   END IF;
+  -- Add source column so Moomoo/Tiger P&L is stored separately from Alpaca paper
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name='daily_pnl' AND column_name='source') THEN
+    ALTER TABLE daily_pnl ADD COLUMN source TEXT NOT NULL DEFAULT 'alpaca';
+    ALTER TABLE daily_pnl DROP CONSTRAINT IF EXISTS daily_pnl_date_username_key;
+    ALTER TABLE daily_pnl ADD CONSTRAINT daily_pnl_date_username_source_key UNIQUE (date, username, source);
+  END IF;
 END $$;
 -- Migrate conversation_history.chat_id from BIGINT to TEXT for username-keyed isolation
 DO $$ BEGIN
@@ -1019,34 +1026,35 @@ export async function markDocQueryNotified(id) {
 
 // ─── Daily P&L ────────────────────────────────────────────────────────────────
 
-export async function upsertDailyPnl({ date, realized_pnl, unrealized_pnl, total_trades, winning_trades, username = 'admin' }) {
+export async function upsertDailyPnl({ date, realized_pnl, unrealized_pnl, total_trades, winning_trades, username = 'admin', source = 'alpaca' }) {
   if (!dbAvailable) return;
   try {
     await query(
-      `INSERT INTO daily_pnl (date, username, realized_pnl, unrealized_pnl, total_trades, winning_trades, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,NOW())
-       ON CONFLICT (date, username) DO UPDATE SET
-         realized_pnl   = $3,
-         unrealized_pnl = $4,
-         total_trades   = $5,
-         winning_trades = $6,
+      `INSERT INTO daily_pnl (date, username, source, realized_pnl, unrealized_pnl, total_trades, winning_trades, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+       ON CONFLICT (date, username, source) DO UPDATE SET
+         realized_pnl   = $4,
+         unrealized_pnl = $5,
+         total_trades   = $6,
+         winning_trades = $7,
          updated_at     = NOW()`,
-      [date, username, realized_pnl ?? 0, unrealized_pnl ?? 0, total_trades ?? 0, winning_trades ?? 0]
+      [date, username, source, realized_pnl ?? 0, unrealized_pnl ?? 0, total_trades ?? 0, winning_trades ?? 0]
     );
   } catch (err) {
     console.error('upsertDailyPnl error:', err.message);
   }
 }
 
-export async function getDailyPnlHistory({ days = 30, username = 'admin' } = {}) {
+export async function getDailyPnlHistory({ days = 30, username = 'admin', source = 'alpaca' } = {}) {
   if (!dbAvailable) return null;
   try {
     const { rows } = await query(
       `SELECT * FROM daily_pnl
        WHERE date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
          AND username = $2
+         AND source = $3
        ORDER BY date DESC`,
-      [days, username]
+      [days, username, source]
     );
     return rows;
   } catch (err) {
