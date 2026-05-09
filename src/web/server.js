@@ -37,6 +37,7 @@ import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, p
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
 import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRisk, getGraphStats } from '../core/graph.js';
+import { runPremarketScan } from '../core/premarket-scanner.js';
 import { getStockPrediction } from '../core/predictor.js';
 import YahooFinance from 'yahoo-finance2';
 const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
@@ -6820,6 +6821,20 @@ cron.schedule('5 10 * * 2-6', async () => {
   } catch (err) { console.error('[catalyst-perf] cron error:', err.message); }
 }, { timezone: 'America/New_York' });
 
+// Pre-market impact scanner — runs every 15 min, 7:00–9:30 AM ET Mon–Fri
+cron.schedule('*/15 7-9 * * 1-5', async () => {
+  try {
+    const result = await runPremarketScan();
+    if (result.skipped || !result.alerts?.length) return;
+    for (const alert of result.alerts) {
+      pushToChat(`🌅 Pre-Market Alert\n\n${alert.message}`, 'premarket_impact');
+    }
+    console.log(`[premarket] ${result.alerts.length} alerts pushed`);
+  } catch (e) {
+    console.error('[premarket] scan error:', e.message);
+  }
+});
+
 // ─── Admin API: manual trigger (per-step or all) ──────────────────────────────
 
 const _RESEARCH_SCRIPTS = {
@@ -6967,6 +6982,13 @@ app.get('/api/graph/stats', requireAuth, async (req, res) => {
     if (!isGraphConfigured()) return res.json({ available: false });
     const stats = await getGraphStats();
     res.json({ available: true, ...stats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/graph/premarket', requireAuth, async (req, res) => {
+  try {
+    const result = await runPremarketScan();
+    res.json({ ok: true, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
