@@ -3745,7 +3745,7 @@ app.get('/api/ask', requireAuth, async (req, res) => {
         ].filter(Boolean).join('\n');
 
         const msg = await _anthropic.messages.create({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL_LIGHTWEIGHT,
           max_tokens: 280,
           messages: [{
             role: 'user',
@@ -4146,7 +4146,7 @@ app.post('/api/chat', requireAuth, chatLimiter, async (req, res) => {
       done:             true,
       credits:          creditsLeft,
       source:           chatResult?.source           ?? 'claude',
-      model:            chatResult?.model            ?? 'claude-sonnet-4-6',
+      model:            chatResult?.model            ?? MODEL_CRITICAL,
       knowledge_response: !!chatResult?.knowledge_response,
     });
   } catch (err) {
@@ -4624,6 +4624,9 @@ app.get('/api/chat/poll', requireAuth, (req, res) => {
 
 const _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const MODEL_CRITICAL    = 'claude-sonnet-4-6';         // reasoning, user chat, tool use
+const MODEL_LIGHTWEIGHT = 'claude-haiku-4-5-20251001'; // templated summaries, high-frequency calls
+
 // Pricing constants for cost tracking (per 1M tokens)
 const SONNET_INPUT_PER_M  = 3.00;
 const SONNET_OUTPUT_PER_M = 15.00;
@@ -4667,7 +4670,7 @@ Market data:
 - Yesterday P&L: $${pnl?.pnl?.toFixed(2) ?? '0'}
 
 Keep it under 200 words.`,
-      fallbackModel: 'claude-haiku-4-5-20251001',
+      fallbackModel: MODEL_LIGHTWEIGHT,
       maxTokens: 500,
     });
 
@@ -4741,7 +4744,7 @@ Write a concise EOD summary (under 150 words):
 2. What worked and what didn't (be specific to the trades above)
 3. What to watch tomorrow
 4. One lesson or pattern from today`,
-      fallbackModel: 'claude-haiku-4-5-20251001',
+      fallbackModel: MODEL_LIGHTWEIGHT,
       maxTokens: 400,
     });
 
@@ -5570,7 +5573,7 @@ app.get('/api/news/analysis', requireAuth, async (req, res) => {
     }).join('\n');
 
     const msg = await _anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL_LIGHTWEIGHT,
       max_tokens: 700,
       messages: [{
         role: 'user',
@@ -5679,7 +5682,7 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
     const newsText = newsLines.join('\n') || 'No recent news';
 
     const msg = await _anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL_LIGHTWEIGHT,
       max_tokens: 900,
       messages: [{
         role: 'user',

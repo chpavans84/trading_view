@@ -13,6 +13,8 @@ import { getConvictionScore } from './scoring.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const MODEL_LIGHTWEIGHT = 'claude-haiku-4-5-20251001'; // templated summaries, high-frequency calls
+
 // Filter out things we should never trade
 function isValidSymbol(sym) {
   if (!sym || typeof sym !== 'string') return false;
@@ -259,7 +261,7 @@ Rules:
     const ctrl    = new AbortController();
     const timer   = setTimeout(() => ctrl.abort(), 20_000);
     const message = await anthropic.messages.create({
-      model:      'claude-haiku-4-5-20251001',
+      model:      MODEL_LIGHTWEIGHT,
       max_tokens: 120,
       messages:   [{ role: 'user', content: prompt }],
     });

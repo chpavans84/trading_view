@@ -186,6 +186,8 @@ async function buildLessonsBlock(username = null) {
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const MODEL_CRITICAL = 'claude-sonnet-4-6'; // reasoning, user chat, tool use
+
 const DEFAULT_WATCHLIST = [
   'MRVL','NVDA','AMD','AAPL','MSFT','GOOGL','META','AMZN',
   'TSLA','NFLX','INTC','QCOM','MU','AVGO','TSM','SMCI','RTX','LMT','XOM','JPM',
@@ -1346,7 +1348,7 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
 
     const t0 = Date.now();
     const stream = anthropic.messages.stream({
-      model: 'claude-sonnet-4-6',
+      model: MODEL_CRITICAL,
       max_tokens: 2048,
       system: fullSystem,
       tools: TOOLS,
@@ -1406,7 +1408,7 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
       role:    'assistant',
       content: fullText,
       source:  'claude',
-      model:   'claude-sonnet-4-6',
+      model:   MODEL_CRITICAL,
     };
   }
 }

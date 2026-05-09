@@ -20,8 +20,10 @@ import { getFunds as getMoomooFunds, getPositions as getMoomooPositions } from '
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const PRICE_INPUT_PER_M  = 0.80;
-const PRICE_OUTPUT_PER_M = 4.00;
+const MODEL_CRITICAL = 'claude-sonnet-4-6'; // reasoning, user chat, tool use
+
+const PRICE_INPUT_PER_M  = 3.00;  // claude-sonnet-4-6
+const PRICE_OUTPUT_PER_M = 15.00; // claude-sonnet-4-6
 function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
 
 // Separate in-memory conversation history for admin sessions (per session ID)
@@ -439,7 +441,7 @@ export async function adminChat({ sessionId, message, adminUsername, onChunk, on
 
     const t0     = Date.now();
     const stream = anthropic.messages.stream({
-      model:      'claude-haiku-4-5-20251001',
+      model:      MODEL_CRITICAL,
       max_tokens: 2048,
       system:     buildAdminSystemPrompt(),
       tools:      ADMIN_TOOLS,
