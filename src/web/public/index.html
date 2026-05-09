@@ -136,6 +136,7 @@
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
+    <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)">📡 Signal Center</button>
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
     <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
     <button class="tab" id="tab-stats" onclick="showPage('stats',this)" style="display:none">Stats</button>
@@ -604,6 +605,54 @@
 </div>
 
 <!-- ═══════════════════════ RESEARCH PAGE ═══════════════════════ -->
+<div class="page" id="page-signal-center">
+  <div>
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">📡 Signal Center</h2>
+        <div style="font-size:0.8rem;color:#8b949e" id="sc-meta">Graph-powered earnings cascade &amp; pre-market impact alerts</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <select id="sc-days" onchange="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 10px;color:#e6edf3;font-size:0.83rem">
+          <option value="3">Next 3 days</option>
+          <option value="7" selected>Next 7 days</option>
+          <option value="14">Next 14 days</option>
+        </select>
+        <button onclick="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:6px 14px;color:#e6edf3;cursor:pointer;font-size:0.85rem">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Two-column layout -->
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start">
+
+      <!-- Left: Earnings list -->
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
+        <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">📅 Upcoming Earnings</div>
+        <div id="sc-earnings-list" style="padding:8px 0">
+          <div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>
+        </div>
+      </div>
+
+      <!-- Right: Cascade detail -->
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden;min-height:320px">
+        <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3" id="sc-detail-header">👥 Cascade Impact</div>
+        <div id="sc-cascade-detail" style="padding:16px;color:#8b949e;font-size:0.83rem">
+          Select an earnings ticker on the left to see connected stocks likely to move in sympathy.
+        </div>
+      </div>
+    </div>
+
+    <!-- Pre-market panel (shown only when there's data) -->
+    <div id="sc-premarket-wrap" style="margin-top:16px;display:none">
+      <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
+        <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">🌅 Pre-Market Movers (live)</div>
+        <div id="sc-premarket-list" style="padding:8px 16px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="page" id="page-research">
   <div>
 
@@ -3815,6 +3864,7 @@ const TAB_PAGE_MAP = {
   dashboard: 'dashboard', trades: 'trades',
   market: 'market', stats: 'stats', research: 'research',
   bot_rules: 'bot', admin_bot: 'admin', calendar: 'calendar',
+  signal_center: 'signal-center',
 };
 
 function applyPermissions(perms) {
@@ -6947,7 +6997,7 @@ function showPage(name, btn) {
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, 'signal-center': loadSignalCenter };
   loaders[name]?.();
 }
 
@@ -8390,6 +8440,114 @@ function renderEarningsPreview(data) {
 
 // ── loadCalendar alias keeps showPage() loader working ────────────
 function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); loadEarningsCalendar(); loadEarningsReaction('NVDA'); loadEarningsPreview(); }
+
+// ── Signal Center ─────────────────────────────────────────────────────────────
+let _scData = null;
+
+async function loadSignalCenter() {
+  const days = document.getElementById('sc-days')?.value || '7';
+  const listEl   = document.getElementById('sc-earnings-list');
+  const detailEl = document.getElementById('sc-cascade-detail');
+  const metaEl   = document.getElementById('sc-meta');
+  if (listEl) listEl.innerHTML = '<div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>';
+  if (detailEl) detailEl.innerHTML = '<div style="color:#8b949e;font-size:0.83rem">Loading cascade data…</div>';
+
+  try {
+    const [cascadeRes, premarketRes] = await Promise.allSettled([
+      fetch(`/api/graph/earnings-cascade?days=${days}`).then(r => r.json()),
+      fetch('/api/graph/premarket').then(r => r.json()),
+    ]);
+
+    const cascade  = cascadeRes.status  === 'fulfilled' ? cascadeRes.value  : {};
+    const premarket = premarketRes.status === 'fulfilled' ? premarketRes.value : {};
+    _scData = cascade;
+
+    if (metaEl) {
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const neo = cascade.skipped ? '⚠️ Neo4j offline — graph data unavailable' : `Last scanned ${now}`;
+      metaEl.textContent = neo;
+    }
+
+    // ── Earnings list ─────────────────────────────────────────────────
+    if (!listEl) return;
+    const alerts = cascade.alerts || [];
+    if (alerts.length === 0) {
+      listEl.innerHTML = `<div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">No graph-tracked earnings in the next ${days} days.</div>`;
+      if (detailEl) detailEl.innerHTML = '<div style="color:#8b949e;font-size:0.83rem">No upcoming earnings found.</div>';
+    } else {
+      listEl.innerHTML = alerts.map((a, i) => {
+        const dayBadge = a.daysUntil === 0 ? '<span style="background:#f85149;color:#fff;font-size:0.7rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px">TODAY</span>'
+          : a.daysUntil === 1 ? '<span style="background:#e3b341;color:#000;font-size:0.7rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px">TOMORROW</span>'
+          : `<span style="background:#21262d;color:#8b949e;font-size:0.7rem;padding:1px 6px;border-radius:4px;margin-left:6px">+${a.daysUntil}d</span>`;
+        const sympathyCount = a.sympathy?.length || 0;
+        return `<div class="sc-ticker-row" onclick="scShowDetail(${i})" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;cursor:pointer;border-bottom:1px solid #21262d;transition:background 0.15s" onmouseover="this.style.background='#21262d'" onmouseout="this.style.background=''">
+          <div>
+            <span style="font-weight:700;font-size:0.9rem;color:#e6edf3">${a.ticker}</span>${dayBadge}
+            <div style="font-size:0.75rem;color:#8b949e;margin-top:2px">${a.date} · ${sympathyCount} connected</div>
+          </div>
+          <span style="color:#8b949e;font-size:0.8rem">›</span>
+        </div>`;
+      }).join('');
+      // Auto-select first
+      scShowDetail(0);
+    }
+
+    // ── Pre-market panel ──────────────────────────────────────────────
+    const pmWrap = document.getElementById('sc-premarket-wrap');
+    const pmList = document.getElementById('sc-premarket-list');
+    const pmAlerts = premarket.alerts || [];
+    if (pmWrap) pmWrap.style.display = pmAlerts.length ? '' : 'none';
+    if (pmList && pmAlerts.length) {
+      pmList.innerHTML = pmAlerts.map(a => {
+        const dir  = a.mover.change_pct > 0 ? '#3fb950' : '#f85149';
+        const sign = a.mover.change_pct > 0 ? '+' : '';
+        return `<div style="padding:10px 0;border-bottom:1px solid #21262d">
+          <div style="font-weight:700;color:${dir};margin-bottom:4px">${a.mover.ticker} <span style="font-size:0.85rem">${sign}${a.mover.change_pct}% pre-market</span></div>
+          <div style="font-size:0.8rem;color:#8b949e;white-space:pre-line">${a.message.replace(/^.*\n━+\n/, '')}</div>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {
+    if (listEl) listEl.innerHTML = `<div style="padding:16px;color:#f85149;font-size:0.83rem">Error: ${e.message}</div>`;
+  }
+}
+
+function scShowDetail(idx) {
+  const alerts   = _scData?.alerts || [];
+  const a        = alerts[idx];
+  const detailEl = document.getElementById('sc-cascade-detail');
+  const headerEl = document.getElementById('sc-detail-header');
+  // Highlight selected row
+  document.querySelectorAll('.sc-ticker-row').forEach((r, i) => {
+    r.style.background = i === idx ? '#21262d' : '';
+  });
+  if (!detailEl || !a) return;
+  if (headerEl) headerEl.textContent = `👥 Cascade Impact — ${a.ticker}`;
+  if (!a.sympathy || a.sympathy.length === 0) {
+    detailEl.innerHTML = `<div style="color:#8b949e;font-size:0.83rem">No graph connections found for ${a.ticker}.</div>`;
+    return;
+  }
+  const rows = a.sympathy.slice(0, 8).map(s => {
+    const hops = s.hops === 1 ? 'direct' : `${s.hops} hops`;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #21262d">
+      <div>
+        <span style="font-weight:700;color:#e6edf3;font-size:0.9rem">${s.ticker}</span>
+        <span style="font-size:0.78rem;color:#8b949e;margin-left:8px">${s.relationship}</span>
+      </div>
+      <span style="font-size:0.75rem;background:#21262d;color:#8b949e;padding:2px 8px;border-radius:4px">${hops}</span>
+    </div>`;
+  }).join('');
+  const watchlist = a.sympathy.slice(0, 5).map(s => s.ticker).join(', ');
+  const dayLabel  = a.daysUntil === 0 ? 'Today' : a.daysUntil === 1 ? 'Tomorrow' : `In ${a.daysUntil} days`;
+  detailEl.innerHTML = `
+    <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #21262d">
+      <div style="font-size:0.8rem;color:#8b949e">Reports: <span style="color:#e6edf3;font-weight:600">${dayLabel} · ${a.date}</span></div>
+    </div>
+    ${rows}
+    <div style="margin-top:14px;padding:10px 12px;background:#21262d;border-radius:6px;font-size:0.8rem;color:#8b949e">
+      📋 Watch list: <span style="color:#58a6ff;font-weight:600">${watchlist}</span>
+    </div>`;
+}
 
 // ── Earnings Reaction Analysis ─────────────────────────────────────
 let _erCurrentSym = 'NVDA';
