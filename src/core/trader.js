@@ -283,8 +283,8 @@ export async function moveStopToBreakeven(symbol) {
 
 // ─── Daily P&L Targets ───────────────────────────────────────────────────────
 
-export const DAILY_PROFIT_TARGET = 150;  // stop trading when we hit $150 profit
-export const DAILY_LOSS_LIMIT    = 200;  // stop trading when we lose $200
+export const DAILY_PROFIT_TARGET = 500;  // stop trading when we hit $500 profit
+export const DAILY_LOSS_LIMIT    = 600;  // stop trading when we lose $600
 
 // Shared in-process cache so /api/dashboard and /api/pnl always return the same value
 const _pnlCache = { admin: null, ts: 0 };
@@ -469,7 +469,7 @@ export async function getLatestPrice(symbol) {
 const MIN_ATR_PCT          = 1.0;   // skip stocks that don't move enough intraday
 const TARGET_PROFIT_DOLLARS = 150;  // size position to earn this per winning trade
 const MIN_POSITION_DOLLARS  = 1500;
-const MAX_POSITION_DOLLARS  = 5000;
+const MAX_POSITION_DOLLARS  = 12000;
 
 // ─── Market Regime ────────────────────────────────────────────────────────────
 // VIX thresholds: above 25 = defensive (cut size 50%), above 35 = no new longs
@@ -524,6 +524,13 @@ export async function placeTrade({
     await logRejection({ symbol, reason: msg, conviction_score }).catch(() => {});
     throw new Error(msg);
   }
+
+  // Daily P&L gates — block new trades if daily loss limit or profit target is hit
+  const pnlCheck = await getDailyPnL();
+  if (pnlCheck.available && pnlCheck.loss_limit_reached)
+    throw new Error(`Trade blocked: daily loss limit reached ($${Math.abs(pnlCheck.pnl).toFixed(0)} lost today, limit is $${DAILY_LOSS_LIMIT})`);
+  if (pnlCheck.available && pnlCheck.target_reached)
+    throw new Error(`Trade blocked: daily profit target reached ($${pnlCheck.pnl.toFixed(0)} profit today, target is $${DAILY_PROFIT_TARGET})`);
 
   // Duplicate check — refuse if we already hold this symbol on Alpaca
   const existingPositions = await getPositions();
