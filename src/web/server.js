@@ -3016,24 +3016,52 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
         }).catch(() => {});
       }
 
-      // History comes from daily_pnl table (accurate PLOfDay stored by EOD cron)
+      // History — prefer daily_pnl table (accurate PLOfDay); fall back to snapshot equity-delta
       const pnlRows = isDbAvailable()
         ? await getDailyPnlHistory({ days, username: req.session.username, source: 'moomoo' })
         : [];
-      const history = (pnlRows ?? []).map(r => ({
-        date:           r.date instanceof Date
-          ? r.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-          : String(r.date).slice(0, 10),
-        pnl:            parseFloat(r.realized_pnl ?? 0),
-        unrealized_pl:  parseFloat(r.unrealized_pnl ?? 0),
-        total_trades:   parseInt(r.total_trades   ?? 0),
-        winning_trades: parseInt(r.winning_trades ?? 0),
-      }));
+      let history;
+      if (pnlRows && pnlRows.length > 0) {
+        history = pnlRows.map(r => ({
+          date:           r.date instanceof Date
+            ? r.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+            : String(r.date).slice(0, 10),
+          pnl:            parseFloat(r.realized_pnl ?? 0),
+          unrealized_pl:  parseFloat(r.unrealized_pnl ?? 0),
+          total_trades:   parseInt(r.total_trades   ?? 0),
+          winning_trades: parseInt(r.winning_trades ?? 0),
+        }));
+      } else {
+        // No PLOfDay data yet — fall back to equity-delta from snapshots.
+        // Filter out days where the swing exceeds $5 000 (deposits, not trading P&L).
+        const snapshots = isDbAvailable()
+          ? await getAccountSnapshots({ source: 'moomoo', username: req.session.username, days })
+          : [];
+        history = [];
+        for (let i = 1; i < snapshots.length; i++) {
+          const prev = snapshots[i - 1];
+          const curr = snapshots[i];
+          const equityDelta = curr.portfolio_value != null && prev.portfolio_value != null
+            ? +( parseFloat(curr.portfolio_value) - parseFloat(prev.portfolio_value) ).toFixed(2)
+            : null;
+          if (equityDelta === null || Math.abs(equityDelta) > 5000) continue; // skip deposits/withdrawals
+          history.push({
+            date:          curr.date instanceof Date
+              ? curr.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+              : String(curr.date).slice(0, 10),
+            pnl:           equityDelta,
+            equity:        parseFloat(curr.portfolio_value),
+            unrealized_pl: curr.unrealized_pl != null ? parseFloat(curr.unrealized_pl) : null,
+          });
+        }
+      }
 
-      const todayPnl = livePnl.available ? livePnl.pnl : null;
-      console.log(`[pnl] moomoo live today_pl=${todayPnl} history=${history.length}`);
+      // today P&L: live PLOfDay sum; fall back to unrealized_pl if OpenD is unreachable
+      const todayPnl = livePnl.available ? livePnl.pnl : (account?.unrealized_pl ?? null);
+      const todayAvailable = livePnl.available || account != null;
+      console.log(`[pnl] moomoo today_pl=${todayPnl} (live=${livePnl.available}) history=${history.length}`);
       return res.json({
-        today:   { pnl: todayPnl ?? 0, available: livePnl.available, live: true },
+        today:   { pnl: todayPnl ?? 0, available: todayAvailable, live: livePnl.available },
         account: account ?? null,
         history,
       });
