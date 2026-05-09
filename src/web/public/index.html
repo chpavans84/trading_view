@@ -608,12 +608,22 @@
 <div class="page" id="page-signal-center">
   <div>
     <!-- Header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
         <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">📡 Signal Center</h2>
         <div style="font-size:0.8rem;color:#8b949e" id="sc-meta">Graph-powered earnings cascade &amp; pre-market impact alerts</div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px">
+    </div>
+
+    <!-- Inner tab switcher -->
+    <div style="display:flex;gap:4px;margin-bottom:16px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:4px;width:fit-content">
+      <button id="sc-tab-cascade" onclick="scSwitchView('cascade')" style="background:#21262d;border:none;border-radius:6px;padding:6px 16px;color:#e6edf3;font-size:0.83rem;cursor:pointer;font-weight:600">📅 Earnings Cascade</button>
+      <button id="sc-tab-graph"   onclick="scSwitchView('graph')"   style="background:transparent;border:none;border-radius:6px;padding:6px 16px;color:#8b949e;font-size:0.83rem;cursor:pointer">🕸️ Network Graph</button>
+    </div>
+
+    <!-- ── Cascade view ──────────────────────────────────────────── -->
+    <div id="sc-view-cascade">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
         <select id="sc-days" onchange="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 10px;color:#e6edf3;font-size:0.83rem">
           <option value="7">Next 7 days</option>
           <option value="14">Next 14 days</option>
@@ -622,33 +632,57 @@
         </select>
         <button onclick="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:6px 14px;color:#e6edf3;cursor:pointer;font-size:0.85rem">↻ Refresh</button>
       </div>
-    </div>
 
-    <!-- Two-column layout -->
-    <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start">
-
-      <!-- Left: Earnings list -->
-      <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
-        <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">📅 Upcoming Earnings</div>
-        <div id="sc-earnings-list" style="padding:8px 0">
-          <div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start">
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">📅 Upcoming Earnings</div>
+          <div id="sc-earnings-list" style="padding:8px 0">
+            <div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>
+          </div>
+        </div>
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden;min-height:320px">
+          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3" id="sc-detail-header">👥 Cascade Impact</div>
+          <div id="sc-cascade-detail" style="padding:16px;color:#8b949e;font-size:0.83rem">
+            Select an earnings ticker on the left to see connected stocks likely to move in sympathy.
+          </div>
         </div>
       </div>
 
-      <!-- Right: Cascade detail -->
-      <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden;min-height:320px">
-        <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3" id="sc-detail-header">👥 Cascade Impact</div>
-        <div id="sc-cascade-detail" style="padding:16px;color:#8b949e;font-size:0.83rem">
-          Select an earnings ticker on the left to see connected stocks likely to move in sympathy.
+      <div id="sc-premarket-wrap" style="margin-top:16px;display:none">
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">🌅 Pre-Market Movers (live)</div>
+          <div id="sc-premarket-list" style="padding:8px 16px"></div>
         </div>
       </div>
     </div>
 
-    <!-- Pre-market panel (shown only when there's data) -->
-    <div id="sc-premarket-wrap" style="margin-top:16px;display:none">
-      <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
-        <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">🌅 Pre-Market Movers (live)</div>
-        <div id="sc-premarket-list" style="padding:8px 16px"></div>
+    <!-- ── Network Graph view ────────────────────────────────────── -->
+    <div id="sc-view-graph" style="display:none">
+      <div style="display:grid;grid-template-columns:1fr 300px;gap:16px">
+        <!-- Canvas -->
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;overflow:hidden;position:relative">
+          <div id="sc-graph-canvas" style="height:580px"></div>
+          <div id="sc-graph-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8b949e;font-size:0.85rem;background:#0d1117">Loading graph…</div>
+        </div>
+        <!-- Node detail -->
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3" id="sc-graph-detail-header">🔗 Connections</div>
+          <div id="sc-graph-detail" style="padding:16px;color:#8b949e;font-size:0.83rem">Click any node to see its direct connections.</div>
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:12px;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:0.78rem;color:#8b949e">
+        <span style="font-weight:600;color:#e6edf3">Sectors:</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#58a6ff;margin-right:4px;vertical-align:middle"></span>Semiconductor Equipment</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#bc8cff;margin-right:4px;vertical-align:middle"></span>Semiconductor Chips</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3fb950;margin-right:4px;vertical-align:middle"></span>Big Tech</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#e3b341;margin-right:4px;vertical-align:middle"></span>Energy</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f0883e;margin-right:4px;vertical-align:middle"></span>Utilities</span>
+        <span style="margin-left:8px;font-weight:600;color:#e6edf3">Edges:</span>
+        <span><span style="display:inline-block;width:20px;height:3px;background:#f85149;margin-right:4px;vertical-align:middle;border-radius:2px"></span>Competes With</span>
+        <span><span style="display:inline-block;width:20px;height:3px;background:#3fb950;margin-right:4px;vertical-align:middle;border-radius:2px"></span>Supplies To</span>
+        <span><span style="display:inline-block;width:20px;height:3px;background:#58a6ff;margin-right:4px;vertical-align:middle;border-radius:2px"></span>Manufactures For</span>
       </div>
     </div>
   </div>
@@ -8549,6 +8583,155 @@ function scShowDetail(idx) {
     <div style="margin-top:14px;padding:10px 12px;background:#21262d;border-radius:6px;font-size:0.8rem;color:#8b949e">
       📋 Watch list: <span style="color:#58a6ff;font-weight:600">${watchlist}</span>
     </div>`;
+}
+
+// ── Signal Center — Network Graph ─────────────────────────────────────────────
+let _scNetwork     = null;
+let _scGraphData   = null;
+let _scGraphLoaded = false;
+
+function scSwitchView(view) {
+  const cascade = document.getElementById('sc-view-cascade');
+  const graph   = document.getElementById('sc-view-graph');
+  const tabC    = document.getElementById('sc-tab-cascade');
+  const tabG    = document.getElementById('sc-tab-graph');
+  if (cascade) cascade.style.display = view === 'cascade' ? '' : 'none';
+  if (graph)   graph.style.display   = view === 'graph'   ? '' : 'none';
+  if (tabC) { tabC.style.background = view === 'cascade' ? '#21262d' : 'transparent'; tabC.style.color = view === 'cascade' ? '#e6edf3' : '#8b949e'; tabC.style.fontWeight = view === 'cascade' ? '600' : '400'; }
+  if (tabG) { tabG.style.background = view === 'graph'   ? '#21262d' : 'transparent'; tabG.style.color = view === 'graph'   ? '#e6edf3' : '#8b949e'; tabG.style.fontWeight = view === 'graph'   ? '600' : '400'; }
+  if (view === 'graph' && !_scGraphLoaded) loadNetworkGraph();
+}
+
+async function loadNetworkGraph() {
+  const canvas    = document.getElementById('sc-graph-canvas');
+  const loadingEl = document.getElementById('sc-graph-loading');
+  if (!canvas) return;
+
+  // Lazy-load vis-network from CDN on first use
+  if (!window.vis) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/vis-network/standalone/umd/vis-network.min.js';
+      s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  try {
+    const data = await fetch('/api/graph/network').then(r => r.json());
+    if (!data.available) {
+      if (loadingEl) loadingEl.innerHTML = '<span style="color:#f85149">Neo4j not configured</span>';
+      return;
+    }
+    _scGraphData = data;
+
+    const SECTOR_COLOR = {
+      'Semiconductor Equipment': '#58a6ff',
+      'Semiconductor':           '#bc8cff',
+      'Semiconductors':          '#bc8cff',
+      'Semiconductor Chips':     '#bc8cff',
+      'Technology':              '#3fb950',
+      'Big Tech':                '#3fb950',
+      'Energy':                  '#e3b341',
+      'Utilities':               '#f0883e',
+    };
+    const REL_COLOR = {
+      COMPETES_WITH:    '#f85149',
+      SUPPLIES_TO:      '#3fb950',
+      MANUFACTURES_FOR: '#58a6ff',
+    };
+
+    const nodes = new vis.DataSet(data.nodes.map(n => ({
+      id:    n.ticker,
+      label: n.ticker,
+      title: `<b>${n.name || n.ticker}</b><br>${n.sector || ''}`,
+      color: {
+        background: SECTOR_COLOR[n.sector] || '#8b949e',
+        border:     '#0d1117',
+        highlight:  { background: '#ffffff', border: '#e6edf3' },
+        hover:      { background: SECTOR_COLOR[n.sector] || '#aaa', border: '#e6edf3' },
+      },
+      font:  { color: '#e6edf3', size: 13, face: 'Inter,sans-serif', bold: { color: '#e6edf3', size: 13 } },
+      size:  20,
+      shape: 'dot',
+    })));
+
+    const edges = new vis.DataSet(data.edges.map((e, i) => ({
+      id:     i,
+      from:   e.from,
+      to:     e.to,
+      title:  `${e.rel_type.replace(/_/g,' ')}${e.strength ? ' · ' + e.strength + '%' : ''}`,
+      color:  { color: REL_COLOR[e.rel_type] || '#8b949e', opacity: 0.65, highlight: '#ffffff', hover: '#ffffff' },
+      width:  e.strength ? Math.max(1, Math.min(5, e.strength / 20)) : 1.5,
+      arrows: { to: { enabled: true, scaleFactor: 0.4 } },
+      smooth: { type: 'continuous' },
+    })));
+
+    const options = {
+      nodes:  { borderWidth: 2, borderWidthSelected: 3 },
+      edges:  { selectionWidth: 4 },
+      physics: {
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: { gravitationalConstant: -60, centralGravity: 0.01, springLength: 140, springConstant: 0.07 },
+        stabilization: { iterations: 200 },
+      },
+      interaction: { hover: true, tooltipDelay: 120, navigationButtons: false, keyboard: false },
+    };
+
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (_scNetwork) { _scNetwork.destroy(); _scNetwork = null; }
+    _scNetwork = new vis.Network(canvas, { nodes, edges }, options);
+
+    _scNetwork.on('click', params => {
+      if (params.nodes.length) scShowGraphDetail(params.nodes[0]);
+    });
+    _scNetwork.on('stabilizationIterationsDone', () => {
+      _scNetwork.setOptions({ physics: { enabled: false } });
+    });
+
+    _scGraphLoaded = true;
+  } catch (e) {
+    if (loadingEl) loadingEl.innerHTML = `<span style="color:#f85149">Error: ${e.message}</span>`;
+  }
+}
+
+function scShowGraphDetail(ticker) {
+  const headerEl = document.getElementById('sc-graph-detail-header');
+  const detailEl = document.getElementById('sc-graph-detail');
+  if (!detailEl || !_scGraphData) return;
+  if (headerEl) headerEl.textContent = `🔗 ${ticker} — Connections`;
+
+  const connected = _scGraphData.edges
+    .filter(e => e.from === ticker || e.to === ticker)
+    .map(e => ({
+      ticker:   e.from === ticker ? e.to : e.from,
+      rel_type: e.rel_type,
+      strength: e.strength,
+      dir:      e.from === ticker ? '→' : '←',
+    }))
+    .sort((a, b) => (b.strength || 0) - (a.strength || 0));
+
+  if (!connected.length) {
+    detailEl.innerHTML = '<div style="color:#8b949e">No direct connections.</div>';
+    return;
+  }
+
+  detailEl.innerHTML = connected.map(c => {
+    const rel      = c.rel_type.replace(/_/g,' ').toLowerCase();
+    const strength = c.strength != null ? `${Number(c.strength).toFixed(0)}%` : '';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #21262d">
+      <div>
+        <span style="font-weight:700;color:#e6edf3;font-size:0.88rem">${c.ticker}</span>
+        <span style="font-size:0.75rem;color:#8b949e;margin-left:6px">${c.dir} ${rel}</span>
+      </div>
+      ${strength ? `<span style="font-size:0.73rem;background:#21262d;color:#8b949e;padding:2px 7px;border-radius:4px">${strength}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  if (_scNetwork) {
+    _scNetwork.selectNodes([ticker]);
+    _scNetwork.focus(ticker, { scale: 1.3, animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
+  }
 }
 
 // ── Earnings Reaction Analysis ─────────────────────────────────────

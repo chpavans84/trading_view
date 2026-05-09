@@ -124,6 +124,43 @@ export async function getSystemicRisk(ticker) {
     risk_tier: conn >= 15 ? 'critical' : conn >= 8 ? 'high' : conn >= 4 ? 'medium' : 'low' };
 }
 
+export async function getFullGraph() {
+  const records = await run(`
+    MATCH (a:Company)-[r]->(b:Company)
+    RETURN a.ticker AS from_ticker, a.name AS from_name, a.sector AS from_sector,
+           b.ticker AS to_ticker, b.name AS to_name, b.sector AS to_sector,
+           type(r) AS rel_type,
+           coalesce(r.overlap_pct, r.revenue_pct, r.market_share_pct, r.supply_criticality) AS strength
+  `);
+
+  const nodeMap = new Map();
+  const edges   = [];
+
+  for (const rec of records) {
+    const fromTicker = rec.get('from_ticker');
+    const toTicker   = rec.get('to_ticker');
+    if (!nodeMap.has(fromTicker))
+      nodeMap.set(fromTicker, { ticker: fromTicker, name: rec.get('from_name'), sector: rec.get('from_sector') });
+    if (!nodeMap.has(toTicker))
+      nodeMap.set(toTicker,   { ticker: toTicker,   name: rec.get('to_name'),   sector: rec.get('to_sector') });
+    const raw = rec.get('strength');
+    const strength = raw == null ? null
+      : typeof raw.toNumber === 'function' ? raw.toNumber()
+      : Number(raw);
+    edges.push({ from: fromTicker, to: toTicker, rel_type: rec.get('rel_type'), strength });
+  }
+
+  // Pick up any isolated nodes (no relationships)
+  const isolated = await run(`MATCH (c:Company) WHERE NOT (c)-[]-() RETURN c.ticker AS ticker, c.name AS name, c.sector AS sector`);
+  for (const rec of isolated) {
+    const ticker = rec.get('ticker');
+    if (!nodeMap.has(ticker))
+      nodeMap.set(ticker, { ticker, name: rec.get('name'), sector: rec.get('sector') });
+  }
+
+  return { nodes: [...nodeMap.values()], edges };
+}
+
 export async function getGraphStats() {
   const records = await run(`
     MATCH (c:Company) WITH count(c) AS companies

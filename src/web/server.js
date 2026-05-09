@@ -36,7 +36,7 @@ import { getAccounts, getFunds, getPositions as getMoomooPositions, getMoomooTod
 import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, placeTigerOrder } from '../core/tiger.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
-import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRisk, getGraphStats } from '../core/graph.js';
+import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRisk, getGraphStats, getFullGraph } from '../core/graph.js';
 import { runPremarketScan } from '../core/premarket-scanner.js';
 import { runEarningsCascadeScan } from '../core/earnings-cascade.js';
 import { getStockPrediction } from '../core/predictor.js';
@@ -7004,6 +7004,14 @@ app.get('/api/graph/premarket', requireAuth, async (req, res) => {
   try {
     const result = await runPremarketScan();
     res.json({ ok: true, ...result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/graph/network', requireAuth, async (req, res) => {
+  try {
+    if (!isGraphConfigured()) return res.json({ available: false });
+    const data = await getFullGraph();
+    res.json({ available: true, ...data });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
