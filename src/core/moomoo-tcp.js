@@ -323,6 +323,18 @@ export async function getPositions({ acc_id, market = 'all' } = {}) {
   });
 }
 
+export async function getMoomooTodayPnL() {
+  try {
+    const result = await getPositions();
+    if (!result.success) return { available: false };
+    const pnl = +result.positions.reduce((s, p) => s + (p.today_pl ?? 0), 0).toFixed(2);
+    return { available: true, pnl };
+  } catch (err) {
+    console.error('getMoomooTodayPnL error:', err.message);
+    return { available: false };
+  }
+}
+
 export async function getOrders({ acc_id, status = 'active' } = {}) {
   return withClient(async (client) => {
     let accID = acc_id;
