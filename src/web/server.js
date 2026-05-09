@@ -2993,86 +2993,19 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
     const pnlUser = await getUser(req.session.username);
     const pnlAdmin = pnlUser?.role === 'admin';
 
-    // Moomoo — live PLOfDay (sum across positions) + history from daily_pnl table
-    if (source === 'moomoo') {
-      console.log(`[pnl] source=moomoo username=${req.session.username}`);
-      const [accountResult, livePnlResult] = await Promise.allSettled([
-        getAccountData('moomoo', req.session.username),
-        getMoomooTodayPnL(),
-      ]);
-      const account  = accountResult.status  === 'fulfilled' ? accountResult.value.account   : null;
-      const livePnl  = livePnlResult.status  === 'fulfilled' ? livePnlResult.value            : { available: false };
-
-      // Persist snapshot so account overview cards stay up to date
-      if (account && isDbAvailable()) {
-        const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-        upsertAccountSnapshot({
-          date:            todayStr,
-          source:          'moomoo',
-          username:        req.session.username,
-          portfolio_value: account.portfolio_value ?? null,
-          realized_pl:     account.realized_pl    ?? null,
-          unrealized_pl:   account.unrealized_pl  ?? null,
-        }).catch(() => {});
-      }
-
-      // History — prefer daily_pnl table (accurate PLOfDay); fall back to snapshot equity-delta
-      const pnlRows = isDbAvailable()
-        ? await getDailyPnlHistory({ days, username: req.session.username, source: 'moomoo' })
-        : [];
-      let history;
-      if (pnlRows && pnlRows.length > 0) {
-        history = pnlRows.map(r => ({
-          date:           r.date instanceof Date
-            ? r.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-            : String(r.date).slice(0, 10),
-          pnl:            parseFloat(r.realized_pnl ?? 0),
-          unrealized_pl:  parseFloat(r.unrealized_pnl ?? 0),
-          total_trades:   parseInt(r.total_trades   ?? 0),
-          winning_trades: parseInt(r.winning_trades ?? 0),
-        }));
-      } else {
-        // No PLOfDay data yet — fall back to equity-delta from snapshots.
-        // Filter out days where the swing exceeds $5 000 (deposits, not trading P&L).
-        const snapshots = isDbAvailable()
-          ? await getAccountSnapshots({ source: 'moomoo', username: req.session.username, days })
-          : [];
-        history = [];
-        for (let i = 1; i < snapshots.length; i++) {
-          const prev = snapshots[i - 1];
-          const curr = snapshots[i];
-          const equityDelta = curr.portfolio_value != null && prev.portfolio_value != null
-            ? +( parseFloat(curr.portfolio_value) - parseFloat(prev.portfolio_value) ).toFixed(2)
-            : null;
-          if (equityDelta === null || Math.abs(equityDelta) > 5000) continue; // skip deposits/withdrawals
-          history.push({
-            date:          curr.date instanceof Date
-              ? curr.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-              : String(curr.date).slice(0, 10),
-            pnl:           equityDelta,
-            equity:        parseFloat(curr.portfolio_value),
-            unrealized_pl: curr.unrealized_pl != null ? parseFloat(curr.unrealized_pl) : null,
-          });
-        }
-      }
-
-      // today P&L: live PLOfDay sum; fall back to unrealized_pl if OpenD is unreachable
-      const todayPnl = livePnl.available ? livePnl.pnl : (account?.unrealized_pl ?? null);
-      const todayAvailable = livePnl.available || account != null;
-      console.log(`[pnl] moomoo today_pl=${todayPnl} (live=${livePnl.available}) history=${history.length}`);
-      return res.json({
-        today:   { pnl: todayPnl ?? 0, available: todayAvailable, live: livePnl.available },
-        account: account ?? null,
-        history,
-      });
-    }
-
-    // Tiger / alpaca_live — live snapshot + equity-delta history from account_daily_snapshots
-    if (source === 'tiger' || source === 'alpaca_live') {
+    // Real-money accounts (moomoo, tiger, alpaca_live) — generic path
+    if (source === 'moomoo' || source === 'tiger' || source === 'alpaca_live') {
       console.log(`[pnl] source=${source} username=${req.session.username}`);
-      const { account } = await getAccountData(source, req.session.username);
-      console.log(`[pnl] account=${account ? JSON.stringify({ pv: account.portfolio_value, unreal: account.unrealized_pl }) : 'null'}`);
 
+      // Moomoo has a precise per-position today P&L endpoint; others use unrealized_pl
+      const [accountResult, livePnlResult] = await Promise.allSettled([
+        getAccountData(source, req.session.username),
+        source === 'moomoo' ? getMoomooTodayPnL() : Promise.resolve({ available: false }),
+      ]);
+      const account = accountResult.status === 'fulfilled' ? accountResult.value.account : null;
+      const livePnl = livePnlResult.status === 'fulfilled' ? livePnlResult.value : { available: false };
+
+      // Persist snapshot so account overview cards accumulate over time
       if (account && isDbAvailable()) {
         const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
         upsertAccountSnapshot({
@@ -3085,34 +3018,57 @@ app.get('/api/pnl', requireAuth, async (req, res) => {
         }).catch(() => {});
       }
 
-      const snapshots = isDbAvailable()
-        ? await getAccountSnapshots({ source, username: req.session.username, days })
+      // History: prefer accurate daily_pnl rows (stored by EOD cron); fall back to
+      // equity-delta from snapshots, filtering out swings > $5 000 (deposits/withdrawals).
+      const pnlRows = isDbAvailable()
+        ? await getDailyPnlHistory({ days, username: req.session.username, source })
         : [];
-
-      const history = [];
-      for (let i = 1; i < snapshots.length; i++) {
-        const prev = snapshots[i - 1];
-        const curr = snapshots[i];
-        const realDelta = curr.realized_pl != null && prev.realized_pl != null
-          ? +( parseFloat(curr.realized_pl) - parseFloat(prev.realized_pl) ).toFixed(2)
-          : null;
-        const equityDelta = curr.portfolio_value != null && prev.portfolio_value != null
-          ? +( parseFloat(curr.portfolio_value) - parseFloat(prev.portfolio_value) ).toFixed(2)
-          : null;
-        const pnl = (realDelta !== null && realDelta !== 0) ? realDelta : (equityDelta ?? 0);
-        history.push({
-          date:           curr.date instanceof Date
-            ? curr.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
-            : String(curr.date).slice(0, 10),
-          pnl,
-          equity:         curr.portfolio_value != null ? parseFloat(curr.portfolio_value) : null,
-          unrealized_pl:  curr.unrealized_pl  != null ? parseFloat(curr.unrealized_pl)  : null,
-        });
+      let history;
+      if (pnlRows && pnlRows.length > 0) {
+        history = pnlRows.map(r => ({
+          date:           r.date instanceof Date
+            ? r.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+            : String(r.date).slice(0, 10),
+          pnl:            parseFloat(r.realized_pnl  ?? 0),
+          unrealized_pl:  parseFloat(r.unrealized_pnl ?? 0),
+          total_trades:   parseInt(r.total_trades    ?? 0),
+          winning_trades: parseInt(r.winning_trades  ?? 0),
+        }));
+      } else {
+        const snapshots = isDbAvailable()
+          ? await getAccountSnapshots({ source, username: req.session.username, days })
+          : [];
+        history = [];
+        for (let i = 1; i < snapshots.length; i++) {
+          const prev = snapshots[i - 1];
+          const curr = snapshots[i];
+          // Prefer realized_pl delta when available (some brokers report it accurately)
+          const realDelta = curr.realized_pl != null && prev.realized_pl != null
+            ? +( parseFloat(curr.realized_pl) - parseFloat(prev.realized_pl) ).toFixed(2)
+            : null;
+          const equityDelta = curr.portfolio_value != null && prev.portfolio_value != null
+            ? +( parseFloat(curr.portfolio_value) - parseFloat(prev.portfolio_value) ).toFixed(2)
+            : null;
+          const pnl = (realDelta !== null && realDelta !== 0) ? realDelta : equityDelta;
+          // Skip days with no data or large swings that are clearly deposits/withdrawals
+          if (pnl === null || Math.abs(pnl) > 5000) continue;
+          history.push({
+            date:          curr.date instanceof Date
+              ? curr.date.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+              : String(curr.date).slice(0, 10),
+            pnl,
+            equity:        curr.portfolio_value != null ? parseFloat(curr.portfolio_value) : null,
+            unrealized_pl: curr.unrealized_pl  != null ? parseFloat(curr.unrealized_pl)  : null,
+          });
+        }
       }
 
-      console.log(`[pnl] snapshots=${snapshots.length} history=${history.length}`, history.map(h => ({ date: h.date, pnl: h.pnl })));
+      // Today P&L: Moomoo uses live PLOfDay; all brokers fall back to unrealized_pl
+      const todayPnl      = livePnl.available ? livePnl.pnl : (account?.unrealized_pl ?? null);
+      const todayAvailable = livePnl.available || account != null;
+      console.log(`[pnl] source=${source} today_pl=${todayPnl} (live=${livePnl.available}) history=${history.length}`);
       return res.json({
-        today:   { pnl: account?.unrealized_pl ?? 0, available: !!account, live: true },
+        today:   { pnl: todayPnl ?? 0, available: todayAvailable, live: livePnl.available },
         account: account ?? null,
         history,
       });
