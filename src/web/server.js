@@ -230,15 +230,17 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:     ["'self'"],
-      scriptSrc:      ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://static.cloudflareinsights.com"],   // inline <script> blocks + Chart.js CDN
-      scriptSrcAttr:  ["'unsafe-inline'"],             // onclick/onchange/etc. attributes
-      styleSrc:       ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+      scriptSrc:      ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://static.cloudflareinsights.com"],
+      scriptSrcAttr:  ["'unsafe-inline'"],
+      styleSrc:       ["'self'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+      styleSrcElem:   ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
       imgSrc:         ["'self'", 'data:', 'https:'],
       connectSrc:     ["'self'", "https://cdn.jsdelivr.net"],
       fontSrc:        ["'self'", "https://fonts.gstatic.com"],
       objectSrc:      ["'none'"],
       frameAncestors: ["'none'"],
       baseUri:        ["'self'"],
+      formAction:     ["'self'"],
     },
   },
   crossOriginEmbedderPolicy: false,  // avoids breaking fetch to same-origin APIs

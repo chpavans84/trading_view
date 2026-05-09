@@ -1,0 +1,50 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0d1117; color: #e6edf3;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh;
+}
+.card {
+  background: #161b22; border: 1px solid #30363d;
+  border-radius: 12px; padding: 40px; width: calc(100% - 32px); max-width: 380px;
+}
+h1 { font-size: 1.4rem; margin-bottom: 6px; }
+.subtitle { color: #8b949e; font-size: 0.9rem; margin-bottom: 28px; }
+.free-badge {
+  display: inline-block; background: #1f6feb22; border: 1px solid #388bfd55;
+  color: #58a6ff; font-size: 0.78rem; padding: 2px 8px; border-radius: 20px;
+  margin-bottom: 20px;
+}
+label { display: block; font-size: 0.85rem; color: #8b949e; margin-bottom: 6px; margin-top: 14px; }
+input {
+  width: 100%; padding: 10px 14px; background: #0d1117;
+  border: 1px solid #30363d; border-radius: 8px; color: #e6edf3;
+  font-size: 1rem; outline: none;
+}
+input:focus { border-color: #58a6ff; }
+.hint { color: #6e7681; font-size: 0.78rem; margin-top: 4px; }
+button {
+  width: 100%; margin-top: 24px; padding: 11px;
+  background: #238636; border: none; border-radius: 8px;
+  color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+}
+button:hover { background: #2ea043; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+.msg { font-size: 0.85rem; margin-top: 14px; display: none; }
+.msg.error { color: #f85149; }
+.msg.success { color: #3fb950; }
+.login-link { text-align: center; margin-top: 20px; font-size: 0.85rem; color: #8b949e; }
+.login-link a { color: #58a6ff; text-decoration: none; }
+.login-link a:hover { text-decoration: underline; }
+.perks { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; }
+.perks p { font-size: 0.82rem; color: #8b949e; margin-bottom: 6px; }
+.perks ul { list-style: none; padding: 0; }
+.perks li { font-size: 0.82rem; color: #e6edf3; padding: 2px 0; }
+.perks li::before { content: '✓ '; color: #3fb950; }
+.terms-row { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; }
+.terms-row input[type=checkbox] { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; accent-color: #238636; cursor: pointer; }
+.terms-row label { font-size: 0.82rem; color: #8b949e; margin: 0; cursor: pointer; }
+.terms-row a { color: #58a6ff; text-decoration: none; }
+.terms-row a:hover { text-decoration: underline; }
+.risk-note { background: #1a0a0a; border: 1px solid #6e1111; border-radius: 8px; padding: 10px 14px; margin-top: 14px; font-size: 0.78rem; color: #9a6060; line-height: 1.5; }
