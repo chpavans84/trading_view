@@ -8607,17 +8607,16 @@ async function loadNetworkGraph() {
   const loadingEl = document.getElementById('sc-graph-loading');
   if (!canvas) return;
 
-  // Lazy-load vis-network from CDN on first use
-  if (!window.vis) {
-    await new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://unpkg.com/vis-network/standalone/umd/vis-network.min.js';
-      s.onload = resolve; s.onerror = reject;
-      document.head.appendChild(s);
-    });
-  }
-
   try {
+    // Lazy-load vis-network from CDN on first use (jsdelivr is in CSP allowlist)
+    if (!window.vis) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/vis-network/standalone/umd/vis-network.min.js';
+        s.onload = resolve; s.onerror = () => reject(new Error('Failed to load vis-network from CDN'));
+        document.head.appendChild(s);
+      });
+    }
     const data = await fetch('/api/graph/network').then(r => r.json());
     if (!data.available) {
       if (loadingEl) loadingEl.innerHTML = '<span style="color:#f85149">Neo4j not configured</span>';
