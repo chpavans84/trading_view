@@ -6227,6 +6227,147 @@ function renderTVChart(symbol) {
   ro.observe(container);
 }
 
+// ── Chart resize handle ───────────────────────────────────────────────────────
+let _chartIsFilled = false;
+
+function snapChartH(h) {
+  const tvEl  = document.getElementById('explorerTVChart');
+  const cvWrap = document.getElementById('explorerCanvasWrap');
+  const cvDiv  = cvWrap?.querySelector('div[style*="height"]');
+  const fillBtn = document.getElementById('csz-f');
+
+  if (h === 0) {
+    // Fill: use available body space
+    const body = document.querySelector('.float-explorer-body');
+    const wrap = document.getElementById('explorerTVWrap');
+    const controls = document.getElementById('explorerChartWrap')
+      ?.querySelector('[style*="display:flex"]')?.offsetHeight || 56;
+    const rb   = wrap?.querySelector('.chart-range-bar')?.offsetHeight || 34;
+    const bodyH = body ? body.clientHeight : 640;
+    h = Math.max(200, bodyH - controls - rb - 26);
+    _chartIsFilled = true;
+    if (fillBtn) fillBtn.textContent = '↩';
+  } else {
+    _chartIsFilled = false;
+    if (fillBtn) fillBtn.textContent = '⛶';
+  }
+
+  // Update active indicator on size buttons
+  document.querySelectorAll('.csz-btn').forEach(b => b.classList.remove('csz-active'));
+  const snapMap = { 220: 'csz-s', 400: 'csz-m', 620: 'csz-l' };
+  if (snapMap[h]) document.getElementById(snapMap[h])?.classList.add('csz-active');
+
+  if (tvEl)  tvEl.style.height  = h + 'px';
+  if (cvDiv) cvDiv.style.height = Math.max(180, h - 40) + 'px';
+  if (_lwChart) _lwChart.applyOptions({ height: h });
+}
+
+// Drag-to-resize
+(function () {
+  let dragging = false, startY = 0, startH = 0;
+
+  document.addEventListener('mousedown', e => {
+    if (!e.target.closest('#chartRhGrip')) return;
+    dragging = true;
+    startY = e.clientY;
+    startH = parseInt(document.getElementById('explorerTVChart')?.style.height) || 400;
+    document.body.style.cursor     = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const newH = Math.max(150, Math.min(1000, startH + (e.clientY - startY)));
+    const tvEl   = document.getElementById('explorerTVChart');
+    const cvDiv  = document.querySelector('#explorerCanvasWrap div[style*="height"]');
+    if (tvEl)  tvEl.style.height  = newH + 'px';
+    if (cvDiv) cvDiv.style.height = Math.max(180, newH - 40) + 'px';
+    if (_lwChart) _lwChart.applyOptions({ height: newH });
+    // Remove active from preset btns while free-dragging
+    document.querySelectorAll('.csz-btn').forEach(b => b.classList.remove('csz-active'));
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
+// ── Explorer panel resize tab (right-edge floating arrow handle) ──────────────
+function _feTabSync() {
+  const panel = document.getElementById('floatExplorer');
+  const tab   = document.getElementById('feResizeTab');
+  if (!panel || !tab) return;
+  if (panel.classList.contains('open')) {
+    const r = panel.getBoundingClientRect();
+    tab.style.left    = r.right + 'px';
+    tab.style.top     = (r.top + r.height / 2) + 'px';
+    tab.style.display = 'flex';
+  } else {
+    tab.style.display = 'none';
+  }
+}
+
+(function () {
+  let dragging = false, startX = 0, startW = 0;
+
+  document.addEventListener('mousedown', e => {
+    if (!e.target.closest('#feResizeTab')) return;
+    const panel = document.getElementById('floatExplorer');
+    if (!panel) return;
+    dragging = true;
+    startX = e.clientX;
+    startW = panel.offsetWidth;
+    document.getElementById('feResizeTab').classList.add('fe-tab-active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const panel = document.getElementById('floatExplorer');
+    if (!panel) return;
+    const newW = Math.max(300, Math.min(Math.round(window.innerWidth * 0.92), startW + (e.clientX - startX)));
+    panel.style.width = newW + 'px';
+    document.documentElement.style.setProperty('--explorer-w', newW + 'px');
+    _feTabSync();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.getElementById('feResizeTab')?.classList.remove('fe-tab-active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
+
+// ── Explorer panel width cycle (⊞ button) ─────────────────────────────────────
+let _feWidthIdx = 0;
+function cycleExplorerWidth() {
+  const steps = [
+    Math.round(window.innerWidth * 0.33),
+    Math.round(window.innerWidth * 0.50),
+    Math.round(window.innerWidth * 0.70),
+    Math.round(window.innerWidth * 0.88),
+  ];
+  _feWidthIdx = (_feWidthIdx + 1) % steps.length;
+  const panel = document.getElementById('floatExplorer');
+  if (panel) {
+    panel.style.width = steps[_feWidthIdx] + 'px';
+    document.documentElement.style.setProperty('--explorer-w', steps[_feWidthIdx] + 'px');
+  }
+  const icons  = ['⊞', '⊡', '⊠', '⊟'];
+  const titles = ['Normal', 'Wide', 'Extra-wide', 'Full-width'];
+  const btn = document.getElementById('feExpandBtn');
+  if (btn) { btn.textContent = icons[_feWidthIdx]; btn.title = titles[_feWidthIdx] + ' panel'; }
+  setTimeout(_feTabSync, 20);
+}
+
 let _activeCanvasRange = '1Y';
 
 function setCanvasChartRange(period) {
@@ -13979,6 +14120,12 @@ function exploreSymbol(sym) {
 </script>
 
 <!-- ── Floating Stock Explorer ─────────────────────────────────────────── -->
+<!-- Floating resize tab — sits at the right edge of the explorer panel -->
+<div id="feResizeTab" title="Drag to resize panel  •  Click ⊞ in header to snap sizes">
+  <span style="font-size:0.75rem;line-height:1;color:#58a6ff;pointer-events:none">◀▶</span>
+</div>
+
+<div id="explorerBackdrop" onclick="closeFloatExplorer()"></div>
 <div class="float-explorer" id="floatExplorer">
   <!-- Drag handle / header -->
   <div class="float-explorer-header" id="floatExplorerHeader">
@@ -13994,6 +14141,7 @@ function exploreSymbol(sym) {
     <button onclick="loadStockExplorer()" style="background:#238636;border:none;border-radius:6px;padding:6px 14px;color:#fff;cursor:pointer;font-size:0.82rem;font-weight:600;white-space:nowrap;flex-shrink:0">Explore →</button>
     <button id="explorerWlBtn" class="wl-heart" data-wl-sym="" onclick="explorerToggleWatchlist()" title="Add to Watchlist" style="font-size:1.2rem;padding:4px 6px;display:none;flex-shrink:0;opacity:1">🤍</button>
     <button id="qtToggleBtn" onclick="toggleQuickTrade()" title="Quick Trade" style="background:#1a1f3a;border:1px solid #58a6ff;border-radius:6px;padding:6px 12px;color:#58a6ff;cursor:pointer;font-size:0.82rem;font-weight:600;white-space:nowrap;flex-shrink:0">⚡ Trade</button>
+    <button id="feExpandBtn" onclick="cycleExplorerWidth()" title="Expand panel" style="background:none;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#8b949e;cursor:pointer;font-size:1rem;line-height:1;flex-shrink:0;transition:all 0.15s" onmouseover="this.style.color='#e6edf3';this.style.borderColor='#58a6ff'" onmouseout="this.style.color='#8b949e';this.style.borderColor='#30363d'">⊞</button>
     <button class="float-explorer-close" onclick="closeFloatExplorer()" title="Close">✕</button>
   </div>
 
@@ -14109,8 +14257,17 @@ function exploreSymbol(sym) {
         <button onclick="setExplorerView('score')"  id="ev-score"  class="ev-btn">🎯 Conviction Score</button>
         <button onclick="setExplorerView('return')" id="ev-return" class="ev-btn">📊 1M Return</button>
 
+        <!-- Chart size controls -->
+        <div id="chartSizeBar" style="margin-left:auto;display:flex;align-items:center;gap:3px">
+          <span style="font-size:0.62rem;color:#6e7681;user-select:none;margin-right:1px">↕</span>
+          <button class="csz-btn" id="csz-s" onclick="snapChartH(220)" title="Compact chart">S</button>
+          <button class="csz-btn csz-active" id="csz-m" onclick="snapChartH(400)" title="Normal chart">M</button>
+          <button class="csz-btn" id="csz-l" onclick="snapChartH(620)" title="Tall chart">L</button>
+          <button class="csz-btn" id="csz-f" onclick="snapChartH(0)" title="Fill panel">⛶</button>
+        </div>
+
         <!-- Chart type dropdown -->
-        <div class="chart-type-wrap" id="chartTypeWrap" style="margin-left:auto">
+        <div class="chart-type-wrap" id="chartTypeWrap">
           <div class="chart-type-btn" id="chartTypeBtn" onclick="toggleChartTypeMenu()">
             <span id="chartTypeIcon">🕯️</span>
             <span id="chartTypeLabel">Candlestick</span>
@@ -14156,6 +14313,8 @@ function exploreSymbol(sym) {
           <button class="crb-btn" data-range="5Y" onclick="setChartRange('5Y')">5Y</button>
         </div>
         <div id="explorerTVChart" style="height:400px;width:100%;overflow:hidden;position:relative"></div>
+        <!-- ── Drag grip (free resize) ── -->
+        <div class="chart-rh-grip" id="chartRhGrip" title="Drag to resize chart height">⠿ ⠿ ⠿</div>
       </div>
 
       <!-- Score / Return (Chart.js) -->
@@ -14563,7 +14722,7 @@ function openFloatExplorer() {
     return;
   }
 
-  // First open: default to LEFT side
+  // First open: LEFT side, push mode (content shifts right, no overlay)
   panel.classList.add('dock-left');
   panel.style.left  = '0';
   panel.style.right = 'auto';
@@ -14580,6 +14739,7 @@ function openFloatExplorer() {
   }
   loadExplorerSymbols();
   document.getElementById('explorerSymbol').focus();
+  setTimeout(_feTabSync, 320); // after slide-in transition
 }
 
 function openExplorerForSymbol(sym) {
@@ -14595,9 +14755,11 @@ function closeFloatExplorer() {
   panel.classList.remove('open', 'dock-left');
   panel.style.left  = '';
   panel.style.right = '';
+  document.getElementById('explorerBackdrop')?.classList.remove('active');
   document.getElementById('tab-explorer').classList.remove('active');
   document.body.classList.remove('explorer-open', 'explorer-left');
   document.documentElement.style.setProperty('--explorer-w', '0px');
+  _feTabSync();
   // Reset news drawer to sit flush right
   if (typeof _newsDrawerOpen !== 'undefined' && _newsDrawerOpen) {
     const drawer = document.getElementById('newsDrawer');

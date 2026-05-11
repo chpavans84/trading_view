@@ -2,7 +2,7 @@
 // Network-first for everything — app updates frequently so we never serve stale assets.
 // Offline fallback: serve cached HTML shell if network is unavailable.
 
-const CACHE = 'trading-v3';
+const CACHE = 'trading-v4';
 const SHELL_URL = '/';
 
 self.addEventListener('install', e => {
