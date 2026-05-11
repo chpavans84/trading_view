@@ -3,12 +3,39 @@
 <head>
 <link rel="stylesheet" href="/css/dashboard.css">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#161b22">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TradingBot">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.svg">
 <title>Trading Bot Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-
+<script>
+// Error capture — runs before any other JS so we catch early failures too
+(function(){
+  function post(payload){
+    try{fetch('/api/client-error',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{});}catch(e){}
+  }
+  window.onerror = function(msg, src, line, col, err){
+    post({message: String(msg), stack: err?.stack, url: src, context:{line,col}, level:'error'});
+  };
+  window.onunhandledrejection = function(ev){
+    const err = ev.reason;
+    post({message: err?.message || String(err), stack: err?.stack, url: location.href, level:'error'});
+  };
+  // Register service worker for PWA / offline shell
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+})();
+</script>
 </head>
 <body>
 
@@ -136,7 +163,7 @@
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
-    <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)">📡 Signal Center</button>
+    <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)">Signal Center</button>
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
     <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
     <button class="tab" id="tab-stats" onclick="showPage('stats',this)" style="display:none">Stats</button>
@@ -610,81 +637,264 @@
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
-        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">📡 Signal Center</h2>
+        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">Signal Center</h2>
         <div style="font-size:0.8rem;color:#8b949e" id="sc-meta">Graph-powered earnings cascade &amp; pre-market impact alerts</div>
       </div>
-    </div>
-
-    <!-- Inner tab switcher -->
-    <div style="display:flex;gap:4px;margin-bottom:16px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:4px;width:fit-content">
-      <button id="sc-tab-cascade" onclick="scSwitchView('cascade')" style="background:#21262d;border:none;border-radius:6px;padding:6px 16px;color:#e6edf3;font-size:0.83rem;cursor:pointer;font-weight:600">📅 Earnings Cascade</button>
-      <button id="sc-tab-graph"   onclick="scSwitchView('graph')"   style="background:transparent;border:none;border-radius:6px;padding:6px 16px;color:#8b949e;font-size:0.83rem;cursor:pointer">🕸️ Network Graph</button>
-    </div>
-
-    <!-- ── Cascade view ──────────────────────────────────────────── -->
-    <div id="sc-view-cascade">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <select id="sc-days" onchange="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 10px;color:#e6edf3;font-size:0.83rem">
-          <option value="7">Next 7 days</option>
-          <option value="14">Next 14 days</option>
-          <option value="30" selected>Next 30 days</option>
-          <option value="60">Next 60 days</option>
-        </select>
-        <button onclick="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:6px 14px;color:#e6edf3;cursor:pointer;font-size:0.85rem">↻ Refresh</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="sc-seed-btn" onclick="scSeedGraph()" style="background:#21262d;border:1px solid #30363d;border-radius:20px;padding:5px 14px;color:#3fb950;font-size:0.82rem;cursor:pointer;display:none;align-items:center;gap:5px" title="Populate Neo4j with all companies and relationships">
+          🌱 Seed Graph
+        </button>
+        <button onclick="showScHelp()" style="background:#21262d;border:1px solid #30363d;border-radius:20px;padding:5px 14px;color:#8b949e;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:5px" title="How to read Signal Center">
+          <span style="font-weight:700;font-size:1rem;line-height:1">?</span> How to read this
+        </button>
       </div>
+    </div>
 
-      <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start">
+    <!-- Help Modal -->
+    <div id="sc-help-overlay" onclick="hideScHelp()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9000;overflow-y:auto;padding:40px 16px"></div>
+    <div id="sc-help-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9001;width:min(720px,95vw);max-height:85vh;overflow-y:auto;background:#161b22;border:1px solid #30363d;border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+      <!-- Modal header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid #21262d;position:sticky;top:0;background:#161b22;z-index:1">
+        <div style="font-size:1.05rem;font-weight:700;color:#e6edf3">Signal Center — How to Read It</div>
+        <button onclick="hideScHelp()" style="background:none;border:none;color:#8b949e;font-size:1.3rem;cursor:pointer;padding:0 4px;line-height:1" title="Close">✕</button>
+      </div>
+      <!-- Modal body -->
+      <div style="padding:24px;font-size:0.85rem;color:#c9d1d9;line-height:1.65">
+
+        <!-- Section 1: Earnings Cascade -->
+        <div style="margin-bottom:28px">
+          <div style="font-size:0.95rem;font-weight:700;color:#e6edf3;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+            <span>📅</span> Earnings Cascade Tab
+          </div>
+          <p style="margin:0 0 12px 0;color:#8b949e">When a big company reports earnings, connected stocks often move <em>before</em> or <em>at the same time</em>. The Cascade tab shows you which stocks in our graph are reporting soon, and which connected companies are likely to react.</p>
+
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px 16px;margin-bottom:14px">
+            <div style="font-size:0.78rem;font-weight:700;color:#58a6ff;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em">Example — NVDA Reports Tomorrow</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:0.82rem">
+              <div>
+                <div style="color:#8b949e;margin-bottom:6px;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.03em">Left Panel (Earnings List)</div>
+                <div style="background:#161b22;border-radius:6px;padding:10px 12px;border-left:3px solid #58a6ff">
+                  <span style="color:#58a6ff;font-weight:700">NVDA</span>
+                  <span style="background:#e3b341;color:#000;font-size:0.68rem;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:6px">TOMORROW</span>
+                  <div style="color:#8b949e;font-size:0.75rem;margin-top:3px">2026-05-10 · 5 connected</div>
+                </div>
+                <div style="color:#8b949e;font-size:0.78rem;margin-top:8px">Click a row to load cascade impact →</div>
+              </div>
+              <div>
+                <div style="color:#8b949e;margin-bottom:6px;font-size:0.76rem;text-transform:uppercase;letter-spacing:0.03em">Right Panel (Cascade Impact)</div>
+                <div style="background:#161b22;border-radius:6px;padding:10px 12px">
+                  <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #21262d">
+                    <div><span style="color:#58a6ff;font-weight:700">AMD</span> <span style="color:#8b949e;font-size:0.76rem">competes with</span></div>
+                    <span style="background:#21262d;color:#8b949e;padding:1px 7px;border-radius:3px;font-size:0.74rem">85%</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #21262d">
+                    <div><span style="color:#58a6ff;font-weight:700">ASML</span> <span style="color:#8b949e;font-size:0.76rem">supplies to</span></div>
+                    <span style="background:#21262d;color:#8b949e;padding:1px 7px;border-radius:3px;font-size:0.74rem">70%</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;padding:5px 0">
+                    <div><span style="color:#58a6ff;font-weight:700">TSM</span> <span style="color:#8b949e;font-size:0.76rem">manufactures for</span></div>
+                    <span style="background:#21262d;color:#8b949e;padding:1px 7px;border-radius:3px;font-size:0.74rem">60%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px 16px">
+            <div style="font-size:0.78rem;font-weight:700;color:#e3b341;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">How to interpret the relationship types</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="min-width:130px;font-size:0.78rem;background:#21262d;color:#f85149;padding:2px 8px;border-radius:4px;font-weight:600;text-align:center">competes with</span>
+                <span style="color:#8b949e;font-size:0.82rem"><strong style="color:#c9d1d9">Inverse move.</strong> If NVDA beats → AMD may fall (market share fears). If NVDA misses → AMD may rally.</span>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="min-width:130px;font-size:0.78rem;background:#21262d;color:#3fb950;padding:2px 8px;border-radius:4px;font-weight:600;text-align:center">supplies to</span>
+                <span style="color:#8b949e;font-size:0.82rem"><strong style="color:#c9d1d9">Sympathy move.</strong> If NVDA beats and guides higher → ASML benefits (more orders for chip-making tools).</span>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="min-width:130px;font-size:0.78rem;background:#21262d;color:#58a6ff;padding:2px 8px;border-radius:4px;font-weight:600;text-align:center">manufactures for</span>
+                <span style="color:#8b949e;font-size:0.82rem"><strong style="color:#c9d1d9">Sympathy move.</strong> If NVDA demand is strong → TSM (makes NVDA chips) sees higher utilization → positive read-through.</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;padding:10px 14px;background:#0d1117;border-left:3px solid #58a6ff;border-radius:0 6px 6px 0;font-size:0.8rem;color:#8b949e">
+            <strong style="color:#c9d1d9">Strength %</strong> — how much of the relationship weight exists (e.g. 85% overlap means AMD and NVDA compete across 85% of their product lines). Higher = stronger expected reaction.
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid #21262d;margin:0 0 28px 0">
+
+        <!-- Section 2: Network Graph -->
+        <div style="margin-bottom:28px">
+          <div style="font-size:0.95rem;font-weight:700;color:#e6edf3;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+            <span>🕸️</span> Network Graph Tab
+          </div>
+          <p style="margin:0 0 12px 0;color:#8b949e">A visual map of all 23 tracked stocks and how they connect. Drag nodes to explore, click any node to see its direct relationships on the right.</p>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+            <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px 16px">
+              <div style="font-size:0.78rem;font-weight:700;color:#bc8cff;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em">Node colours = sector</div>
+              <div style="display:flex;flex-direction:column;gap:6px;font-size:0.81rem">
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:#58a6ff;display:inline-block;flex-shrink:0"></span><span>Semiconductor Equipment <span style="color:#8b949e">(ASML, AMAT, LRCX, KLAC)</span></span></div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:#bc8cff;display:inline-block;flex-shrink:0"></span><span>Chips <span style="color:#8b949e">(NVDA, AMD, INTC, TSM…)</span></span></div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:#3fb950;display:inline-block;flex-shrink:0"></span><span>Big Tech <span style="color:#8b949e">(MSFT, META, GOOGL, AMZN, AAPL)</span></span></div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:#e3b341;display:inline-block;flex-shrink:0"></span><span>Energy <span style="color:#8b949e">(XOM, CVX, HAL, SLB)</span></span></div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:#f0883e;display:inline-block;flex-shrink:0"></span><span>Utilities <span style="color:#8b949e">(VST, CEG, ETR)</span></span></div>
+              </div>
+            </div>
+            <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px 16px">
+              <div style="font-size:0.78rem;font-weight:700;color:#bc8cff;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em">Edge colours = relationship</div>
+              <div style="display:flex;flex-direction:column;gap:6px;font-size:0.81rem">
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:3px;background:#f85149;display:inline-block;flex-shrink:0;border-radius:2px"></span><span style="color:#f85149;font-weight:600">Red</span> — Competes With</div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:3px;background:#3fb950;display:inline-block;flex-shrink:0;border-radius:2px"></span><span style="color:#3fb950;font-weight:600">Green</span> — Supplies To</div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:3px;background:#58a6ff;display:inline-block;flex-shrink:0;border-radius:2px"></span><span style="color:#58a6ff;font-weight:600">Blue</span> — Manufactures For</div>
+                <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:3px;background:#f7c948;display:inline-block;flex-shrink:0;border-radius:2px"></span><span style="color:#f7c948;font-weight:600">Gold</span> — Invested In</div>
+              </div>
+              <div style="margin-top:12px;font-size:0.8rem;color:#8b949e">Arrow direction shows who does what to whom. ASML →<span style="color:#3fb950">supplies to</span>→ NVDA.</div>
+            </div>
+          </div>
+
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px 16px">
+            <div style="font-size:0.78rem;font-weight:700;color:#e3b341;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em">Reading the node detail panel</div>
+            <div style="font-size:0.82rem;color:#8b949e">Click <strong style="color:#c9d1d9">NVDA</strong> → right panel shows:
+              <div style="background:#161b22;border-radius:6px;padding:10px 12px;margin-top:8px">
+                <div style="font-weight:700;color:#e6edf3;margin-bottom:8px">NVDA — Connections</div>
+                <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #21262d;font-size:0.8rem">
+                  <div><span style="color:#58a6ff;font-weight:700">AMD</span> <span style="color:#8b949e">← competes with</span></div>
+                  <span style="background:#21262d;color:#8b949e;padding:1px 7px;border-radius:3px;font-size:0.74rem">85%</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:0.8rem">
+                  <div><span style="color:#58a6ff;font-weight:700">ASML</span> <span style="color:#8b949e">→ supplied by</span></div>
+                  <span style="background:#21262d;color:#8b949e;padding:1px 7px;border-radius:3px;font-size:0.74rem">70%</span>
+                </div>
+              </div>
+              <div style="margin-top:8px">← / → arrow shows direction: <strong style="color:#c9d1d9">←</strong> = the other stock does it to NVDA, <strong style="color:#c9d1d9">→</strong> = NVDA does it to the other stock.</div>
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid #21262d;margin:0 0 28px 0">
+
+        <!-- Section 3: Pre-Market -->
+        <div style="margin-bottom:10px">
+          <div style="font-size:0.95rem;font-weight:700;color:#e6edf3;margin-bottom:10px;display:flex;align-items:center;gap:8px">
+            <span>🌅</span> Pre-Market Movers Panel
+          </div>
+          <p style="margin:0 0 12px 0;color:#8b949e">Only visible weekdays 7:00–9:25 AM ET. Automatically scans the 23 tracked stocks for moves &gt;3% before the open, then shows contagion impact on connected companies.</p>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px 16px;font-size:0.82rem">
+            <div style="font-size:0.78rem;font-weight:700;color:#3fb950;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.04em">Example — NVDA up +5.2% pre-market</div>
+            <div style="color:#8b949e">
+              <div>🟢 <strong style="color:#c9d1d9">NVDA +5.2%</strong> pre-market</div>
+              <div style="margin-top:6px;padding-left:12px">📡 Contagion Impact:</div>
+              <div style="padding-left:24px;margin-top:4px">↑ ASML +1.4% — SUPPLIES_TO (direct)<br>↑ TSM +0.9% — MANUFACTURES_FOR (direct)<br>↓ AMD -1.3% — COMPETES_WITH (direct)</div>
+              <div style="margin-top:6px;padding-left:12px">👥 Sympathy watch: AMD, ASML, TSM</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tips -->
+        <hr style="border:none;border-top:1px solid #21262d;margin:20px 0">
+        <div style="font-size:0.78rem;color:#8b949e">
+          <strong style="color:#c9d1d9">Tips:</strong>
+          <ul style="margin:6px 0 0 16px;padding:0;display:flex;flex-direction:column;gap:4px">
+            <li>All blue ticker names are clickable — opens Stock Explorer for that symbol.</li>
+            <li>Use the days selector (7/14/30/60) to widen the earnings look-ahead window.</li>
+            <li>A stock with many connections (high degree in the graph) creates larger cascade effects when it moves.</li>
+            <li>Pre-market panel only appears during the pre-market window (7:00–9:25 AM ET, Mon–Fri).</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Search bar + controls ───────────────────────────────────── -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="position:relative;flex:1;min-width:200px;max-width:320px">
+        <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#8b949e;pointer-events:none">🔍</span>
+        <input id="sc-graph-search" type="text" placeholder="Find stock in graph (e.g. NVDA)…"
+          oninput="scSearchGraph(this.value)" onkeydown="if(event.key==='Enter')scSearchGraph(this.value,true)"
+          style="width:100%;background:#21262d;border:1px solid #30363d;border-radius:6px;padding:7px 12px 7px 32px;color:#e6edf3;font-size:0.84rem;outline:none;box-sizing:border-box">
+      </div>
+      <select id="sc-days" onchange="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:0.83rem">
+        <option value="7">Next 7 days</option>
+        <option value="14">Next 14 days</option>
+        <option value="30" selected>Next 30 days</option>
+        <option value="60">Next 60 days</option>
+      </select>
+      <button onclick="loadSignalCenter()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:6px 14px;color:#e6edf3;cursor:pointer;font-size:0.85rem">↻ Refresh</button>
+      <div id="sc-click-history" style="display:none;align-items:center;gap:6px;flex-wrap:wrap"></div>
+    </div>
+
+    <!-- ── Unified layout: Earnings left | Graph right ────────────── -->
+    <div id="sc-main-grid" style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start">
+
+      <!-- Left column: Upcoming Earnings + Pre-market -->
+      <div>
         <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
           <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">📅 Upcoming Earnings</div>
           <div id="sc-earnings-list" style="padding:8px 0">
             <div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>
           </div>
         </div>
-        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden;min-height:320px">
-          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3" id="sc-detail-header">👥 Cascade Impact</div>
-          <div id="sc-cascade-detail" style="padding:16px;color:#8b949e;font-size:0.83rem">
-            Select an earnings ticker on the left to see connected stocks likely to move in sympathy.
+        <div id="sc-premarket-wrap" style="margin-top:12px;display:none">
+          <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
+            <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">🌅 Pre-Market Movers</div>
+            <div id="sc-premarket-list" style="padding:8px 16px"></div>
           </div>
         </div>
       </div>
 
-      <div id="sc-premarket-wrap" style="margin-top:16px;display:none">
-        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
-          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">🌅 Pre-Market Movers (live)</div>
-          <div id="sc-premarket-list" style="padding:8px 16px"></div>
+      <!-- Right column: Graph canvas + Connections + Legend + Impact -->
+      <div>
+        <!-- Graph canvas + connections side panel -->
+        <div id="sc-graph-grid" style="display:grid;grid-template-columns:1fr 260px;gap:12px">
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;overflow:hidden;position:relative">
+            <div id="sc-graph-canvas" style="height:500px"></div>
+            <div id="sc-graph-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8b949e;font-size:0.85rem;background:#0d1117">Loading graph…</div>
+          </div>
+          <div id="sc-connections-panel" style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
+            <div style="padding:12px 14px;border-bottom:1px solid #21262d;font-size:0.84rem;font-weight:600;color:#e6edf3" id="sc-graph-detail-header">🔗 Connections</div>
+            <div id="sc-graph-detail" style="padding:14px;color:#8b949e;font-size:0.82rem">Click a node or earnings ticker to see connections and impact.</div>
+          </div>
+        </div>
+
+        <!-- Legend -->
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;padding:8px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:0.76rem;color:#8b949e">
+          <span style="font-weight:600;color:#e6edf3">Sectors:</span>
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#58a6ff;margin-right:3px;vertical-align:middle"></span>Semicon. Equip.</span>
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#bc8cff;margin-right:3px;vertical-align:middle"></span>Chips</span>
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#3fb950;margin-right:3px;vertical-align:middle"></span>Big Tech</span>
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#e3b341;margin-right:3px;vertical-align:middle"></span>Energy</span>
+          <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#f0883e;margin-right:3px;vertical-align:middle"></span>Utilities</span>
+          <span style="margin-left:6px;font-weight:600;color:#e6edf3">Edges:</span>
+          <span><span style="display:inline-block;width:16px;height:3px;background:#f85149;margin-right:3px;vertical-align:middle;border-radius:2px"></span>Competes</span>
+          <span><span style="display:inline-block;width:16px;height:3px;background:#3fb950;margin-right:3px;vertical-align:middle;border-radius:2px"></span>Supplies</span>
+          <span><span style="display:inline-block;width:16px;height:3px;background:#58a6ff;margin-right:3px;vertical-align:middle;border-radius:2px"></span>Manufactures</span>
+          <span><span style="display:inline-block;width:16px;height:3px;background:#f7c948;margin-right:3px;vertical-align:middle;border-radius:2px"></span>Invests</span>
+        </div>
+
+        <!-- Historical Impact panel (shown on node/earnings click) -->
+        <div id="sc-node-impact" style="display:none;margin-top:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px 8px 0 0;border-bottom:1px solid #21262d">
+            <div>
+              <span style="font-weight:600;font-size:0.88rem;color:#e6edf3" id="sc-node-impact-header">📊 Historical Impact</span>
+              <span style="font-size:0.78rem;color:#8b949e;margin-left:10px" id="sc-node-impact-meta"></span>
+            </div>
+            <select id="sc-node-impact-days" onchange="reloadNodeImpact()" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:4px 10px;color:#e6edf3;font-size:0.82rem">
+              <option value="180">6 months</option>
+              <option value="365" selected>1 year</option>
+              <option value="730">2 years</option>
+            </select>
+          </div>
+          <div id="sc-node-impact-body" style="background:#0d1117;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;padding:8px">
+            <div style="color:#8b949e;font-size:0.83rem;padding:20px;text-align:center">Loading…</div>
+          </div>
         </div>
       </div>
+
     </div>
 
-    <!-- ── Network Graph view ────────────────────────────────────── -->
-    <div id="sc-view-graph" style="display:none">
-      <div style="display:grid;grid-template-columns:1fr 300px;gap:16px">
-        <!-- Canvas -->
-        <div style="background:#0d1117;border:1px solid #30363d;border-radius:10px;overflow:hidden;position:relative">
-          <div id="sc-graph-canvas" style="height:580px"></div>
-          <div id="sc-graph-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8b949e;font-size:0.85rem;background:#0d1117">Loading graph…</div>
-        </div>
-        <!-- Node detail -->
-        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
-          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3" id="sc-graph-detail-header">🔗 Connections</div>
-          <div id="sc-graph-detail" style="padding:16px;color:#8b949e;font-size:0.83rem">Click any node to see its direct connections.</div>
-        </div>
-      </div>
-
-      <!-- Legend -->
-      <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:12px;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:0.78rem;color:#8b949e">
-        <span style="font-weight:600;color:#e6edf3">Sectors:</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#58a6ff;margin-right:4px;vertical-align:middle"></span>Semiconductor Equipment</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#bc8cff;margin-right:4px;vertical-align:middle"></span>Semiconductor Chips</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3fb950;margin-right:4px;vertical-align:middle"></span>Big Tech</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#e3b341;margin-right:4px;vertical-align:middle"></span>Energy</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f0883e;margin-right:4px;vertical-align:middle"></span>Utilities</span>
-        <span style="margin-left:8px;font-weight:600;color:#e6edf3">Edges:</span>
-        <span><span style="display:inline-block;width:20px;height:3px;background:#f85149;margin-right:4px;vertical-align:middle;border-radius:2px"></span>Competes With</span>
-        <span><span style="display:inline-block;width:20px;height:3px;background:#3fb950;margin-right:4px;vertical-align:middle;border-radius:2px"></span>Supplies To</span>
-        <span><span style="display:inline-block;width:20px;height:3px;background:#58a6ff;margin-right:4px;vertical-align:middle;border-radius:2px"></span>Manufactures For</span>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -1324,6 +1534,9 @@
           </button>
           <button id="adminViewTerm" onclick="setAdminView('terminal')" style="background:none;border:none;color:#8b949e;padding:6px 14px;font-size:0.8rem;cursor:pointer">💻 Terminal</button>
           <button id="adminViewArch" onclick="setAdminView('arch')" style="background:none;border:none;color:#8b949e;padding:6px 14px;font-size:0.8rem;cursor:pointer">🏗️ Architecture</button>
+          <button id="adminViewErrors" onclick="setAdminView('errors')" style="background:none;border:none;color:#8b949e;padding:6px 14px;font-size:0.8rem;cursor:pointer;position:relative">
+            🛡 Errors <span id="adminErrBadge" style="display:none;position:absolute;top:4px;right:4px;background:#f85149;color:#fff;border-radius:50%;width:8px;height:8px;font-size:0;"></span>
+          </button>
         </div>
         <button id="adminClearBtn" onclick="clearAdminChat()" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:8px;padding:6px 14px;font-size:0.8rem;cursor:pointer" title="Clear conversation">↺ Clear</button>
       </div>
@@ -3728,6 +3941,43 @@ erDiagram
 
     </div><!-- /adminArchPanel -->
 
+    <!-- Error Log panel -->
+    <div id="adminErrorPanel" style="display:none;flex:1;overflow-y:auto;min-height:0;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0;padding-bottom:8px;border-bottom:1px solid #21262d">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:0.8rem;font-weight:600;color:#8b949e">Source:</span>
+          <button onclick="loadErrorLog()" class="rpt-filter-btn active" data-ef="all">All</button>
+          <button onclick="loadErrorLog('browser')" class="rpt-filter-btn" data-ef="browser">Browser</button>
+          <button onclick="loadErrorLog('server')" class="rpt-filter-btn" data-ef="server">Server</button>
+          <button onclick="loadErrorLog('monitor')" class="rpt-filter-btn" data-ef="monitor">Monitor</button>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:#8b949e;font-size:0.78rem;margin-left:8px">
+            <input type="checkbox" id="errShowResolved" onchange="loadErrorLog()" style="accent-color:#58a6ff">
+            Show resolved
+          </label>
+        </div>
+        <button onclick="loadErrorLog()" style="background:none;border:none;color:#58a6ff;font-size:0.8rem;cursor:pointer">↺ Refresh</button>
+      </div>
+      <div id="errorLogStats" style="display:flex;gap:16px;flex-wrap:wrap;flex-shrink:0;font-size:0.78rem;color:#8b949e"></div>
+      <div style="overflow-x:auto;flex:1">
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem">
+          <thead>
+            <tr style="border-bottom:1px solid #30363d;background:#0d1117">
+              <th style="padding:8px 12px;text-align:left;color:#8b949e;font-weight:500;white-space:nowrap">Time</th>
+              <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">Source</th>
+              <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">Level</th>
+              <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">Message</th>
+              <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">URL</th>
+              <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">Auto Action</th>
+              <th style="padding:8px 8px;text-align:left;color:#8b949e;font-weight:500">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="errorLogBody">
+            <tr><td colspan="7" style="text-align:center;color:#6e7681;padding:32px">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div><!-- /adminErrorPanel -->
+
     <!-- Input row (hidden when terminal is active) -->
     <div id="adminInputRow" style="display:flex;gap:10px;margin-top:12px;flex-shrink:0">
       <textarea id="adminInput" placeholder="Ask anything — 'suspend user malli', 'reset credits for raghu to 50', 'pause the scanner'…"
@@ -5962,7 +6212,7 @@ function renderTVChart(symbol) {
         position: 'belowBar',
         color:    gradeColor[s.grade] || '#8b949e',
         shape:    'circle',
-        text:     `${s.grade}${s.score}`,
+        text:     '',
         size:     1,
       })));
   }
@@ -8477,15 +8727,55 @@ function renderEarningsPreview(data) {
 function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); loadEarningsCalendar(); loadEarningsReaction('NVDA'); loadEarningsPreview(); }
 
 // ── Signal Center ─────────────────────────────────────────────────────────────
+async function scSeedGraph() {
+  const btn = document.getElementById('sc-seed-btn');
+  if (!btn) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Seeding…';
+  try {
+    const r = await fetch('/api/graph/seed', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      btn.innerHTML = `✅ Done (${d.companies} co, ${d.relationships_ok} rels)`;
+      setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 4000);
+      _scGraphLoaded = false;
+      loadNetworkGraph();
+    } else {
+      btn.innerHTML = '❌ ' + (d.error || 'Failed');
+      setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 3000);
+    }
+  } catch (e) {
+    btn.innerHTML = '❌ Error';
+    setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 3000);
+  }
+}
+
+function showScHelp() {
+  document.getElementById('sc-help-overlay').style.display = 'block';
+  document.getElementById('sc-help-modal').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+function hideScHelp() {
+  document.getElementById('sc-help-overlay').style.display = 'none';
+  document.getElementById('sc-help-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
 let _scData = null;
 
 async function loadSignalCenter() {
-  const days = document.getElementById('sc-days')?.value || '7';
-  const listEl   = document.getElementById('sc-earnings-list');
-  const detailEl = document.getElementById('sc-cascade-detail');
-  const metaEl   = document.getElementById('sc-meta');
+  // Show seed button for admins only
+  const seedBtn = document.getElementById('sc-seed-btn');
+  if (seedBtn) seedBtn.style.display = _currentUser?.role === 'admin' ? 'flex' : 'none';
+
+  const days   = document.getElementById('sc-days')?.value || '7';
+  const listEl = document.getElementById('sc-earnings-list');
+  const metaEl = document.getElementById('sc-meta');
   if (listEl) listEl.innerHTML = '<div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>';
-  if (detailEl) detailEl.innerHTML = '<div style="color:#8b949e;font-size:0.83rem">Loading cascade data…</div>';
+
+  // Auto-boot graph on first load
+  if (!_scGraphLoaded) loadNetworkGraph();
 
   try {
     const [cascadeRes, premarketRes] = await Promise.allSettled([
@@ -8493,14 +8783,13 @@ async function loadSignalCenter() {
       fetch('/api/graph/premarket').then(r => r.json()),
     ]);
 
-    const cascade  = cascadeRes.status  === 'fulfilled' ? cascadeRes.value  : {};
+    const cascade   = cascadeRes.status  === 'fulfilled' ? cascadeRes.value  : {};
     const premarket = premarketRes.status === 'fulfilled' ? premarketRes.value : {};
     _scData = cascade;
 
     if (metaEl) {
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const neo = cascade.skipped ? '⚠️ Neo4j offline — graph data unavailable' : `Last scanned ${now}`;
-      metaEl.textContent = neo;
+      metaEl.textContent = cascade.skipped ? '⚠️ Neo4j offline' : `Updated ${now}`;
     }
 
     // ── Earnings list ─────────────────────────────────────────────────
@@ -8508,23 +8797,24 @@ async function loadSignalCenter() {
     const alerts = cascade.alerts || [];
     if (alerts.length === 0) {
       listEl.innerHTML = `<div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">No graph-tracked earnings in the next ${days} days.</div>`;
-      if (detailEl) detailEl.innerHTML = '<div style="color:#8b949e;font-size:0.83rem">No upcoming earnings found.</div>';
     } else {
-      listEl.innerHTML = alerts.map((a, i) => {
-        const dayBadge = a.daysUntil === 0 ? '<span style="background:#f85149;color:#fff;font-size:0.7rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px">TODAY</span>'
-          : a.daysUntil === 1 ? '<span style="background:#e3b341;color:#000;font-size:0.7rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:6px">TOMORROW</span>'
-          : `<span style="background:#21262d;color:#8b949e;font-size:0.7rem;padding:1px 6px;border-radius:4px;margin-left:6px">+${a.daysUntil}d</span>`;
+      listEl.innerHTML = alerts.map(a => {
+        const dayBadge = a.daysUntil === 0
+          ? '<span style="background:#f85149;color:#fff;font-size:0.68rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:5px">TODAY</span>'
+          : a.daysUntil === 1
+          ? '<span style="background:#e3b341;color:#000;font-size:0.68rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:5px">TMR</span>'
+          : `<span style="background:#21262d;color:#8b949e;font-size:0.68rem;padding:1px 6px;border-radius:4px;margin-left:5px">+${a.daysUntil}d</span>`;
         const sympathyCount = a.sympathy?.length || 0;
-        return `<div class="sc-ticker-row" onclick="scShowDetail(${i})" style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;cursor:pointer;border-bottom:1px solid #21262d;transition:background 0.15s" onmouseover="this.style.background='#21262d'" onmouseout="this.style.background=''">
+        return `<div class="sc-ticker-row" data-ticker="${a.ticker}" onclick="scSelectNode('${a.ticker}')"
+          style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer;border-bottom:1px solid #21262d;transition:background 0.13s"
+          onmouseover="this.style.background='#21262d'" onmouseout="if(this.dataset.active!='1')this.style.background=''">
           <div>
-            <span style="font-weight:700;font-size:0.9rem;color:#e6edf3">${a.ticker}</span>${dayBadge}
-            <div style="font-size:0.75rem;color:#8b949e;margin-top:2px">${a.date} · ${sympathyCount} connected</div>
+            <span style="font-weight:700;font-size:0.88rem;color:#58a6ff">${a.ticker}</span>${dayBadge}
+            <div style="font-size:0.73rem;color:#8b949e;margin-top:2px">${a.date}${sympathyCount ? ` · ${sympathyCount} linked` : ''}</div>
           </div>
-          <span style="color:#8b949e;font-size:0.8rem">›</span>
+          <span style="color:#8b949e;font-size:0.78rem">›</span>
         </div>`;
       }).join('');
-      // Auto-select first
-      scShowDetail(0);
     }
 
     // ── Pre-market panel ──────────────────────────────────────────────
@@ -8547,59 +8837,70 @@ async function loadSignalCenter() {
   }
 }
 
-function scShowDetail(idx) {
-  const alerts   = _scData?.alerts || [];
-  const a        = alerts[idx];
-  const detailEl = document.getElementById('sc-cascade-detail');
-  const headerEl = document.getElementById('sc-detail-header');
-  // Highlight selected row
-  document.querySelectorAll('.sc-ticker-row').forEach((r, i) => {
-    r.style.background = i === idx ? '#21262d' : '';
-  });
-  if (!detailEl || !a) return;
-  if (headerEl) headerEl.textContent = `👥 Cascade Impact — ${a.ticker}`;
-  if (!a.sympathy || a.sympathy.length === 0) {
-    detailEl.innerHTML = `<div style="color:#8b949e;font-size:0.83rem">No graph connections found for ${a.ticker}.</div>`;
-    return;
-  }
-  const rows = a.sympathy.slice(0, 8).map(s => {
-    const relLabel  = (s.rel_type || 'connected').replace(/_/g, ' ').toLowerCase();
-    const strength  = s.strength != null ? `${Number(s.strength).toFixed(0)}%` : '';
-    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #21262d">
-      <div>
-        <span style="font-weight:700;color:#e6edf3;font-size:0.9rem">${s.ticker}</span>
-        <span style="font-size:0.78rem;color:#8b949e;margin-left:8px">${relLabel}</span>
-      </div>
-      ${strength ? `<span style="font-size:0.75rem;background:#21262d;color:#8b949e;padding:2px 8px;border-radius:4px">${strength}</span>` : ''}
-    </div>`;
-  }).join('');
-  const watchlist = a.sympathy.slice(0, 5).map(s => s.ticker).join(', ');
-  const dayLabel  = a.daysUntil === 0 ? 'Today' : a.daysUntil === 1 ? 'Tomorrow' : `In ${a.daysUntil} days`;
-  detailEl.innerHTML = `
-    <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #21262d">
-      <div style="font-size:0.8rem;color:#8b949e">Reports: <span style="color:#e6edf3;font-weight:600">${dayLabel} · ${a.date}</span></div>
-    </div>
-    ${rows}
-    <div style="margin-top:14px;padding:10px 12px;background:#21262d;border-radius:6px;font-size:0.8rem;color:#8b949e">
-      📋 Watch list: <span style="color:#58a6ff;font-weight:600">${watchlist}</span>
-    </div>`;
-}
-
 // ── Signal Center — Network Graph ─────────────────────────────────────────────
 let _scNetwork     = null;
 let _scGraphData   = null;
 let _scGraphLoaded = false;
+let _scPendingNode = null;
+let _scHistory     = [];
 
-function scSwitchView(view) {
-  const cascade = document.getElementById('sc-view-cascade');
-  const graph   = document.getElementById('sc-view-graph');
-  const tabC    = document.getElementById('sc-tab-cascade');
-  const tabG    = document.getElementById('sc-tab-graph');
-  if (cascade) cascade.style.display = view === 'cascade' ? '' : 'none';
-  if (graph)   graph.style.display   = view === 'graph'   ? '' : 'none';
-  if (tabC) { tabC.style.background = view === 'cascade' ? '#21262d' : 'transparent'; tabC.style.color = view === 'cascade' ? '#e6edf3' : '#8b949e'; tabC.style.fontWeight = view === 'cascade' ? '600' : '400'; }
-  if (tabG) { tabG.style.background = view === 'graph'   ? '#21262d' : 'transparent'; tabG.style.color = view === 'graph'   ? '#e6edf3' : '#8b949e'; tabG.style.fontWeight = view === 'graph'   ? '600' : '400'; }
-  if (view === 'graph' && !_scGraphLoaded) loadNetworkGraph();
+const _SC_HIST_COLORS = [
+  '#58a6ff','#3fb950','#f85149','#f7c948','#bc8cff',
+  '#f0883e','#4fc3f7','#79c0ff','#56d364','#ff7b72',
+];
+
+function scAddToHistory(ticker) {
+  const i = _scHistory.indexOf(ticker);
+  if (i !== -1) _scHistory.splice(i, 1);
+  _scHistory.unshift(ticker);
+  if (_scHistory.length > 10) _scHistory.pop();
+  scRenderHistory();
+}
+
+function scRenderHistory() {
+  const el = document.getElementById('sc-click-history');
+  if (!el) return;
+  if (!_scHistory.length) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  el.innerHTML = '<span style="font-size:0.72rem;color:#8b949e;white-space:nowrap;margin-right:2px">Recent:</span>'
+    + _scHistory.map((t, i) => {
+      const c = _SC_HIST_COLORS[i % _SC_HIST_COLORS.length];
+      return `<span onclick="scSelectNode('${t}')"
+        style="padding:3px 10px;border-radius:20px;border:1px solid ${c};color:${c};background:${c}1a;font-size:0.74rem;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.13s"
+        onmouseover="this.style.background='${c}33'" onmouseout="this.style.background='${c}1a'">${t}</span>`;
+    }).join('');
+}
+
+function scSelectNode(ticker) {
+  // Track history
+  scAddToHistory(ticker);
+  // Highlight active earnings row
+  document.querySelectorAll('.sc-ticker-row').forEach(r => {
+    const active = r.dataset.ticker === ticker;
+    r.dataset.active = active ? '1' : '';
+    r.style.background = active ? '#21262d' : '';
+  });
+  // Open stock explorer
+  openExplorerForSymbol(ticker);
+  // Interact with graph if ready; otherwise queue and load impact immediately
+  if (_scGraphData && _scNetwork) {
+    _scPendingNode = null;
+    scShowGraphDetail(ticker);  // also calls loadNodeImpact
+  } else {
+    _scPendingNode = ticker;    // applied once graph finishes loading
+    loadNodeImpact(ticker);
+  }
+  // Smooth-scroll impact panel into view
+  setTimeout(() => document.getElementById('sc-node-impact')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 200);
+}
+
+function scSearchGraph(val, exact = false) {
+  val = val.trim().toUpperCase();
+  if (!val || !_scGraphData) return;
+  const node = _scGraphData.nodes.find(n => n.ticker === val)
+            || (!exact && _scGraphData.nodes.find(n => n.name && n.name.toUpperCase().startsWith(val)))
+            || (!exact && _scGraphData.nodes.find(n => n.ticker.startsWith(val)));
+  if (node) scSelectNode(node.ticker);
 }
 
 async function loadNetworkGraph() {
@@ -8638,6 +8939,7 @@ async function loadNetworkGraph() {
       COMPETES_WITH:    '#f85149',
       SUPPLIES_TO:      '#3fb950',
       MANUFACTURES_FOR: '#58a6ff',
+      INVESTED_IN:      '#f7c948',
     };
 
     const nodes = new vis.DataSet(data.nodes.map(n => ({
@@ -8660,7 +8962,7 @@ async function loadNetworkGraph() {
       from:   e.from,
       to:     e.to,
       title:  `${e.rel_type.replace(/_/g,' ')}${e.strength ? ' · ' + e.strength + '%' : ''}`,
-      color:  { color: REL_COLOR[e.rel_type] || '#8b949e', opacity: 0.65, highlight: '#ffffff', hover: '#ffffff' },
+      color:  { color: REL_COLOR[e.rel_type] || '#8b949e', opacity: 0.7, highlight: REL_COLOR[e.rel_type] || '#8b949e', hover: REL_COLOR[e.rel_type] || '#8b949e' },
       width:  e.strength ? Math.max(1, Math.min(5, e.strength / 20)) : 1.5,
       arrows: { to: { enabled: true, scaleFactor: 0.4 } },
       smooth: { type: 'continuous' },
@@ -8668,7 +8970,7 @@ async function loadNetworkGraph() {
 
     const options = {
       nodes:  { borderWidth: 2, borderWidthSelected: 3 },
-      edges:  { selectionWidth: 4 },
+      edges:  { selectionWidth: multiplier => multiplier * 2.5 },
       physics: {
         solver: 'forceAtlas2Based',
         forceAtlas2Based: { gravitationalConstant: -60, centralGravity: 0.01, springLength: 140, springConstant: 0.07 },
@@ -8682,13 +8984,20 @@ async function loadNetworkGraph() {
     _scNetwork = new vis.Network(canvas, { nodes, edges }, options);
 
     _scNetwork.on('click', params => {
-      if (params.nodes.length) scShowGraphDetail(params.nodes[0]);
+      if (params.nodes.length) scSelectNode(params.nodes[0]);
     });
     _scNetwork.on('stabilizationIterationsDone', () => {
       _scNetwork.setOptions({ physics: { enabled: false } });
+      _scNetwork.fit({ animation: { duration: 600, easingFunction: 'easeInOutQuad' } });
     });
 
     _scGraphLoaded = true;
+    // Apply any pending node selection made before graph was ready
+    if (_scPendingNode) {
+      const t = _scPendingNode;
+      _scPendingNode = null;
+      scShowGraphDetail(t);
+    }
   } catch (e) {
     if (loadingEl) loadingEl.innerHTML = `<span style="color:#f85149">Error: ${e.message}</span>`;
   }
@@ -8699,6 +9008,7 @@ function scShowGraphDetail(ticker) {
   const detailEl = document.getElementById('sc-graph-detail');
   if (!detailEl || !_scGraphData) return;
   if (headerEl) headerEl.textContent = `🔗 ${ticker} — Connections`;
+  openExplorerForSymbol(ticker);
 
   const connected = _scGraphData.edges
     .filter(e => e.from === ticker || e.to === ticker)
@@ -8720,7 +9030,7 @@ function scShowGraphDetail(ticker) {
     const strength = c.strength != null ? `${Number(c.strength).toFixed(0)}%` : '';
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #21262d">
       <div>
-        <span style="font-weight:700;color:#e6edf3;font-size:0.88rem">${c.ticker}</span>
+        <span style="font-weight:700;color:#58a6ff;font-size:0.88rem;cursor:pointer" onclick="openExplorerForSymbol('${c.ticker}')">${c.ticker}</span>
         <span style="font-size:0.75rem;color:#8b949e;margin-left:6px">${c.dir} ${rel}</span>
       </div>
       ${strength ? `<span style="font-size:0.73rem;background:#21262d;color:#8b949e;padding:2px 7px;border-radius:4px">${strength}</span>` : ''}
@@ -8729,8 +9039,185 @@ function scShowGraphDetail(ticker) {
 
   if (_scNetwork) {
     _scNetwork.selectNodes([ticker]);
-    _scNetwork.focus(ticker, { scale: 1.3, animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
+    _scNetwork.fit({ animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
   }
+
+  loadNodeImpact(ticker);
+}
+
+// ── Signal Center — Node Impact History (below graph) ────────────────────────
+let _scImpactExpanded = null;
+let _scNodeImpactTicker = null;
+let _scImpactAbort = null;
+
+async function loadNodeImpact(ticker) {
+  const days   = document.getElementById('sc-node-impact-days')?.value || '365';
+  const panel  = document.getElementById('sc-node-impact');
+  const bodyEl = document.getElementById('sc-node-impact-body');
+  const meta   = document.getElementById('sc-node-impact-meta');
+  const hdr    = document.getElementById('sc-node-impact-header');
+  if (!panel || !bodyEl) return;
+
+  // Cancel any previous in-flight request
+  if (_scImpactAbort) { _scImpactAbort.abort(); }
+  _scImpactAbort = new AbortController();
+  const signal = _scImpactAbort.signal;
+
+  _scNodeImpactTicker = ticker;
+  _scImpactExpanded = null;
+  panel.style.display = '';
+  if (hdr) hdr.textContent = `📊 Historical Impact — ${ticker}`;
+  if (meta) meta.textContent = '';
+  bodyEl.innerHTML = '<div style="color:#8b949e;font-size:0.83rem;padding:30px;text-align:center">Fetching historical data… this may take 10–20 seconds.</div>';
+  try {
+    const r = await fetch(`/api/graph/impact?ticker=${ticker}&days=${days}`, { signal });
+    const d = await r.json();
+    if (!d.ok) { bodyEl.innerHTML = `<div style="color:#f85149;padding:20px">Error: ${d.error || 'failed'}</div>`; return; }
+    if (d.noGraph) { bodyEl.innerHTML = `<div style="color:#8b949e;padding:20px">${ticker} has no graph connections yet.</div>`; return; }
+    if (meta) meta.textContent = `${d.bigMoveDays} big moves · ${d.pastEarnings} earnings events · ${days}d window`;
+    renderImpactTable(d, bodyEl);
+  } catch (e) {
+    if (e.name === 'AbortError') return; // silently ignore cancelled requests
+    bodyEl.innerHTML = `<div style="color:#f85149;padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+function reloadNodeImpact() {
+  if (_scNodeImpactTicker) loadNodeImpact(_scNodeImpactTicker);
+}
+
+function renderImpactTable(d, body) {
+  if (!body) return;
+
+  const peers = d.peers.filter(p => !p.error);
+  if (!peers.length) {
+    body.innerHTML = '<div style="color:#8b949e;padding:20px">No connection data available.</div>';
+    return;
+  }
+
+  function pctColor(v) {
+    if (v === null || v === undefined) return '#8b949e';
+    return v > 0 ? '#3fb950' : v < 0 ? '#f85149' : '#8b949e';
+  }
+  function pctStr(v) {
+    if (v === null || v === undefined) return '—';
+    return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+  }
+  function corrBar(c) {
+    if (c === null) return '<span style="color:#8b949e">—</span>';
+    const abs = Math.abs(c), pct = Math.round(abs * 100);
+    const col = abs >= 0.7 ? '#3fb950' : abs >= 0.4 ? '#e3b341' : '#8b949e';
+    const dir = c >= 0 ? '↑' : '↓';
+    return `<div style="display:flex;align-items:center;gap:6px">
+      <span style="color:${col};font-weight:700;font-size:0.8rem">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>
+      <div style="width:60px;height:5px;background:#21262d;border-radius:3px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${col};border-radius:3px"></div>
+      </div>
+      <span style="color:${col};font-size:0.72rem">${dir} ${abs >= 0.7 ? 'strong' : abs >= 0.4 ? 'mod' : 'weak'}</span>
+    </div>`;
+  }
+  function relBadge(rel) {
+    const label = (rel || 'connected').replace(/_/g,' ').toLowerCase();
+    const col = rel === 'COMPETES_WITH' ? '#f85149' : rel === 'SUPPLIES_TO' ? '#3fb950' : rel === 'MANUFACTURES_FOR' ? '#58a6ff' : rel === 'INVESTED_IN' ? '#f7c948' : '#8b949e';
+    return `<span style="font-size:0.7rem;background:rgba(${col==='#f85149'?'248,81,73':'rel'==='#3fb950'?'63,185,80':'88,166,255'},0.12);color:${col};padding:2px 7px;border-radius:4px">${label}</span>`;
+  }
+
+  // Header row
+  let html = `
+  <div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+    <thead>
+      <tr style="border-bottom:2px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em">
+        <th style="padding:10px 12px;text-align:left;font-weight:600">Stock</th>
+        <th style="padding:10px 12px;text-align:left;font-weight:600">Relationship</th>
+        <th style="padding:10px 12px;text-align:left;font-weight:600">1-yr Correlation</th>
+        <th style="padding:10px 12px;text-align:center;font-weight:600" title="When ${d.ticker} moved ≥3%, avg peer move same day / next day">Big Move Impact<br><span style="font-weight:400;text-transform:none;font-size:0.7rem">same day / next day</span></th>
+        <th style="padding:10px 12px;text-align:center;font-weight:600" title="After ${d.ticker} earnings, avg peer move next 2 days">Earnings Impact<br><span style="font-weight:400;text-transform:none;font-size:0.7rem">day+1 / day+2</span></th>
+        <th style="padding:10px 4px;text-align:center;font-weight:600">Events</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  for (let i = 0; i < peers.length; i++) {
+    const p = peers[i];
+    const relCol = p.rel_type === 'COMPETES_WITH' ? '#f85149' : p.rel_type === 'SUPPLIES_TO' ? '#3fb950' : p.rel_type === 'MANUFACTURES_FOR' ? '#58a6ff' : p.rel_type === 'INVESTED_IN' ? '#f7c948' : '#8b949e';
+    const relLabel = (p.rel_type || 'connected').replace(/_/g,' ').toLowerCase();
+    const hasEvents = p.events?.length > 0;
+
+    html += `<tr id="sc-impact-row-${i}" style="border-bottom:1px solid #21262d;cursor:${hasEvents ? 'pointer' : 'default'};transition:background 0.15s"
+      ${hasEvents ? `onclick="scToggleImpactEvents(${i})"` : ''}
+      onmouseover="this.style.background='#161b22'" onmouseout="this.style.background=''">
+      <td style="padding:12px 12px">
+        <span style="font-weight:700;color:#58a6ff;cursor:pointer" onclick="event.stopPropagation();openExplorerForSymbol('${p.ticker}')">${p.ticker}</span>
+        <div style="font-size:0.72rem;color:#8b949e;margin-top:1px">${p.name}</div>
+      </td>
+      <td style="padding:12px 12px"><span style="font-size:0.75rem;color:${relCol};background:${relCol}22;padding:2px 8px;border-radius:4px">${relLabel}</span></td>
+      <td style="padding:12px 12px">${corrBar(p.correlation)}</td>
+      <td style="padding:12px 12px;text-align:center">
+        ${p.bigMove?.count > 0 ? `
+          <span style="color:${pctColor(p.bigMove.avgSameDay)};font-weight:600">${pctStr(p.bigMove.avgSameDay)}</span>
+          <span style="color:#8b949e;margin:0 3px">/</span>
+          <span style="color:${pctColor(p.bigMove.avgNextDay)}">${pctStr(p.bigMove.avgNextDay)}</span>
+          <div style="font-size:0.7rem;color:#8b949e">${p.bigMove.count} events</div>` : '<span style="color:#8b949e">—</span>'}
+      </td>
+      <td style="padding:12px 12px;text-align:center">
+        ${p.earnings?.count > 0 ? `
+          <span style="color:${pctColor(p.earnings.avgDay1)};font-weight:600">${pctStr(p.earnings.avgDay1)}</span>
+          <span style="color:#8b949e;margin:0 3px">/</span>
+          <span style="color:${pctColor(p.earnings.avgDay2)}">${pctStr(p.earnings.avgDay2)}</span>
+          <div style="font-size:0.7rem;color:#8b949e">${p.earnings.count} reports</div>` : '<span style="color:#8b949e">—</span>'}
+      </td>
+      <td style="padding:12px 4px;text-align:center;color:#8b949e;font-size:0.8rem">${hasEvents ? '▸' : ''}</td>
+    </tr>
+    <tr id="sc-impact-events-${i}" style="display:none">
+      <td colspan="6" style="padding:0 12px 12px 12px;background:#0d1117">
+        <div style="font-size:0.78rem;color:#8b949e;margin-bottom:6px;padding-top:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em">Recent events — how ${p.ticker} reacted</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+        ${(p.events || []).map(ev => {
+          const isBigMove = ev.type === 'big_move';
+          const label = isBigMove
+            ? `${d.ticker} moved <span style="color:${pctColor(ev.originPct)};font-weight:600">${pctStr(ev.originPct)}</span>`
+            : `${d.ticker} earnings${ev.surprisePct != null ? ` (surprise: <span style="color:${pctColor(ev.surprisePct * 100)}">${(ev.surprisePct * 100).toFixed(1)}%</span>)` : ''}`;
+          const peerSame  = ev.peerSameDay  !== undefined ? `Same day: <span style="color:${pctColor(ev.peerSameDay)};font-weight:600">${pctStr(ev.peerSameDay)}</span>` : '';
+          const peerNext  = ev.peerNextDay  !== null && ev.peerNextDay !== undefined ? `Next day: <span style="color:${pctColor(ev.peerNextDay)};font-weight:600">${pctStr(ev.peerNextDay)}</span>` : '';
+          const peerD1    = ev.peerDay1     !== undefined ? `Day+1: <span style="color:${pctColor(ev.peerDay1)};font-weight:600">${pctStr(ev.peerDay1)}</span>` : '';
+          const peerD2    = ev.peerDay2     !== undefined && ev.peerDay2 !== null ? `Day+2: <span style="color:${pctColor(ev.peerDay2)};font-weight:600">${pctStr(ev.peerDay2)}</span>` : '';
+          return `<div style="display:flex;gap:16px;align-items:center;padding:6px 10px;background:#161b22;border-radius:5px;border-left:3px solid ${isBigMove ? '#e3b341' : '#58a6ff'}">
+            <span style="color:#8b949e;font-size:0.75rem;min-width:80px">${ev.date}</span>
+            <span style="color:#c9d1d9;font-size:0.78rem">${label} → ${p.ticker}: ${peerSame || peerD1} ${peerNext || peerD2}</span>
+          </div>`;
+        }).join('')}
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  html += `</tbody></table></div>
+  <div style="margin-top:14px;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:0.78rem;color:#8b949e">
+    <strong style="color:#c9d1d9">How to read:</strong>
+    Correlation is Pearson on daily returns (1 = moves in lockstep, −1 = inverse, 0 = no relationship).
+    Big Move Impact = when <strong style="color:#e6edf3">${d.ticker}</strong> moved ≥3% in a single day, the peer's avg response.
+    Earnings Impact = after <strong style="color:#e6edf3">${d.ticker}</strong> reported, the peer's avg move over the next 2 days.
+    Click any row to see actual historical examples.
+  </div>`;
+
+  body.innerHTML = html;
+}
+
+function scToggleImpactEvents(i) {
+  const row = document.getElementById(`sc-impact-events-${i}`);
+  const btn = document.querySelector(`#sc-impact-row-${i} td:last-child`);
+  if (!row) return;
+  const open = row.style.display === 'none' || row.style.display === '';
+  if (_scImpactExpanded !== null && _scImpactExpanded !== i) {
+    const prev = document.getElementById(`sc-impact-events-${_scImpactExpanded}`);
+    const prevBtn = document.querySelector(`#sc-impact-row-${_scImpactExpanded} td:last-child`);
+    if (prev) prev.style.display = 'none';
+    if (prevBtn) prevBtn.textContent = '▸';
+  }
+  row.style.display = open ? '' : 'none';
+  if (btn) btn.textContent = open ? '▾' : '▸';
+  _scImpactExpanded = open ? i : null;
 }
 
 // ── Earnings Reaction Analysis ─────────────────────────────────────
@@ -10822,6 +11309,7 @@ function setAdminView(view) {
   const isTerm = view === 'terminal';
   const isScan = view === 'scanner';
   const isArch = view === 'arch';
+  const isErr  = view === 'errors';
 
   document.getElementById('adminMessages').style.display       = isAI   ? 'flex'  : 'none';
   document.getElementById('adminChips').style.display          = isAI   ? 'flex'  : 'none';
@@ -10829,24 +11317,28 @@ function setAdminView(view) {
   document.getElementById('adminTerminalPanel').style.display  = isTerm ? 'flex'  : 'none';
   document.getElementById('adminScannerPanel').style.display   = isScan ? 'flex'  : 'none';
   document.getElementById('adminArchPanel').style.display      = isArch ? 'flex'  : 'none';
+  document.getElementById('adminErrorPanel').style.display     = isErr  ? 'flex'  : 'none';
   document.getElementById('adminClearBtn').style.display       = isAI   ? ''      : 'none';
   document.getElementById('adminInputRow').style.display       = isAI   ? 'flex'  : 'none';
 
   const active = '#1f6feb', inactive = 'none', ac = '#fff', ic = '#8b949e';
-  document.getElementById('adminViewAI').style.background   = isAI   ? active : inactive;
-  document.getElementById('adminViewAI').style.color        = isAI   ? ac : ic;
-  document.getElementById('adminViewRpt').style.background  = isRpt  ? active : inactive;
-  document.getElementById('adminViewRpt').style.color       = isRpt  ? ac : ic;
-  document.getElementById('adminViewTerm').style.background = isTerm ? active : inactive;
-  document.getElementById('adminViewTerm').style.color      = isTerm ? ac : ic;
-  document.getElementById('adminViewScan').style.background = isScan ? active : inactive;
-  document.getElementById('adminViewScan').style.color      = isScan ? ac : ic;
-  document.getElementById('adminViewArch').style.background = isArch ? active : inactive;
-  document.getElementById('adminViewArch').style.color      = isArch ? ac : ic;
+  document.getElementById('adminViewAI').style.background     = isAI   ? active : inactive;
+  document.getElementById('adminViewAI').style.color          = isAI   ? ac : ic;
+  document.getElementById('adminViewRpt').style.background    = isRpt  ? active : inactive;
+  document.getElementById('adminViewRpt').style.color         = isRpt  ? ac : ic;
+  document.getElementById('adminViewTerm').style.background   = isTerm ? active : inactive;
+  document.getElementById('adminViewTerm').style.color        = isTerm ? ac : ic;
+  document.getElementById('adminViewScan').style.background   = isScan ? active : inactive;
+  document.getElementById('adminViewScan').style.color        = isScan ? ac : ic;
+  document.getElementById('adminViewArch').style.background   = isArch ? active : inactive;
+  document.getElementById('adminViewArch').style.color        = isArch ? ac : ic;
+  document.getElementById('adminViewErrors').style.background = isErr  ? active : inactive;
+  document.getElementById('adminViewErrors').style.color      = isErr  ? ac : ic;
 
   if (isRpt)  loadAdminReports();
   if (isTerm) termInit();
   if (isScan) scanRefreshStatus();
+  if (isErr)  loadErrorLog();
 }
 
 // ── ERD zoom + pan ─────────────────────────────────────
@@ -11211,6 +11703,75 @@ async function scanToggleAuto() {
   }
 }
 
+// ── Error Log ────────────────────────────────────────
+
+let _errSource = 'all';
+async function loadErrorLog(source) {
+  if (source !== undefined) {
+    _errSource = source || 'all';
+    document.querySelectorAll('.rpt-filter-btn[data-ef]').forEach(b => {
+      b.classList.toggle('active', b.dataset.ef === _errSource);
+    });
+  }
+  const showResolved = document.getElementById('errShowResolved')?.checked;
+  const params = new URLSearchParams({ limit: 100 });
+  if (_errSource !== 'all') params.set('source', _errSource);
+  if (!showResolved) params.set('resolved', 'false');
+  try {
+    const r = await fetch('/api/agent/errors?' + params);
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'Failed');
+    const errors = data.errors || [];
+    const tbody = document.getElementById('errorLogBody');
+    const statsEl = document.getElementById('errorLogStats');
+
+    // Update badge
+    const unresolved = errors.filter(e => !e.resolved).length;
+    const badge = document.getElementById('adminErrBadge');
+    if (badge) badge.style.display = unresolved > 0 ? '' : 'none';
+
+    // Stats row
+    const bySource = {};
+    errors.forEach(e => { bySource[e.source] = (bySource[e.source] || 0) + 1; });
+    statsEl.innerHTML = Object.entries(bySource).map(([s,n]) =>
+      `<span style="background:#21262d;border-radius:4px;padding:2px 8px"><strong style="color:#e6edf3">${n}</strong> ${s}</span>`
+    ).join('') + (errors.length ? `<span style="color:#6e7681">${errors.length} total</span>` : '<span style="color:#6e7681">No errors found</span>');
+
+    if (!errors.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#6e7681;padding:32px">No errors found</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = errors.map(e => {
+      const levelColor = e.level === 'error' ? '#f85149' : e.level === 'warn' ? '#f7c948' : '#8b949e';
+      const ts = new Date(e.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const srcColor = { browser: '#58a6ff', server: '#3fb950', monitor: '#f7c948' }[e.source] || '#8b949e';
+      return `<tr style="border-bottom:1px solid #21262d;${e.resolved ? 'opacity:0.5' : ''}">
+        <td style="padding:8px 12px;white-space:nowrap;color:#6e7681;font-size:0.75rem">${ts}</td>
+        <td style="padding:8px 8px"><span style="background:${srcColor}22;color:${srcColor};border-radius:4px;padding:2px 7px;font-size:0.75rem;font-weight:600">${e.source}</span></td>
+        <td style="padding:8px 8px"><span style="color:${levelColor};font-size:0.78rem;font-weight:600">${e.level.toUpperCase()}</span></td>
+        <td style="padding:8px 8px;max-width:320px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.8rem;color:#e6edf3" title="${e.message?.replace(/"/g,'&quot;')}">${e.message || ''}</div>${e.stack ? `<details style="margin-top:2px"><summary style="font-size:0.72rem;color:#6e7681;cursor:pointer">Stack trace</summary><pre style="font-size:0.68rem;color:#8b949e;white-space:pre-wrap;margin:4px 0;max-height:120px;overflow:auto">${e.stack}</pre></details>` : ''}</td>
+        <td style="padding:8px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem;color:#6e7681" title="${e.url||''}">${e.url ? e.url.replace(/^https?:\/\/[^/]+/, '') : '—'}</td>
+        <td style="padding:8px 8px;font-size:0.75rem;color:#f7c948">${e.auto_action || '—'}</td>
+        <td style="padding:8px 8px">${e.resolved ? '<span style="color:#3fb950;font-size:0.75rem">✓ Resolved</span>' : `<button onclick="resolveErrorEntry(${e.id},this)" style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:4px;padding:2px 8px;font-size:0.72rem;cursor:pointer">Resolve</button>`}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('errorLogBody').innerHTML = `<tr><td colspan="7" style="color:#f85149;padding:20px">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function resolveErrorEntry(id, btn) {
+  btn.disabled = true;
+  try {
+    await fetch(`/api/agent/errors/${id}/resolve`, { method: 'POST' });
+    loadErrorLog();
+  } catch (e) {
+    btn.disabled = false;
+    alert('Failed to resolve: ' + e.message);
+  }
+}
+
 // ── Bug Reports ────────────────────────────────────────
 let _rptFilter = 'all';
 async function loadAdminReports(filter) {
@@ -11466,8 +12027,18 @@ function catEmoji(cat) { return CAT_META[cat]?.emoji || '📰'; }
 
 function srcBadge(source) {
   const cls = `src-${(source||'').toLowerCase().replace(/[^a-z]/g,'')}`;
-  const label = source === 'financialjuice' ? 'FJ' : source === 'alpaca' ? 'ALP' : source === 'yahoo' ? 'YF' : source === 'cna' ? 'CNA' : source === 'reuters' ? 'REU' : (source||'').slice(0,4).toUpperCase();
+  const labels = { financialjuice:'FJ', alpaca:'ALP', yahoo:'YF', cna:'CNA', reuters:'REU', benzinga:'BZ', nyt_politics:'NYT', thehill:'HILL' };
+  const label = labels[source] || (source||'').slice(0,4).toUpperCase();
   return `<span class="src-badge ${cls}">${label}</span>`;
+}
+
+function sentimentBadge(sentiment) {
+  if (!sentiment) return '';
+  const s = sentiment.toLowerCase();
+  if (s === 'bullish')  return `<span class="bz-sentiment bullish">▲ Bullish</span>`;
+  if (s === 'bearish')  return `<span class="bz-sentiment bearish">▼ Bearish</span>`;
+  if (s === 'neutral')  return `<span class="bz-sentiment neutral">— Neutral</span>`;
+  return '';
 }
 
 function renderHomeNews(news) {
@@ -11478,11 +12049,13 @@ function renderHomeNews(news) {
   el.innerHTML = news.slice(0, 30).map(a => {
     const ago = timeAgo(a.published);
     const tickers = (a.tickers||[]).slice(0,4).map(t=>`<span class="story-ticker">${t}</span>`).join('');
+    const sent = a.source === 'benzinga' ? sentimentBadge(a.sentiment) : '';
     return `<a class="story-card" href="${escHtml(a.url||'#')}" target="_blank" rel="noopener">
       <div class="story-card-meta">
         <span class="cat-dot" style="background:${catColor(a.category)}"></span>
         ${srcBadge(a.source)}
         <span>${escHtml(a.publisher||a.source||'')}</span>
+        ${sent}
         <span style="margin-left:auto">${ago}</span>
       </div>
       <div class="story-card-title">${escHtml(a.title)}</div>
@@ -15072,19 +15645,18 @@ function toggleNotifPanel() {
   const NOTIF_W = 348;
   if (!open) {
     _notifIsClosing = true;
-    const mainEl = document.querySelector('main');
-    // Freeze main's margin transition before any layout class changes fire.
-    if (mainEl) mainEl.style.transition = 'none';
-    // Remove layout class and reset CSS var in the same task so the browser
-    // sees both as one atomic change — no transition can fire between them.
+    // Add closing class FIRST — CSS transition: none kicks in synchronously,
+    // before any layout class changes. This is more reliable than inline style
+    // because it survives Chrome minimize/restore (rAF is unreliable there).
+    document.body.classList.add('notif-closing');
     document.body.classList.remove('notif-open');
     document.documentElement.style.setProperty('--notif-w', '0px');
-    // Double rAF: first frame commits the layout, second re-enables transition.
-    // Avoids setTimeout race conditions that break when Chrome is minimized/restored.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (mainEl) mainEl.style.transition = '';
+    // setTimeout(0) = next macrotask — guaranteed to fire after layout settles,
+    // even after minimize/restore. rAF is not guaranteed in that scenario.
+    setTimeout(() => {
+      document.body.classList.remove('notif-closing');
       _notifIsClosing = false;
-    }));
+    }, 0);
   } else {
     document.documentElement.style.setProperty('--notif-w', NOTIF_W + 'px');
     document.body.classList.add('notif-open');

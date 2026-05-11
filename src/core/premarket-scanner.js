@@ -19,9 +19,28 @@ function alpacaHeaders() {
 
 // All tickers we track in the graph
 const GRAPH_TICKERS = [
-  'ASML','AMAT','LRCX','KLAC','TSM','INTC','NVDA','AMD','QCOM',
-  'AVGO','ARM','MU','MSFT','META','GOOGL','AMZN','AAPL',
-  'XOM','CVX','HAL','SLB','VST','CEG','ETR',
+  // Semiconductor Equipment
+  'ASML','AMAT','LRCX','KLAC',
+  // Chips / Semis
+  'TSM','INTC','NVDA','AMD','QCOM','AVGO','ARM','MU','TXN','MRVL','ON','ADI','NXPI','SMCI',
+  // Big Tech
+  'MSFT','META','GOOGL','AMZN','AAPL','TSLA','NFLX','ORCL','CRM','ADBE','NOW','CSCO','IBM',
+  // Cloud / Cybersecurity / AI
+  'CRWD','PANW','ZS','NET','DDOG','SNOW','PLTR','AI','PATH',
+  // Finance
+  'JPM','BAC','GS','MS','WFC','V','MA','PYPL','SQ','COIN',
+  // Healthcare / Pharma
+  'LLY','JNJ','UNH','PFE','ABBV','MRK','AMGN','GILD','REGN',
+  // Consumer / Retail
+  'COST','WMT','HD','TGT','NKE','DIS','SBUX','MCD',
+  // EV / Auto
+  'RIVN','F','GM',
+  // Energy
+  'XOM','CVX','HAL','SLB','OXY','BP',
+  // Utilities
+  'VST','CEG','ETR',
+  // Telecom / Media
+  'T','VZ','SPOT','UBER','ABNB',
 ];
 
 // Fetch pre-market snapshot for all tickers at once
