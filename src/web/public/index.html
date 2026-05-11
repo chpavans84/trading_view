@@ -5954,7 +5954,8 @@ function renderExplorerStats() {
   const lq = _explorerLiveQuote;
   const livePrice = lq?.price ?? lq?.mid ?? null;
   const prevClose = lastPrice ? parseFloat(lastPrice.close) : null;
-  const livePct   = livePrice && prevClose ? ((livePrice - prevClose) / prevClose * 100) : null;
+  const livePct   = lq?.change_pct != null ? parseFloat(lq.change_pct)
+                  : (livePrice && prevClose ? ((livePrice - prevClose) / prevClose * 100) : null);
 
   const livePriceHtml = livePrice
     ? `<div style="font-size:0.72rem;color:#8b949e">Live Price <span style="background:#1f3a1f;color:#3fb950;border-radius:3px;padding:1px 5px;font-size:0.65rem;font-weight:700;margin-left:2px">LIVE</span></div>
