@@ -61,6 +61,7 @@ const VALID_REL_TYPES = new Set([
   'SUPPLIES_TO', 'MANUFACTURES_FOR', 'CUSTOMER_OF',
   'OWNS_EQUITY_IN', 'LICENSES_TO', 'COMPETES_WITH',
   'MEMBER_OF', 'HELD_BY', 'OPERATES_IN', 'ACQUIRED',
+  'INVESTED_IN',
 ]);
 
 export async function upsertRelationship({ from, to, type, props = {} }) {
@@ -105,9 +106,10 @@ export async function getContagionImpact(ticker, eventPct = -10, maxHops = 3) {
 
 export async function getSympathyTrades(ticker) {
   const records = await run(`
-    MATCH (origin:Company {ticker: $ticker})-[r:COMPETES_WITH|SUPPLIES_TO|MANUFACTURES_FOR]-(peer:Company)
+    MATCH (origin:Company {ticker: $ticker})-[r:COMPETES_WITH|SUPPLIES_TO|MANUFACTURES_FOR|INVESTED_IN]-(peer:Company)
     RETURN peer.ticker AS ticker, peer.name AS name, peer.sector AS sector,
-           type(r) AS rel_type, coalesce(r.overlap_pct, r.market_share_pct, r.revenue_pct, 30) AS strength
+           type(r) AS rel_type,
+           coalesce(r.overlap_pct, r.market_share_pct, r.revenue_pct, r.stake_pct, 30) AS strength
     ORDER BY strength DESC
   `, { ticker });
   return records.map(r => ({ ticker: r.get('ticker'), name: r.get('name'), sector: r.get('sector'), rel_type: r.get('rel_type'), strength: r.get('strength') }));

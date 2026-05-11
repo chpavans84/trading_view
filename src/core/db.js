@@ -524,6 +524,21 @@ CREATE TABLE IF NOT EXISTS catalyst_performance (
   UNIQUE(trade_date, symbol)
 );
 CREATE INDEX IF NOT EXISTS idx_catperf_date ON catalyst_performance(trade_date);
+
+CREATE TABLE IF NOT EXISTS agent_error_log (
+  id           SERIAL PRIMARY KEY,
+  source       VARCHAR(20) NOT NULL DEFAULT 'server',
+  level        VARCHAR(10) NOT NULL DEFAULT 'error',
+  message      TEXT NOT NULL,
+  stack        TEXT,
+  url          TEXT,
+  context      JSONB,
+  auto_action  VARCHAR(100),
+  resolved     BOOLEAN DEFAULT FALSE,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_errlog_created ON agent_error_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_errlog_source  ON agent_error_log(source);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -1931,6 +1946,64 @@ export async function removeUserWatchlistSymbol(username, symbol) {
     );
   } catch (err) {
     console.error('removeUserWatchlistSymbol error:', err.message);
+  }
+}
+
+// ─── Agent Error Log ──────────────────────────────────────────────────────────
+
+export async function logClientError({ source = 'browser', level = 'error', message, stack, url, context }) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(
+      `INSERT INTO agent_error_log (source, level, message, stack, url, context)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [source, level, message?.slice(0, 2000), stack?.slice(0, 5000), url?.slice(0, 500), context ? JSON.stringify(context) : null]
+    );
+  } catch (err) {
+    console.error('logClientError error:', err.message);
+  }
+}
+
+export async function logServerError({ source = 'server', level = 'error', message, stack, context, auto_action }) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(
+      `INSERT INTO agent_error_log (source, level, message, stack, context, auto_action)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [source, level, message?.slice(0, 2000), stack?.slice(0, 5000), context ? JSON.stringify(context) : null, auto_action?.slice(0, 100)]
+    );
+  } catch (err) {
+    console.error('logServerError error:', err.message);
+  }
+}
+
+export async function getErrorLog({ limit = 50, source, resolved } = {}) {
+  if (!isDbAvailable()) return [];
+  try {
+    const conditions = [];
+    const params = [];
+    if (source) { conditions.push(`source = $${params.length + 1}`); params.push(source); }
+    if (resolved !== undefined) { conditions.push(`resolved = $${params.length + 1}`); params.push(resolved); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit);
+    const rows = await query(
+      `SELECT id, source, level, message, stack, url, context, auto_action, resolved, created_at
+       FROM agent_error_log ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+      params
+    );
+    return rows.rows;
+  } catch (err) {
+    console.error('getErrorLog error:', err.message);
+    return [];
+  }
+}
+
+export async function resolveError(id) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(`UPDATE agent_error_log SET resolved = TRUE WHERE id = $1`, [id]);
+  } catch (err) {
+    console.error('resolveError error:', err.message);
   }
 }
 

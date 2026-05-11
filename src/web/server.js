@@ -7,6 +7,7 @@
 import net from 'net';
 import fs from 'fs';
 import http from 'http';
+import https from 'https';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WebSocketServer } from 'ws';
@@ -20,7 +21,7 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, saveUserMoomoo, clearUserMoomoo, saveUserTiger, clearUserTiger, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache, upsertPrediction, fillActualPrice, getPredictionsForWeek, getPredictionHistory, setDisabledSources, upsertAccountSnapshot, getAccountSnapshots, getUserWatchlistSymbols, addUserWatchlistSymbol, removeUserWatchlistSymbol } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, saveUserMoomoo, clearUserMoomoo, saveUserTiger, clearUserTiger, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache, upsertPrediction, fillActualPrice, getPredictionsForWeek, getPredictionHistory, setDisabledSources, upsertAccountSnapshot, getAccountSnapshots, getUserWatchlistSymbols, addUserWatchlistSymbol, removeUserWatchlistSymbol, logClientError, logServerError, getErrorLog, resolveError } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
@@ -37,8 +38,10 @@ import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, p
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { seedKnowledge } from '../core/knowledge.js';
 import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRisk, getGraphStats, getFullGraph } from '../core/graph.js';
+import { seedGraph } from '../core/graph-seed.js';
 import { runPremarketScan } from '../core/premarket-scanner.js';
 import { runEarningsCascadeScan } from '../core/earnings-cascade.js';
+import { getImpactAnalysis } from '../core/graph-impact.js';
 import { getStockPrediction } from '../core/predictor.js';
 import YahooFinance from 'yahoo-finance2';
 const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
@@ -304,6 +307,15 @@ const sessionMiddleware = session({
   },
 });
 app.use(sessionMiddleware);
+
+// Redirect mobile browsers to mobile.html unless ?desktop=1 is set
+app.get('/', (req, res, next) => {
+  if (req.query.desktop === '1') return next();
+  const ua = req.headers['user-agent'] || '';
+  const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  if (isMobile) return res.redirect('/mobile.html');
+  next();
+});
 
 app.use(express.static(join(__dirname, 'public'), {
   setHeaders(res, filePath) {
@@ -646,6 +658,26 @@ app.post('/api/public/chat', publicChatRateLimit, async (req, res) => {
     console.error('[public-chat] error:', err.message);
     res.status(500).json({ error: 'Chat unavailable right now.' });
   }
+});
+
+// ─── Cert download — lets iPhone install the self-signed cert ─────────────────
+app.get('/cert', (req, res) => {
+  const certPath = process.env.SSL_CERT_PATH;
+  if (!certPath || !fs.existsSync(certPath)) return res.status(404).send('No cert configured');
+  res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+  res.setHeader('Content-Disposition', 'attachment; filename="tradingbot.crt"');
+  res.sendFile(certPath);
+});
+
+// ─── Public client-error endpoint (before requireAuth) ───────────────────────
+// Intentionally unauthenticated — captures JS errors before/after session expires
+app.post('/api/client-error', async (req, res) => {
+  try {
+    const { message, stack, url, context, level = 'error' } = req.body || {};
+    if (!message) return res.status(400).json({ error: 'message required' });
+    await logClientError({ source: 'browser', level, message, stack, url, context });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── API routes ───────────────────────────────────────────────────────────────
@@ -1135,12 +1167,39 @@ async function getAccountData(source, username) {
   };
 }
 
-// News only — fast path, 5-min cache, hard 6s deadline
+// Merged market news: Benzinga (if configured) first, then Alpaca/Yahoo/RSS, deduped by URL
+async function _mergedMarketNews(limit = 40) {
+  const [baseRes, bzRes] = await Promise.allSettled([
+    getMarketNews({ limit }),
+    isBenzingaConfigured() ? getBzNews({ limit: 25 }) : Promise.resolve(null),
+  ]);
+  const baseArticles = baseRes.status === 'fulfilled' ? (baseRes.value || []) : [];
+  const bzArticles   = bzRes.status   === 'fulfilled' && bzRes.value
+    ? (bzRes.value.articles || []).map(a => ({
+        title:     a.title,
+        publisher: 'Benzinga',
+        published: a.published_at,
+        summary:   a.teaser   || null,
+        url:       a.url,
+        source:    'benzinga',
+        tickers:   a.tickers  || [],
+        sentiment: a.sentiment || null,
+      }))
+    : [];
+  const seen = new Set();
+  return [...bzArticles, ...baseArticles].filter(a => {
+    if (!a.url || seen.has(a.url)) return false;
+    seen.add(a.url);
+    return true;
+  });
+}
+
+// News only — fast path, 5-min cache, hard 8s deadline (Benzinga adds ~1s)
 app.get('/api/home-news', async (req, res) => {
   try {
-    const deadline = new Promise(resolve => setTimeout(() => resolve([]), 6000));
+    const deadline = new Promise(resolve => setTimeout(() => resolve([]), 8000));
     const news = await Promise.race([
-      ttlCache('home:news', 5 * 60 * 1000, () => getMarketNews({ limit: 40 })),
+      ttlCache('home:news', 5 * 60 * 1000, () => _mergedMarketNews(40)),
       deadline,
     ]);
     res.json((news || []).map(a => ({ ...a, category: categoriseNews(a.title) })));
@@ -1166,7 +1225,7 @@ app.get('/api/home', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const [newsRes, earningsRes] = await Promise.allSettled([
-      ttlCache('home:news', 5 * 60 * 1000, () => getMarketNews({ limit: 40 })),
+      ttlCache('home:news', 5 * 60 * 1000, () => _mergedMarketNews(40)),
       ttlCache(`home:earnings:${today}`, 60 * 60 * 1000, () => getEarningsCalendar({ date: today, limit: 15 })),
     ]);
     const news = newsRes.status === 'fulfilled' ? newsRes.value : [];
@@ -7023,6 +7082,63 @@ app.get('/api/graph/earnings-cascade', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/graph/seed', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (!isGraphConfigured()) return res.status(400).json({ error: 'Neo4j not configured' });
+    const result = await seedGraph();
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/graph/impact', requireAuth, async (req, res) => {
+  try {
+    if (!isGraphConfigured()) return res.json({ available: false });
+    const ticker = (req.query.ticker || '').toUpperCase();
+    const days   = Math.min(730, Math.max(90, parseInt(req.query.days) || 365));
+    if (!ticker) return res.status(400).json({ error: 'ticker required' });
+    const result = await getImpactAnalysis(ticker, days);
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Error Agent ──────────────────────────────────────────────────────────────
+
+// Admin: read error log
+app.get('/api/agent/errors', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { source, resolved, limit = 100 } = req.query;
+    const logs = await getErrorLog({
+      limit: Math.min(500, parseInt(limit) || 100),
+      source: source || undefined,
+      resolved: resolved === undefined ? undefined : resolved === 'true',
+    });
+    res.json({ ok: true, errors: logs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Admin: mark error resolved
+app.post('/api/agent/errors/:id/resolve', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await resolveError(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Optional HTTPS server for mobile testing (set HTTPS_PORT + SSL_KEY_PATH + SSL_CERT_PATH)
+if (process.env.HTTPS_PORT && process.env.SSL_KEY_PATH && process.env.SSL_CERT_PATH) {
+  try {
+    const httpsServer = https.createServer({
+      key:  fs.readFileSync(process.env.SSL_KEY_PATH),
+      cert: fs.readFileSync(process.env.SSL_CERT_PATH),
+    }, app);
+    httpsServer.listen(parseInt(process.env.HTTPS_PORT), () => {
+      console.log(`🔒 HTTPS server running at https://localhost:${process.env.HTTPS_PORT}`);
+    });
+  } catch (e) {
+    console.warn('⚠️  HTTPS server failed to start:', e.message);
+  }
+}
+
 httpServer.listen(PORT, () => {
   console.log(`🌐 Dashboard running at http://localhost:${PORT}`);
   console.log(`[knowledge] using model: ${process.env.OLLAMA_KNOWLEDGE_MODEL || 'llama3.2:3b'}`);
@@ -7030,8 +7146,8 @@ httpServer.listen(PORT, () => {
   // Pre-warm caches in the background so first user requests are instant
   const today = new Date().toISOString().split('T')[0];
   Promise.allSettled([
-    ttlCache('home:news', 5 * 60 * 1000, () => getMarketNews({ limit: 40 }))
-      .then(() => console.log('✅ News cache warmed'))
+    ttlCache('home:news', 5 * 60 * 1000, () => _mergedMarketNews(40))
+      .then(() => console.log('✅ News cache warmed (Benzinga + market feeds)'))
       .catch(e => console.warn('⚠️  News cache warm failed:', e.message)),
     ttlCache(`home:earnings:${today}`, 60 * 60 * 1000, () => getEarningsCalendar({ date: today, limit: 15 }))
       .then(() => console.log('✅ Earnings cache warmed'))

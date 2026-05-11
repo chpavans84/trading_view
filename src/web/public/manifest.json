@@ -1,0 +1,37 @@
+{
+  "name": "Trading Dashboard",
+  "short_name": "TradingBot",
+  "description": "AI-powered trading dashboard with signal center, portfolio tracking, and market intelligence",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#161b22",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["finance", "business"],
+  "shortcuts": [
+    {
+      "name": "Signal Center",
+      "url": "/?tab=signal-center",
+      "description": "View earnings, network graph and impact analysis"
+    },
+    {
+      "name": "Dashboard",
+      "url": "/?tab=dashboard",
+      "description": "Portfolio and P&L overview"
+    }
+  ]
+}

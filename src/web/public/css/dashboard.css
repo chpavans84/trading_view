@@ -414,6 +414,9 @@
                 margin-left  0.3s cubic-bezier(0.4,0,0.2,1),
                 max-width    0.3s cubic-bezier(0.4,0,0.2,1);
   }
+  /* Kill all main transitions while a panel is closing — prevents the "slide left" glitch
+     when Chrome restores from minimized (rAF is unreliable there; setTimeout+CSS class is not) */
+  body.notif-closing main, body.news-closing main { transition: none !important; }
 
   /* Push main content — notif panel only */
   body.notif-open main {
@@ -1275,6 +1278,15 @@
   .src-financialjuice { background: #1f1038; color: #bc8cff; }
   .src-cna          { background: #0d2218; color: #3fb950; }
   .src-reuters      { background: #1a0d0d; color: #f85149; }
+  .src-benzinga     { background: #1a2a00; color: #85c918; border: 1px solid #85c91840; }
+  .src-nytpolitics  { background: #1a1000; color: #e3b341; }
+  .src-thehill      { background: #0d1a2a; color: #79c0ff; }
+
+  /* Benzinga sentiment badges in news cards */
+  .bz-sentiment { font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 10px; letter-spacing: 0.04em; white-space: nowrap; }
+  .bz-sentiment.bullish { background: #0d2a1a; color: #3fb950; border: 1px solid #3fb95040; }
+  .bz-sentiment.bearish { background: #2a0d0d; color: #f85149; border: 1px solid #f8514940; }
+  .bz-sentiment.neutral { background: #1a1a1a; color: #8b949e; border: 1px solid #30363d; }
 
   /* Category dot */
   .cat-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; flex-shrink: 0; }
@@ -1782,8 +1794,11 @@
   .nav-notif-btn { position:relative; display:inline-flex; align-items:center; justify-content:center; width:32px; height:30px; border-radius:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); color:#8b949e; font-size:0.95rem; cursor:pointer; margin-right:6px; transition:background .15s,color .15s; }
   .nav-notif-btn:hover,.nav-notif-btn.active { background:rgba(255,255,255,0.1); color:#e6edf3; border-color:rgba(255,255,255,0.18); }
   #notifBadge { position:absolute; top:-4px; right:-4px; background:#f85149; color:#fff; font-size:0.58rem; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:none; align-items:center; justify-content:center; padding:0 3px; line-height:1; }
-  #notifPanel { position:fixed; right:var(--explorer-w,0px); top:98px; width:348px; height:calc(100vh - 98px); background:rgba(9,13,20,0.97); backdrop-filter:blur(20px); border-left:1px solid rgba(255,255,255,0.08); z-index:902; transform:translateX(100%); transition:transform .28s cubic-bezier(.4,0,.2,1),right .3s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; overflow:hidden; }
+  #notifPanel { position:fixed; right:0px; top:98px; width:348px; height:calc(100vh - 98px); background:rgba(9,13,20,0.97); backdrop-filter:blur(20px); border-left:1px solid rgba(255,255,255,0.08); z-index:902; transform:translateX(100%); transition:transform .28s cubic-bezier(.4,0,.2,1),right .3s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; overflow:hidden; }
   #notifPanel.open { transform:translateX(0); }
+  /* Only shift notif panel left when explorer is docked on the RIGHT — not left.
+     Explorer-left sets --explorer-w too, which previously dragged the closed panel into view. */
+  body.explorer-open #notifPanel { right: var(--explorer-w, 0px); }
   .np-head { display:flex; align-items:center; gap:6px; padding:11px 14px; border-bottom:1px solid rgba(255,255,255,0.07); flex-shrink:0; }
   .np-title { font-size:0.85rem; font-weight:700; color:#e6edf3; flex:1; }
   .np-btn { background:none; border:1px solid rgba(255,255,255,0.1); border-radius:5px; color:#8b949e; padding:3px 8px; font-size:0.73rem; cursor:pointer; }
@@ -2651,3 +2666,39 @@
       .qt-result.err { background:rgba(244,63,94,0.12);  border:1px solid var(--red);   color:var(--red); }
       .qt-divider { border:none; border-top:1px solid var(--faint); margin:8px 0; }
       .qt-optional { color:#6e7681; font-weight:400; font-size:0.68rem; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   PWA MOBILE ADDITIONS — purely additive, no conflicts with above.
+   Only targeting elements not already covered by existing breakpoints.
+═══════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* ── Signal Center: stack layout vertically ── */
+  #sc-main-grid   { display: flex !important; flex-direction: column !important; }
+  #sc-graph-grid  { display: flex !important; flex-direction: column !important; }
+  #sc-graph-canvas { height: 320px !important; }
+  #sc-connections-panel { max-height: 200px; overflow-y: auto; }
+  #sc-earnings-list {
+    max-height: 220px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #sc-click-history {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  #sc-click-history::-webkit-scrollbar { display: none; }
+
+  /* ── Admin panel height ── */
+  #page-admin > div { height: auto !important; }
+
+  /* ── rpt-filter buttons: no wrap ── */
+  .rpt-filter-btn { white-space: nowrap; flex-shrink: 0; }
+}
+
+@media (max-width: 480px) {
+  #sc-graph-canvas { height: 260px !important; }
+}
