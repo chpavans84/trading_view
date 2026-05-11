@@ -7919,31 +7919,42 @@ function renderCatalystPerf(data) {
       <div class="cp-note">Strategy: Buy at prev close · Sell at earnings-day open · $1,000 per stock</div>
     </div>`;
 
+  // Grade label map
+  const gradeLabel = { A: 'Strong Buy', B: 'Buy', C: 'Neutral', F: 'Avoid' };
+  const gradeColor = { A: '#3fb950', B: '#58a6ff', C: '#f0883e', F: '#f85149' };
+
   const cards = results.map(r => {
-    const pct     = r.change_pct  != null ? +r.change_pct  : null;
-    const pnl     = r.pnl_1000    != null ? +r.pnl_1000    : null;
-    const color   = pct == null ? '#6e7681' : pct >= 0 ? '#3fb950' : '#f85149';
-    const pctStr  = pct  != null ? (pct  >= 0 ? '+' : '') + pct.toFixed(2)  + '%' : '—';
-    const pnlStr  = pnl  != null ? (pnl  >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2) : '—';
-    const entry   = r.entry_price != null ? '$' + (+r.entry_price).toFixed(2) : '—';
-    const exit    = r.exit_price  != null ? '$' + (+r.exit_price).toFixed(2)  : '—';
-    const badge   = r.bucket === 'amc'
+    const pct      = r.change_pct       != null ? +r.change_pct       : null;
+    const pnl      = r.pnl_1000         != null ? +r.pnl_1000         : null;
+    const score    = r.conviction_score != null ? +r.conviction_score : null;
+    const grade    = r.conviction_grade || null;
+    const color    = pct == null ? '#6e7681' : pct >= 0 ? '#3fb950' : '#f85149';
+    const pctStr   = pct  != null ? (pct  >= 0 ? '+' : '') + pct.toFixed(2)  + '%' : '—';
+    const pnlStr   = pnl  != null ? (pnl  >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2) : '—';
+    const entry    = r.entry_price != null ? '$' + (+r.entry_price).toFixed(2) : '—';
+    const exit     = r.exit_price  != null ? '$' + (+r.exit_price).toFixed(2)  : '—';
+    const timeBadge = r.bucket === 'amc'
       ? `<span class="cp-badge-amc">AMC</span>`
       : `<span class="cp-badge-bmo">BMO</span>`;
     const noPrices = r.entry_price == null || r.exit_price == null;
+    const noData   = noPrices && r.entry_price == null;
+    const scoreBadge = grade
+      ? `<span style="font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:4px;background:${gradeColor[grade]}22;color:${gradeColor[grade]};border:1px solid ${gradeColor[grade]}55">${grade} · ${gradeLabel[grade]}</span>`
+      : `<span style="font-size:0.65rem;padding:2px 7px;border-radius:4px;background:#21262d;color:#484f58;border:1px solid #30363d" title="This stock was not in the scanner universe before earnings">Not in scanner</span>`;
     return `<div class="cp-card">
       <div class="cp-card-top">
         <div>
           <div class="cp-sym sym-link" data-symbol="${r.symbol}">${r.symbol}</div>
           <div class="cp-co">${r.company || ''}</div>
         </div>
-        ${badge}
+        ${timeBadge}
       </div>
+      ${scoreBadge ? `<div style="margin:4px 0 6px">${scoreBadge}${score != null ? `<span style="font-size:0.65rem;color:#8b949e;margin-left:5px">score ${score}</span>` : ''}</div>` : ''}
       <div class="cp-prices">
         <span>${entry}</span>
         <span class="cp-arrow">→</span>
         <span>${exit}</span>
-        ${noPrices ? '<span style="font-size:0.68rem;color:#f0883e">price unavailable</span>' : ''}
+        ${noData ? '<span style="font-size:0.68rem;color:#8b949e">new listing</span>' : noPrices ? '<span style="font-size:0.68rem;color:#f0883e">price unavailable</span>' : ''}
       </div>
       <div class="cp-result">
         <div class="cp-pct" style="color:${color}">${pctStr}</div>
@@ -7953,7 +7964,38 @@ function renderCatalystPerf(data) {
     </div>`;
   }).join('');
 
-  body.innerHTML = summaryHtml + `<div class="cp-grid">${cards}</div>`;
+  // Accuracy table by conviction grade
+  const gradeOrder = ['A','B','C','F'];
+  const accuracyRows = gradeOrder.map(g => {
+    const group = results.filter(r => r.conviction_grade === g && r.change_pct != null);
+    if (!group.length) return null;
+    const avgMove = group.reduce((s,r) => s + +r.change_pct, 0) / group.length;
+    const wins    = group.filter(r => +r.change_pct > 0).length;
+    const totalPl = group.reduce((s,r) => s + (+r.pnl_1000||0), 0);
+    const gc      = gradeColor[g];
+    return `<tr>
+      <td><span style="font-weight:700;color:${gc}">${g}</span> <span style="color:#8b949e;font-size:0.78rem">${gradeLabel[g]}</span></td>
+      <td style="text-align:center">${group.length}</td>
+      <td style="text-align:center;color:${wins/group.length>=0.5?'#3fb950':'#f85149'}">${wins}/${group.length}</td>
+      <td style="text-align:right;color:${avgMove>=0?'#3fb950':'#f85149'}">${avgMove>=0?'+':''}${avgMove.toFixed(2)}%</td>
+      <td style="text-align:right;color:${totalPl>=0?'#3fb950':'#f85149'}">${totalPl>=0?'+$':'-$'}${Math.abs(totalPl).toFixed(0)}</td>
+    </tr>`;
+  }).filter(Boolean).join('');
+
+  const accuracyTable = accuracyRows ? `
+    <div style="margin:20px 0 8px;font-size:0.8rem;font-weight:600;color:#8b949e;letter-spacing:0.05em">SIGNAL ACCURACY</div>
+    <table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:24px">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d">
+        <th style="text-align:left;padding:6px 0">Signal</th>
+        <th style="text-align:center;padding:6px 4px">Stocks</th>
+        <th style="text-align:center;padding:6px 4px">Win Rate</th>
+        <th style="text-align:right;padding:6px 4px">Avg Move</th>
+        <th style="text-align:right;padding:6px 0">P&L ×$1K</th>
+      </tr></thead>
+      <tbody>${accuracyRows}</tbody>
+    </table>` : '';
+
+  body.innerHTML = summaryHtml + accuracyTable + `<div class="cp-grid">${cards}</div>`;
 
   body.querySelectorAll('.sym-link').forEach(el => {
     el.style.cursor = 'pointer';

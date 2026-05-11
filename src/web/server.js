@@ -6835,11 +6835,18 @@ app.get('/api/catalyst-performance', requireAuth, async (req, res) => {
   if (!date) return res.json({ results: [], trade_date: null });
   if (!isDbAvailable()) return res.json({ results: [], trade_date: date, error: 'db_unavailable' });
   const { rows } = await query(
-    `SELECT symbol,company,bucket,call_time,
-            ROUND(entry_price,2) AS entry_price, ROUND(exit_price,2) AS exit_price,
-            change_pct, pnl_1000
-     FROM catalyst_performance WHERE trade_date=$1
-     ORDER BY ABS(COALESCE(pnl_1000,0)) DESC`,
+    `SELECT cp.symbol, cp.company, cp.bucket, cp.call_time,
+            ROUND(cp.entry_price,2) AS entry_price, ROUND(cp.exit_price,2) AS exit_price,
+            cp.change_pct, cp.pnl_1000,
+            cs.score AS conviction_score, cs.grade AS conviction_grade
+     FROM catalyst_performance cp
+     LEFT JOIN LATERAL (
+       SELECT score, grade FROM conviction_scores
+       WHERE symbol = cp.symbol AND scored_at::date <= cp.trade_date
+       ORDER BY scored_at DESC LIMIT 1
+     ) cs ON true
+     WHERE cp.trade_date=$1
+     ORDER BY (cp.exit_price IS NULL) ASC, ABS(COALESCE(cp.pnl_1000,0)) DESC`,
     [date]
   );
   res.json({ results: rows, trade_date: date });

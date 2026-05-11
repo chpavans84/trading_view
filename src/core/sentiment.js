@@ -75,6 +75,42 @@ const HEADERS = {
   'Accept': 'application/json',
 };
 
+const NASDAQ_CAL_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Origin': 'https://www.nasdaq.com',
+  'Referer': 'https://www.nasdaq.com/market-activity/earnings',
+};
+
+// Fetch symbols reporting earnings in the next `days` trading days (default: today + 2 more)
+async function fetchUpcomingEarningsSymbols(days = 3) {
+  const isValidSym = s => typeof s === 'string' && /^[A-Z]{1,5}$/.test(s);
+  const syms = new Set();
+  const today = new Date();
+  let added = 0;
+  for (let i = 0; i < 7 && added < days; i++) {
+    const d = new Date(today.getTime() + i * 86_400_000);
+    if (d.getDay() === 0 || d.getDay() === 6) continue; // skip weekends
+    const dateStr = d.toISOString().split('T')[0];
+    try {
+      const r = await fetch(
+        `https://api.nasdaq.com/api/calendar/earnings?date=${dateStr}`,
+        { headers: NASDAQ_CAL_HEADERS, signal: AbortSignal.timeout(6000) }
+      );
+      if (!r.ok) { added++; continue; }
+      const j = await r.json();
+      const rows = j?.data?.rows;
+      if (Array.isArray(rows)) rows.forEach(row => {
+        const sym = (row.symbol || '').toUpperCase().trim();
+        if (isValidSym(sym)) syms.add(sym);
+      });
+    } catch { /* network error — skip day */ }
+    added++;
+  }
+  return [...syms];
+}
+
 const ALPACA_DATA = 'https://data.alpaca.markets';
 
 function alpacaHeaders() {
@@ -517,6 +553,10 @@ async function fetchDynamicUniverse() {
     } catch { return []; }
   };
 
+  // ── Pre-fetch upcoming earnings — always included regardless of momentum ────────
+  const earningsSyms = await fetchUpcomingEarningsSymbols(3).catch(() => []);
+  if (earningsSyms.length) console.log(`[universe] Upcoming earnings: ${earningsSyms.join(', ')}`);
+
   // ── Tier 1: Yahoo Finance screeners ──────────────────────────────────────────
   try {
     const [trendRes, gainRes, activeRes, loserRes] = await Promise.allSettled([
@@ -529,7 +569,8 @@ async function fetchDynamicUniverse() {
     const anyOk = [trendRes, gainRes, activeRes, loserRes].some(r => r.status === 'fulfilled');
     if (!anyOk) throw new Error('all Yahoo sources returned errors');
 
-    const syms = new Set(CORE_ALWAYS_SCAN);
+    // Earnings symbols go first so they survive the 120-symbol cap
+    const syms = new Set([...earningsSyms, ...CORE_ALWAYS_SCAN]);
     if (trendRes.status  === 'fulfilled') extractTrending(trendRes.value).forEach(s => syms.add(s));
     if (gainRes.status   === 'fulfilled') extractScreener(gainRes.value).forEach(s => syms.add(s));
     if (activeRes.status === 'fulfilled') extractScreener(activeRes.value).forEach(s => syms.add(s));
@@ -554,7 +595,7 @@ async function fetchDynamicUniverse() {
         fetch(`${ALPACA_DATA}/v1beta1/screener/stocks/top-market-movers?market_type=stocks`, { headers: aHeaders }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
       ]);
 
-      const syms = new Set(CORE_ALWAYS_SCAN);
+      const syms = new Set([...earningsSyms, ...CORE_ALWAYS_SCAN]);
       if (activesRes.status === 'fulfilled') {
         (activesRes.value?.most_actives ?? [])
           .filter(s => isValidSym(s.symbol))
