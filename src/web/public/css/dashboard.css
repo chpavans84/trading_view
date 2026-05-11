@@ -439,11 +439,12 @@
     margin-left: 24px;
   }
 
-  /* Push main content right when explorer is on left side */
+  /* Explorer on left: overlay mode — floats above content, no push, no backdrop */
+  body.explorer-left {
+    overflow-x: hidden;
+  }
   body.explorer-left main {
     max-width: none;
-    margin-left: calc(var(--explorer-w) + 24px);
-    margin-right: calc(var(--news-w) + var(--notif-w));
   }
 
   /* Chat FAB/widget — stay clear of all right panels */
@@ -599,6 +600,17 @@
   #wlBody tr td { vertical-align: middle; }
   .wl-horizon { display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.72rem;font-weight:600;white-space:nowrap; }
 
+  /* Floating Stock Explorer — backdrop */
+  #explorerBackdrop {
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 899;
+    display: none;
+    cursor: pointer;
+  }
+  /* Backdrop only shows in true float mode, not when docked to either side */
+
   /* Floating Stock Explorer */
   .float-explorer {
     position: fixed;
@@ -647,6 +659,51 @@
   }
   .float-explorer-close:hover { color: var(--text); background: rgba(248,81,73,0.15); }
   .float-explorer-body { overflow-y: auto; flex: 1; }
+
+  /* ── Explorer panel floating resize tab ─────────────────────────────────── */
+  #feResizeTab {
+    position: fixed;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 64px;
+    background: #21262d;
+    border: 1px solid #388bfd;
+    border-left: none;
+    border-radius: 0 10px 10px 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: col-resize;
+    z-index: 910;
+    box-shadow: 3px 0 12px rgba(0,0,0,0.5);
+    user-select: none;
+    transition: background 0.15s, border-color 0.15s, width 0.12s;
+  }
+  #feResizeTab:hover, #feResizeTab.fe-tab-active {
+    background: #1c2128;
+    border-color: #58a6ff;
+    width: 22px;
+    box-shadow: 3px 0 18px rgba(88,166,255,0.3);
+  }
+
+  /* ── Chart resize controls (toolbar buttons + drag grip) ─────────────────── */
+  .csz-btn {
+    background: rgba(33,38,45,0.9); border: 1px solid #30363d; border-radius: 4px;
+    color: #8b949e; font-size: 0.68rem; font-weight: 700;
+    padding: 3px 8px; cursor: pointer; line-height: 1; white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .csz-btn:hover { color: #e6edf3; background: #30363d; border-color: #484f58; }
+  .csz-active { color: #58a6ff !important; border-color: #388bfd !important; background: rgba(56,139,253,0.1) !important; }
+  .chart-rh-grip {
+    text-align: center; cursor: ns-resize;
+    color: #3d444d; font-size: 1rem; letter-spacing: 8px;
+    height: 18px; line-height: 18px;
+    border-top: 1px solid #21262d;
+    background: #0d1117; user-select: none;
+    transition: color 0.15s, background 0.15s;
+  }
+  .chart-rh-grip:hover { color: #6e7681; background: #161b22; }
   /* Explorer — News & Analyst extras */
   .exnews-section { padding:0 16px 16px;border-top:1px solid var(--border); }
   .exnews-toggle  { display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:8px 0 6px; }
@@ -1533,6 +1590,7 @@
     body.explorer-open main  { margin-right: 0 !important; max-width: 1400px !important; margin-left: auto !important; }
     body.explorer-open .chat-fab    { right: 16px !important; }
     body.explorer-open .chat-widget { right: 0 !important; }
+    body.explorer-left       { overflow-x: visible !important; }
     body.explorer-left main  { margin-left: auto !important; margin-right: 0 !important; max-width: 1400px !important; }
     body.notif-open main     { margin-right: 0 !important; max-width: 1400px !important; margin-left: auto !important; }
     body.news-open main      { margin-right: 0 !important; max-width: 1400px !important; margin-left: auto !important; }
@@ -1758,7 +1816,7 @@
     .hero-title { font-size: 2.1rem; }
     .movers { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
     .ecal-grid { max-width: 100%; grid-template-columns: repeat(7, 1fr); }
-    .float-explorer { width: 560px !important; }
+    .float-explorer { width: 560px; }
   }
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -1773,7 +1831,7 @@
     .card { padding: 28px; }
     .card-value { font-size: 2.4rem; }
     #gsPanelWrap { width: 1000px; }
-    .float-explorer { width: 640px !important; }
+    .float-explorer { width: 640px; }
   }
 
   /* ── Global Search ──────────────────────────────────────────────────────── */
