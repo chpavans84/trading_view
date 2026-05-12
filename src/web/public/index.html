@@ -4136,12 +4136,10 @@ erDiagram
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<!-- Chart.js + Lightweight Charts: used on main dashboard — load normally -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-<link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"/>
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<!-- Mermaid + XTerm: admin-only — lazy loaded on demand, not on page load -->
 <script>
 // ── Permissions ───────────────────────────────────────
 // Map permission key → page name used in showPage()
@@ -10651,16 +10649,32 @@ loadIntradayPicks();           // initial load (uses 10-min cache on server)
 initTicker(); // loads news in background for the ticker strip
 updateStatus();
 loadMarket();                  // populate hero banner market stats on load
-setInterval(refreshPositions, 3_000);   // positions live every 3s
-setInterval(_refreshPosExtPrices, 60_000); // position ext (pre/post) prices every 60s
-_refreshPosExtPrices(); // initial fetch
-setInterval(loadDashboard, 30_000);     // full dashboard every 30s
-setInterval(loadTomorrowCatalysts, 30 * 60_000); // catalysts every 30 min
-setInterval(loadIntradayPicks, 10 * 60_000); // intraday picks every 10 min
-setInterval(updateStatus, 60_000);
-setInterval(initTicker, 5 * 60_000);   // refresh ticker headlines every 5 min
-setInterval(loadMarket, 5 * 60_000);   // refresh hero market stats every 5 min
-setInterval(refreshWatchlistPrices, 5_000); // watchlist live prices every 5s (skips when tab hidden)
+// ── Polling manager: all intervals pause when tab is hidden ──────────────────
+const _managedIntervals = [];
+function _mkInterval(fn, ms) {
+  const entry = { fn, ms, id: setInterval(fn, ms) };
+  _managedIntervals.push(entry);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    _managedIntervals.forEach(t => { clearInterval(t.id); t.id = null; });
+  } else {
+    _managedIntervals.forEach(t => {
+      if (t.id == null) { t.fn(); t.id = setInterval(t.fn, t.ms); }
+    });
+  }
+});
+
+_mkInterval(refreshPositions, 10_000);          // was 3s → 10s
+_mkInterval(_refreshPosExtPrices, 60_000);
+_refreshPosExtPrices();
+_mkInterval(loadDashboard, 30_000);
+_mkInterval(loadTomorrowCatalysts, 30 * 60_000);
+_mkInterval(loadIntradayPicks, 10 * 60_000);
+_mkInterval(updateStatus, 60_000);
+_mkInterval(initTicker, 5 * 60_000);
+_mkInterval(loadMarket, 5 * 60_000);
+_mkInterval(refreshWatchlistPrices, 15_000);    // was 5s → 15s
 
 // ── Dual Clock: SGT + US ET ───────────────────────────
 // Cache previous values — only write to DOM when something actually changed
@@ -10672,40 +10686,45 @@ function _setIfChanged(id, val) {
   if (el) el.textContent = val;
 }
 
+// Pre-create formatters once — avoids re-parsing locale options every second
+const _fmtSGTTime = new Intl.DateTimeFormat('en-SG', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const _fmtSGTDate = new Intl.DateTimeFormat('en-SG', { timeZone: 'Asia/Singapore', weekday: 'short', month: 'short', day: 'numeric' });
+const _fmtETTime  = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const _fmtETTZ    = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' });
+let _clockLastMin = -1; // only recheck market status when minute changes
+
 function updateNavClocks() {
   const now = new Date();
 
-  // SGT
-  const sgtStr  = now.toLocaleString('en-SG', { timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  const sgtDate = now.toLocaleString('en-SG', { timeZone: 'Asia/Singapore', weekday: 'short', month: 'short', day: 'numeric' });
-  _setIfChanged('clockSGTTime', sgtStr);
-  _setIfChanged('clockSGTDate', sgtDate);
+  // SGT — format once per second
+  _setIfChanged('clockSGTTime', _fmtSGTTime.format(now));
 
-  // ET
-  const etFull = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const etStr  = now.toLocaleString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  _setIfChanged('clockETTime', etStr);
+  // ET time
+  _setIfChanged('clockETTime', _fmtETTime.format(now));
 
-  // Market status (only changes at specific minute boundaries — cheap check)
-  const etDay  = etFull.getDay();
-  const etMins = etFull.getHours() * 60 + etFull.getMinutes();
-  const open     = etDay >= 1 && etDay <= 5 && etMins >= 9 * 60 + 30 && etMins < 16 * 60;
-  const preOpen  = etDay >= 1 && etDay <= 5 && etMins >= 4 * 60 && etMins < 9 * 60 + 30;
-  const afterHrs = etDay >= 1 && etDay <= 5 && etMins >= 16 * 60 && etMins < 20 * 60;
-  const weekend  = etDay === 0 || etDay === 6;
-  const statusText = open ? '🟢 Market Open' : preOpen ? '🌅 Pre-Market' : afterHrs ? '🌙 After-Hours' : weekend ? '📅 Weekend' : '🔴 Market Closed';
-  _setIfChanged('clockETSub', statusText);
+  // Minute-boundary checks (market status, date, TZ label) — skip if minute unchanged
+  const nowMin = Math.floor(now / 60000);
+  if (nowMin !== _clockLastMin) {
+    _clockLastMin = nowMin;
 
-  // Market open class (toggle only when state changes)
-  const etClockEl = document.getElementById('clockET');
-  if (etClockEl) {
-    const wasOpen = etClockEl.classList.contains('market-open');
-    if (open !== wasOpen) etClockEl.classList.toggle('market-open', open);
+    _setIfChanged('clockSGTDate', _fmtSGTDate.format(now));
+
+    // Derive ET fields from parts (avoids locale string parsing)
+    const parts = Object.fromEntries(_fmtETTZ.formatToParts(now).map(p => [p.type, p.value]));
+    const etH = parseInt(parts.hour), etM = parseInt(parts.minute);
+    const etDay  = now.toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short' });
+    const isWeekend = etDay === 'Sat' || etDay === 'Sun';
+    const etMins = etH * 60 + etM;
+    const open     = !isWeekend && etMins >= 9 * 60 + 30 && etMins < 16 * 60;
+    const preOpen  = !isWeekend && etMins >= 4 * 60 && etMins < 9 * 60 + 30;
+    const afterHrs = !isWeekend && etMins >= 16 * 60 && etMins < 20 * 60;
+    _setIfChanged('clockETSub', open ? '🟢 Market Open' : preOpen ? '🌅 Pre-Market' : afterHrs ? '🌙 After-Hours' : isWeekend ? '📅 Weekend' : '🔴 Market Closed');
+
+    const etClockEl = document.getElementById('clockET');
+    if (etClockEl) etClockEl.classList.toggle('market-open', open);
+
+    _setIfChanged('clockETLabel', `US ${parts.timeZoneName}`);
   }
-
-  // EDT/EST label — changes only twice a year
-  const tzAbbr = `US ${etFull.toLocaleTimeString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' }).split(' ').pop()}`;
-  _setIfChanged('clockETLabel', tzAbbr);
 }
 updateNavClocks();
 setInterval(updateNavClocks, 1000);
@@ -11727,7 +11746,9 @@ function showArch(view) {
   });
   if (view === 'db' && !_erdRendered) {
     _erdRendered = true;
-    mermaid.initialize({
+    // Lazy-load mermaid only when user opens DB Schema tab
+    const _doRenderErd = () => {
+      mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
       themeVariables: {
@@ -11745,19 +11766,28 @@ function showArch(view) {
       },
       er: { diagramPadding: 20, layoutDirection: 'LR', entityPadding: 15 }
     });
-    const erdEl  = document.getElementById('dbErdDiagram');
-    const srcEl  = document.getElementById('erdSource');
-    const srcTxt = srcEl ? srcEl.textContent.trim() : '';
-    if (srcTxt) {
-      mermaid.render('erd-svg-out', srcTxt).then(({ svg }) => {
-        erdEl.innerHTML = svg;
-        _erdSvgW = 0;
-        _erdScale = 1;
-        // wait for browser layout before measuring — rAF alone is not enough
-        setTimeout(() => { erdZoomFit(); erdInitPan(); }, 80);
-      }).catch(err => {
-        erdEl.innerHTML = `<pre style="color:#f85149;font-size:0.78rem;white-space:pre-wrap;padding:12px">${err?.message ?? String(err)}</pre>`;
-      });
+      const erdEl  = document.getElementById('dbErdDiagram');
+      const srcEl  = document.getElementById('erdSource');
+      const srcTxt = srcEl ? srcEl.textContent.trim() : '';
+      if (srcTxt) {
+        mermaid.render('erd-svg-out', srcTxt).then(({ svg }) => {
+          erdEl.innerHTML = svg;
+          _erdSvgW = 0;
+          _erdScale = 1;
+          setTimeout(() => { erdZoomFit(); erdInitPan(); }, 80);
+        }).catch(err => {
+          erdEl.innerHTML = `<pre style="color:#f85149;font-size:0.78rem;white-space:pre-wrap;padding:12px">${err?.message ?? String(err)}</pre>`;
+        });
+      }
+    };
+    if (window.mermaid) {
+      _doRenderErd();
+    } else {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+      s.onload = _doRenderErd;
+      s.onerror = () => { document.getElementById('dbErdDiagram').innerHTML = '<p style="color:#f85149;padding:16px">Failed to load diagram library.</p>'; };
+      document.head.appendChild(s);
     }
   }
 }
@@ -13713,8 +13743,31 @@ function termInit() {
   if (_termReady) { _termFit?.fit(); return; }
 
   const container = document.getElementById('terminal-container');
-  if (!container || typeof Terminal === 'undefined') {
-    document.getElementById('term-status').textContent = 'xterm.js not loaded — check network';
+  if (!container) return;
+
+  // Lazy-load xterm.js + addon only when terminal tab is first opened
+  if (typeof Terminal === 'undefined') {
+    const _loadXterm = () => new Promise((res, rej) => {
+      if (!document.querySelector('link[href*="xterm"]')) {
+        const lnk = document.createElement('link');
+        lnk.rel = 'stylesheet';
+        lnk.href = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css';
+        document.head.appendChild(lnk);
+      }
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
+      s.onload = () => {
+        const s2 = document.createElement('script');
+        s2.src = 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js';
+        s2.onload = res; s2.onerror = rej;
+        document.head.appendChild(s2);
+      };
+      s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    _loadXterm().then(() => termInit()).catch(() => {
+      document.getElementById('term-status').textContent = 'xterm.js not loaded — check network';
+    });
     return;
   }
 
@@ -15691,7 +15744,7 @@ async function updateAnalystState() {
   } catch {}
 }
 
-setInterval(updateAnalystState, 30000);
+_mkInterval(updateAnalystState, 30000);
 
 async function loadRejections() {
   const el = document.getElementById('rejectionsList');
@@ -15716,7 +15769,7 @@ async function loadRejections() {
   } catch { el.innerHTML = '<div style="color:#6e7681;font-size:0.8rem">Error loading</div>'; }
 }
 loadRejections();
-setInterval(loadRejections, 60000);
+_mkInterval(loadRejections, 60000);
 
 // ── Autonomous Chat Poll (SSE fallback — skipped when SSE is live) ───────────────
 let _lastPollTime = new Date().toISOString();
@@ -15735,7 +15788,7 @@ async function pollAutonomousMessages() {
   } catch {}
 }
 
-setInterval(pollAutonomousMessages, 5000);
+_mkInterval(pollAutonomousMessages, 10000);  // was 5s → 10s
 
 // ── Theme system ────────────────────────────────────────────────────────────────
 // THEME_VARS is inlined inside applyTheme to avoid TDZ errors if earlier code throws.
@@ -15961,7 +16014,7 @@ function _renderHeroTicker(track, segments, segments2) {
 
 // Load immediately and refresh every 60 min (hot headlines persist 1 hr)
 loadHeroNewsTicker();
-setInterval(loadHeroNewsTicker, 60 * 60_000);
+_mkInterval(loadHeroNewsTicker, 60 * 60_000);
 
 // Recolor ticker items every 60s as they age: 5–20 min = green, else white
 function _updateTickerColors() {
@@ -15973,7 +16026,7 @@ function _updateTickerColors() {
     else                       el.classList.remove('htk-fresh');
   });
 }
-setInterval(_updateTickerColors, 60_000);
+_mkInterval(_updateTickerColors, 60_000);
 
 // ── Stock price ticker ────────────────────────────────────────────────────────
 const _stkSyms = ['SPY','QQQ','NVDA','AAPL','TSLA','MSFT','AMZN','META','PLTR','MRVL','AMD','GOOGL','NFLX','AVGO','SMCI','SOXL'];
@@ -16038,7 +16091,7 @@ async function refreshStockTicker() {
 }
 
 refreshStockTicker();
-setInterval(refreshStockTicker, 15_000);
+_mkInterval(refreshStockTicker, 15_000);
 
 // ── AI Notification Center ────────────────────────────────────────────────────
 const _NOTIF_INTERVAL = 5 * 60_000;

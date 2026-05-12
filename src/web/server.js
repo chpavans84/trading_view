@@ -12,6 +12,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
+import compression from 'compression';
 import express from 'express';
 import session from 'express-session';
 import helmet from 'helmet';
@@ -232,6 +233,9 @@ const isProd = process.env.NODE_ENV === 'production';
 // Trust the first proxy hop (Cloudflare / nginx) so rate-limiting uses real client IP
 if (isProd) app.set('trust proxy', 1);
 
+// Gzip compression — must be first so all responses benefit
+app.use(compression({ level: 6, threshold: 1024 }));
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -320,13 +324,24 @@ app.get('/', (req, res, next) => {
 app.use(express.static(join(__dirname, 'public'), {
   setHeaders(res, filePath) {
     if (filePath.endsWith('.html')) {
+      // HTML: always revalidate so deploys are picked up immediately
       res.setHeader('Cache-Control', 'no-store');
+    } else if (/\.(css|js)$/.test(filePath)) {
+      // CSS/JS: cache 1 day — short enough to pick up updates, long enough to help repeat visits
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    } else if (/\.(png|jpg|jpeg|gif|svg|webp|ico|woff2?)$/.test(filePath)) {
+      // Static assets: cache 1 week
+      res.setHeader('Cache-Control', 'public, max-age=604800');
     }
   },
 }));
 
-// Serve project-level images folder (e.g. /images/background.png)
-app.use('/images', express.static(join(__dirname, '../../images')));
+// Serve project-level images folder — 1 week cache (rarely changes)
+app.use('/images', express.static(join(__dirname, '../../images'), {
+  setHeaders(res) {
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+  },
+}));
 
 // /terms is served as a static file: src/web/public/terms.html
 
