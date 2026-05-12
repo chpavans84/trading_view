@@ -5338,26 +5338,6 @@ app.get('/api/docs/queries', async (req, res) => {
   res.json({ queries: rows });
 });
 
-// Background: notify Telegram about unanswered doc queries every 30 min
-async function notifyUnansweredQueries() {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) return;
-  try {
-    const rows = await getDocQueries({ onlyUnanswered: true });
-    const pending = rows.filter(r => !r.notified);
-    if (!pending.length) return;
-    const lines = pending.map(r => `• "${r.query}" (${new Date(r.created_at).toLocaleString()})`).join('\n');
-    const msg = `📚 *Unanswered Docs Queries (${pending.length})*\n\nUsers searched for things not in the docs:\n${lines}\n\nConsider adding these to the documentation.`;
-    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: process.env.TELEGRAM_CHAT_ID, text: msg, parse_mode: 'Markdown' }),
-    });
-    for (const r of pending) await markDocQueryNotified(r.id);
-  } catch (e) {
-    console.error('notifyUnansweredQueries error:', e.message);
-  }
-}
-setInterval(notifyUnansweredQueries, 30 * 60 * 1000); // every 30 min
 
 // ─── Detailed API call stats ─────────────────────────────────────────────────
 
@@ -5426,16 +5406,10 @@ app.get('/api/health', async (req, res) => {
       s.once('timeout', () => { s.destroy(); resolve({ name: 'Moomoo OpenD', status: 'error', detail: 'Connection timeout' }); });
     }),
 
-    // Telegram Bot — check token validity
-    process.env.TELEGRAM_BOT_TOKEN
-      ? fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getMe`)
-          .then(r => r.json()).then(d => ({ name: 'Telegram Bot', status: d.ok ? 'ok' : 'error', detail: d.ok ? `@${d.result.username}` : d.description }))
-          .catch(e => ({ name: 'Telegram Bot', status: 'error', detail: e.message }))
-      : Promise.resolve({ name: 'Telegram Bot', status: 'unavailable', detail: 'TELEGRAM_BOT_TOKEN not set' }),
   ]);
 
   const services = checks.map((r, i) =>
-    r.status === 'fulfilled' ? r.value : { name: ['PostgreSQL','Alpaca','Anthropic','Moomoo','Telegram'][i], status: 'error', detail: r.reason?.message }
+    r.status === 'fulfilled' ? r.value : { name: ['PostgreSQL','Alpaca','Anthropic','Moomoo'][i], status: 'error', detail: r.reason?.message }
   );
   res.json({ services, checked_at: new Date().toISOString() });
 });
@@ -6257,14 +6231,6 @@ app.get('/api/research/fundamentals/:symbol', requireAuth, async (req, res) => {
 // Runs every minute, triggers at 3:50 PM ET on weekdays.
 // Cancels all open orders then closes all positions — ensures no overnight exposure.
 
-async function sendTelegramMsg(text) {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) return;
-  await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: process.env.TELEGRAM_CHAT_ID, text, parse_mode: 'Markdown' }),
-  });
-}
 
 // ─── Nodemailer alert transport (SMTP — Zoho / Google Workspace / any SMTP) ──
 let _mailer = null;
@@ -6348,16 +6314,14 @@ async function eodFlatten() {
       pnlLine = `\n💰 *Today's P&L: ${pnl.pnl >= 0 ? '+' : ''}$${pnl.pnl?.toFixed(2)} (${pnl.pnl_pct?.toFixed(2)}%)*`;
     } catch {}
 
-    // 4. Notify via Telegram + email
+    // 4. Notify via email
     const posLines = results.length ? results.join('\n') : 'No open positions.';
     const eodMsg = `🔔 *EOD Flatten — 3:50 PM ET*\n\n${posLines}${pnlLine}\n\n_All orders cancelled. No overnight exposure._`;
-    await sendTelegramMsg(eodMsg);
     await sendEmailAlert('EOD Flatten — 3:50 PM ET', eodMsg).catch(() => {});
     console.log('[EOD] Flatten complete:', results);
   } catch (e) {
     console.error('[EOD] Flatten error:', e.message);
     const failMsg = `⚠️ *EOD Flatten failed*: ${e.message}`;
-    await sendTelegramMsg(failMsg).catch(() => {});
     await sendEmailAlert('⚠ EOD Flatten Failed', failMsg).catch(() => {});
   }
 }
@@ -6639,7 +6603,6 @@ async function runWeekendResearchRefresh() {
   const summary = `🔬 Research Refresh Complete (${totalSec}s)\n\n${stepLines}${modelLine}`;
 
   pushToChat(summary, 'autonomous');
-  await sendTelegramMsg(summary).catch(() => {});
   await sendEmailAlert('Research Pipeline Complete', summary).catch(() => {});
   console.log('[research]', summary);
 

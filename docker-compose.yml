@@ -29,17 +29,5 @@ services:
       db:
         condition: service_healthy
 
-  # ── Telegram AI bot ──────────────────────────────────────────────────────────
-  bot:
-    build: .
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-tradingbot}@db:5432/tradingbot
-    depends_on:
-      db:
-        condition: service_healthy
-    command: ["node", "--env-file=.env", "src/bot/telegram-ai.js"]
-
 volumes:
   db_data:
