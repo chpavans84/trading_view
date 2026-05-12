@@ -31,7 +31,7 @@ import nodemailer from 'nodemailer';
 import { SP500, NASDAQ100 } from '../research/sp500.js';
 import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades, clearPnlCache } from '../core/trader.js';
 import cron from 'node-cron';
-import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
+import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, getDynamicUniverse, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews, getEarnings } from '../core/news.js';
 import { getAccounts, getFunds, getPositions as getMoomooPositions, getMoomooTodayPnL, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
 import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, placeTigerOrder } from '../core/tiger.js';
@@ -3696,6 +3696,94 @@ app.get('/api/quotes/batch', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[quotes/batch]', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ── Stock Explorer — Market Pulse (indices + sector ETFs) ────────────────────
+// Returns live quotes for market indices + sector ETFs for the pulse strip.
+// Sector data is cached 10 min by getSectorPerformance(); indices are live.
+app.get('/api/explorer/pulse', requireAuth, async (req, res) => {
+  try {
+    const mktSyms = ['SPY', 'QQQ', 'IWM', 'DIA', 'VIX'];
+    const [sectorRes, ...mktRes] = await Promise.allSettled([
+      getSectorPerformance(),
+      ...mktSyms.map(s => fetchCurrentPrice(s)),
+    ]);
+    const market = mktSyms.map((sym, i) => {
+      const q = mktRes[i].status === 'fulfilled' ? mktRes[i].value : null;
+      return { symbol: sym, price: q?.price ?? null, change_pct: q?.change_pct ?? null };
+    });
+    const sectors = sectorRes.status === 'fulfilled' ? sectorRes.value : {};
+    res.json({
+      market,
+      sectors: sectors.all_sectors ?? [],
+      rotation_signal: sectors.rotation_signal ?? null,
+    });
+  } catch (err) {
+    console.error('[explorer/pulse]', err);
+    res.status(500).json({ error: 'Failed to fetch market pulse' });
+  }
+});
+
+// ── Stock Explorer — Universe list (stocks + ETFs with grades) ────────────────
+// Returns the current scanner universe merged with latest conviction grades.
+// No live prices — browser batch-fetches those separately for speed.
+const EXPLORER_ETFS = {
+  SPY:'S&P 500 ETF', QQQ:'Nasdaq 100 ETF', IWM:'Russell 2000 ETF', DIA:'Dow Jones ETF',
+  XLK:'Technology ETF', XLF:'Financials ETF', XLE:'Energy ETF', XLV:'Healthcare ETF',
+  XLI:'Industrials ETF', XLB:'Materials ETF', XLP:'Consumer Staples ETF',
+  XLY:'Consumer Disc. ETF', XLC:'Comm. Services ETF', XLRE:'Real Estate ETF',
+  XLU:'Utilities ETF', GLD:'Gold ETF', TLT:'20Y Treasury ETF', UUP:'US Dollar ETF',
+  SOXL:'Semis 3× Bull', SOXS:'Semis 3× Bear', ARKK:'ARK Innovation ETF',
+  TQQQ:'QQQ 3× Bull', SQQQ:'QQQ 3× Bear', VXX:'Volatility ETF',
+};
+const _ETF_SET = new Set(Object.keys(EXPLORER_ETFS));
+
+app.get('/api/explorer/universe', requireAuth, async (req, res) => {
+  try {
+    const [universeSyms, scoresResult] = await Promise.allSettled([
+      getDynamicUniverse(),
+      isDbAvailable()
+        ? query(`SELECT DISTINCT ON (symbol) symbol, name, score, grade, scored_at
+                 FROM conviction_scores ORDER BY symbol, scored_at DESC`)
+        : Promise.resolve({ rows: [] }),
+    ]);
+
+    const syms   = universeSyms.status === 'fulfilled' ? universeSyms.value : [];
+    const dbRows = scoresResult.status  === 'fulfilled' ? scoresResult.value.rows : [];
+    const scoreMap = Object.fromEntries(dbRows.map(r => [r.symbol, r]));
+
+    // Merge universe stocks (from scanner) + ETFs
+    const allSyms = [...new Set([...syms, ...Object.keys(EXPLORER_ETFS)])];
+
+    const items = allSyms.map(sym => {
+      const sc = scoreMap[sym];
+      const isEtf = _ETF_SET.has(sym);
+      return {
+        symbol:   sym,
+        name:     sc?.name || EXPLORER_ETFS[sym] || sym,
+        is_etf:   isEtf,
+        etf_desc: EXPLORER_ETFS[sym] ?? null,
+        grade:    isEtf ? null : (sc?.grade ?? null),
+        score:    isEtf ? null : (sc?.score != null ? +parseFloat(sc.score).toFixed(0) : null),
+        sector:   SECTOR_MAP[sym] ?? null,
+        scored_at: sc?.scored_at ?? null,
+      };
+    });
+
+    // Sort: A → B → C → F → ungraded stocks → ETFs
+    const go = { A:0, B:1, C:2, F:3 };
+    items.sort((a, b) => {
+      if (a.is_etf !== b.is_etf) return a.is_etf ? 1 : -1;
+      const ga = go[a.grade] ?? 4, gb = go[b.grade] ?? 4;
+      if (ga !== gb) return ga - gb;
+      return (b.score ?? 0) - (a.score ?? 0);
+    });
+
+    res.json({ items, etf_symbols: Object.keys(EXPLORER_ETFS) });
+  } catch (err) {
+    console.error('[explorer/universe]', err);
+    res.status(500).json({ error: 'Failed to fetch universe' });
   }
 });
 

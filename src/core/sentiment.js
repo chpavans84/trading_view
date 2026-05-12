@@ -546,6 +546,10 @@ export function getUniverseInfo() {
   };
 }
 
+export async function getDynamicUniverse() {
+  return fetchDynamicUniverse();
+}
+
 async function fetchDynamicUniverse() {
   if (_universeCache.symbols.length > 0 && Date.now() - _universeCache.ts < UNIVERSE_TTL) {
     return _universeCache.symbols;

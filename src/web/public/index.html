@@ -5913,6 +5913,21 @@ async function loadStockExplorer() {
   document.getElementById('explorerTVChart').innerHTML =
     '<div style="height:420px;display:flex;align-items:center;justify-content:center;color:#8b949e;font-size:0.9rem">Loading chart…</div>';
 
+  // ETFs have no backtest data — show live quote + pulse info directly
+  if (isEtfSymbol(symbol)) {
+    _explorerData = { symbol, prices: [], scores: [], returns: [] };
+    await api(`/api/quote/${symbol}`).then(q => { _explorerLiveQuote = q; }).catch(() => {});
+    document.getElementById('explorerStats').style.display = 'flex';
+    document.getElementById('ev-score').style.display  = 'none';
+    document.getElementById('ev-return').style.display = 'none';
+    renderExplorerStats();
+    renderExplorerDips();
+    setExplorerView('price');
+    loadExplorerExtras(symbol);
+    if (document.getElementById('exViewPortfolio')?.style.display !== 'none') loadExplorerCompany();
+    return;
+  }
+
   try {
     // Fetch historical data and live quote in parallel
     [_explorerData] = await Promise.all([
@@ -5943,15 +5958,16 @@ async function loadStockExplorer() {
 function renderExplorerStats() {
   if (!_explorerData) return;
   const { prices, scores, returns, symbol } = _explorerData;
-  const lastPrice  = prices[prices.length-1];
+  const lastPrice  = prices[prices.length - 1];
   const firstPrice = prices[0];
-  const totalReturn = lastPrice && firstPrice ? ((lastPrice.close - firstPrice.close)/firstPrice.close*100).toFixed(1) : null;
-  const lastScore  = scores[scores.length-1];
-  const dips       = (returns||[]).filter(r=>r.dip_pct!=null).length;
+  const totalReturn = lastPrice && firstPrice
+    ? ((lastPrice.close - firstPrice.close) / firstPrice.close * 100).toFixed(1) : null;
+  const lastScore = scores[scores.length - 1];
+  const dips      = (returns || []).filter(r => r.dip_pct != null).length;
   const gradeColor = { A:'#3fb950', B:'#58a6ff', C:'#d29922', F:'#f85149' };
 
-  // Live quote overlay — show real-time price if available, with change vs previous close
-  const lq = _explorerLiveQuote;
+  // Live quote
+  const lq        = _explorerLiveQuote;
   const livePrice = lq?.price ?? lq?.mid ?? null;
   const prevClose = lastPrice ? parseFloat(lastPrice.close) : null;
   const livePct   = lq?.change_pct != null ? parseFloat(lq.change_pct)
@@ -5964,13 +5980,99 @@ function renderExplorerStats() {
        ${_extPriceLine(lq)}`
     : (lastPrice ? `<div style="font-size:0.72rem;color:#8b949e">Last Close</div><div style="font-size:1.2rem;font-weight:700">$${parseFloat(lastPrice.close).toFixed(2)}</div>${_extPriceLine(lq)}` : '');
 
+  // ── RSI ───────────────────────────────────────────────────────────────────
+  const rsi = lastScore?.rsi != null ? parseFloat(lastScore.rsi) : null;
+  const rsiColor = rsi == null ? '#8b949e' : rsi >= 70 ? '#f85149' : rsi <= 30 ? '#3fb950' : '#e6edf3';
+  const rsiLabel = rsi == null ? '' : rsi >= 70 ? 'Overbought' : rsi <= 30 ? 'Oversold' : 'Neutral';
+  const rsiHtml = rsi != null ? `<div>
+    <div style="font-size:0.72rem;color:#8b949e">RSI</div>
+    <div style="font-size:1.2rem;font-weight:700;color:${rsiColor}">${rsi.toFixed(1)}</div>
+    <div style="font-size:0.66rem;color:${rsiColor}">${rsiLabel}</div>
+    <div class="ex-stat-bar" style="width:60px;margin-top:4px">
+      <div class="ex-stat-bar-fill" style="width:${Math.min(rsi,100)}%;background:${rsiColor}"></div>
+    </div>
+  </div>` : '';
+
+  // ── 52-Week range ──────────────────────────────────────────────────────────
+  const recent252 = prices.slice(-252);
+  const wk52Hi = recent252.length ? Math.max(...recent252.map(p => parseFloat(p.high))) : null;
+  const wk52Lo = recent252.length ? Math.min(...recent252.map(p => parseFloat(p.low)))  : null;
+  const curPx  = livePrice ?? (lastPrice ? parseFloat(lastPrice.close) : null);
+  const wk52Pct = (wk52Hi && wk52Lo && curPx && wk52Hi > wk52Lo)
+    ? Math.round((curPx - wk52Lo) / (wk52Hi - wk52Lo) * 100) : null;
+  const wk52Html = wk52Hi && wk52Lo ? `<div style="min-width:90px">
+    <div style="font-size:0.72rem;color:#8b949e">52-Week Range</div>
+    <div style="font-size:0.75rem;font-weight:600;color:#e6edf3;margin-top:2px">${wk52Pct != null ? wk52Pct + '% of range' : ''}</div>
+    <div class="ex-stat-bar" style="width:90px;margin-top:4px">
+      <div class="ex-stat-bar-fill" style="width:${wk52Pct ?? 50}%;background:#58a6ff"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:0.62rem;color:#484f58;margin-top:2px;width:90px">
+      <span>$${wk52Lo.toFixed(2)}</span><span>$${wk52Hi.toFixed(2)}</span>
+    </div>
+  </div>` : '';
+
+  // ── RVOL (Relative Volume) ─────────────────────────────────────────────────
+  const recentVols = prices.slice(-21).map(p => parseFloat(p.volume || 0)).filter(v => v > 0);
+  const avgVol = recentVols.length > 1
+    ? recentVols.slice(0, -1).reduce((a, b) => a + b, 0) / (recentVols.length - 1) : null;
+  const todayVol = lastPrice?.volume ? parseFloat(lastPrice.volume) : null;
+  const rvol = avgVol && todayVol ? (todayVol / avgVol) : null;
+  const rvolColor = rvol == null ? '#8b949e' : rvol >= 2 ? '#f0883e' : rvol >= 1.5 ? '#e3b341' : '#8b949e';
+  const rvolHtml = rvol != null ? `<div>
+    <div style="font-size:0.72rem;color:#8b949e">RVOL</div>
+    <div style="font-size:1.2rem;font-weight:700;color:${rvolColor}">${rvol.toFixed(2)}×</div>
+    <div style="font-size:0.66rem;color:${rvolColor}">${rvol>=2?'Very High':rvol>=1.5?'High':rvol>=1?'Normal':'Low'}</div>
+  </div>` : '';
+
+  // ── Pre / Post market ──────────────────────────────────────────────────────
+  const extHtml = (() => {
+    if (!lq) return '';
+    if (lq.pre_price != null) {
+      const c = (lq.pre_change_pct ?? 0) >= 0 ? '#3fb950' : '#f85149';
+      return `<div><div style="font-size:0.72rem;color:#8b949e">Pre-Market</div>
+        <div style="font-size:1.1rem;font-weight:700;color:#e6edf3">$${parseFloat(lq.pre_price).toFixed(2)}</div>
+        <div style="font-size:0.72rem;font-weight:600;color:${c}">${lq.pre_change_pct>=0?'+':''}${(lq.pre_change_pct??0).toFixed(2)}%</div></div>`;
+    }
+    if (lq.post_price != null) {
+      const c = (lq.post_change_pct ?? 0) >= 0 ? '#3fb950' : '#f85149';
+      return `<div><div style="font-size:0.72rem;color:#8b949e">After-Hours</div>
+        <div style="font-size:1.1rem;font-weight:700;color:#e6edf3">$${parseFloat(lq.post_price).toFixed(2)}</div>
+        <div style="font-size:0.72rem;font-weight:600;color:${c}">${lq.post_change_pct>=0?'+':''}${(lq.post_change_pct??0).toFixed(2)}%</div></div>`;
+    }
+    return '';
+  })();
+
+  // ── ETF mode: swap out backtest score + dips for sector info ───────────────
+  const etf = isEtfSymbol(symbol);
+  let sectorOrScoreHtml = '';
+  if (etf) {
+    const sectorEntry = _pulseData?.sectors?.find(s => s.symbol === symbol);
+    const sChg = sectorEntry?.chg_pct;
+    const sCol = sChg == null ? '#8b949e' : sChg >= 0 ? '#3fb950' : '#f85149';
+    sectorOrScoreHtml = `<div>
+      <div style="font-size:0.72rem;color:#8b949e">Type</div>
+      <div style="font-size:0.9rem;font-weight:700;color:#e3b341">ETF</div>
+      ${sChg != null ? `<div style="font-size:0.75rem;font-weight:600;color:${sCol}">${sChg>=0?'+':''}${sChg.toFixed(2)}% today</div>` : ''}
+    </div>`;
+  } else {
+    sectorOrScoreHtml = lastScore
+      ? `<div title="Historical score from the offline research pipeline">
+          <div style="font-size:0.72rem;color:#8b949e">Backtest Score</div>
+          <div style="font-size:1.2rem;font-weight:700;color:${gradeColor[lastScore.grade]||'#e6edf3'}">Grade ${lastScore.grade} (${parseFloat(lastScore.score).toFixed(0)})</div>
+          <div style="font-size:0.68rem;color:#484f58">${lastScore.score_date ? new Date(lastScore.score_date).toLocaleDateString([],{month:'short',day:'numeric'}) : 'historical'}</div>
+        </div>` : '';
+  }
+
   document.getElementById('explorerStatsInner').innerHTML = [
     (lastPrice || livePrice) ? `<div>${livePriceHtml}</div>` : '',
-    totalReturn ? `<div><div style="font-size:0.72rem;color:#8b949e">3Y Return</div><div style="font-size:1.2rem;font-weight:700;color:${parseFloat(totalReturn)>=0?'#3fb950':'#f85149'}">${parseFloat(totalReturn)>=0?'+':''}${totalReturn}%</div></div>` : '',
-    lastScore  ? `<div title="Historical score from the offline research pipeline (EOD indicators: RSI, EMA, MACD). Different from the live conviction score below which uses real-time news, analyst ratings, and insider data."><div style="font-size:0.72rem;color:#8b949e">Backtest Score <span style="color:#484f58">(pipeline)</span></div><div style="font-size:1.2rem;font-weight:700;color:${gradeColor[lastScore.grade]||'#e6edf3'}">Grade ${lastScore.grade} (${parseFloat(lastScore.score).toFixed(0)})</div><div style="font-size:0.68rem;color:#484f58">${lastScore.score_date ? new Date(lastScore.score_date).toLocaleDateString([],{month:'short',day:'numeric'}) : 'historical'}</div></div>` : '',
-    `<div><div style="font-size:0.72rem;color:#8b949e">Dip Events</div><div style="font-size:1.2rem;font-weight:700;color:#f0883e">${dips}</div></div>`,
-    prices.length ? `<div><div style="font-size:0.72rem;color:#8b949e">Data Points</div><div style="font-size:1.2rem;font-weight:700">${prices.length}</div></div>` : '',
-  ].join('');
+    extHtml,
+    sectorOrScoreHtml,
+    rsiHtml,
+    wk52Html,
+    rvolHtml,
+    !etf && totalReturn ? `<div><div style="font-size:0.72rem;color:#8b949e">3Y Return</div><div style="font-size:1.2rem;font-weight:700;color:${parseFloat(totalReturn)>=0?'#3fb950':'#f85149'}">${parseFloat(totalReturn)>=0?'+':''}${totalReturn}%</div></div>` : '',
+    !etf ? `<div><div style="font-size:0.72rem;color:#8b949e">Dip Events</div><div style="font-size:1.2rem;font-weight:700;color:#f0883e">${dips}</div></div>` : '',
+  ].filter(Boolean).join('');
 }
 
 function setExplorerView(view) {
@@ -14278,9 +14380,28 @@ function exploreSymbol(sym) {
     <div class="qt-result" id="qtResult"></div>
   </div>
 
+  <!-- Market Pulse Strip -->
+  <div id="mktPulseWrap" style="border-bottom:1px solid var(--border);background:#0d1117;flex-shrink:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 10px 4px">
+      <span style="font-size:0.68rem;font-weight:700;color:#8b949e;letter-spacing:0.5px;text-transform:uppercase">Market Pulse</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span id="pulseLastUpdated" style="font-size:0.62rem;color:#484f58"></span>
+        <button onclick="loadMarketPulse(true)" title="Refresh" style="background:none;border:none;color:#484f58;cursor:pointer;font-size:0.8rem;padding:0 2px;line-height:1" onmouseover="this.style.color='#8b949e'" onmouseout="this.style.color='#484f58'">↻</button>
+        <button onclick="togglePulseExpand()" id="pulseExpandBtn" title="Show sector ETFs" style="background:none;border:none;color:#484f58;cursor:pointer;font-size:0.7rem;padding:0 2px;line-height:1" onmouseover="this.style.color='#8b949e'" onmouseout="this.style.color='#484f58'">▾</button>
+      </div>
+    </div>
+    <!-- Market indices row (always visible) -->
+    <div id="pulseMarketRow" style="display:flex;gap:4px;padding:0 10px 6px;overflow-x:auto;scrollbar-width:none"></div>
+    <!-- Sector ETFs row (collapsible) -->
+    <div id="pulseSectorRow" style="display:none;gap:4px;padding:0 10px 6px;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap"></div>
+    <!-- Rotation signal (collapsible) -->
+    <div id="pulseRotation" style="display:none;padding:0 10px 6px;font-size:0.68rem;color:#8b949e"></div>
+  </div>
+
   <!-- Explorer section tabs -->
-  <div style="display:flex;border-bottom:1px solid var(--border);background:var(--card-bg)">
-    <button id="exTabChart" onclick="switchExplorerTab('chart')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--accent);border-bottom:2px solid var(--accent)">📈 Chart</button>
+  <div style="display:flex;border-bottom:1px solid var(--border);background:var(--card-bg);flex-shrink:0">
+    <button id="exTabChart"  onclick="switchExplorerTab('chart')"   style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--accent);border-bottom:2px solid var(--accent)">📈 Chart</button>
+    <button id="exTabBrowse" onclick="switchExplorerTab('browse')"  style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">📋 Browse</button>
     <button id="exTabPortfolio" onclick="switchExplorerTab('portfolio')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">🏢 Company</button>
   </div>
 
@@ -14417,6 +14538,29 @@ function exploreSymbol(sym) {
     </div>
     </div><!-- end exViewChart -->
 
+    <!-- ── BROWSE VIEW ── -->
+    <div id="exViewBrowse" style="display:none;flex-direction:column;height:100%">
+      <!-- Filter bar -->
+      <div style="padding:10px 12px 8px;border-bottom:1px solid var(--border);background:var(--card-bg);flex-shrink:0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <div style="position:relative;flex:1;min-width:120px">
+          <input id="browseSearch" type="text" placeholder="Filter symbols…" autocomplete="off"
+            oninput="filterBrowseList(this.value)"
+            style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 8px;color:#e6edf3;font-size:0.8rem;outline:none">
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="bwf-btn bwf-active" data-filter="all"   onclick="setBrowseFilter('all')">All</button>
+          <button class="bwf-btn" data-filter="A"    onclick="setBrowseFilter('A')">A</button>
+          <button class="bwf-btn" data-filter="B"    onclick="setBrowseFilter('B')">B</button>
+          <button class="bwf-btn" data-filter="etf"  onclick="setBrowseFilter('etf')">ETF</button>
+        </div>
+        <div id="browseCount" style="font-size:0.7rem;color:#484f58;white-space:nowrap"></div>
+      </div>
+      <!-- List -->
+      <div id="browseList" style="overflow-y:auto;flex:1;padding-bottom:8px">
+        <div id="browseLoading" style="padding:32px;text-align:center;color:#8b949e;font-size:0.85rem">Loading universe…</div>
+      </div>
+    </div><!-- end exViewBrowse -->
+
     <!-- ── COMPANY VIEW ── -->
     <div id="exViewPortfolio" style="display:none;padding:14px 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -14464,17 +14608,206 @@ function exploreSymbol(sym) {
 <script>
 // ── Explorer tab switching ─────────────────────────────────────────────────
 function switchExplorerTab(tab) {
-  const isChart = tab === 'chart';
-  document.getElementById('exViewChart').style.display     = isChart ? '' : 'none';
-  document.getElementById('exViewPortfolio').style.display = isChart ? 'none' : '';
-  const btnChart = document.getElementById('exTabChart');
-  const btnPort  = document.getElementById('exTabPortfolio');
-  btnChart.style.color             = isChart ? 'var(--accent)' : 'var(--text2)';
-  btnChart.style.borderBottomColor = isChart ? 'var(--accent)' : 'transparent';
-  btnPort.style.color              = isChart ? 'var(--text2)' : 'var(--accent)';
-  btnPort.style.borderBottomColor  = isChart ? 'transparent' : 'var(--accent)';
-  if (!isChart) loadExplorerCompany();
+  const views = { chart: 'exViewChart', browse: 'exViewBrowse', portfolio: 'exViewPortfolio' };
+  const btns  = { chart: 'exTabChart',  browse: 'exTabBrowse',  portfolio: 'exTabPortfolio'  };
+  Object.keys(views).forEach(t => {
+    const v = document.getElementById(views[t]);
+    const b = document.getElementById(btns[t]);
+    if (!v || !b) return;
+    const active = t === tab;
+    v.style.display          = active ? (t === 'browse' ? 'flex' : '') : 'none';
+    b.style.color            = active ? 'var(--accent)' : 'var(--text2)';
+    b.style.borderBottomColor= active ? 'var(--accent)' : 'transparent';
+  });
+  if (tab === 'portfolio') loadExplorerCompany();
+  if (tab === 'browse')    loadExplorerUniverse();
 }
+
+// ─── Market Pulse Strip ───────────────────────────────────────────────────────
+let _pulseData = null;
+let _pulseExpanded = false;
+let _pulseTimer = null;
+
+function togglePulseExpand() {
+  _pulseExpanded = !_pulseExpanded;
+  document.getElementById('pulseSectorRow').style.display = _pulseExpanded ? 'flex' : 'none';
+  document.getElementById('pulseRotation').style.display  = _pulseExpanded ? '' : 'none';
+  document.getElementById('pulseExpandBtn').textContent   = _pulseExpanded ? '▴' : '▾';
+}
+
+async function loadMarketPulse(force) {
+  if (!force && _pulseData && Date.now() - _pulseData._ts < 30000) return;
+  try {
+    const d = await api('/api/explorer/pulse');
+    _pulseData = { ...d, _ts: Date.now() };
+    renderMarketPulse();
+    document.getElementById('pulseLastUpdated').textContent = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  } catch {}
+}
+
+function renderMarketPulse() {
+  if (!_pulseData) return;
+  const mktRow = document.getElementById('pulseMarketRow');
+  const secRow = document.getElementById('pulseSectorRow');
+  const rotEl  = document.getElementById('pulseRotation');
+
+  const chip = (sym, price, pct, onClick) => {
+    const c = pct == null ? '#8b949e' : pct >= 0 ? '#3fb950' : '#f85149';
+    const pctStr = pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    const priceStr = price != null ? `$${parseFloat(price).toFixed(2)}` : '';
+    return `<div class="pulse-chip" onclick="${onClick}" title="${sym}">
+      <span class="pulse-chip-sym">${sym}</span>
+      <span class="pulse-chip-price">${priceStr}</span>
+      <span class="pulse-chip-pct" style="color:${c}">${pctStr}</span>
+    </div>`;
+  };
+
+  // Market indices
+  const VIX_COLORS = { high: '#f85149', mid: '#f0883e', low: '#3fb950' };
+  mktRow.innerHTML = (_pulseData.market || []).map(m => {
+    if (m.symbol === 'VIX') {
+      const vix = m.price;
+      const vc = vix > 30 ? VIX_COLORS.high : vix > 20 ? VIX_COLORS.mid : VIX_COLORS.low;
+      return `<div class="pulse-chip" title="CBOE Volatility Index">
+        <span class="pulse-chip-sym" style="color:#e3b341">VIX</span>
+        <span class="pulse-chip-price" style="color:${vc};font-weight:700">${vix != null ? vix.toFixed(2) : '—'}</span>
+      </div>`;
+    }
+    return chip(m.symbol, m.price, m.change_pct, `explorerSelectAndLoad('${m.symbol}')`);
+  }).join('');
+
+  // Sector ETFs
+  secRow.innerHTML = (_pulseData.sectors || []).map(s =>
+    chip(s.symbol, s.price, s.chg_pct, `explorerSelectAndLoad('${s.symbol}')`)
+  ).join('');
+
+  // Rotation signal
+  if (_pulseData.rotation_signal) {
+    rotEl.innerHTML = `<span style="color:#e3b341;margin-right:4px">↻</span>${_pulseData.rotation_signal}`;
+  }
+}
+
+// ─── Browse Tab — Universe List ───────────────────────────────────────────────
+let _browseItems = [];
+let _browseFilter = 'all';
+let _browseSearch = '';
+let _browseQuotes = {};  // {SYM: {price, change_pct}}
+let _browseUniverseLoaded = false;
+
+const GRADE_COLORS = { A:'#3fb950', B:'#58a6ff', C:'#d29922', F:'#f85149' };
+
+async function loadExplorerUniverse() {
+  if (_browseUniverseLoaded) { renderBrowseList(); return; }
+  document.getElementById('browseLoading').style.display = '';
+  document.getElementById('browseList').querySelectorAll('.browse-row').forEach(el => el.remove());
+  try {
+    const d = await api('/api/explorer/universe');
+    _browseItems = d.items || [];
+    _browseUniverseLoaded = true;
+    renderBrowseList();
+    // Progressively load quotes in batches of 40
+    fetchBrowseQuotes(_browseItems.map(i => i.symbol));
+  } catch {
+    document.getElementById('browseLoading').textContent = 'Failed to load universe';
+  }
+}
+
+async function fetchBrowseQuotes(syms) {
+  const batches = [];
+  for (let i = 0; i < syms.length; i += 40) batches.push(syms.slice(i, i + 40));
+  for (const batch of batches) {
+    try {
+      const d = await api(`/api/quotes/batch?symbols=${batch.join(',')}`);
+      Object.assign(_browseQuotes, d.quotes || {});
+      renderBrowseList();
+    } catch {}
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+function setBrowseFilter(f) {
+  _browseFilter = f;
+  document.querySelectorAll('.bwf-btn').forEach(b =>
+    b.classList.toggle('bwf-active', b.dataset.filter === f));
+  renderBrowseList();
+}
+
+function filterBrowseList(q) {
+  _browseSearch = q.trim().toUpperCase();
+  renderBrowseList();
+}
+
+function renderBrowseList() {
+  const list = document.getElementById('browseList');
+  const loading = document.getElementById('browseLoading');
+  loading.style.display = 'none';
+
+  let items = _browseItems;
+  if (_browseSearch)
+    items = items.filter(i => i.symbol.includes(_browseSearch) || (i.name || '').toUpperCase().includes(_browseSearch));
+  if (_browseFilter === 'A')   items = items.filter(i => i.grade === 'A');
+  if (_browseFilter === 'B')   items = items.filter(i => i.grade === 'B');
+  if (_browseFilter === 'etf') items = items.filter(i => i.is_etf);
+
+  document.getElementById('browseCount').textContent = `${items.length} symbols`;
+
+  // Remove old rows, keep loading div
+  list.querySelectorAll('.browse-row').forEach(el => el.remove());
+
+  if (!items.length) {
+    list.insertAdjacentHTML('beforeend',
+      `<div style="padding:28px;text-align:center;color:#8b949e;font-size:0.82rem">No symbols match</div>`);
+    return;
+  }
+
+  const rows = items.map(item => {
+    const q = _browseQuotes[item.symbol];
+    const price   = q?.price    != null ? `$${parseFloat(q.price).toFixed(2)}` : '—';
+    const pct     = q?.change_pct != null ? parseFloat(q.change_pct) : null;
+    const pctStr  = pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : '—';
+    const pctCol  = pct == null ? '#8b949e' : pct >= 0 ? '#3fb950' : '#f85149';
+    let badge;
+    if (item.is_etf) {
+      badge = `<span class="browse-etf-badge">ETF</span>`;
+    } else if (item.grade) {
+      badge = `<span class="grade-badge grade-${item.grade}" title="Score: ${item.score ?? '?'}">${item.grade}</span>`;
+    } else {
+      badge = `<span style="font-size:0.62rem;color:#484f58;width:22px;display:inline-block">—</span>`;
+    }
+    return `<div class="browse-row" onclick="explorerSelectAndLoad('${item.symbol}')">
+      ${badge}
+      <span class="browse-row-sym">${item.symbol}</span>
+      <span class="browse-row-name">${item.name || ''}</span>
+      <span class="browse-row-price">${price}</span>
+      <span class="browse-row-pct" style="color:${pctCol}">${pctStr}</span>
+    </div>`;
+  }).join('');
+
+  list.insertAdjacentHTML('beforeend', rows);
+}
+
+function explorerSelectAndLoad(symbol) {
+  const inp = document.getElementById('explorerSymbol');
+  if (inp) inp.value = symbol;
+  const clearBtn = document.getElementById('explorerClearBtn');
+  if (clearBtn) clearBtn.style.display = '';
+  switchExplorerTab('chart');
+  loadStockExplorer();
+}
+
+// ─── ETF detection ────────────────────────────────────────────────────────────
+const ALL_ETFS = new Set([
+  'SPY','QQQ','IWM','DIA','VXX','UVXY',
+  'XLK','XLF','XLE','XLV','XLI','XLB','XLP','XLY','XLC','XLRE','XLU',
+  'GLD','SLV','TLT','LQD','HYG','UUP','USO',
+  'SOXL','SOXS','ARKK','TQQQ','SQQQ','SPXL','SPXU','UPRO',
+  'VTI','VOO','ARKQ','ARKG','ARKF',
+]);
+
+function isEtfSymbol(sym) { return ALL_ETFS.has(sym?.toUpperCase()); }
+
+// ─── Enhanced renderExplorerStats ─────────────────────────────────────────────
+// (replaces the existing function — extended with RSI, 52W, RVOL, pre/post)
 
 let _exDescExpanded = false;
 function exToggleDesc() {
@@ -14783,6 +15116,8 @@ function openFloatExplorer() {
   loadExplorerSymbols();
   document.getElementById('explorerSymbol').focus();
   setTimeout(_feTabSync, 320); // after slide-in transition
+  loadMarketPulse(); // kick off pulse strip on first open
+  if (!_pulseTimer) _pulseTimer = setInterval(() => loadMarketPulse(), 30000);
 }
 
 function openExplorerForSymbol(sym) {

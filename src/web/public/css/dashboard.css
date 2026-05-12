@@ -906,6 +906,25 @@
   /* AI Chat — floating widget */
   .ev-btn { background:rgba(33,38,45,0.8);border:1px solid rgba(48,54,61,0.8);border-radius:5px;padding:4px 12px;color:#8b949e;cursor:pointer;font-size:0.78rem;transition:all 0.2s;backdrop-filter:blur(6px); }
   .ev-btn:hover,.ev-btn.ev-active { background:#238636;border-color:#238636;color:#fff;box-shadow:0 0 12px rgba(35,134,54,0.35); }
+  /* Market Pulse Strip */
+  .pulse-chip { display:inline-flex;align-items:center;gap:5px;background:#161b22;border:1px solid #21262d;border-radius:6px;padding:3px 8px;cursor:pointer;white-space:nowrap;transition:border-color 0.15s; }
+  .pulse-chip:hover { border-color:#58a6ff44; }
+  .pulse-chip-sym { font-size:0.72rem;font-weight:700;color:#e6edf3; }
+  .pulse-chip-pct { font-size:0.7rem;font-weight:600; }
+  .pulse-chip-price { font-size:0.65rem;color:#8b949e; }
+  /* Browse List */
+  .bwf-btn { background:#161b22;border:1px solid #30363d;border-radius:5px;padding:3px 10px;color:#8b949e;cursor:pointer;font-size:0.75rem;font-weight:600;transition:all 0.15s; }
+  .bwf-btn:hover,.bwf-btn.bwf-active { background:#1f3a2a;border-color:#3fb950;color:#3fb950; }
+  .browse-row { display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid #161b22;cursor:pointer;transition:background 0.1s; }
+  .browse-row:hover { background:#161b22; }
+  .browse-row-sym { font-size:0.82rem;font-weight:700;color:#e6edf3;min-width:46px; }
+  .browse-row-name { font-size:0.72rem;color:#8b949e;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .browse-row-price { font-size:0.78rem;font-weight:600;color:#e6edf3;min-width:52px;text-align:right; }
+  .browse-row-pct { font-size:0.75rem;font-weight:600;min-width:52px;text-align:right; }
+  .browse-etf-badge { font-size:0.62rem;font-weight:700;color:#e3b341;background:#2a2000;border:1px solid #e3b34133;border-radius:4px;padding:1px 5px;flex-shrink:0; }
+  /* Enhanced stats extra items */
+  .ex-stat-bar { height:5px;border-radius:3px;background:#21262d;overflow:hidden;margin-top:3px; }
+  .ex-stat-bar-fill { height:100%;border-radius:3px; }
   .grade-badge { display:inline-block;border-radius:4px;padding:1px 7px;font-size:0.72rem;font-weight:700; }
   .grade-A { background:rgba(31,58,31,0.85);color:#3fb950;box-shadow:0 0 6px rgba(63,185,80,0.2); }
   .grade-B { background:rgba(26,35,50,0.85);color:#58a6ff;box-shadow:0 0 6px rgba(88,166,255,0.2); }
