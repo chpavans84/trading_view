@@ -7,6 +7,7 @@
  */
 
 import { getQuotes as moomooGetQuotes, getKLines } from './moomoo-tcp.js';
+import { getBzEarnings, isBenzingaConfigured } from './benzinga.js';
 
 const YF_BASE = 'https://query2.finance.yahoo.com';
 
@@ -83,31 +84,53 @@ const NASDAQ_CAL_HEADERS = {
   'Referer': 'https://www.nasdaq.com/market-activity/earnings',
 };
 
-// Fetch symbols reporting earnings in the next `days` trading days (default: today + 2 more)
+// Fetch symbols reporting earnings in the next `days` trading days.
+// Runs Nasdaq calendar + Benzinga (if configured) in parallel and merges results.
 async function fetchUpcomingEarningsSymbols(days = 3) {
   const isValidSym = s => typeof s === 'string' && /^[A-Z]{1,5}$/.test(s);
-  const syms = new Set();
+
+  // Build list of next `days` weekdays
+  const dates = [];
   const today = new Date();
-  let added = 0;
-  for (let i = 0; i < 7 && added < days; i++) {
+  for (let i = 0; i < 14 && dates.length < days; i++) {
     const d = new Date(today.getTime() + i * 86_400_000);
-    if (d.getDay() === 0 || d.getDay() === 6) continue; // skip weekends
-    const dateStr = d.toISOString().split('T')[0];
-    try {
-      const r = await fetch(
-        `https://api.nasdaq.com/api/calendar/earnings?date=${dateStr}`,
-        { headers: NASDAQ_CAL_HEADERS, signal: AbortSignal.timeout(6000) }
-      );
-      if (!r.ok) { added++; continue; }
-      const j = await r.json();
-      const rows = j?.data?.rows;
-      if (Array.isArray(rows)) rows.forEach(row => {
-        const sym = (row.symbol || '').toUpperCase().trim();
-        if (isValidSym(sym)) syms.add(sym);
-      });
-    } catch { /* network error — skip day */ }
-    added++;
+    if (d.getDay() !== 0 && d.getDay() !== 6) dates.push(d.toISOString().split('T')[0]);
   }
+
+  const syms = new Set();
+
+  // ── Nasdaq calendar (one request per day) ────────────────────────────────────
+  const nasdaqFetches = dates.map(dateStr =>
+    fetch(`https://api.nasdaq.com/api/calendar/earnings?date=${dateStr}`,
+      { headers: NASDAQ_CAL_HEADERS, signal: AbortSignal.timeout(6000) })
+      .then(r => r.ok ? r.json() : null)
+      .catch(() => null)
+  );
+
+  // ── Benzinga (one call for the full date range, richer data) ─────────────────
+  const bzFetch = isBenzingaConfigured()
+    ? getBzEarnings({ dateFrom: dates[0], dateTo: dates[dates.length - 1], limit: 200 })
+    : Promise.resolve(null);
+
+  const [nasdaqResults, bzResult] = await Promise.all([
+    Promise.all(nasdaqFetches),
+    bzFetch,
+  ]);
+
+  // Merge Nasdaq
+  for (const j of nasdaqResults) {
+    (j?.data?.rows ?? []).forEach(row => {
+      const sym = (row.symbol || '').toUpperCase().trim();
+      if (isValidSym(sym)) syms.add(sym);
+    });
+  }
+
+  // Merge Benzinga
+  (bzResult?.earnings ?? []).forEach(e => {
+    const sym = (e.ticker || '').toUpperCase().trim();
+    if (isValidSym(sym)) syms.add(sym);
+  });
+
   return [...syms];
 }
 
