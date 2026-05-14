@@ -53,6 +53,8 @@ import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 import { runCatalystScan } from '../core/catalyst-scanner.js';
 import { getBzNews, getBzOptionsActivity, getBzEarnings, getBzGuidance, getBzFDA, getBzDividends, getBzFundamentals, isBenzingaConfigured } from '../core/benzinga.js';
+import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
+import { checkUnusualOptions } from '../core/options-scanner.js';
 
 // Generate a stable numeric chat ID per user so each user has their own
 // Use username string directly as chat key — no hash collision possible.
@@ -3366,6 +3368,22 @@ app.get('/api/sources', requireAuth, async (req, res) => {
   });
 });
 
+// GET /api/options/unusual/:ticker — unusual options activity scanner
+app.get('/api/options/unusual/:ticker', requireAuth, async (req, res) => {
+  const ticker = (req.params.ticker || '').toUpperCase().trim();
+  if (!ticker || !/^[A-Z]{1,5}$/.test(ticker)) {
+    return res.status(400).json({ success: false, error: 'Invalid ticker symbol' });
+  }
+  try {
+    const { unusual_contracts, put_call_ratio, summary, total_call_volume, total_put_volume, chains_scanned } =
+      await checkUnusualOptions(ticker);
+    res.json({ success: true, ticker, unusual_contracts, put_call_ratio, summary, total_call_volume, total_put_volume, chains_scanned });
+  } catch (e) {
+    console.error(`[options] ${ticker}:`, e.message);
+    res.status(500).json({ success: false, ticker, error: e.message });
+  }
+});
+
 // Open positions — source=alpaca (default), alpaca_live, or moomoo
 app.get('/api/positions', requireAuth, async (req, res) => {
   try {
@@ -3575,7 +3593,9 @@ app.post('/api/trade/close', requireAuth, async (req, res, next) => {
     const isAdmin     = sessionUser.role === 'admin';
     const dbU         = isDbAvailable() ? await getDbUser(req.session.username) : null;
     const userCfg     = dbU ? (await getUserBotConfig(req.session.username)) : {};
-    const broker      = isAdmin ? 'paper' : (userCfg?.trade_source ?? 'paper');
+    const VALID_SRC   = ['paper', 'alpaca_live', 'moomoo', 'tiger'];
+    const reqSource   = VALID_SRC.includes(req.body.source) ? req.body.source : null;
+    const broker      = reqSource || (isAdmin ? 'paper' : (userCfg?.trade_source ?? 'paper'));
 
     // ── Tiger close ───────────────────────────────────────────────────────────
     if (broker === 'tiger') {
@@ -3602,7 +3622,7 @@ app.post('/api/trade/close', requireAuth, async (req, res, next) => {
       const mooPos = await getMoomooPositions({ acc_id: dbU?.moomoo_acc_id }).catch(() => null);
       const pos = (mooPos?.positions ?? []).find(p => (p.symbol ?? '').toUpperCase() === ticker2);
       if (!pos) return res.status(403).json({ error: `You do not have an open Moomoo position in ${ticker2}` });
-      const result = await closeMoomooPosition(ticker2);
+      const result = await closeMoomooPosition({ symbol: ticker2, acc_id: dbU?.moomoo_acc_id || null });
       logActivity(req.session.username, 'position_closed', `${ticker2} [Moomoo]`, req.ip);
       return res.json(result);
     }
@@ -3681,8 +3701,32 @@ app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
 app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase().trim();
-    const q = await fetchCurrentPrice(symbol);
-    if (q) return res.json({ symbol, mid: q.price, price: q.price, change: q.change ?? null, change_pct: q.change_pct ?? null, session: q.session ?? 'regular', pre_price: q.pre_price ?? null, pre_change: q.pre_change ?? null, pre_change_pct: q.pre_change_pct ?? null, post_price: q.post_price ?? null, post_change: q.post_change ?? null, post_change_pct: q.post_change_pct ?? null });
+    const [qRes, yfRes] = await Promise.allSettled([
+      fetchCurrentPrice(symbol),
+      _yf.quoteSummary(symbol, { modules: ['price', 'summaryDetail'] }),
+    ]);
+    const q   = qRes.status  === 'fulfilled' ? qRes.value  : null;
+    const yfd = yfRes.status === 'fulfilled' ? yfRes.value : null;
+    const p   = yfd?.price;
+    const sd  = yfd?.summaryDetail;
+    if (q) return res.json({
+      symbol,
+      mid: q.price, price: q.price,
+      change: q.change ?? null, change_pct: q.change_pct ?? null,
+      session: q.session ?? 'regular',
+      pre_price: q.pre_price ?? null, pre_change: q.pre_change ?? null, pre_change_pct: q.pre_change_pct ?? null,
+      post_price: q.post_price ?? null, post_change: q.post_change ?? null, post_change_pct: q.post_change_pct ?? null,
+      name:        p?.longName                   ?? p?.shortName              ?? null,
+      high:        p?.regularMarketDayHigh        ?? null,
+      low:         p?.regularMarketDayLow         ?? null,
+      open:        p?.regularMarketOpen           ?? null,
+      prev_close:  p?.regularMarketPreviousClose  ?? null,
+      volume:      p?.regularMarketVolume         ?? null,
+      market_cap:  p?.marketCap                   ?? null,
+      pe:          sd?.trailingPE                 ?? p?.trailingPE            ?? null,
+      week52_high: sd?.fiftyTwoWeekHigh           ?? p?.fiftyTwoWeekHigh      ?? null,
+      week52_low:  sd?.fiftyTwoWeekLow            ?? p?.fiftyTwoWeekLow       ?? null,
+    });
     const alpaca = await getLatestPrice(symbol);
     res.json(alpaca);
   } catch (err) {
@@ -3711,6 +3755,36 @@ app.get('/api/quotes/batch', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[quotes/batch]', err);
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// OHLCV history for mobile chart — wraps Yahoo Finance chart API
+app.get('/api/chart-data/:symbol', requireAuth, async (req, res) => {
+  try {
+    const symbol   = req.params.symbol.toUpperCase().trim();
+    const range    = ['1mo','3mo','6mo','1y'].includes(req.query.range) ? req.query.range : '3mo';
+    const interval = range === '1y' ? '1wk' : '1d';
+    const r = await fetch(
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(8000) }
+    );
+    if (!r.ok) return res.status(502).json({ error: 'Chart data unavailable' });
+    const d      = await r.json();
+    const result = d?.chart?.result?.[0];
+    const ts     = result?.timestamp || [];
+    const q      = result?.indicators?.quote?.[0] || {};
+    const data   = ts.map((t, i) => ({
+      t,
+      o: q.open?.[i]   ?? null,
+      h: q.high?.[i]   ?? null,
+      l: q.low?.[i]    ?? null,
+      c: q.close?.[i]  ?? null,
+      v: q.volume?.[i] ?? null,
+    })).filter(bar => bar.c != null);
+    res.json({ symbol, range, data });
+  } catch (err) {
+    console.error('[chart-data]', err);
+    res.status(500).json({ error: 'Chart data error' });
   }
 });
 
@@ -4143,10 +4217,21 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
     const ticker = symbol.toUpperCase().trim();
     const shares = Math.floor(Number(qty));
 
-    // Determine user's configured broker
+    // Determine user's configured broker (client-sent source takes priority)
     const dbUser   = isDbAvailable() ? await getDbUser(req.session.username) : null;
     const userCfg  = dbUser ? (await getUserBotConfig(req.session.username)) : {};
-    const broker   = userCfg?.trade_source ?? 'paper';
+    const _VSRC    = ['paper', 'alpaca_live', 'moomoo', 'tiger'];
+    const broker   = (_VSRC.includes(req.body.source) ? req.body.source : null) || (userCfg?.trade_source ?? 'paper');
+
+    // ── Moomoo path ───────────────────────────────────────────────────────────
+    if (broker === 'moomoo') {
+      const result = await placeMoomooTrade({ symbol: ticker, side, qty: shares, acc_id: dbUser?.moomoo_acc_id || null });
+      logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${shares} ${ticker} @ market [Moomoo]`, req.ip);
+      if (side === 'buy') {
+        recordTrade({ order_id: String(result.order_id || `moo_${Date.now()}`), symbol: ticker, side: 'buy', qty: shares, entry_price: 0, account_source: 'moomoo', username: req.session.username }).catch(() => {});
+      }
+      return res.json(result);
+    }
 
     // ── Tiger path ────────────────────────────────────────────────────────────
     if (broker === 'tiger') {
@@ -6941,6 +7026,12 @@ app.post('/api/catalyst-performance/run', requireAdmin, async (req, res) => {
   }
 });
 
+// POST /api/retrospect/run — admin manual trigger (for testing outside 4:30 PM)
+app.post('/api/retrospect/run', requireAdmin, async (req, res) => {
+  res.json({ ok: true, message: 'Running retrospect analysis — email will arrive shortly.' });
+  runDailyRetrospect().catch(e => console.error('[retrospect] manual trigger error:', e.message));
+});
+
 // 10:05 AM ET Tue–Sat — compute previous day's catalyst performance (gap at open)
 // Tue–Fri covers Mon–Thu. Saturday covers Friday's AMC/BMO stocks.
 // Note: Friday's exit price (Monday open) will be null on Saturday — filled in when
@@ -6979,6 +7070,202 @@ cron.schedule('30 7 * * 1-5', async () => {
     console.log(`[earnings-cascade] ${result.alerts.length} alerts pushed`);
   } catch (e) {
     console.error('[earnings-cascade] cron error:', e.message);
+  }
+});
+
+// ─── Daily Retrospect Email — 4:30 PM ET Mon–Fri ────────────────────────────
+// Compares yesterday's catalyst performance vs conviction grades to surface
+// missed opportunities and false positives, then emails a summary to the owner.
+
+async function runDailyRetrospect() {
+  if (!resend || !isDbAvailable()) return;
+
+  const etNow   = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const etDate  = new Date(etNow).toLocaleDateString('en-CA');  // today YYYY-MM-DD ET
+  const yesterday = _prevTradingDay(etDate);
+
+  // Yesterday's catalyst perf with conviction grades
+  let cpRows = [];
+  try {
+    const { rows } = await query(`
+      SELECT cp.symbol, cp.company, cp.bucket, cp.change_pct, cp.pnl_1000,
+             cs.score AS conviction_score, cs.grade AS conviction_grade,
+             cs.breakdown
+      FROM catalyst_performance cp
+      LEFT JOIN LATERAL (
+        SELECT score, grade, breakdown FROM conviction_scores
+        WHERE symbol = cp.symbol AND scored_at::date <= cp.trade_date
+        ORDER BY scored_at DESC LIMIT 1
+      ) cs ON true
+      WHERE cp.trade_date = $1
+      ORDER BY ABS(COALESCE(cp.change_pct, 0)) DESC
+    `, [yesterday]);
+    cpRows = rows;
+  } catch (e) {
+    console.error('[retrospect] catalyst query error:', e.message);
+  }
+
+  // Today's conviction score distribution
+  let todayScores = [];
+  try {
+    const { rows } = await query(`
+      SELECT DISTINCT ON (symbol) symbol, score, grade, signals
+      FROM conviction_scores WHERE scored_at::date = $1
+      ORDER BY symbol, scored_at DESC
+    `, [etDate]);
+    todayScores = rows;
+  } catch (e) {
+    console.error('[retrospect] scores query error:', e.message);
+  }
+
+  // Today's trades
+  let todayTrades = [];
+  try {
+    const { rows } = await query(`
+      SELECT symbol, side, shares, entry_price, exit_price, pnl_usd, status
+      FROM trades WHERE DATE(created_at AT TIME ZONE 'America/New_York') = $1
+      ORDER BY created_at DESC LIMIT 20
+    `, [etDate]);
+    todayTrades = rows;
+  } catch (e) {
+    console.error('[retrospect] trades query error:', e.message);
+  }
+
+  const missed        = cpRows.filter(r => r.conviction_grade === 'F' && (r.change_pct ?? 0) > 5);
+  const falsePos      = cpRows.filter(r => ['A', 'B'].includes(r.conviction_grade) && (r.change_pct ?? 0) < -5);
+  const correctBulls  = cpRows.filter(r => ['A', 'B'].includes(r.conviction_grade) && (r.change_pct ?? 0) > 3);
+  const gradeDist     = { A: 0, B: 0, C: 0, F: 0 };
+  for (const s of todayScores) if (s.grade in gradeDist) gradeDist[s.grade]++;
+
+  // Factor analysis: which factors contributed to wrong grades on misses
+  const factorHits = {};
+  for (const r of missed) {
+    if (!r.breakdown || typeof r.breakdown !== 'object') continue;
+    for (const [k, v] of Object.entries(r.breakdown)) {
+      if (typeof v === 'number' && v < 0) factorHits[k] = (factorHits[k] || 0) + 1;
+    }
+  }
+  const topFactors = Object.entries(factorHits).sort(([, a], [, b]) => b - a).slice(0, 5);
+
+  const pnlTotal = todayTrades.filter(t => t.pnl_usd != null).reduce((s, t) => s + +t.pnl_usd, 0);
+
+  const pct = n => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
+  const usd = n => (n >= 0 ? '+' : '') + '$' + Math.abs(n).toFixed(0);
+
+  const rowStyle = 'padding:6px 10px;border-bottom:1px solid #30363d';
+  const thStyle  = 'padding:6px 10px;text-align:left;color:#8b949e;font-weight:600;font-size:0.8rem;border-bottom:2px solid #30363d';
+
+  function cpTable(rows, emptyMsg) {
+    if (!rows.length) return `<p style="color:#8b949e;font-size:0.9rem">${emptyMsg}</p>`;
+    return `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+      <tr><th style="${thStyle}">Symbol</th><th style="${thStyle}">Grade</th><th style="${thStyle}">Score</th><th style="${thStyle}">Move</th><th style="${thStyle}">P&L/$1K</th></tr>
+      ${rows.map(r => `<tr>
+        <td style="${rowStyle};font-weight:600;color:#e6edf3">${r.symbol}</td>
+        <td style="${rowStyle};color:${r.conviction_grade === 'A' ? '#3fb950' : r.conviction_grade === 'B' ? '#58a6ff' : r.conviction_grade === 'F' ? '#f85149' : '#d29922'}">${r.conviction_grade ?? '–'}</td>
+        <td style="${rowStyle};color:#8b949e">${r.conviction_score ?? '–'}</td>
+        <td style="${rowStyle};color:${(r.change_pct ?? 0) >= 0 ? '#3fb950' : '#f85149'}">${r.change_pct != null ? pct(r.change_pct) : '–'}</td>
+        <td style="${rowStyle};color:${(r.pnl_1000 ?? 0) >= 0 ? '#3fb950' : '#f85149'}">${r.pnl_1000 != null ? usd(r.pnl_1000) : '–'}</td>
+      </tr>`).join('')}
+    </table>`;
+  }
+
+  const html = `
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;max-width:680px;margin:0 auto;padding:24px;border-radius:12px">
+  <h2 style="margin:0 0 4px;font-size:1.4rem">📊 Daily Retrospect — ${etDate}</h2>
+  <p style="color:#8b949e;margin:0 0 24px;font-size:0.9rem">End-of-day scoring analysis • 4:30 PM ET</p>
+
+  ${todayTrades.length ? `
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:20px">
+    <h3 style="margin:0 0 8px;font-size:1rem;color:#58a6ff">💰 Today's Trades</h3>
+    <p style="margin:0;color:${pnlTotal >= 0 ? '#3fb950' : '#f85149'};font-size:1.1rem;font-weight:600">${usd(pnlTotal)} P&L across ${todayTrades.length} trade(s)</p>
+  </div>` : ''}
+
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:20px">
+    <h3 style="margin:0 0 8px;font-size:1rem;color:#58a6ff">🎯 Scanner Grade Distribution (Today)</h3>
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      ${Object.entries(gradeDist).map(([g, c]) => `<span style="background:#21262d;padding:6px 14px;border-radius:20px;font-size:0.85rem"><strong style="color:${g==='A'?'#3fb950':g==='B'?'#58a6ff':g==='C'?'#d29922':'#f85149'}">${g}</strong> · ${c}</span>`).join('')}
+      <span style="background:#21262d;padding:6px 14px;border-radius:20px;font-size:0.85rem;color:#8b949e">Total · ${todayScores.length}</span>
+    </div>
+  </div>
+
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:20px">
+    <h3 style="margin:0 0 12px;font-size:1rem;color:#f85149">⚠️ Missed Opportunities (F-grade but moved >5%)</h3>
+    <p style="margin:0 0 10px;color:#8b949e;font-size:0.85rem">These stocks were rated F but outperformed — review what signals were wrong.</p>
+    ${cpTable(missed, 'No misses yesterday — well done!')}
+    ${topFactors.length ? `
+    <p style="margin:12px 0 4px;color:#8b949e;font-size:0.8rem;font-weight:600">FACTORS THAT DRAGGED THESE SCORES DOWN:</p>
+    <ul style="margin:0;padding-left:18px;color:#d29922;font-size:0.85rem">
+      ${topFactors.map(([k, c]) => `<li>${k.replace(/_/g,' ')} (${c}x)</li>`).join('')}
+    </ul>` : ''}
+  </div>
+
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:20px">
+    <h3 style="margin:0 0 12px;font-size:1rem;color:#d29922">🔴 False Positives (A/B-grade but dropped >5%)</h3>
+    ${cpTable(falsePos, 'No major false positives yesterday.')}
+  </div>
+
+  ${correctBulls.length ? `
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;margin-bottom:20px">
+    <h3 style="margin:0 0 12px;font-size:1rem;color:#3fb950">✅ Correct Bullish Calls (A/B-grade + moved >3%)</h3>
+    ${cpTable(correctBulls, '')}
+  </div>` : ''}
+
+  <p style="color:#6e7681;font-size:0.78rem;margin-top:24px;border-top:1px solid #21262d;padding-top:12px">
+    Generated automatically by Trading Bot · Catalyst data from ${yesterday} · Do not reply to this email.
+  </p>
+</div>`;
+
+  try {
+    await resend.emails.send({
+      from:    `Trading Bot <${RESEND_FROM}>`,
+      to:      'info@trading.dlpinnovations.com',
+      subject: `📊 Daily Retrospect ${etDate} — ${missed.length} miss${missed.length !== 1 ? 'es' : ''}, ${falsePos.length} false positive${falsePos.length !== 1 ? 's' : ''}`,
+      html,
+    });
+    console.log(`[retrospect] Email sent for ${etDate}: ${missed.length} misses, ${falsePos.length} false positives`);
+  } catch (e) {
+    console.error('[retrospect] Email send failed:', e.message);
+  }
+}
+
+cron.schedule('30 16 * * 1-5', async () => {
+  console.log('[retrospect] Running daily retrospect…');
+  runDailyRetrospect().catch(e => console.error('[retrospect] error:', e.message));
+}, { timezone: 'America/New_York' });
+
+// ─── Weekend Position Guardian crons ─────────────────────────────────────────
+
+// Friday 3:30 PM ET — warn about positions going into earnings over the weekend
+cron.schedule('30 15 * * 5', async () => {
+  console.log('[guardian] Friday earnings risk check');
+  try { await checkEarningsRisk(); } catch (e) { console.error('[guardian]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// Friday 6:00 PM ET — first after-hours check after market close
+cron.schedule('0 18 * * 5', async () => {
+  console.log('[guardian] Friday AH move check');
+  try { await checkAfterHoursMove(); } catch (e) { console.error('[guardian]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// Saturday 10:00 AM ET — catch any late AH / extended-hours moves
+cron.schedule('0 10 * * 6', async () => {
+  console.log('[guardian] Saturday morning AH check');
+  try { await checkAfterHoursMove(); } catch (e) { console.error('[guardian]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// Monday 4:15 AM ET — pre-market check before the open
+cron.schedule('15 4 * * 1', async () => {
+  console.log('[guardian] Monday pre-market holdings check');
+  try { await checkPreMarketHoldings(); } catch (e) { console.error('[guardian]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// GET /api/guardian/check — manual trigger (any authenticated user)
+app.get('/api/guardian/check', requireAuth, async (req, res) => {
+  try {
+    const result = await runWeekendScan();
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
   }
 });
 
@@ -7088,6 +7375,39 @@ seedKnowledge()
   .catch(e => console.error('[knowledge] seed error:', e.message));
 await pgStore._ensureTable();
 await migrateUsersToDb();
+// ─── Reminder email cron (check every minute) ─────────────────────────────────
+setInterval(async () => {
+  if (!isDbAvailable() || !resend) return;
+  try {
+    const { rows } = await query(
+      `UPDATE user_reminders SET emailed_at = NOW()
+       WHERE remind_at <= NOW() AND emailed_at IS NULL AND dismissed = FALSE AND done = FALSE
+       RETURNING id, username, title, remind_at`
+    );
+    for (const rem of rows) {
+      try {
+        const { rows: users } = await query(`SELECT email FROM users WHERE username = $1`, [rem.username]);
+        const email = users[0]?.email;
+        if (!email) continue;
+        const dt = new Date(rem.remind_at).toLocaleString('en-US', { weekday:'long', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+        await resend.emails.send({
+          from: `Trading Bot <${RESEND_FROM}>`,
+          to: email,
+          subject: `⏰ Reminder: ${rem.title}`,
+          html: `<div style="font-family:-apple-system,sans-serif;max-width:440px;margin:0 auto;padding:28px">
+            <h2 style="margin:0 0 8px;color:#e6edf3">⏰ Trading Reminder</h2>
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:20px;margin-top:12px">
+              <div style="font-size:1.1rem;font-weight:700;color:#e6edf3;margin-bottom:6px">${rem.title}</div>
+              <div style="color:#8b949e;font-size:0.85rem">Scheduled for: ${dt}</div>
+            </div>
+            <p style="color:#484f58;font-size:0.8rem;margin-top:16px">Trading Dashboard · Not financial advice</p>
+          </div>`
+        });
+        console.log(`[reminders] emailed ${rem.username} for reminder ${rem.id}`);
+      } catch(e) { console.warn(`[reminders] email failed for ${rem.id}:`, e.message); }
+    }
+  } catch(e) { /* db might be unavailable */ }
+}, 60_000);
 setInterval(cleanupOtpTokens, 60 * 60 * 1000); // clean expired OTPs every hour
 httpServer.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
@@ -7193,6 +7513,84 @@ app.get('/api/agent/errors', requireAuth, requireAdmin, async (req, res) => {
 app.post('/api/agent/errors/:id/resolve', requireAuth, requireAdmin, async (req, res) => {
   try {
     await resolveError(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Notes API ────────────────────────────────────────────────────────────────
+app.get('/api/notes', requireAuth, async (req, res) => {
+  try {
+    const username = req.session.username;
+    const { rows } = await query(
+      `SELECT id, title, body, symbol, created_at FROM user_notes WHERE username=$1 ORDER BY created_at DESC LIMIT 200`,
+      [username]
+    );
+    res.json({ notes: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/notes', requireAuth, async (req, res) => {
+  try {
+    const username = req.session.username;
+    const { title = '', body = '' } = req.body || {};
+    if (!title.trim() && !body.trim()) return res.status(400).json({ error: 'Note is empty' });
+    const { symbol = '' } = req.body || {};
+    const { rows } = await query(
+      `INSERT INTO user_notes (username, title, body, symbol) VALUES ($1, $2, $3, $4) RETURNING id, title, body, symbol, created_at`,
+      [username, title.trim(), body.trim(), (symbol || '').trim().toUpperCase().slice(0,20) || null]
+    );
+    res.json({ note: rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/notes/:id', requireAuth, async (req, res) => {
+  try {
+    const username = req.session.username;
+    await query(`DELETE FROM user_notes WHERE id=$1 AND username=$2`, [parseInt(req.params.id), username]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Reminders API ────────────────────────────────────────────────────────────
+app.get('/api/reminders', requireAuth, async (req, res) => {
+  try {
+    const username = req.session.username;
+    const { rows } = await query(
+      `SELECT id, title, remind_at, dismissed, created_at FROM user_reminders WHERE username=$1 ORDER BY remind_at ASC`,
+      [username]
+    );
+    res.json({ reminders: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/reminders', requireAuth, async (req, res) => {
+  try {
+    const username = req.session.username;
+    const { title, remind_at } = req.body || {};
+    if (!title || !remind_at) return res.status(400).json({ error: 'title and remind_at required' });
+    const dt = new Date(remind_at);
+    if (isNaN(dt.getTime())) return res.status(400).json({ error: 'Invalid remind_at date' });
+    const { rows } = await query(
+      `INSERT INTO user_reminders (username, title, remind_at) VALUES ($1, $2, $3) RETURNING id, title, remind_at, dismissed, created_at`,
+      [username, title.trim(), dt.toISOString()]
+    );
+    res.json({ reminder: rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/reminders/:id', requireAuth, async (req, res) => {
+  try {
+    const username = req.session.username;
+    const { dismissed } = req.body || {};
+    await query(`UPDATE user_reminders SET dismissed=$1 WHERE id=$2 AND username=$3`, [!!dismissed, parseInt(req.params.id), username]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/reminders/:id', requireAuth, async (req, res) => {
+  try {
+    const username = req.session.username;
+    await query(`DELETE FROM user_reminders WHERE id=$1 AND username=$2`, [parseInt(req.params.id), username]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

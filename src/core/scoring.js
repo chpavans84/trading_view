@@ -65,8 +65,10 @@ async function getBenzingaEarnings(symbol) {
   const latest          = reported[0];
   const eps_surprise_pct = latest ? (parseFloat(latest.eps_surprise_percent) || null) : null;
   const next_earnings_date = upc[0]?.date || null;
+  // beat_streak_known=false means no quarterly reports were found in DB — streak=0 is ambiguous
+  const beat_streak_known = reported.length > 0;
 
-  return { beat_streak, eps_surprise_pct, next_earnings_date };
+  return { beat_streak, eps_surprise_pct, next_earnings_date, beat_streak_known };
 }
 
 // Returns same shape as getSymbolNews(): { articles, guidance_signal, sources_used }
@@ -283,7 +285,7 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const _newsPromise     = _hasBz ? getBenzingaNews(ticker).catch(() => getSymbolNews({ symbol: ticker, limit: 10 }))     : getSymbolNews({ symbol: ticker, limit: 10 });
   const _surprisePromise = _hasBz ? getBenzingaEarnings(ticker).catch(() => getEarningsSurprise({ symbol: ticker }))      : getEarningsSurprise({ symbol: ticker });
 
-  const [driftRes, rsRes, newsRes, earningsRes, sentimentRes, insiderRes, surpriseRes, techRes, levelsRes, nameRes, rvolRes, weeklyRes, analystRes, shortRes, bzOptsRes, bzGuidRes] =
+  const [driftRes, rsRes, newsRes, earningsRes, sentimentRes, insiderRes, surpriseRes, techRes, levelsRes, nameRes, rvolRes, weeklyRes, analystRes, shortRes, bzOptsRes, bzGuidRes, sectorWeeklyRes] =
     await Promise.allSettled([
       getPreEarningsDrift({ symbol: ticker }),
       getRelativeStrength({ symbol: ticker, sector_etf: sectorEtf }),
@@ -305,28 +307,37 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
       getShortInterest(ticker),
       getBzOptionsSentiment(ticker),
       getBzGuidance({ symbol: ticker, limit: 5 }),
+      getWeeklyTrend(sectorEtf),   // sector ETF trend — tailwind/headwind for this stock
     ]);
 
-  const drift    = driftRes.status    === 'fulfilled' ? driftRes.value    : null;
-  const rs       = rsRes.status       === 'fulfilled' ? rsRes.value       : null;
-  const news     = newsRes.status     === 'fulfilled' ? newsRes.value     : null;
-  const earnings = earningsRes.status === 'fulfilled' ? earningsRes.value : null;
-  const sentiment= sentimentRes.status=== 'fulfilled' ? sentimentRes.value: null;
-  const insider  = insiderRes.status  === 'fulfilled' ? insiderRes.value  : null;
-  const surprise = surpriseRes.status === 'fulfilled' ? surpriseRes.value : null;
-  const tech     = techRes.status     === 'fulfilled' ? techRes.value     : null;
-  const levels   = levelsRes.status   === 'fulfilled' ? levelsRes.value   : null;
-  const name     = nameRes.status     === 'fulfilled' ? nameRes.value     : null;
-  const rvol     = rvolRes.status     === 'fulfilled' ? rvolRes.value     : null;
-  const weekly   = weeklyRes.status   === 'fulfilled' ? weeklyRes.value   : null;
-  const analyst  = analystRes.status  === 'fulfilled' ? analystRes.value  : null;
-  const short    = shortRes.status    === 'fulfilled' ? shortRes.value    : null;
-  const bzOpts   = bzOptsRes.status   === 'fulfilled' ? bzOptsRes.value   : null;
-  const bzGuid   = bzGuidRes.status   === 'fulfilled' ? bzGuidRes.value   : null;
+  const drift        = driftRes.status        === 'fulfilled' ? driftRes.value        : null;
+  const rs           = rsRes.status           === 'fulfilled' ? rsRes.value           : null;
+  const news         = newsRes.status         === 'fulfilled' ? newsRes.value         : null;
+  const earnings     = earningsRes.status     === 'fulfilled' ? earningsRes.value     : null;
+  const sentiment    = sentimentRes.status    === 'fulfilled' ? sentimentRes.value    : null;
+  const insider      = insiderRes.status      === 'fulfilled' ? insiderRes.value      : null;
+  const surprise     = surpriseRes.status     === 'fulfilled' ? surpriseRes.value     : null;
+  const tech         = techRes.status         === 'fulfilled' ? techRes.value         : null;
+  const levels       = levelsRes.status       === 'fulfilled' ? levelsRes.value       : null;
+  const name         = nameRes.status         === 'fulfilled' ? nameRes.value         : null;
+  const rvol         = rvolRes.status         === 'fulfilled' ? rvolRes.value         : null;
+  const weekly       = weeklyRes.status       === 'fulfilled' ? weeklyRes.value       : null;
+  const analyst      = analystRes.status      === 'fulfilled' ? analystRes.value      : null;
+  const short        = shortRes.status        === 'fulfilled' ? shortRes.value        : null;
+  const bzOpts       = bzOptsRes.status       === 'fulfilled' ? bzOptsRes.value       : null;
+  const bzGuid       = bzGuidRes.status       === 'fulfilled' ? bzGuidRes.value       : null;
+  const sectorWeekly = sectorWeeklyRes.status === 'fulfilled' ? sectorWeeklyRes.value : null;
 
   // Extract signal values
   const beat_streak       = surprise?.beat_streak        ?? 0;
+  // beat_streak_known=false means no historical EPS reports found — 0 may be a data gap not a real zero
+  const beat_streak_known = surprise != null && (surprise.beat_streak_known ?? surprise.beat_streak > 0);
   const earnings_quality  = earnings?.history?.[0]?.earnings_quality ?? null;
+
+  // Earnings play: next earnings within 14 days → reduce bearish options penalty (pre-earnings flow is noisy)
+  const nextEd = surprise?.next_earnings_date;
+  const daysToEarnings = nextEd ? (new Date(nextEd) - Date.now()) / 86_400_000 : null;
+  const isEarningsPlay = daysToEarnings != null && daysToEarnings >= 0 && daysToEarnings <= 14;
   const guidance_signal   = news?.guidance_signal        ?? 'neutral';
   const drift_direction   = drift?.drift_direction       ?? 'flat';
   const rs_signal         = rs?.signal                   ?? 'neutral';
@@ -380,11 +391,15 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     // Correlation — extra penalty when portfolio already holds a nearly identical stock
     correlated_position:  corrCheck.correlated          ? -20 : 0,
     // Unusual options flow — institutional smart money directional bets
+    // Bearish flow penalty is halved for earnings plays: pre-earnings options are hedges, not directional bets
     bz_options_bullish:   bzOpts === 'bullish' ? 12 : 0,
-    bz_options_bearish:   bzOpts === 'bearish' ? -12 : 0,
+    bz_options_bearish:   bzOpts === 'bearish' ? (isEarningsPlay ? -6 : -12) : 0,
     // Benzinga formal guidance — raised/lowered vs prior period
     bz_guidance_raised:   bzGuid?.guidance?.[0]?.direction === 'raised'  ?  10 : 0,
     bz_guidance_lowered:  bzGuid?.guidance?.[0]?.direction === 'lowered' ? -10 : 0,
+    // Sector momentum — if the sector ETF is in a weekly uptrend, stocks in that sector get a tailwind
+    // e.g. SOXX up → semis get +12; XLK down → tech stocks get -5
+    sector_momentum:      sectorWeekly == null ? 0 : sectorWeekly.trend === 'up' ? 12 : sectorWeekly.trend === 'down' ? -5 : 0,
     // Base score — starts at 20; a stock must earn its score through real signals
     base:                 20,
   };
@@ -467,6 +482,7 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
 
   const signals = {
     beat_streak,
+    beat_streak_known,
     earnings_quality,
     guidance_signal,
     drift_5d_pct:    drift?.drift_5d_pct    ?? null,
@@ -477,6 +493,11 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
     rvol,
     weekly_trend:        weekly?.trend        ?? null,
     weekly_pct_vs_ema:   weekly?.pct_vs_ema   ?? null,
+    sector_etf:          sectorEtf,
+    sector_weekly_trend: sectorWeekly?.trend  ?? null,
+    sector_pct_vs_ema:   sectorWeekly?.pct_vs_ema ?? null,
+    is_earnings_play:    isEarningsPlay,
+    days_to_earnings:    daysToEarnings != null ? Math.round(daysToEarnings) : null,
     analyst_consensus:   analyst?.consensus   ?? null,
     analyst_target:      analyst?.target_price ?? null,
     analyst_upside_pct:  analyst?.upside_pct  ?? null,

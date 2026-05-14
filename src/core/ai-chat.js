@@ -20,7 +20,7 @@ import {
 import { getConvictionScore } from './scoring.js';
 import {
   loadConversationHistory, appendConversationMessage, clearConversationHistory,
-  isDbAvailable,
+  isDbAvailable, query,
 } from './db.js';
 import { getChartTechnicals, getPriceLevels, getOHLCVSummary } from './tradingview-bridge.js';
 import {
@@ -690,6 +690,19 @@ export const TOOLS = [
     description: 'Scan for pre-market explosive movers and catalysts — CNSP/SKK/GBTG-type setups. Runs 4 detectors in parallel: (1) pre-market gap screener (≥5% gap, >100K volume), (2) SEC 8-K filings from last few hours (acquisitions, press releases, material events), (3) low-float setups (<20M float + RVOL>1.5), (4) biotech/pharma catalyst news (FDA/PDUFA/clinical trial headlines from last 72h). Use this before market open or when looking for high-momentum small-cap plays. Results are cached 10 minutes.',
     input_schema: { type: 'object', properties: {} },
   },
+
+  {
+    name: 'set_reminder',
+    description: 'Create a reminder for the user at a specific date/time. Use when the user says things like "remind me to check AAPL at 3pm", "set a reminder for tomorrow at 9am", or "alert me before earnings". Always confirm the scheduled time back to the user after saving.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title:     { type: 'string', description: 'Reminder text / title shown to the user.' },
+        remind_at: { type: 'string', description: 'ISO 8601 datetime string (e.g. "2026-05-13T09:00:00") for when to fire the reminder. Convert relative expressions like "tomorrow at 9am" to absolute ISO using the current date.' },
+      },
+      required: ['title', 'remind_at'],
+    },
+  },
 ];
 
 const _CHAT_PROFILE_PRESETS = {
@@ -1261,6 +1274,18 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
       }
 
       case 'scan_catalyst_movers':      return await runCatalystScan();
+
+      case 'set_reminder': {
+        if (!username) return { error: 'Not logged in — cannot create reminder.' };
+        const { title, remind_at } = input;
+        const dt = new Date(remind_at);
+        if (isNaN(dt.getTime())) return { error: `Invalid date/time: ${remind_at}` };
+        const { rows } = await query(
+          `INSERT INTO user_reminders (username, title, remind_at) VALUES ($1, $2, $3) RETURNING id`,
+          [username, title.trim(), dt.toISOString()]
+        );
+        return { ok: true, id: rows[0].id, title: title.trim(), remind_at: dt.toISOString() };
+      }
 
       default:                         return { error: `Unknown tool: ${name}` };
     }

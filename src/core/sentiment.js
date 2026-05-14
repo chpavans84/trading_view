@@ -8,6 +8,7 @@
 
 import { getQuotes as moomooGetQuotes, getKLines } from './moomoo-tcp.js';
 import { getBzEarnings, isBenzingaConfigured } from './benzinga.js';
+import { getAllWatchlistSymbols } from './db.js';
 
 const YF_BASE = 'https://query2.finance.yahoo.com';
 
@@ -580,9 +581,13 @@ async function fetchDynamicUniverse() {
     } catch { return []; }
   };
 
-  // ── Pre-fetch upcoming earnings — always included regardless of momentum ────────
-  const earningsSyms = await fetchUpcomingEarningsSymbols(3).catch(() => []);
-  if (earningsSyms.length) console.log(`[universe] Upcoming earnings: ${earningsSyms.join(', ')}`);
+  // ── Pre-fetch upcoming earnings + all-user watchlists ────────────────────────
+  const [earningsSyms, watchlistSyms] = await Promise.all([
+    fetchUpcomingEarningsSymbols(7).catch(() => []),
+    getAllWatchlistSymbols().catch(() => []),
+  ]);
+  if (earningsSyms.length) console.log(`[universe] Upcoming earnings (7d): ${earningsSyms.join(', ')}`);
+  if (watchlistSyms.length) console.log(`[universe] Watchlist symbols: ${watchlistSyms.join(', ')}`);
 
   // ── Tier 1: Yahoo Finance screeners ──────────────────────────────────────────
   try {
@@ -596,14 +601,14 @@ async function fetchDynamicUniverse() {
     const anyOk = [trendRes, gainRes, activeRes, loserRes].some(r => r.status === 'fulfilled');
     if (!anyOk) throw new Error('all Yahoo sources returned errors');
 
-    // Earnings symbols go first so they survive the 120-symbol cap
-    const syms = new Set([...earningsSyms, ...CORE_ALWAYS_SCAN]);
+    // Earnings + watchlist symbols go first so they survive the cap
+    const syms = new Set([...earningsSyms, ...watchlistSyms, ...CORE_ALWAYS_SCAN]);
     if (trendRes.status  === 'fulfilled') extractTrending(trendRes.value).forEach(s => syms.add(s));
     if (gainRes.status   === 'fulfilled') extractScreener(gainRes.value).forEach(s => syms.add(s));
     if (activeRes.status === 'fulfilled') extractScreener(activeRes.value).forEach(s => syms.add(s));
     if (loserRes.status  === 'fulfilled') extractScreener(loserRes.value).forEach(s => syms.add(s));
 
-    const result = [...syms].slice(0, 120);
+    const result = [...syms].slice(0, 200);
     _universeCache = { symbols: result, ts: Date.now(), source: 'yahoo' };
     console.log(`[universe] Yahoo: ${result.length} symbols`);
     return result;
@@ -622,7 +627,7 @@ async function fetchDynamicUniverse() {
         fetch(`${ALPACA_DATA}/v1beta1/screener/stocks/top-market-movers?market_type=stocks`, { headers: aHeaders }).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))),
       ]);
 
-      const syms = new Set([...earningsSyms, ...CORE_ALWAYS_SCAN]);
+      const syms = new Set([...earningsSyms, ...watchlistSyms, ...CORE_ALWAYS_SCAN]);
       if (activesRes.status === 'fulfilled') {
         (activesRes.value?.most_actives ?? [])
           .filter(s => isValidSym(s.symbol))
@@ -638,7 +643,7 @@ async function fetchDynamicUniverse() {
       const anyAlpacaOk = [activesRes, moversRes].some(r => r.status === 'fulfilled');
       if (!anyAlpacaOk) throw new Error('both Alpaca screener endpoints failed');
 
-      const result = [...syms].slice(0, 120);
+      const result = [...syms].slice(0, 200);
       _universeCache = { symbols: result, ts: Date.now(), source: 'alpaca' };
       console.log(`[universe] Alpaca screener: ${result.length} symbols`);
       return result;

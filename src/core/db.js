@@ -539,6 +539,30 @@ CREATE TABLE IF NOT EXISTS agent_error_log (
 );
 CREATE INDEX IF NOT EXISTS idx_errlog_created ON agent_error_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_errlog_source  ON agent_error_log(source);
+
+CREATE TABLE IF NOT EXISTS user_notes (
+  id         SERIAL PRIMARY KEY,
+  username   VARCHAR(100) NOT NULL,
+  symbol     VARCHAR(20),
+  content    TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  title      VARCHAR(255) NOT NULL DEFAULT '',
+  body       TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_user_notes_username ON user_notes(username, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS user_reminders (
+  id          SERIAL PRIMARY KEY,
+  username    VARCHAR(100) NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  remind_at   TIMESTAMPTZ NOT NULL,
+  done        BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  emailed_at  TIMESTAMPTZ,
+  dismissed   BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_user_reminders_username ON user_reminders(username, remind_at);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -565,16 +589,27 @@ export async function initDb() {
     console.error('DB pool error:', err.message);
   });
 
-  try {
-    const client = await pool.connect();
-    await client.query(SCHEMA);
-    client.release();
-    dbAvailable = true;
-    console.log('✅ Database connected and schema ready');
-  } catch (err) {
-    console.warn(`⚠️  Database unavailable (${err.message}) — running without database`);
-    await pool.end().catch(() => {});
-    pool = null;
+  const RETRYABLE = ['deadlock detected', 'could not serialize', 'canceling statement'];
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const client = await pool.connect();
+      await client.query(SCHEMA);
+      client.release();
+      dbAvailable = true;
+      console.log('✅ Database connected and schema ready');
+      return;
+    } catch (err) {
+      const isRetryable = RETRYABLE.some(s => err.message.includes(s));
+      if (isRetryable && attempt < 3) {
+        console.warn(`⚠️  DB schema attempt ${attempt} failed (${err.message}) — retrying in ${attempt * 2}s…`);
+        await new Promise(r => setTimeout(r, attempt * 2000));
+        continue;
+      }
+      console.warn(`⚠️  Database unavailable (${err.message}) — running without database`);
+      await pool.end().catch(() => {});
+      pool = null;
+      return;
+    }
   }
 }
 
@@ -1946,6 +1981,18 @@ export async function removeUserWatchlistSymbol(username, symbol) {
     );
   } catch (err) {
     console.error('removeUserWatchlistSymbol error:', err.message);
+  }
+}
+
+// All distinct watchlist symbols across every user — used to guarantee scanner coverage
+export async function getAllWatchlistSymbols() {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows } = await query(`SELECT DISTINCT symbol FROM user_watchlist ORDER BY symbol`);
+    return rows.map(r => r.symbol);
+  } catch (err) {
+    console.error('getAllWatchlistSymbols error:', err.message);
+    return [];
   }
 }
 

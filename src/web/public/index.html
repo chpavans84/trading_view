@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260514a">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -14,7 +14,7 @@
 <title>Trading Bot Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <script>
 // Error capture — runs before any other JS so we catch early failures too
 (function(){
@@ -141,6 +141,8 @@
             <div class="theme-swatch" data-theme="tokyo"     title="Tokyo Night"    onclick="applyTheme('tokyo')"     style="width:28px;height:28px;border-radius:50%;background:#7aa2f7;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
             <div class="theme-swatch" data-theme="solarized" title="Solarized Dark" onclick="applyTheme('solarized')" style="width:28px;height:28px;border-radius:50%;background:#268bd2;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
             <div class="theme-swatch" data-theme="cyberpunk" title="Cyberpunk"      onclick="applyTheme('cyberpunk')" style="width:28px;height:28px;border-radius:50%;background:#f72585;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="matrix"      title="Matrix Green"   onclick="applyTheme('matrix')"      style="width:28px;height:28px;border-radius:50%;background:#00ff41;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
+            <div class="theme-swatch" data-theme="bluematrix" title="Matrix Blue"    onclick="applyTheme('bluematrix')"  style="width:28px;height:28px;border-radius:50%;background:#00e5ff;cursor:pointer;transition:transform .18s,outline .18s;flex-shrink:0"></div>
           </div>
         </div>
         <div class="udrop-divider"></div>
@@ -159,7 +161,7 @@
 
 <nav>
   <div class="nav-tabs">
-    <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">Dashboard</button>
+    <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">P&amp;L Dashboard</button>
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
@@ -171,6 +173,7 @@
     <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">🔐 Admin</button>
   </div>
   <div class="nav-bot">
+    <button class="nav-notif-btn" id="notesDrawerToggle" onclick="toggleNotesDrawer()" title="Notes & Reminders">📝</button>
     <button class="nav-notif-btn" id="newsDrawerToggle" title="Live Market News">📰</button>
     <button class="nav-notif-btn" id="navNotifBtn" onclick="toggleNotifPanel()" title="AI Notifications">
       🔔<span id="notifBadge"></span>
@@ -197,16 +200,23 @@
 <!-- ── DAILY P&L ──────────────────────────────────────── -->
 <!-- ── DASHBOARD ─────────────────────────────────────── -->
 <div class="page active" id="page-dashboard">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <span style="color:#8b949e;font-size:0.85rem" id="dashSourceLabel">📄 Alpaca Paper Trading</span>
-    <button class="force-btn" onclick="openTradeModal()">⚡ Force Trade</button>
-  </div>
-  <!-- Broker fee strip — hidden for paper, shown for real brokers -->
-  <div id="brokerFeeStrip" style="display:none;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:0.78rem;color:#8b949e;align-items:center;gap:10px;flex-wrap:wrap"></div>
+  <div class="pnl-layout">
 
-  <div class="cards" id="dashCards" style="margin-bottom:0">
-    <div class="loading">Loading...</div>
-  </div>
+    <!-- ── LEFT SIDEBAR: account metrics ──────────────── -->
+    <aside class="pnl-sidebar">
+      <div class="pnl-sidebar-top">
+        <span id="dashSourceLabel" class="pnl-acct-badge">📄 Alpaca Paper Trading</span>
+        <button class="force-btn" onclick="openTradeModal()" style="width:100%;margin-top:6px">⚡ Force Trade</button>
+      </div>
+      <div class="cards" id="dashCards" style="margin-bottom:0">
+        <div class="loading">Loading...</div>
+      </div>
+      <!-- Broker fee strip -->
+      <div id="brokerFeeStrip" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-top:8px;font-size:0.75rem;color:var(--text2);flex-wrap:wrap;gap:8px"></div>
+    </aside>
+
+    <!-- ── RIGHT MAIN: positions + P&L ───────────────── -->
+    <div class="pnl-main">
   <!-- ── Trading Tables — tabbed widget ─────────────── -->
   <div class="table-wrap trading-widget">
     <div class="widget-tab-strip">
@@ -318,6 +328,7 @@
         <div class="loading">Loading...</div>
       </div>
     </div>
+
   </div>
 
   <!-- Moomoo Portfolio Risk Panel — shown only when source = moomoo -->
@@ -332,7 +343,8 @@
       </div>
     </div>
   </div>
-
+    </div><!-- /pnl-main -->
+  </div><!-- /pnl-layout -->
 </div>
 
 <!-- ── SCORES ─────────────────────────────────────────── -->
@@ -4037,6 +4049,68 @@ erDiagram
     <button class="chat-send" id="chatSend" onclick="sendChat()">Send ↵</button>
   </div>
 </div>
+<!-- ── Notes & Reminders Drawer ── -->
+<div id="notesDrawerBackdrop" onclick="toggleNotesDrawer()"></div>
+<div id="notesDrawer">
+  <div class="nd-header">
+    <h4>📝 Notes &amp; Reminders</h4>
+    <div class="nd-header-actions">
+      <button class="nd-hbtn" onclick="toggleNotesDrawer()" title="Close">✕</button>
+    </div>
+  </div>
+  <!-- Scrollable body — both sections stacked -->
+  <div style="overflow-y:auto;flex:1;display:flex;flex-direction:column">
+    <!-- ── NOTES ── -->
+    <div id="ndrSectionNotes">
+      <div style="padding:8px 14px;font-size:0.72rem;font-weight:700;color:#484f58;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid var(--border)">📝 Notes</div>
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border)">
+        <input id="ndrNoteTitle" type="text" placeholder="Title (optional)" maxlength="255"
+          style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:0.82rem;outline:none;margin-bottom:6px"
+          onkeydown="if(event.key==='Enter')document.getElementById('ndrNoteBody').focus()">
+        <div style="position:relative">
+          <textarea id="ndrNoteBody" placeholder="Write your note… type @ to tag a stock (Ctrl+Enter to save)" rows="3"
+            style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:0.82rem;outline:none;resize:none;font-family:inherit;line-height:1.45"
+            onkeydown="if(event.ctrlKey&&event.key==='Enter')ndrSaveNote()"
+            oninput="ndrNoteBodyInput(this)"></textarea>
+          <div id="ndrNoteAtDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1c2128;border:1px solid #30363d;border-radius:6px;z-index:9999;max-height:160px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.5)"></div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+          <span id="ndrNoteSymTag" style="font-size:0.72rem;color:var(--accent);display:none"></span>
+          <button onclick="ndrSaveNote()" style="margin-left:auto;background:#238636;border:none;border-radius:6px;padding:5px 14px;color:#fff;cursor:pointer;font-size:0.8rem;font-weight:600">Save</button>
+        </div>
+        <div id="ndrNoteSaveMsg" style="display:none;font-size:0.75rem;margin-top:4px"></div>
+      </div>
+      <div id="ndrNotesList" style="padding:8px 14px;display:flex;flex-direction:column;gap:6px;min-height:44px">
+        <div style="color:#484f58;font-size:0.8rem;text-align:center;padding:12px 0">Loading notes…</div>
+      </div>
+    </div>
+    <!-- Section divider -->
+    <div style="height:8px;background:rgba(255,255,255,0.03);border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-shrink:0"></div>
+    <!-- ── REMINDERS ── -->
+    <div id="ndrSectionReminders">
+      <div style="padding:8px 14px;font-size:0.72rem;font-weight:700;color:#484f58;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid var(--border)">⏰ Reminders</div>
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border);position:relative">
+        <div style="position:relative">
+          <input id="ndrRemTitle" type="text" placeholder="Reminder title… (type @ to tag a stock)" maxlength="255" autocomplete="off"
+            style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;color:#e6edf3;font-size:0.82rem;outline:none"
+            oninput="ndrRemTitleInput(this)">
+          <div id="ndrAtDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1c2128;border:1px solid #30363d;border-radius:6px;z-index:9999;max-height:160px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.5)"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <input id="ndrRemDate" type="date" style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 8px;color:#e6edf3;font-size:0.8rem;outline:none">
+          <input id="ndrRemTime" type="time" style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 8px;color:#e6edf3;font-size:0.8rem;outline:none">
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px">
+          <button onclick="ndrSaveReminder()" style="background:#238636;border:none;border-radius:6px;padding:5px 14px;color:#fff;cursor:pointer;font-size:0.8rem;font-weight:600">Set Reminder</button>
+        </div>
+        <div id="ndrRemSaveMsg" style="display:none;font-size:0.75rem;margin-top:4px"></div>
+      </div>
+      <div id="ndrRemList" style="padding:8px 14px;display:flex;flex-direction:column;gap:6px;min-height:44px">
+        <div style="color:#484f58;font-size:0.8rem;text-align:center;padding:12px 0">Loading reminders…</div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- ── Floating News Drawer ──────────────────────────────── -->
 <div id="newsDrawer">
   <div class="nd-header">
@@ -6445,6 +6519,37 @@ function _feTabSync() {
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
   });
+
+  // Touch equivalents for iPad/tablet resize
+  document.addEventListener('touchstart', e => {
+    if (!e.target.closest('#feResizeTab')) return;
+    const panel = document.getElementById('floatExplorer');
+    if (!panel) return;
+    dragging = true;
+    startX = e.touches[0].clientX;
+    startW = panel.offsetWidth;
+    document.getElementById('feResizeTab')?.classList.add('fe-tab-active');
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchmove', e => {
+    if (!dragging) return;
+    const panel = document.getElementById('floatExplorer');
+    if (!panel) return;
+    const newW = Math.max(300, Math.min(Math.round(window.innerWidth * 0.92), startW + (e.touches[0].clientX - startX)));
+    panel.style.width = newW + 'px';
+    document.documentElement.style.setProperty('--explorer-w', newW + 'px');
+    _feTabSync();
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchend', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.getElementById('feResizeTab')?.classList.remove('fe-tab-active');
+    document.body.style.userSelect = '';
+  });
 })();
 
 // ── Explorer panel width cycle (⊞ button) ─────────────────────────────────────
@@ -7444,7 +7549,7 @@ async function posClose(symbol, btn) {
   btn.disabled = true; btn.textContent = '⏳';
   if (msgEl) { msgEl.style.color = '#8b949e'; msgEl.textContent = 'Closing…'; }
   try {
-    const r = await fetch('/api/trade/close', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol}) });
+    const r = await fetch('/api/trade/close', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, source: currentSource}) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Close failed');
     if (msgEl) { msgEl.style.color = '#3fb950'; msgEl.textContent = '✓ Position closed'; }
@@ -7481,7 +7586,7 @@ async function posBuyMore(symbol, btn) {
   btn.disabled = true; btn.textContent = '⏳';
   if (msgEl) { msgEl.style.color = '#8b949e'; msgEl.textContent = 'Placing…'; }
   try {
-    const r = await fetch('/api/trade/quick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, side:'buy', qty, order_type:'market'}) });
+    const r = await fetch('/api/trade/quick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, side:'buy', qty, order_type:'market', source: currentSource}) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Order failed');
     if (msgEl) { msgEl.style.color = '#3fb950'; msgEl.textContent = `✓ Bought ${qty} more ${symbol}`; }
@@ -7501,7 +7606,7 @@ async function posSellPartial(symbol, btn) {
   btn.disabled = true; btn.textContent = '⏳';
   if (msgEl) { msgEl.style.color = '#8b949e'; msgEl.textContent = 'Placing…'; }
   try {
-    const r = await fetch('/api/trade/quick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, side:'sell', qty, order_type:'market'}) });
+    const r = await fetch('/api/trade/quick', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol, side:'sell', qty, order_type:'market', source: currentSource}) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Order failed');
     if (msgEl) { msgEl.style.color = '#e3b341'; msgEl.textContent = `✓ Sold ${qty} ${symbol}`; }
@@ -8038,9 +8143,12 @@ function renderCatalystPerf(data) {
       : `<span class="cp-badge-bmo">BMO</span>`;
     const noPrices = r.entry_price == null || r.exit_price == null;
     const noData   = noPrices && r.entry_price == null;
-    const scoreBadge = grade
-      ? `<span style="font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:4px;background:${gradeColor[grade]}22;color:${gradeColor[grade]};border:1px solid ${gradeColor[grade]}55">${grade} · ${gradeLabel[grade]}</span>`
-      : `<span style="font-size:0.65rem;padding:2px 7px;border-radius:4px;background:#21262d;color:#484f58;border:1px solid #30363d" title="This stock was not in the scanner universe before earnings">Not in scanner</span>`;
+    const noSignal = grade === 'F' && score === 0;
+    const scoreBadge = !grade
+      ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:4px;background:#21262d;color:#484f58;border:1px solid #30363d" title="This stock was not in the scanner universe before earnings">Not in scanner</span>`
+      : noSignal
+      ? `<span style="font-size:0.65rem;padding:2px 7px;border-radius:4px;background:#21262d;color:#8b949e;border:1px solid #30363d" title="Scoring data was unavailable for this stock on the scan date">No Signal</span>`
+      : `<span style="font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:4px;background:${gradeColor[grade]}22;color:${gradeColor[grade]};border:1px solid ${gradeColor[grade]}55">${grade} · ${gradeLabel[grade]}</span>`;
     return `<div class="cp-card">
       <div class="cp-card-top">
         <div>
@@ -13539,6 +13647,10 @@ function restoreChatPos() {
     const w = document.getElementById('chatWidget');
     const p = JSON.parse(localStorage.getItem(CHAT_POS_KEY));
     if (!p?.left) return;
+    const left = parseInt(p.left);
+    const top  = parseInt(p.top);
+    // Discard saved position if it falls outside the current viewport
+    if (left < 0 || top < 0 || left > window.innerWidth - 80 || top > window.innerHeight - 80) return;
     // Apply saved position, then re-clamp after layout using actual rendered dimensions
     w.style.right  = 'auto';
     w.style.bottom = 'auto';
@@ -13588,6 +13700,40 @@ function restoreChatPos() {
       header.style.cursor = 'grab';
       try { localStorage.setItem(CHAT_POS_KEY, JSON.stringify({ left: widget.style.left, top: widget.style.top })); } catch {}
     });
+
+    // Touch drag for iPad/tablet
+    header.addEventListener('touchstart', e => {
+      if (e.target.closest('button')) return;
+      const rect = widget.getBoundingClientRect();
+      widget.style.right  = 'auto';
+      widget.style.bottom = 'auto';
+      widget.style.left   = rect.left + 'px';
+      widget.style.top    = rect.top  + 'px';
+      dragging  = true;
+      startX    = e.touches[0].clientX;
+      startY    = e.touches[0].clientY;
+      startLeft = rect.left;
+      startTop  = rect.top;
+      e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchmove', e => {
+      if (!dragging) return;
+      const newLeft = Math.max(0, Math.min(startLeft + (e.touches[0].clientX - startX), window.innerWidth  - widget.offsetWidth));
+      const newTop  = Math.max(0, Math.min(startTop  + (e.touches[0].clientY - startY), window.innerHeight - widget.offsetHeight));
+      widget.style.left = newLeft + 'px';
+      widget.style.top  = newTop  + 'px';
+      _chatWasDragging = true;
+      e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchend', () => {
+      if (!dragging) return;
+      dragging = false;
+      header.style.cursor = 'grab';
+      try { localStorage.setItem(CHAT_POS_KEY, JSON.stringify({ left: widget.style.left, top: widget.style.top })); } catch {}
+      setTimeout(() => { _chatWasDragging = false; }, 200);
+    });
   });
 })();
 
@@ -13620,7 +13766,7 @@ function restoreChatPos() {
   });
 })();
 
-let _chatOpenAt = 0;
+let _chatOpenAt = 0, _chatWasDragging = false;
 function toggleChat() {
   const widget = document.getElementById('chatWidget');
   const fab    = document.getElementById('chatFab');
@@ -13660,6 +13806,7 @@ document.addEventListener('click', function(e) {
   const fab    = document.getElementById('chatFab');
   if (!widget || !widget.classList.contains('open')) return;
   if (Date.now() - _chatOpenAt < 300) return; // ignore the click that opened it
+  if (_chatWasDragging) return;               // ignore synthetic click after touch drag
   if (!widget.contains(e.target) && (!fab || !fab.contains(e.target))) toggleChat();
 });
 
@@ -14327,7 +14474,7 @@ function exploreSymbol(sym) {
 <div class="float-explorer" id="floatExplorer">
   <!-- Drag handle / header -->
   <div class="float-explorer-header" id="floatExplorerHeader">
-    <div class="explorer-search-wrap" id="explorerSearchWrap" style="flex:1;max-width:380px">
+    <div class="explorer-search-wrap" id="explorerSearchWrap" style="flex:1;min-width:80px;max-width:380px">
       <span class="explorer-search-icon">🔍</span>
       <input id="explorerSymbol" type="text" placeholder="Ticker or company name…" autocomplete="off" spellcheck="false"
         class="explorer-search-input"
@@ -14340,6 +14487,7 @@ function exploreSymbol(sym) {
     <button id="explorerWlBtn" class="wl-heart" data-wl-sym="" onclick="explorerToggleWatchlist()" title="Add to Watchlist" style="font-size:1.2rem;padding:4px 6px;display:none;flex-shrink:0;opacity:1">🤍</button>
     <button id="qtToggleBtn" onclick="toggleQuickTrade()" title="Quick Trade" style="background:#1a1f3a;border:1px solid #58a6ff;border-radius:6px;padding:6px 12px;color:#58a6ff;cursor:pointer;font-size:0.82rem;font-weight:600;white-space:nowrap;flex-shrink:0">⚡ Trade</button>
     <button id="feExpandBtn" onclick="cycleExplorerWidth()" title="Expand panel" style="background:none;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#8b949e;cursor:pointer;font-size:1rem;line-height:1;flex-shrink:0;transition:all 0.15s" onmouseover="this.style.color='#e6edf3';this.style.borderColor='#58a6ff'" onmouseout="this.style.color='#8b949e';this.style.borderColor='#30363d'">⊞</button>
+    <button onclick="openExplorerNote()" title="Add note for this stock" style="background:none;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#8b949e;cursor:pointer;font-size:1rem;line-height:1;flex-shrink:0;transition:all 0.15s" onmouseover="this.style.color='#e6edf3';this.style.borderColor='#58a6ff'" onmouseout="this.style.color='#8b949e';this.style.borderColor='#30363d'">📝</button>
     <button class="float-explorer-close" onclick="closeFloatExplorer()" title="Close">✕</button>
   </div>
 
@@ -14456,6 +14604,7 @@ function exploreSymbol(sym) {
     <button id="exTabChart"  onclick="switchExplorerTab('chart')"   style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--accent);border-bottom:2px solid var(--accent)">📈 Chart</button>
     <button id="exTabBrowse" onclick="switchExplorerTab('browse')"  style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">📋 Browse</button>
     <button id="exTabPortfolio" onclick="switchExplorerTab('portfolio')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">🏢 Company</button>
+    <button id="exTabAiChat" onclick="switchExplorerTab('aichat')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">🤖 AI Chat</button>
   </div>
 
   <!-- Scrollable body -->
@@ -14655,25 +14804,48 @@ function exploreSymbol(sym) {
         <div id="exCompanyExecs"></div>
       </div>
     </div>
+
+    <!-- ── AI CHAT VIEW ── -->
+    <div id="exViewAiChat" style="display:none;flex-direction:column;height:100%">
+      <div id="exAiSymbolBanner" style="padding:6px 12px;font-size:0.75rem;color:var(--text2);background:var(--card-bg);border-bottom:1px solid var(--border);flex-shrink:0">
+        Ask Akshaya AI about a stock — search a symbol first or type your question freely.
+      </div>
+      <!-- Chat messages -->
+      <div id="exAiMessages" style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-height:200px">
+        <div style="text-align:center;color:#484f58;font-size:0.78rem;padding:24px 0">Ask anything about stocks, markets, or your portfolio.</div>
+      </div>
+      <!-- Input -->
+      <div style="flex-shrink:0;border-top:1px solid var(--border);padding:10px 12px;background:var(--card-bg);display:flex;gap:8px;align-items:flex-end">
+        <textarea id="exAiInput" placeholder="Ask about the stock…" rows="2"
+          style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 10px;color:#e6edf3;font-size:0.82rem;outline:none;resize:none;font-family:inherit;line-height:1.45"
+          onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){exAiSend();return false}"></textarea>
+        <button onclick="exAiSend()" id="exAiSendBtn"
+          style="background:var(--accent);border:none;border-radius:8px;padding:8px 14px;color:#000;cursor:pointer;font-size:0.85rem;font-weight:700;white-space:nowrap;align-self:flex-end;min-height:36px">
+          Send
+        </button>
+      </div>
+      <div style="padding:2px 12px 6px;font-size:0.65rem;color:#484f58;flex-shrink:0">Ctrl+Enter to send</div>
+    </div>
   </div>
 </div>
 
 <script>
 // ── Explorer tab switching ─────────────────────────────────────────────────
 function switchExplorerTab(tab) {
-  const views = { chart: 'exViewChart', browse: 'exViewBrowse', portfolio: 'exViewPortfolio' };
-  const btns  = { chart: 'exTabChart',  browse: 'exTabBrowse',  portfolio: 'exTabPortfolio'  };
+  const views = { chart: 'exViewChart', browse: 'exViewBrowse', portfolio: 'exViewPortfolio', aichat: 'exViewAiChat' };
+  const btns  = { chart: 'exTabChart',  browse: 'exTabBrowse',  portfolio: 'exTabPortfolio',  aichat: 'exTabAiChat'  };
   Object.keys(views).forEach(t => {
     const v = document.getElementById(views[t]);
     const b = document.getElementById(btns[t]);
     if (!v || !b) return;
     const active = t === tab;
-    v.style.display          = active ? (t === 'browse' ? 'flex' : '') : 'none';
+    v.style.display          = active ? (t === 'browse' || t === 'aichat' ? 'flex' : '') : 'none';
     b.style.color            = active ? 'var(--accent)' : 'var(--text2)';
     b.style.borderBottomColor= active ? 'var(--accent)' : 'transparent';
   });
   if (tab === 'portfolio') loadExplorerCompany();
   if (tab === 'browse')    loadExplorerUniverse();
+  if (tab === 'aichat')    exAiUpdateBanner();
 }
 
 // ─── Market Pulse Strip ───────────────────────────────────────────────────────
@@ -15151,13 +15323,14 @@ function openFloatExplorer() {
     return;
   }
 
-  // First open: LEFT side, push mode (content shifts right, no overlay)
+  // First open: LEFT side
   panel.classList.add('dock-left');
   panel.style.left  = '0';
   panel.style.right = 'auto';
   panel.classList.add('open');
   document.getElementById('tab-explorer').classList.add('active');
-  if (window.innerWidth > 768) {
+  if (window.innerWidth > 1024) {
+    // Desktop: push content to the right
     document.body.classList.remove('explorer-open');
     document.body.classList.add('explorer-left');
     requestAnimationFrame(() => {
@@ -15165,6 +15338,10 @@ function openFloatExplorer() {
       document.documentElement.style.setProperty('--explorer-w', w + 'px');
       _explorerSyncTop();
     });
+  } else if (window.innerWidth > 768) {
+    // Tablet: overlay mode — show backdrop, don't push content
+    document.body.classList.remove('explorer-open', 'explorer-left');
+    document.getElementById('explorerBackdrop')?.classList.add('active');
   }
   loadExplorerSymbols();
   document.getElementById('explorerSymbol').focus();
@@ -15803,11 +15980,18 @@ function applyTheme(id, save = true) {
     tokyo:    { '--bg':'#1a1b2e','--bg2':'#24253a','--surface':'#2f3148','--border':'rgba(59,61,90,0.8)','--text':'#c0caf5','--text2':'#a9b1d6','--muted':'#565f89','--faint':'#414868','--accent':'#7aa2f7','--accent-l':'#9eceff','--green':'#9ece6a','--red':'#f7768e','--yellow':'#e0af68','--nav-bg':'rgba(26,27,46,0.88)','--card-bg':'linear-gradient(135deg,rgba(36,37,58,.92) 0%,rgba(26,27,46,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(36,37,58,.94) 0%,rgba(26,27,46,.90) 100%)','--body-grad':'radial-gradient(ellipse 80% 50% at 20% -10%,rgba(122,162,247,.13) 0%,transparent 60%)','--ticker-bg':'#1a1b2e','--term-bg':'#1a1b2e','--term-fg':'#c0caf5','--term-cur':'#7aa2f7' },
     solarized:{ '--bg':'#002b36','--bg2':'#073642','--surface':'#0d4858','--border':'rgba(27,88,106,0.8)','--text':'#fdf6e3','--text2':'#eee8d5','--muted':'#839496','--faint':'#657b83','--accent':'#268bd2','--accent-l':'#4cb8f0','--green':'#859900','--red':'#dc322f','--yellow':'#b58900','--nav-bg':'rgba(0,43,54,0.88)','--card-bg':'linear-gradient(135deg,rgba(13,72,88,.92) 0%,rgba(0,43,54,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(13,72,88,.94) 0%,rgba(0,43,54,.88) 100%)','--body-grad':'none','--ticker-bg':'#002b36','--term-bg':'#002b36','--term-fg':'#fdf6e3','--term-cur':'#268bd2' },
     cyberpunk:{ '--bg':'#0a0a0f','--bg2':'#111120','--surface':'#181830','--border':'rgba(37,37,80,0.8)','--text':'#e0e0ff','--text2':'#c0c0e0','--muted':'#7070b0','--faint':'#505080','--accent':'#f72585','--accent-l':'#ff60a8','--green':'#06d6a0','--red':'#ef233c','--yellow':'#ffbe0b','--nav-bg':'rgba(10,10,15,0.90)','--card-bg':'linear-gradient(135deg,rgba(24,24,48,.92) 0%,rgba(10,10,15,.88) 100%)','--table-bg':'linear-gradient(160deg,rgba(24,24,48,.94) 0%,rgba(10,10,15,.88) 100%)','--body-grad':'radial-gradient(ellipse 80% 50% at 20% -10%,rgba(247,37,133,.15) 0%,transparent 60%)','--ticker-bg':'#0a0a0f','--term-bg':'#0a0a0f','--term-fg':'#e0e0ff','--term-cur':'#f72585' },
+    matrix:      { '--bg':'#000000','--bg2':'#000000','--surface':'#080808','--border':'rgba(0,255,65,0.15)','--text':'#00ff41','--text2':'#00bb2a','--muted':'#336633','--faint':'#0f0f0f','--accent':'#00ff41','--accent-l':'#39ff14','--green':'#00ff41','--red':'#ff3333','--yellow':'#aaff00','--nav-bg':'rgba(0,0,0,0.98)','--card-bg':'#000000','--table-bg':'#000000','--body-grad':'none','--ticker-bg':'#000000','--term-bg':'#000000','--term-fg':'#00ff41','--term-cur':'#00ff41','--bg-img-opacity':'0' },
+    bluematrix:  { '--bg':'#000000','--bg2':'#000000','--surface':'#080808','--border':'rgba(0,229,255,0.15)','--text':'#00e5ff','--text2':'#00aacc','--muted':'#006688','--faint':'#0f0f0f','--accent':'#00e5ff','--accent-l':'#7fffd4','--green':'#00e5ff','--red':'#ff3355','--yellow':'#00ccff','--nav-bg':'rgba(0,0,0,0.98)','--card-bg':'#000000','--table-bg':'#000000','--body-grad':'none','--ticker-bg':'#000000','--term-bg':'#000000','--term-fg':'#00e5ff','--term-cur':'#00e5ff','--bg-img-opacity':'0' },
   };
   var vars = THEME_VARS[id] || THEME_VARS['vexai'];
   _currentTheme = id;
   const root = document.documentElement;
+  root.setAttribute('data-theme', id);   // activate CSS [data-theme] selectors
   Object.entries(vars).forEach(([k, v]) => root.style.setProperty(k, v));
+  // Matrix themes: monospace font + hide background image
+  const isMatrix = id === 'matrix' || id === 'bluematrix';
+  document.body.style.fontFamily = isMatrix ? "'Share Tech Mono', monospace" : '';
+  if (!isMatrix) root.style.setProperty('--bg-img-opacity', '0.10');
   if (save) localStorage.setItem('theme', id);
 
   if (typeof _term !== 'undefined' && _term) {
@@ -16969,6 +17153,415 @@ function analyzeNewsItem(ticker, headline) {
 <div style="position:fixed;bottom:0;left:0;right:0;background:#0a0a0a;border-top:1px solid #1e1e1e;padding:5px 16px;text-align:center;font-size:11px;color:#444;z-index:500;pointer-events:none;">
   For informational purposes only. Not financial advice. Past performance does not guarantee future results. Do your own research before making any investment decisions.
 </div>
+
+<script>
+// ─── Notes & Reminders Floating Panel ────────────────────────────────────────
+let _notesDrawerOpen = false;
+let _ndrNoteContextSym = null;
+let _atStockCache = [];
+let _ndrDragState = null;
+let _ndrDragInited = false;
+
+function toggleNotesDrawer() {
+  const drawer = document.getElementById('notesDrawer');
+  const backdrop = document.getElementById('notesDrawerBackdrop');
+  if (!drawer) return;
+  _notesDrawerOpen = !_notesDrawerOpen;
+  if (_notesDrawerOpen) {
+    // Reset to centered before opening
+    drawer.style.left = '';
+    drawer.style.top = '';
+    drawer.style.transform = '';
+  }
+  drawer.classList.toggle('open', _notesDrawerOpen);
+  if (backdrop) backdrop.classList.toggle('open', _notesDrawerOpen);
+  const btn = document.getElementById('notesDrawerToggle');
+  if (btn) btn.classList.toggle('active', _notesDrawerOpen);
+  if (_notesDrawerOpen) {
+    ndrLoadNotes();
+    ndrLoadReminders();
+    ndrSetDefaultRemTime();
+    if (!_atStockCache.length) _loadAtStockCache();
+    _ndrDragInit();
+  }
+}
+
+function _ndrDragInit() {
+  if (_ndrDragInited) return;
+  _ndrDragInited = true;
+  const drawer = document.getElementById('notesDrawer');
+  const header = drawer?.querySelector('.nd-header');
+  if (!header || !drawer) return;
+  header.addEventListener('mousedown', e => {
+    if (e.target.closest('button')) return;
+    const rect = drawer.getBoundingClientRect();
+    _ndrDragState = { startX: e.clientX - rect.left, startY: e.clientY - rect.top };
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!_ndrDragState) return;
+    drawer.style.left = (e.clientX - _ndrDragState.startX) + 'px';
+    drawer.style.top = (e.clientY - _ndrDragState.startY) + 'px';
+    drawer.style.transform = 'none';
+  });
+  document.addEventListener('mouseup', () => { _ndrDragState = null; });
+}
+
+function openNotesDrawer(section) {
+  if (!_notesDrawerOpen) toggleNotesDrawer();
+  if (section === 'reminders') {
+    setTimeout(() => {
+      const body = document.querySelector('#notesDrawer > div[style*="overflow-y"]');
+      const rem = document.getElementById('ndrSectionReminders');
+      if (body && rem) body.scrollTop = rem.offsetTop;
+    }, 300);
+  }
+}
+
+function switchNotesTab(tab) { openNotesDrawer(tab); }
+
+// ── Notes ────────────────────────────────────────────────────────────────────
+async function ndrLoadNotes() {
+  const el = document.getElementById('ndrNotesList');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/notes');
+    const d = await r.json();
+    if (!d.notes || !d.notes.length) {
+      el.innerHTML = '<div style="color:#484f58;font-size:0.8rem;text-align:center;padding:20px 0">No notes yet.</div>';
+      return;
+    }
+    el.innerHTML = d.notes.map(n => `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;position:relative">
+        <button onclick="ndrDeleteNote(${n.id},this)" style="position:absolute;top:7px;right:8px;background:none;border:none;color:#484f58;cursor:pointer;font-size:0.85rem;padding:2px 5px;border-radius:4px" onmouseover="this.style.color='#f85149'" onmouseout="this.style.color='#484f58'">✕</button>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:${n.body?'5':'0'}px;padding-right:22px">
+          ${n.symbol ? `<span class="ndr-sym-chip">@${escHtml(n.symbol)}</span>` : ''}
+          ${n.title ? `<span style="font-size:0.83rem;font-weight:600;color:var(--text)">${escHtml(n.title)}</span>` : ''}
+        </div>
+        ${n.body ? `<div style="font-size:0.8rem;color:var(--text2);white-space:pre-wrap;line-height:1.5">${escHtml(n.body)}</div>` : ''}
+        <div style="font-size:0.67rem;color:#484f58;margin-top:5px">${new Date(n.created_at).toLocaleString()}</div>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="color:#f85149;font-size:0.8rem;padding:8px">Failed: ${e.message}</div>`;
+  }
+}
+
+async function ndrSaveNote() {
+  const title = (document.getElementById('ndrNoteTitle')?.value || '').trim();
+  const body  = (document.getElementById('ndrNoteBody')?.value  || '').trim();
+  const msg   = document.getElementById('ndrNoteSaveMsg');
+  if (!title && !body) { _ndrFlash(msg, 'Enter a title or note', 'error'); return; }
+  try {
+    const r = await fetch('/api/notes', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ title, body, symbol: _ndrNoteContextSym || null }) });
+    const d = await r.json();
+    if (d.error) { _ndrFlash(msg, d.error, 'error'); return; }
+    document.getElementById('ndrNoteTitle').value = '';
+    document.getElementById('ndrNoteBody').value = '';
+    _ndrFlash(msg, 'Note saved ✓', 'ok');
+    ndrLoadNotes();
+  } catch(e) { _ndrFlash(msg, e.message, 'error'); }
+}
+
+async function ndrDeleteNote(id) {
+  if (!confirm('Delete this note?')) return;
+  await fetch(`/api/notes/${id}`, { method:'DELETE' });
+  ndrLoadNotes();
+}
+
+// ── Reminders ────────────────────────────────────────────────────────────────
+function ndrSetDefaultRemTime() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const di = document.getElementById('ndrRemDate');
+  const ti = document.getElementById('ndrRemTime');
+  if (di && !di.value) di.value = dateStr;
+  if (ti && !ti.value) ti.value = timeStr;
+}
+
+async function ndrLoadReminders() {
+  const el = document.getElementById('ndrRemList');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/reminders');
+    const d = await r.json();
+    if (!d.reminders || !d.reminders.length) {
+      el.innerHTML = '<div style="color:#484f58;font-size:0.8rem;text-align:center;padding:20px 0">No reminders yet.</div>';
+      return;
+    }
+    const now = new Date();
+    const sorted = [...d.reminders].sort((a,b) => new Date(a.remind_at)-new Date(b.remind_at));
+    el.innerHTML = sorted.map(r => {
+      const dt = new Date(r.remind_at);
+      const overdue = !r.dismissed && dt < now;
+      const timeStr = dt.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      const titleHtml = _renderRemTitle(r.title);
+      return `<div style="background:var(--surface);border:1px solid ${overdue?'rgba(248,81,73,0.4)':'var(--border)'};border-radius:8px;padding:10px 12px;opacity:${r.dismissed?'0.5':'1'}">
+        <div style="font-size:0.82rem;color:var(--text);line-height:1.45;margin-bottom:4px;padding-right:4px">${titleHtml}</div>
+        <div style="font-size:0.73rem;color:${overdue?'#f85149':'#484f58'}">${overdue?'⚠ Overdue — ':''}${timeStr}</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          ${!r.dismissed?`<button onclick="ndrDismissReminder(${r.id})" style="background:none;border:1px solid #30363d;border-radius:5px;padding:2px 8px;color:#8b949e;cursor:pointer;font-size:0.7rem" onmouseover="this.style.borderColor='#3fb950';this.style.color='#3fb950'" onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'">✓ Done</button>`:''}
+          <button onclick="ndrDeleteReminder(${r.id})" style="background:none;border:none;color:#484f58;cursor:pointer;font-size:0.8rem;padding:2px 5px" onmouseover="this.style.color='#f85149'" onmouseout="this.style.color='#484f58'">✕</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="color:#f85149;font-size:0.8rem;padding:8px">Failed: ${e.message}</div>`;
+  }
+}
+
+function _renderRemTitle(title) {
+  return escHtml(title).replace(/@([A-Z0-9.^-]{1,10})/g,
+    '<span class="ndr-sym-chip">@$1</span>');
+}
+
+async function ndrSaveReminder() {
+  const title = (document.getElementById('ndrRemTitle')?.value || '').trim();
+  const date  = document.getElementById('ndrRemDate')?.value;
+  const time  = document.getElementById('ndrRemTime')?.value || '09:00';
+  const msg   = document.getElementById('ndrRemSaveMsg');
+  if (!title) { _ndrFlash(msg,'Enter a reminder title','error'); return; }
+  if (!date)  { _ndrFlash(msg,'Pick a date','error'); return; }
+  const remind_at = new Date(`${date}T${time}:00`).toISOString();
+  try {
+    const r = await fetch('/api/reminders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,remind_at})});
+    const d = await r.json();
+    if (d.error) { _ndrFlash(msg,d.error,'error'); return; }
+    document.getElementById('ndrRemTitle').value = '';
+    document.getElementById('ndrRemDate').value = '';
+    document.getElementById('ndrRemTime').value = '';
+    _ndrFlash(msg,'Reminder set ✓','ok');
+    ndrLoadReminders();
+  } catch(e) { _ndrFlash(msg,e.message,'error'); }
+}
+
+async function ndrDismissReminder(id) {
+  await fetch(`/api/reminders/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({dismissed:true})});
+  ndrLoadReminders();
+}
+async function ndrDeleteReminder(id) {
+  if (!confirm('Delete this reminder?')) return;
+  await fetch(`/api/reminders/${id}`,{method:'DELETE'});
+  ndrLoadReminders();
+}
+
+function _ndrFlash(el,text,type) {
+  if (!el) return;
+  el.textContent=text; el.style.color=type==='ok'?'#3fb950':'#f85149'; el.style.display='';
+  setTimeout(()=>el.style.display='none',3000);
+}
+
+// ── @ Stock Tagging Autocomplete ─────────────────────────────────────────────
+async function _loadAtStockCache() {
+  try {
+    const r = await fetch('/api/scores?limit=200');
+    const d = await r.json();
+    const arr = Array.isArray(d) ? d : (d.scores || []);
+    _atStockCache = arr.map(s => ({ symbol: s.symbol, name: s.name || s.symbol }));
+  } catch {}
+}
+
+function ndrRemTitleInput(input) {
+  const val = input.value;
+  const drop = document.getElementById('ndrAtDropdown');
+  if (!drop) return;
+  const atIdx = val.lastIndexOf('@');
+  if (atIdx === -1) { drop.style.display='none'; return; }
+  const query = val.slice(atIdx+1).toUpperCase();
+  // Show top stocks even when query is empty (just typed @)
+  const matches = _atStockCache.filter(s =>
+    !query || s.symbol.startsWith(query) || s.name.toUpperCase().includes(query)
+  ).slice(0,8);
+  if (!matches.length) { drop.style.display='none'; return; }
+  drop.innerHTML = matches.map(s =>
+    `<div class="ndr-at-item" onmousedown="ndrSelectAt('${s.symbol}')">
+       <span class="ndr-sym-chip">@${s.symbol}</span>
+       <span style="color:#8b949e;font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.name)}</span>
+     </div>`
+  ).join('');
+  drop.style.display = '';
+}
+
+function ndrSelectAt(symbol) {
+  const input = document.getElementById('ndrRemTitle');
+  if (!input) return;
+  const val = input.value;
+  const atIdx = val.lastIndexOf('@');
+  input.value = val.slice(0,atIdx+1) + symbol + ' ';
+  document.getElementById('ndrAtDropdown').style.display='none';
+  input.focus();
+}
+
+function ndrNoteBodyInput(textarea) {
+  const drop = document.getElementById('ndrNoteAtDropdown');
+  if (!drop) return;
+  const val = textarea.value;
+  const pos = textarea.selectionStart;
+  const before = val.slice(0, pos);
+  const atIdx = before.lastIndexOf('@');
+  if (atIdx === -1) { drop.style.display='none'; return; }
+  const query = before.slice(atIdx+1).toUpperCase();
+  if (/\s/.test(query)) { drop.style.display='none'; return; }
+  if (!_atStockCache.length) _loadAtStockCache();
+  const matches = _atStockCache.filter(s =>
+    !query || s.symbol.startsWith(query) || s.name.toUpperCase().includes(query)
+  ).slice(0,8);
+  if (!matches.length) { drop.style.display='none'; return; }
+  drop.innerHTML = matches.map(s =>
+    `<div class="ndr-at-item" onmousedown="ndrSelectAtNote('${s.symbol}')">
+       <span class="ndr-sym-chip">@${s.symbol}</span>
+       <span style="color:#8b949e;font-size:0.75rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.name)}</span>
+     </div>`
+  ).join('');
+  drop.style.display = '';
+}
+
+function ndrSelectAtNote(symbol) {
+  const textarea = document.getElementById('ndrNoteBody');
+  if (!textarea) return;
+  const val = textarea.value;
+  const pos = textarea.selectionStart;
+  const before = val.slice(0, pos);
+  const atIdx = before.lastIndexOf('@');
+  const newVal = val.slice(0, atIdx+1) + symbol + ' ' + val.slice(pos);
+  textarea.value = newVal;
+  const newPos = atIdx + 1 + symbol.length + 1;
+  textarea.setSelectionRange(newPos, newPos);
+  document.getElementById('ndrNoteAtDropdown').style.display='none';
+  textarea.focus();
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#ndrAtDropdown') && !e.target.closest('#ndrRemTitle')) {
+    const d = document.getElementById('ndrAtDropdown');
+    if (d) d.style.display='none';
+  }
+  if (!e.target.closest('#ndrNoteAtDropdown') && !e.target.closest('#ndrNoteBody')) {
+    const d = document.getElementById('ndrNoteAtDropdown');
+    if (d) d.style.display='none';
+  }
+});
+
+// ── Explorer integration ──────────────────────────────────────────────────────
+function openExplorerNote() {
+  const sym = (document.getElementById('explorerSymbol')?.value||'').trim().toUpperCase();
+  _ndrNoteContextSym = sym || null;
+  const tag = document.getElementById('ndrNoteSymTag');
+  if (tag) { tag.textContent = sym ? `Noting for ${sym}` : ''; tag.style.display = sym ? '' : 'none'; }
+  openNotesDrawer('notes');
+  setTimeout(() => document.getElementById('ndrNoteBody')?.focus(), 350);
+}
+
+function openExplorerReminder() {
+  const sym = (document.getElementById('explorerSymbol')?.value||'').trim().toUpperCase();
+  openNotesDrawer('reminders');
+  ndrSetDefaultRemTime();
+  setTimeout(() => {
+    const t = document.getElementById('ndrRemTitle');
+    if (t && sym && !t.value) { t.value = `@${sym} `; t.focus(); }
+    else if (t) t.focus();
+  }, 350);
+}
+
+// ── Existing switchWidgetTab override (notes/reminders removed) ───────────────
+// (no override needed now that notes/reminders are out of the dashboard tabs)
+
+// ─── Explorer AI Chat ─────────────────────────────────────────────────────────
+let _exAiMessages = [];
+let _exAiStreaming = false;
+
+function exAiUpdateBanner() {
+  const sym = (document.getElementById('explorerSymbol')?.value || '').trim().toUpperCase();
+  const banner = document.getElementById('exAiSymbolBanner');
+  if (banner) banner.textContent = sym
+    ? `Asking about: ${sym} — or type any question.`
+    : 'Ask Akshaya AI about a stock — search a symbol first or type your question freely.';
+}
+
+async function exAiSend() {
+  if (_exAiStreaming) return;
+  const input = document.getElementById('exAiInput');
+  const raw = (input?.value || '').trim();
+  if (!raw) return;
+
+  const sym = (document.getElementById('explorerSymbol')?.value || '').trim().toUpperCase();
+  const text = sym ? `[Stock: ${sym}] ${raw}` : raw;
+
+  input.value = '';
+  _exAiMessages.push({ role: 'user', text: raw });
+  exAiRender();
+
+  const btn = document.getElementById('exAiSendBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  _exAiStreaming = true;
+
+  const msgList = document.getElementById('exAiMessages');
+  const thinkDiv = document.createElement('div');
+  thinkDiv.style.cssText = 'color:#484f58;font-size:0.78rem;font-style:italic;padding:4px 0';
+  thinkDiv.textContent = 'Thinking…';
+  msgList?.appendChild(thinkDiv);
+  msgList?.scrollTo(0, msgList.scrollHeight);
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, chatId: 'explorer-ai' })
+    });
+
+    if (!resp.ok || !resp.body) throw new Error('No response');
+
+    thinkDiv.remove();
+    let aiText = '';
+    const aiDiv = document.createElement('div');
+    aiDiv.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:0.82rem;color:var(--text);line-height:1.55;white-space:pre-wrap';
+    msgList?.appendChild(aiDiv);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trim();
+        if (raw === '[DONE]') break;
+        try {
+          const evt = JSON.parse(raw);
+          if (evt.type === 'text' && evt.text) { aiText += evt.text; aiDiv.textContent = aiText; msgList?.scrollTo(0, msgList.scrollHeight); }
+        } catch {}
+      }
+    }
+    _exAiMessages.push({ role: 'assistant', text: aiText });
+  } catch (e) {
+    thinkDiv.remove();
+    const errDiv = document.createElement('div');
+    errDiv.style.cssText = 'color:#f85149;font-size:0.8rem;padding:6px 0';
+    errDiv.textContent = 'Error: ' + e.message;
+    msgList?.appendChild(errDiv);
+  } finally {
+    _exAiStreaming = false;
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+    msgList?.scrollTo(0, msgList.scrollHeight);
+  }
+}
+
+function exAiRender() {
+  const msgList = document.getElementById('exAiMessages');
+  if (!msgList) return;
+  msgList.innerHTML = _exAiMessages.map(m => {
+    if (m.role === 'user') return `<div style="align-self:flex-end;background:var(--accent);color:#000;border-radius:12px 12px 4px 12px;padding:8px 12px;font-size:0.82rem;max-width:85%;line-height:1.45">${escHtml(m.text)}</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:0.82rem;color:var(--text);line-height:1.55;white-space:pre-wrap">${escHtml(m.text)}</div>`;
+  }).join('');
+  msgList.scrollTo(0, msgList.scrollHeight);
+}
+</script>
 
 </body>
 </html>

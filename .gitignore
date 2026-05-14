@@ -27,3 +27,6 @@ discovery-log.json
 *.swp
 *.swo
 tiger_private.pem
+
+# TLS certs — contain private keys
+certs/

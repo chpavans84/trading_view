@@ -269,4 +269,65 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 
 **Custom Ollama model:** `npm run ollama:build` → generates `trading-coach.Modelfile` from last 90 days of PostgreSQL trade data → `ollama create trading-coach -f trading-coach.Modelfile`
 
+---
+
+## Web Dashboard — Built Features Inventory
+> Keep this section updated after every feature addition. It is the single source of truth that survives context compression.
+
+### Top-nav tabs (id → label)
+| id | Label | Notes |
+|----|-------|-------|
+| tab-dashboard | P&L Dashboard | Renamed from "Dashboard". Two-column layout: left sidebar (account metrics) + right main (positions, trades, P&L chart) |
+| tab-market | Market | Market overview, home stats |
+| tab-stats | Stats | Usage stats, cost per day |
+| tab-docs | Docs | Architecture docs, DB schema |
+| tab-calendar | Calendar | Earnings calendar, FDA, dividends |
+| tab-signal-center | Signal Center | Catalyst scan, signal graph |
+| tab-research | Research | Research pipeline |
+| tab-users | Users | Admin only |
+| tab-admin | Admin | Admin only |
+| tab-explorer | Stock Explorer | Floating panel, opened via nav button |
+
+### Dashboard widget tabs (inside P&L Dashboard)
+| key | Label |
+|-----|-------|
+| positions | Open Positions + Daily P&L chart + P&L history table |
+| trades | Recent Trades |
+| catalysts | 🎯 Tomorrow's Catalysts *(planned move → Signal Center)* |
+| intraday | Intraday Picks |
+| watchlist | ❤️ Watchlist |
+| cp | 📈 Trade Results *(planned move → Signal Center)* |
+| tradehistory | 📋 Trade History |
+| **notes** | **📝 Notes — personal trade journal. Free-text notes saved to PostgreSQL `user_notes` table. Features: add note with title+body, list all notes newest-first, delete note. BUILT IN PREVIOUS SESSION — needs to be verified/rebuilt if missing.** |
+
+### Floating / overlay widgets
+- **Chat widget** (Akshaya AI) — draggable, touch-enabled, saves position. FAB button + nav button. Logo: `GARUDA_SEARCH.PNG`.
+- **Stock Explorer** — left-side floating panel, touch resize on iPad, overlay mode on tablet (backdrop).
+- **News Drawer** — right-side sliding drawer.
+- **Notifications panel** — top-right overlay.
+- **Reminders** — `user_reminders` table, AI `set_reminder` tool, `GET/POST /api/reminders`, `PATCH/DELETE /api/reminders/:id`.
+
+### Themes
+| id | Description |
+|----|-------------|
+| vexai | Default dark navy |
+| github | GitHub dark |
+| midnight | Deep blue |
+| dracula | Dracula purple |
+| tokyo | Tokyo Night |
+| solarized | Solarized dark |
+| cyberpunk | Cyberpunk pink |
+| matrix | Green-on-black, Share Tech Mono font |
+| bluematrix | Cyan-on-black, Share Tech Mono font |
+
+### Key DB tables (web dashboard)
+`trades` · `conviction_scores` · `trade_rejections` · `knowledge_chunks` · `fundamentals` · `backtest_*` · `model_results` · `stock_predictions` · `prediction_calibration*` · `prediction_errors` · `user_activity` · `conversation_history` · `user_reminders` · **`user_notes`** (title, body, username, created_at)
+
+### Server ops
+- PM2 processes: `trading-dashboard` (port 3000, production) · `trading-staging` (UAT) · `trading-bot` (cron bot)
+- Restart: `pm2 restart trading-dashboard trading-staging` — **never use pkill**
+- Images served from: `images/` project root → `/images/` URL path
+- Background image: `images/New_backgraound.PNG` (NYSE bull, opacity 0.18)
+- GARUDA AI logo: `images/GARUDA_SEARCH.PNG`
+
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
