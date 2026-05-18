@@ -18,6 +18,7 @@ import { getPositions as getMoomooPositions }                  from './moomoo-tc
 import { getBzNews }                                           from './benzinga.js';
 import { getMarketContext }                                    from './market-context.js';
 import { SECTOR_MAP }                                         from './sentiment.js';
+import { getOptionsFlow, getInsiderTrades, getCongressionalTrades, getEconomicCalendar, isUWConfigured } from './unusual-whales.js';
 import {
   query, isDbAvailable,
   insertSentinelRun, insertPendingAction, getSentinelRecipients,
@@ -26,9 +27,9 @@ import {
 const yf         = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ─── Macro event calendar — keep updated manually ────────────────────────────
+// ─── Macro event calendar — static fallback + dynamic UW source ──────────────
 // sectors_at_risk uses the same ETF keys as SECTOR_MAP values (XLK, SOXX, etc.)
-const MACRO_EVENTS = [
+const MACRO_EVENTS_STATIC = [
   { date: '2026-06-11', name: 'CPI Release',       sectors_at_risk: ['XLK', 'SOXX', 'XLY'] },
   { date: '2026-06-18', name: 'FOMC Decision',     sectors_at_risk: ['XLF', 'XLK', 'XLY', 'SOXX'] },
   { date: '2026-07-02', name: 'NFP Report',        sectors_at_risk: ['XLF', 'XLY', 'XLP'] },
@@ -37,6 +38,39 @@ const MACRO_EVENTS = [
   { date: '2026-08-06', name: 'NFP Report',        sectors_at_risk: ['XLF', 'XLY', 'XLP'] },
   { date: '2026-09-16', name: 'FOMC Decision',     sectors_at_risk: ['XLF', 'XLK', 'XLY', 'SOXX'] },
 ];
+
+// Keyword → ETF bucket mapping for UW economic calendar events
+const _MACRO_KEYWORD_MAP = [
+  { kw: 'cpi',       etfs: ['XLK', 'SOXX', 'XLY'] },
+  { kw: 'inflation', etfs: ['XLK', 'SOXX', 'XLY'] },
+  { kw: 'fomc',      etfs: ['XLF', 'XLK', 'XLY', 'SOXX'] },
+  { kw: 'federal',   etfs: ['XLF', 'XLK', 'XLY', 'SOXX'] },
+  { kw: 'nfp',       etfs: ['XLF', 'XLY', 'XLP'] },
+  { kw: 'payroll',   etfs: ['XLF', 'XLY', 'XLP'] },
+  { kw: 'gdp',       etfs: ['XLF', 'XLY', 'XLP', 'XLI'] },
+  { kw: 'pce',       etfs: ['XLK', 'XLY', 'XLF'] },
+];
+
+async function getMacroEvents() {
+  if (!isUWConfigured()) return MACRO_EVENTS_STATIC;
+  try {
+    const result = await getEconomicCalendar();
+    // getEconomicCalendar returns an array, not { events: [...] }
+    if (!Array.isArray(result) || !result.length) return MACRO_EVENTS_STATIC;
+    const dynamic = result.map(ev => {
+      const title = (ev.event || '').toLowerCase();
+      const match = _MACRO_KEYWORD_MAP.find(m => title.includes(m.kw));
+      return {
+        date: ev.time ? toYMD(ev.time) : null,
+        name: ev.event || 'Economic Event',
+        sectors_at_risk: match ? match.etfs : ['XLF', 'XLK'],
+      };
+    }).filter(ev => ev.date);
+    return dynamic.length ? dynamic : MACRO_EVENTS_STATIC;
+  } catch {
+    return MACRO_EVENTS_STATIC;
+  }
+}
 
 // ─── Trading day helpers ──────────────────────────────────────────────────────
 
@@ -182,25 +216,95 @@ function getSectorConcentrationRisks(positions) {
   return risks;
 }
 
-function getMacroRisks(positions, mode) {
+async function getMacroRisks(positions, mode) {
   const today     = etNow();
   const lookahead = mode === 'weekend' ? 5 : 2;
   const cutoff    = addTradingDays(today, lookahead);
   const risks     = [];
 
-  for (const ev of MACRO_EVENTS) {
+  const events = await getMacroEvents();
+  for (const ev of events) {
     const evDate = new Date(ev.date);
     if (evDate < today || evDate > cutoff) continue;
     const affected = positions.filter(p => ev.sectors_at_risk.includes(SECTOR_MAP[p.symbol] || ''));
     if (!affected.length) continue;
     risks.push({
-      event:           ev.name,
-      event_date:      ev.date,
+      event:            ev.name,
+      event_date:       ev.date,
       affected_symbols: affected.map(p => p.symbol),
-      severity:        'med',
+      severity:         'med',
     });
   }
   return risks;
+}
+
+// ─── UW-driven risk detectors ─────────────────────────────────────────────────
+
+async function getUnusualOptionsRisk(symbol) {
+  if (!isUWConfigured()) return null;
+  try {
+    // getOptionsFlow returns an array directly, not { flow: [...] }
+    const flow = await getOptionsFlow({ ticker: symbol, limit: 20 });
+    if (!Array.isArray(flow) || !flow.length) return null;
+    const bearish = flow.filter(f => (f.sentiment || '').toLowerCase() === 'bearish');
+    const bullish = flow.filter(f => (f.sentiment || '').toLowerCase() === 'bullish');
+    const totalPremium = flow.reduce((s, f) => s + parseFloat(f.total_premium || 0), 0);
+    if (totalPremium < 500_000 && flow.length < 5) return null; // below noise floor
+    const bearishRatio = flow.length > 0 ? bearish.length / flow.length : 0;
+    const severity = bearishRatio >= 0.7 && totalPremium >= 2_000_000 ? 'high' : 'med';
+    return {
+      flow_count:      flow.length,
+      bearish_count:   bearish.length,
+      bullish_count:   bullish.length,
+      bearish_ratio:   +bearishRatio.toFixed(2),
+      total_premium:   totalPremium,
+      severity,
+    };
+  } catch { return null; }
+}
+
+async function getInsiderSellingRisk(symbol) {
+  if (!isUWConfigured()) return null;
+  try {
+    // getInsiderTrades returns an array directly; uses days=30 default filter internally
+    const trades = await getInsiderTrades({ ticker: symbol });
+    if (!Array.isArray(trades) || !trades.length) return null;
+    // `side` is 'sell' (negative amount) or 'buy' (positive amount); `amount` is dollar value
+    const sells = trades.filter(t => t.side === 'sell');
+    const buys  = trades.filter(t => t.side === 'buy');
+    const sellValue = sells.reduce((s, t) => s + Math.abs(t.amount ?? 0), 0);
+    if (sells.length === 0 || sellValue < 100_000) return null;
+    const severity = sells.length >= 3 || sellValue >= 1_000_000 ? 'high' : 'med';
+    return {
+      sell_count:  sells.length,
+      buy_count:   buys.length,
+      sell_value:  sellValue,
+      recent_days: 30,
+      severity,
+    };
+  } catch { return null; }
+}
+
+async function getCongressionalActivityRisk(symbol) {
+  if (!isUWConfigured()) return null;
+  try {
+    const result = await getCongressionalTrades({ ticker: symbol, limit: 20 });
+    if (!Array.isArray(result) || !result.length) return null;
+    const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000); // last 60 days
+    const recent = result.filter(t => t.transaction_date && new Date(t.transaction_date) >= cutoff);
+    if (!recent.length) return null;
+    const sells = recent.filter(t => {
+      const txn = (t.transaction_type || '').toLowerCase();
+      return txn.includes('sell') || txn.includes('sale');
+    });
+    if (sells.length < 2) return null; // single sell not significant
+    return {
+      sell_count:  sells.length,
+      total_count: recent.length,
+      members:     [...new Set(sells.map(t => t.member_name).filter(Boolean))],
+      severity:    sells.length >= 3 ? 'high' : 'med',
+    };
+  } catch { return null; }
 }
 
 // ─── Proposal builder (deterministic — no LLM) ───────────────────────────────
@@ -453,10 +557,13 @@ export async function runSentinel({ mode = 'preclose' } = {}) {
     // 3. Gather risk signals for each position in parallel
     const riskRows = [];
 
-    const [earningsResults, newsResults, calibrationResults] = await Promise.all([
+    const [earningsResults, newsResults, calibrationResults, uwFlowResults, uwInsiderResults, uwCongressResults] = await Promise.all([
       Promise.allSettled(positions.map(p => getEarningsRisk(p.symbol))),
       Promise.allSettled(positions.map(p => getNewsRisk(p.symbol))),
       Promise.allSettled(positions.map(p => getCalibrationRisk(p.symbol, p.unrealized_pl_pct))),
+      Promise.allSettled(positions.map(p => getUnusualOptionsRisk(p.symbol))),
+      Promise.allSettled(positions.map(p => getInsiderSellingRisk(p.symbol))),
+      Promise.allSettled(positions.map(p => getCongressionalActivityRisk(p.symbol))),
     ]);
 
     positions.forEach((p, i) => {
@@ -464,18 +571,24 @@ export async function runSentinel({ mode = 'preclose' } = {}) {
       const news        = newsResults[i].status        === 'fulfilled' ? newsResults[i].value        : null;
       const calibration = calibrationResults[i].status === 'fulfilled' ? calibrationResults[i].value : null;
       const drawdown    = getDrawdownRisk(p.symbol, p.unrealized_pl_pct);
+      const uwFlow      = uwFlowResults[i].status      === 'fulfilled' ? uwFlowResults[i].value      : null;
+      const uwInsider   = uwInsiderResults[i].status   === 'fulfilled' ? uwInsiderResults[i].value   : null;
+      const uwCongress  = uwCongressResults[i].status  === 'fulfilled' ? uwCongressResults[i].value  : null;
 
-      if (earnings)    riskRows.push({ symbol: p.symbol, type: 'earnings',    detail: earnings,    severity: earnings.severity });
-      if (news)        riskRows.push({ symbol: p.symbol, type: 'news',        detail: news,        severity: news.severity });
-      if (calibration) riskRows.push({ symbol: p.symbol, type: 'calibration', detail: calibration, severity: calibration.severity });
-      if (drawdown)    riskRows.push({ symbol: p.symbol, type: 'drawdown',    detail: drawdown,    severity: drawdown.severity });
+      if (earnings)   riskRows.push({ symbol: p.symbol, type: 'earnings',             detail: earnings,   severity: earnings.severity });
+      if (news)       riskRows.push({ symbol: p.symbol, type: 'news',                 detail: news,       severity: news.severity });
+      if (calibration)riskRows.push({ symbol: p.symbol, type: 'calibration',          detail: calibration,severity: calibration.severity });
+      if (drawdown)   riskRows.push({ symbol: p.symbol, type: 'drawdown',             detail: drawdown,   severity: drawdown.severity });
+      if (uwFlow)     riskRows.push({ symbol: p.symbol, type: 'unusual_options',      detail: uwFlow,     severity: uwFlow.severity });
+      if (uwInsider)  riskRows.push({ symbol: p.symbol, type: 'insider_selling',      detail: uwInsider,  severity: uwInsider.severity });
+      if (uwCongress) riskRows.push({ symbol: p.symbol, type: 'congressional_activity',detail: uwCongress,severity: uwCongress.severity });
     });
 
     // Sector concentration and macro risks (portfolio-level)
     for (const risk of getSectorConcentrationRisks(positions)) {
       riskRows.push({ symbol: null, type: 'concentration', detail: risk, severity: risk.severity });
     }
-    for (const risk of getMacroRisks(positions, mode)) {
+    for (const risk of await getMacroRisks(positions, mode)) {
       riskRows.push({ symbol: null, type: 'macro', detail: risk, severity: risk.severity });
     }
 

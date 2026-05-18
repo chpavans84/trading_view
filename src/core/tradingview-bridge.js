@@ -6,7 +6,6 @@
 
 import { getState }      from './chart.js';
 import { getOhlcv, getStudyValues, getPineLines, getPineLabels, getQuote } from './data.js';
-import { getKLines as moomooGetKLines, getQuote as moomooGetQuote } from './moomoo-tcp.js';
 
 const CDP_HOST = 'localhost';
 const CDP_PORT = 9222;
@@ -36,34 +35,13 @@ export async function isTradingViewAvailable() {
   return result;
 }
 
-// ─── Fallback technicals — Moomoo KLines first, Yahoo Finance second ─────────
+// ─── Fallback technicals — Yahoo Finance only (skip Moomoo to prevent TCP storms) ─
 
 async function fetchFallbackTechnicals(symbol) {
   let closes, highs, lows, vols, price, dayHigh, dayLow, source;
 
-  // Tier 1: Moomoo KLines
-  try {
-    const [klResult, quoteResult] = await Promise.allSettled([
-      moomooGetKLines({ symbol, klType: 'day', count: 90 }),
-      moomooGetQuote(symbol),
-    ]);
-    const kl = klResult.status === 'fulfilled' ? klResult.value : null;
-    const qt = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
-
-    if (kl?.success && kl.candles?.length >= 20) {
-      closes = kl.candles.map(c => c.close);
-      highs  = kl.candles.map(c => c.high);
-      lows   = kl.candles.map(c => c.low);
-      vols   = kl.candles.map(c => c.volume ?? 0);
-      price  = qt?.price ?? closes.at(-1);
-      dayHigh = qt?.high ?? highs.at(-1);
-      dayLow  = qt?.low  ?? lows.at(-1);
-      source  = 'moomoo';
-    }
-  } catch { /* fall through */ }
-
-  // Tier 2: Yahoo Finance fallback
-  if (!closes) {
+  // Yahoo Finance
+  {
     const r = await fetch(
       `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=90d`,
       { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(7000) }

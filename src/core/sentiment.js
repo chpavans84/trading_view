@@ -6,7 +6,7 @@
  * Futures:  Yahoo Finance only (ES=F, NQ=F not available via Moomoo/Alpaca)
  */
 
-import { getQuotes as moomooGetQuotes, getKLines } from './moomoo-tcp.js';
+import { getQuotes as moomooGetQuotes } from './moomoo-tcp.js';
 import { getBzEarnings, isBenzingaConfigured } from './benzinga.js';
 import { getAllWatchlistSymbols } from './db.js';
 
@@ -442,18 +442,7 @@ export async function getTrendingStocks({ limit = 15 } = {}) {
 // ─── Relative Strength vs Sector ETF ─────────────────────────────────────────
 
 async function fetch5dReturn(symbol) {
-  // Try Moomoo daily candles first (real-time, no rate limits)
-  try {
-    const kl = await getKLines({ symbol, klType: 'day', count: 10 });
-    if (kl.success && kl.candles.length >= 6) {
-      const closes = kl.candles.map(c => c.close).filter(v => v != null);
-      if (closes.length >= 6) {
-        return +((closes[closes.length - 1] / closes[closes.length - 6] - 1) * 100).toFixed(2);
-      }
-    }
-  } catch { /* fall through */ }
-
-  // Yahoo Finance fallback
+  // Yahoo Finance only — skip Moomoo to prevent TCP connection storms
   try {
     const r = await fetch(
       `${YF_BASE}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10d`,

@@ -254,6 +254,9 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 │  conversation_history← chat context per chatId (20-message rolling window)        │
 │  sentinel_runs       ← one row per sentinel execution (mode, risks, proposals)    │
 │  pending_actions     ← HMAC-signed one-click trade proposals; expires in 30 min   │
+│  uw_options_flow     ← unusual options flow alerts (ingested every 5 min)         │
+│  uw_insider_trades   ← insider buy/sell filings from Unusual Whales (15 min)      │
+│  uw_congressional_trades ← congressional trading disclosures (hourly)             │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
@@ -269,7 +272,9 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 
 **Pipeline npm scripts:** `research:download` → `research:scores` → `research:backtest` → `research:train`
 
-**Pre-Close Sentinel** (`src/core/sentinel.js`): Runs weekdays 3 PM ET + Sundays 6 PM ET. Scans all Alpaca + Moomoo positions for 5 risk signals (earnings, news, calibration accuracy, sector concentration, macro events). High-severity risks get deterministic one-click HMAC-signed trade proposals. Claude (sonnet-4-6) writes ONLY the prose explanation from pre-built facts — it never invents tickers, prices, or quantities. LLM output is never parsed for trade parameters; every number in a proposal is decided in Node code. One-click links: `GET /api/action/execute/:id?token=` and `GET /api/action/ignore/:id?token=` — registered before `requireAuth`, use HMAC-SHA256 token auth only. Manual trigger: `POST /api/sentinel/run` (admin only). HTML response pages in `src/core/sentinel-pages.js`. Env vars required: `SENTINEL_EMAIL_FROM`, `SENTINEL_EMAIL_TO`, `PUBLIC_URL`, `ACTION_SIGNING_SECRET`.
+**Pre-Close Sentinel** (`src/core/sentinel.js`): Runs weekdays 3 PM ET + Sundays 6 PM ET. Scans all Alpaca + Moomoo positions for 8 risk signals (earnings, news, calibration accuracy, sector concentration, macro events, unusual_options, insider_selling, congressional_activity). The last 3 require UW_API_KEY. Macro events are now pulled live from Unusual Whales economic calendar with static fallback. High-severity risks get deterministic one-click HMAC-signed trade proposals. Claude (sonnet-4-6) writes ONLY the prose explanation from pre-built facts — it never invents tickers, prices, or quantities. LLM output is never parsed for trade parameters; every number in a proposal is decided in Node code. One-click links: `GET /api/action/execute/:id?token=` and `GET /api/action/ignore/:id?token=` — registered before `requireAuth`, use HMAC-SHA256 token auth only. Manual trigger: `POST /api/sentinel/run` (admin only). HTML response pages in `src/core/sentinel-pages.js`. Env vars required: `SENTINEL_EMAIL_FROM`, `SENTINEL_EMAIL_TO`, `PUBLIC_URL`, `ACTION_SIGNING_SECRET`.
+
+**Unusual Whales Integration** (`src/core/unusual-whales.js`): Personal use only — ONE rate-limited client (120 req/min, 80,000 req/day). Dual token bucket rate limiter. In-memory TTL cache. WebSocket streaming for real-time options flow (auto-reconnect, exponential backoff). Exported methods: `getFlowAlerts`, `getMarketTide`, `getOptionsFlow`, `getInsiderTrades`, `getCongressionalTrades`, `getTopMovers`, `getEconomicCalendar`, `getIpoCalendar`, `getFundamentals`, `getAnalystTargets`, `getEarningsTranscript`, `getCorrelations`, `getDrawdown`, `getIvRank`, `getStockState`, `getQuota`, `streamOptionsFlow`. All routes consuming UW data are `requireAuth`-gated. If `UW_API_KEY` is missing, every feature degrades gracefully (returns null/503). Env var: `UW_API_KEY`. Cron jobs: movers every 5 min, insider every 15 min, congress every 1 hr, economic cal + IPO cal at 6 AM ET, fundamentals cache warmup at 6 PM ET. API routes: `GET /api/uw/flow-alerts`, `/api/uw/market-tide`, `/api/uw/options-flow`, `/api/uw/insider`, `/api/uw/congressional`, `/api/uw/movers`, `/api/uw/correlations`. DB tables: `uw_options_flow`, `uw_insider_trades`, `uw_congressional_trades`. Claude AI tools: `get_options_flow`, `get_insider_activity`, `get_congressional_activity`, `get_top_movers_uw`, `get_economic_calendar`, `get_correlations`. Dashboard widgets: 🐋 Options Flow, 👤 Insider, 🏛️ Congress, 🔗 Correlations (inside P&L Dashboard tab strip). Stock Explorer: shows UW options flow + insider activity in collapsible sections alongside analyst rating and news.
 
 **Custom Ollama model:** `npm run ollama:build` → generates `trading-coach.Modelfile` from last 90 days of PostgreSQL trade data → `ollama create trading-coach -f trading-coach.Modelfile`
 
@@ -304,6 +309,10 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 | cp | 📈 Trade Results *(planned move → Signal Center)* |
 | tradehistory | 📋 Trade History |
 | **notes** | **📝 Notes — personal trade journal. Free-text notes saved to PostgreSQL `user_notes` table. Features: add note with title+body, list all notes newest-first, delete note. BUILT IN PREVIOUS SESSION — needs to be verified/rebuilt if missing.** |
+| uw_flow | 🐋 Options Flow — Unusual Whales real-time options alerts (60s refresh). Requires UW_API_KEY. |
+| uw_insider | 👤 Insider Trades — Form 4 insider filings from Unusual Whales. Requires UW_API_KEY. |
+| uw_congress | 🏛️ Congressional Trades — STOCK Act disclosures from Unusual Whales. Requires UW_API_KEY. |
+| uw_correlations | 🔗 Correlations — 30d/90d correlation vs market instruments. Requires UW_API_KEY + ticker input. |
 
 ### Floating / overlay widgets
 - **Chat widget** (Akshaya AI) — draggable, touch-enabled, saves position. FAB button + nav button. Logo: `GARUDA_SEARCH.PNG`.

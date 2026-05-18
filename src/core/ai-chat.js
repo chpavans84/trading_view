@@ -41,6 +41,7 @@ import { getStockPrediction } from './predictor.js';
 import { applyCalibration } from './prediction-calibration.js';
 import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswer } from './fundamental-screener.js';
 import { runCatalystScan } from './catalyst-scanner.js';
+import { getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getCorrelations, isUWConfigured } from './unusual-whales.js';
 
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
 
@@ -703,6 +704,75 @@ export const TOOLS = [
       required: ['title', 'remind_at'],
     },
   },
+
+  // ── Unusual Whales tools ──────────────────────────────────────────────────
+  {
+    name: 'get_options_flow',
+    description: 'Get unusual options flow for a ticker from Unusual Whales. Shows large sweeps, unusual volume, call/put sentiment. Use when the user asks about "options flow", "dark pool", "unusual activity", "smart money", or whale trades. Returns side (call/put), strike, expiry, premium, volume, sentiment (bullish/bearish).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticker: { type: 'string', description: 'Stock ticker, e.g. AAPL. Omit for market-wide flow.' },
+        limit:  { type: 'number', description: 'Number of alerts to return (default 20, max 50).' },
+      },
+    },
+  },
+
+  {
+    name: 'get_insider_activity',
+    description: 'Get insider trading filings (Form 4) for a ticker from Unusual Whales. Shows executives and directors buying or selling. Use when the user asks about "insider buys", "insider selling", "insider activity", or "executives buying/selling".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticker: { type: 'string', description: 'Stock ticker, e.g. NVDA. Omit for market-wide recent filings.' },
+        limit:  { type: 'number', description: 'Number of transactions to return (default 20).' },
+      },
+    },
+  },
+
+  {
+    name: 'get_congressional_activity',
+    description: 'Get congressional trading disclosures for a ticker from Unusual Whales. Shows senators and representatives buying/selling stocks. Use when the user asks about "congress trades", "politicians buying stocks", "congressional activity", or "Nancy Pelosi trades".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticker: { type: 'string', description: 'Stock ticker, e.g. NVDA. Omit for recent filings across all stocks.' },
+        limit:  { type: 'number', description: 'Number of trades to return (default 20).' },
+      },
+    },
+  },
+
+  {
+    name: 'get_top_movers_uw',
+    description: 'Get the top options flow movers for today from Unusual Whales — stocks with the most unusual institutional activity ranked by flow score. Different from get_market_movers (which is price-based). Use when the user asks "what are whales buying today", "top flow stocks", or "institutional movers".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Number of movers to return (default 20).' },
+      },
+    },
+  },
+
+  {
+    name: 'get_economic_calendar',
+    description: 'Get the upcoming economic events calendar from Unusual Whales — FOMC decisions, CPI releases, NFP reports, GDP prints, and other macro events. Use when the user asks "what economic events are coming", "when is the Fed meeting", "CPI date", or "macro calendar".',
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+
+  {
+    name: 'get_correlations',
+    description: 'Get correlation data for a stock vs market instruments from Unusual Whales — shows how closely a stock moves with SPY, QQQ, sector ETFs, and peers over 30 and 90 days. Use when the user asks "what is X correlated with", "does X move with the market", or "correlation analysis".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ticker: { type: 'string', description: 'Stock ticker to analyze, e.g. NVDA.' },
+      },
+      required: ['ticker'],
+    },
+  },
 ];
 
 const _CHAT_PROFILE_PRESETS = {
@@ -1285,6 +1355,44 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           [username, title.trim(), dt.toISOString()]
         );
         return { ok: true, id: rows[0].id, title: title.trim(), remind_at: dt.toISOString() };
+      }
+
+      // ── Unusual Whales tools ────────────────────────────────────────────────
+
+      case 'get_options_flow': {
+        if (!isUWConfigured()) return { error: 'Unusual Whales API not configured — UW_API_KEY missing.' };
+        const { ticker, limit = 20 } = input;
+        return await getOptionsFlow({ ticker: ticker?.toUpperCase(), limit: Math.min(limit, 50) });
+      }
+
+      case 'get_insider_activity': {
+        if (!isUWConfigured()) return { error: 'Unusual Whales API not configured — UW_API_KEY missing.' };
+        const { ticker, limit = 20 } = input;
+        return await getInsiderTrades({ ticker: ticker?.toUpperCase(), limit: Math.min(limit, 50) });
+      }
+
+      case 'get_congressional_activity': {
+        if (!isUWConfigured()) return { error: 'Unusual Whales API not configured — UW_API_KEY missing.' };
+        const { ticker, limit = 20 } = input;
+        return await getCongressionalTrades({ ticker: ticker?.toUpperCase(), limit: Math.min(limit, 50) });
+      }
+
+      case 'get_top_movers_uw': {
+        if (!isUWConfigured()) return { error: 'Unusual Whales API not configured — UW_API_KEY missing.' };
+        const { limit = 20 } = input;
+        return await getTopMovers({ limit: Math.min(limit, 50) });
+      }
+
+      case 'get_economic_calendar': {
+        if (!isUWConfigured()) return { error: 'Unusual Whales API not configured — UW_API_KEY missing.' };
+        return await getEconomicCalendar();
+      }
+
+      case 'get_correlations': {
+        if (!isUWConfigured()) return { error: 'Unusual Whales API not configured — UW_API_KEY missing.' };
+        const { ticker } = input;
+        if (!ticker) return { error: 'ticker is required' };
+        return await getCorrelations({ ticker: ticker.toUpperCase() });
       }
 
       default:                         return { error: `Unknown tool: ${name}` };

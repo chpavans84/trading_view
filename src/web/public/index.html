@@ -229,6 +229,10 @@
       <button class="widget-tab" onclick="switchWidgetTab('watchlist')">❤️ Watchlist</button>
       <button class="widget-tab" onclick="switchWidgetTab('cp')">📈 Trade Results</button>
       <button class="widget-tab" onclick="switchWidgetTab('tradehistory')">📋 Trade History</button>
+      <button class="widget-tab" onclick="switchWidgetTab('uw_flow')">🐋 Options Flow</button>
+      <button class="widget-tab" onclick="switchWidgetTab('uw_insider')">👤 Insider</button>
+      <button class="widget-tab" onclick="switchWidgetTab('uw_congress')">🏛️ Congress</button>
+      <button class="widget-tab" onclick="switchWidgetTab('uw_correlations')">🔗 Correlations</button>
       <div style="flex:1;min-width:8px"></div>
       <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
         <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
@@ -328,6 +332,62 @@
           </div>
         </div>
         <div class="loading">Loading...</div>
+      </div>
+    </div>
+
+    <!-- UW Options Flow panel -->
+    <div class="widget-panel" id="widget-panel-uw_flow">
+      <div class="table-wrap">
+        <div class="table-head">
+          <h3>🐋 Unusual Options Flow <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="uwFlowTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWFlow()">
+            <button class="refresh-btn" onclick="loadUWFlow()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="uwFlowBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- UW Insider Trades panel -->
+    <div class="widget-panel" id="widget-panel-uw_insider">
+      <div class="table-wrap">
+        <div class="table-head">
+          <h3>👤 Insider Trades <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="uwInsiderTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWInsider()">
+            <button class="refresh-btn" onclick="loadUWInsider()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="uwInsiderBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- UW Congressional Trades panel -->
+    <div class="widget-panel" id="widget-panel-uw_congress">
+      <div class="table-wrap">
+        <div class="table-head">
+          <h3>🏛️ Congressional Trades <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="uwCongressTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWCongress()">
+            <button class="refresh-btn" onclick="loadUWCongress()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="uwCongressBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- UW Correlations panel -->
+    <div class="widget-panel" id="widget-panel-uw_correlations">
+      <div class="table-wrap">
+        <div class="table-head">
+          <h3>🔗 Correlations <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="uwCorrTicker" placeholder="Ticker (e.g. AAPL)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWCorrelations()">
+            <button class="refresh-btn" onclick="loadUWCorrelations()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="uwCorrBody" style="padding:16px 20px"><div class="loading">Enter a ticker and click Refresh</div></div>
       </div>
     </div>
 
@@ -3365,6 +3425,122 @@ For days 2–5 of the weekly forecast:
               <div class="dsc-provides"><strong>Tables:</strong> users · user_sessions · trades · conversation_history · daily_picks · conviction_scores · performance_patterns · api_usage_stats · daily_pnl · scanner_state · position_monitoring · activity_log · rejection_log · bug_reports · trade_lessons · otp_tokens · <strong>fundamentals</strong> (S&amp;P 500 + NASDAQ-100 quarterly income data — revenue, gross profit, operating income, net income, EPS)</div>
               <div class="dsc-chain"><strong>Fallback:</strong> In-memory store when DB is unavailable (<code>isDbAvailable</code> flag). App continues working — chat still works, scans still work — but nothing persists to disk.</div>
               <div class="dsc-note">Connection pool initialized at startup with auto-retry. All writes are async and non-blocking — they never block the API response. Schema is auto-applied (CREATE IF NOT EXISTS) on every server start.</div>
+            </div>
+          </div>
+
+          <div class="datasrc-card" style="--dc:#f78166">
+            <div class="dsc-header">
+              <div class="dsc-badge" style="background:#f78166;color:#0d1117">PAID</div>
+              <div class="dsc-name">🦈 Unusual Whales</div>
+              <div class="dsc-conn">HTTPS · api.unusualwhales.com · API key required · 120 req/min · 80 000 req/day</div>
+            </div>
+            <div class="dsc-body">
+              <div class="dsc-provides"><strong>Provides:</strong>
+                <strong>Options Flow Alerts</strong> — real-time unusual options activity (sweeps, blocks, repeated hits) with strike, expiry, premium, IV, and aggressor side ·
+                <strong>Market Tide</strong> — intraday 5-minute net call/put premium bars for the full session with bullish/bearish bias score
+              </div>
+              <div class="dsc-chain"><strong>Endpoints exposed:</strong>
+                <code>GET /api/uw/flow-alerts?symbol=&amp;limit=</code> — unusual options flow (60s cache) ·
+                <code>GET /api/uw/market-tide</code> — intraday net premium tide (5-min cache)
+              </div>
+
+              <div style="margin:10px 0 4px;font-size:0.78rem;font-weight:700;color:#e6edf3;text-transform:uppercase;letter-spacing:.04em">Endpoint 1 — GET /api/uw/flow-alerts</div>
+              <div class="dsc-note" style="margin-bottom:6px">
+                Returns recent unusual options flow alerts. Optional <code>symbol</code> query param filters to a single ticker.<br>
+                <strong>Query params:</strong> <code>symbol</code> (optional ticker, e.g. NVDA) · <code>limit</code> (1–100, default 25)<br>
+                <strong>Response envelope:</strong> <code>{ alerts: [...], count: N, source: "unusualwhales" }</code><br>
+                <strong>Key alert fields:</strong><br>
+                &nbsp;· <code>ticker</code> — stock symbol<br>
+                &nbsp;· <code>type</code> — <code>"call"</code> or <code>"put"</code><br>
+                &nbsp;· <code>strike</code> — strike price (string)<br>
+                &nbsp;· <code>expiry</code> — expiration date (YYYY-MM-DD)<br>
+                &nbsp;· <code>total_premium</code> — total premium paid ($, string)<br>
+                &nbsp;· <code>volume</code> — contracts traded<br>
+                &nbsp;· <code>open_interest</code> — open interest at alert time<br>
+                &nbsp;· <code>underlying_price</code> — stock price at alert time<br>
+                &nbsp;· <code>has_sweep</code> — true if aggressor swept multiple exchanges<br>
+                &nbsp;· <code>has_floor</code> — true if floor / block trade<br>
+                &nbsp;· <code>alert_rule</code> — rule name: <code>RepeatedHits</code> | <code>RepeatedHitsDescendingFill</code> | …<br>
+                &nbsp;· <code>sector</code> — GICS sector name<br>
+                &nbsp;· <code>next_earnings_date</code> — next earnings date or null<br>
+                &nbsp;· <code>option_chain</code> — full OCC symbol (e.g. <code>NVDA260620C00130000</code>)<br>
+                &nbsp;· <code>iv_start</code> / <code>iv_end</code> — implied volatility range over the trade sequence<br>
+                &nbsp;· <code>sentiment</code> — derived: <code>"bullish"</code> | <code>"bearish"</code> | <code>"neutral"</code><br>
+                &nbsp;· <code>created_at</code> — ISO timestamp of alert<br>
+                <strong>Cache:</strong> 60 seconds · <strong>Auth:</strong> requireAuth
+              </div>
+
+              <div style="margin:10px 0 4px;font-size:0.78rem;font-weight:700;color:#e6edf3;text-transform:uppercase;letter-spacing:.04em">Endpoint 2 — GET /api/uw/market-tide</div>
+              <div class="dsc-note">
+                Returns intraday market tide — 5-minute net call/put premium bars for the current session, plus a computed session summary.<br>
+                <strong>No query parameters.</strong><br>
+                <strong>Response shape:</strong> <code>{ bars: [...], summary: {...}, source: "unusualwhales" }</code><br>
+                <strong>Each bar:</strong><br>
+                &nbsp;· <code>timestamp</code> — ISO timestamp (Eastern time)<br>
+                &nbsp;· <code>date</code> — date string (YYYY-MM-DD)<br>
+                &nbsp;· <code>net_call_premium</code> — net call premium for this 5-min bar ($ string, can be negative)<br>
+                &nbsp;· <code>net_put_premium</code> — net put premium for this 5-min bar ($ string, can be negative)<br>
+                &nbsp;· <code>net_volume</code> — net options volume (negative = put-dominated)<br>
+                <strong>Summary object:</strong><br>
+                &nbsp;· <code>total_net_call</code> — cumulative net call premium today ($)<br>
+                &nbsp;· <code>total_net_put</code> — cumulative net put premium today ($)<br>
+                &nbsp;· <code>bias</code> — <code>"bullish"</code> | <code>"bearish"</code> | <code>"neutral"</code><br>
+                &nbsp;· <code>bias_pct</code> — bias strength 0–100 (|call − put| / (|call| + |put|) × 100)<br>
+                &nbsp;· <code>last_updated</code> — timestamp of most recent bar<br>
+                &nbsp;· <code>bar_count</code> — number of 5-min bars available today<br>
+                <strong>Cache:</strong> 5 minutes · <strong>Auth:</strong> requireAuth
+              </div>
+
+              <div style="margin:10px 0 4px;font-size:0.78rem;font-weight:700;color:#e6edf3;text-transform:uppercase;letter-spacing:.04em">Endpoint 3 — GET /api/uw/options-flow</div>
+              <div class="dsc-note" style="margin-bottom:6px">
+                Returns detailed options flow with full per-contract breakdown. Superset of flow-alerts.<br>
+                <strong>Query params:</strong> <code>ticker</code> (optional) · <code>limit</code> (1–200, default 50)<br>
+                <strong>Response:</strong> <code>{ flow: [...], source: "unusualwhales" }</code><br>
+                <strong>Key fields:</strong> <code>ticker</code> · <code>side</code> (call/put) · <code>strike</code> · <code>expiry</code> · <code>premium</code> ($) · <code>volume</code> · <code>open_interest</code> · <code>sentiment</code> (bullish/bearish/neutral)<br>
+                <strong>Cache:</strong> 60 seconds · <strong>Auth:</strong> requireAuth · <strong>DB:</strong> persisted to <code>uw_options_flow</code> every 5 min
+              </div>
+
+              <div style="margin:10px 0 4px;font-size:0.78rem;font-weight:700;color:#e6edf3;text-transform:uppercase;letter-spacing:.04em">Endpoint 4 — GET /api/uw/insider</div>
+              <div class="dsc-note" style="margin-bottom:6px">
+                Returns Form 4 insider trading filings. Shows executives and board members buying/selling their own company's stock.<br>
+                <strong>Query params:</strong> <code>ticker</code> (optional) · <code>limit</code> (1–200, default 50)<br>
+                <strong>Response:</strong> <code>{ trades: [...], source: "unusualwhales" }</code><br>
+                <strong>Key fields:</strong> <code>ticker</code> · <code>insider_name</code> · <code>role</code> · <code>transaction_type</code> (buy/sell) · <code>shares</code> · <code>price</code> · <code>value</code> ($) · <code>filed_at</code> (ISO timestamp)<br>
+                <strong>Cache:</strong> 15 minutes · <strong>Auth:</strong> requireAuth · <strong>DB:</strong> persisted to <code>uw_insider_trades</code> every 15 min
+              </div>
+
+              <div style="margin:10px 0 4px;font-size:0.78rem;font-weight:700;color:#e6edf3;text-transform:uppercase;letter-spacing:.04em">Endpoint 5 — GET /api/uw/congressional</div>
+              <div class="dsc-note" style="margin-bottom:6px">
+                Returns STOCK Act congressional trading disclosures. Shows senators and representatives buying/selling stocks.<br>
+                <strong>Query params:</strong> <code>ticker</code> (optional) · <code>limit</code> (1–200, default 50)<br>
+                <strong>Response:</strong> <code>{ trades: [...], source: "unusualwhales" }</code><br>
+                <strong>Key fields:</strong> <code>ticker</code> · <code>member_name</code> · <code>party</code> (Democrat/Republican) · <code>chamber</code> (House/Senate) · <code>transaction_type</code> · <code>amount_range</code> (e.g. "$50,001 - $100,000") · <code>traded_at</code> (DATE) · <code>filed_at</code><br>
+                <strong>Cache:</strong> 60 minutes · <strong>Auth:</strong> requireAuth · <strong>DB:</strong> persisted to <code>uw_congressional_trades</code> hourly
+              </div>
+
+              <div style="margin:10px 0 4px;font-size:0.78rem;font-weight:700;color:#e6edf3;text-transform:uppercase;letter-spacing:.04em">Endpoint 6 — GET /api/uw/movers</div>
+              <div class="dsc-note" style="margin-bottom:6px">
+                Returns top stocks ranked by options flow activity today — institutional movers list.<br>
+                <strong>Query params:</strong> <code>limit</code> (1–100, default 20)<br>
+                <strong>Response:</strong> <code>{ movers: [...], source: "unusualwhales" }</code><br>
+                <strong>Key fields:</strong> <code>ticker</code> · <code>direction</code> (bullish/bearish) · <code>flow_score</code> · <code>premium_total</code> · <code>unusual_count</code><br>
+                <strong>Cache:</strong> 5 minutes · <strong>Auth:</strong> requireAuth
+              </div>
+
+              <div style="margin:10px 0 4px;font-size:0.78rem;font-weight:700;color:#e6edf3;text-transform:uppercase;letter-spacing:.04em">Endpoint 7 — GET /api/uw/correlations?ticker=AAPL</div>
+              <div class="dsc-note" style="margin-bottom:6px">
+                Returns 30-day and 90-day correlation data between a stock and market instruments (SPY, QQQ, sector ETFs, peers).<br>
+                <strong>Query params:</strong> <code>ticker</code> (required)<br>
+                <strong>Response:</strong> <code>{ correlations: [{ symbol, correlation_30d, correlation_90d }, ...], source: "unusualwhales" }</code><br>
+                <strong>Correlation values:</strong> −1.0 to +1.0 (strong negative → strong positive). Values above 0.7 indicate high co-movement.<br>
+                <strong>Cache:</strong> 60 minutes · <strong>Auth:</strong> requireAuth
+              </div>
+
+              <div style="margin:10px 0 2px;font-size:0.75rem;color:#8b949e">
+                <strong>Rate budget:</strong> flow-alerts 60s = ~1/min · market-tide 5min = 0.2/min · options-flow 60s = ~1/min · insider 15min = 0.07/min · congressional 60min = 0.017/min · movers 5min = 0.2/min · correlations 60min = varies.
+                Total well within 120 req/min. Resets 8 PM ET daily. DB tables: <code>uw_options_flow</code> · <code>uw_insider_trades</code> · <code>uw_congressional_trades</code>.
+                Env var: <code>UW_API_KEY</code>. All routes require authentication. Personal use only — never expose raw UW data publicly.
+              </div>
             </div>
           </div>
 
@@ -7117,25 +7293,113 @@ async function loadExplorerExtras(symbol) {
   document.getElementById('explorerExtras').style.display = 'block';
   document.getElementById('exAnalystInner').innerHTML = '<span style="color:#484f58">Loading…</span>';
   document.getElementById('exNewsInner').innerHTML    = '<span style="color:#484f58">Loading…</span>';
-  // Start both sections open
   toggleExSection('analyst', true);
   toggleExSection('news', true);
+
+  // UW sections — show if configured
+  const uwFlowWrap    = document.getElementById('exUWFlowWrap');
+  const uwInsiderWrap = document.getElementById('exUWInsiderWrap');
+
   try {
-    const data = await api(`/api/explorer/extras?symbol=${symbol}`);
-    renderExplorerAnalyst(data.analyst);
-    renderExplorerNews(data.news, symbol);
+    const [data, uwFlow, uwInsider] = await Promise.allSettled([
+      api(`/api/explorer/extras?symbol=${symbol}`),
+      fetch(`/api/uw/options-flow?ticker=${symbol}&limit=10`).then(r => r.ok ? r.json() : null),
+      fetch(`/api/uw/insider?ticker=${symbol}&limit=10`).then(r => r.ok ? r.json() : null),
+    ]);
+
+    if (data.status === 'fulfilled') {
+      renderExplorerAnalyst(data.value.analyst);
+      renderExplorerNews(data.value.news, symbol);
+    } else {
+      document.getElementById('exAnalystInner').innerHTML = '<span style="color:#484f58">Unavailable</span>';
+      document.getElementById('exNewsInner').innerHTML    = '<span style="color:#484f58">Unavailable</span>';
+    }
+
+    // UW options flow + IV
+    const flowData = uwFlow.status === 'fulfilled' ? uwFlow.value : null;
+    if (flowData && !flowData.error && (flowData.flow?.length || flowData.alerts?.length)) {
+      uwFlowWrap.style.display = '';
+      toggleExSection('uwflow', true);
+      renderExplorerUWFlow(flowData, symbol);
+    } else if (flowData?.error === 'UW_API_KEY not configured') {
+      uwFlowWrap.style.display = 'none';
+    }
+
+    // UW insider
+    const insiderData = uwInsider.status === 'fulfilled' ? uwInsider.value : null;
+    if (insiderData && !insiderData.error && insiderData.trades?.length) {
+      uwInsiderWrap.style.display = '';
+      toggleExSection('uwinsider', true);
+      renderExplorerUWInsider(insiderData, symbol);
+    } else if (insiderData?.error === 'UW_API_KEY not configured') {
+      uwInsiderWrap.style.display = 'none';
+    }
   } catch {
     document.getElementById('exAnalystInner').innerHTML = '<span style="color:#484f58">Unavailable</span>';
     document.getElementById('exNewsInner').innerHTML    = '<span style="color:#484f58">Unavailable</span>';
   }
 }
 
+function renderExplorerUWFlow(data, symbol) {
+  const inner   = document.getElementById('exUWFlowInner');
+  const summary = document.getElementById('exUWFlowSummary');
+  const flows   = data.flow || data.alerts || [];
+  if (!flows.length) { inner.innerHTML = '<span style="color:#484f58">No unusual flow found</span>'; return; }
+
+  const bullish = flows.filter(f => (f.sentiment||'').toLowerCase() === 'bullish').length;
+  const bearish = flows.filter(f => (f.sentiment||'').toLowerCase() === 'bearish').length;
+  const totalPrem = flows.reduce((s, f) => s + (f.premium ?? 0), 0);
+  summary.textContent = `${flows.length} alerts · $${(totalPrem/1e6).toFixed(1)}M`;
+
+  const rows = flows.slice(0, 8).map(f => {
+    const sentColor = (f.sentiment||'').toLowerCase()==='bearish' ? '#f78166' : '#3fb950';
+    return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #21262d;font-size:0.79rem">
+      <span style="color:${(f.side||'').toLowerCase()==='call'?'#3fb950':'#f78166'};font-weight:700">${(f.side||'?').toUpperCase()}</span>
+      <span>${f.strike != null ? '$'+f.strike : '—'} · ${f.expiry||'—'}</span>
+      <span>${f.premium != null ? '$'+(f.premium/1e6).toFixed(2)+'M' : '—'}</span>
+      <span style="color:${sentColor}">${f.sentiment||'—'}</span>
+    </div>`;
+  }).join('');
+
+  inner.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:8px;font-size:0.79rem">
+    <span>🟢 Bullish: <strong style="color:#3fb950">${bullish}</strong></span>
+    <span>🔴 Bearish: <strong style="color:#f78166">${bearish}</strong></span>
+  </div>${rows}`;
+}
+
+function renderExplorerUWInsider(data, symbol) {
+  const inner   = document.getElementById('exUWInsiderInner');
+  const summary = document.getElementById('exUWInsiderSummary');
+  const trades  = data.trades || [];
+  if (!trades.length) { inner.innerHTML = '<span style="color:#484f58">No insider activity found</span>'; return; }
+
+  const buys  = trades.filter(t => (t.transaction_type||'').toLowerCase().includes('buy'));
+  const sells = trades.filter(t => (t.transaction_type||'').toLowerCase().includes('sell'));
+  summary.textContent = `${buys.length} buy · ${sells.length} sell`;
+
+  const rows = trades.slice(0, 6).map(t => {
+    const txColor = (t.transaction_type||'').toLowerCase().includes('sell') ? '#f78166' : '#3fb950';
+    return `<div style="padding:4px 0;border-bottom:1px solid #21262d;font-size:0.79rem">
+      <div style="display:flex;justify-content:space-between">
+        <span style="color:#e6edf3">${t.insider_name||'—'}</span>
+        <span style="color:${txColor};font-weight:700">${t.transaction_type||'—'}</span>
+      </div>
+      <div style="color:#8b949e;font-size:0.75rem">${t.role||''} · ${t.value != null ? '$'+(t.value/1e6).toFixed(2)+'M' : ''} · ${t.filed_at ? new Date(t.filed_at).toLocaleDateString() : ''}</div>
+    </div>`;
+  }).join('');
+
+  inner.innerHTML = rows;
+}
+
 function toggleExSection(section, forceOpen) {
-  const body    = document.getElementById(section === 'news' ? 'exNewsBody'    : 'exAnalystBody');
-  const chevron = document.getElementById(section === 'news' ? 'exNewsChevron' : 'exAnalystChevron');
+  const bodyMap    = { news:'exNewsBody', analyst:'exAnalystBody', uwflow:'exUWFlowBody', uwinsider:'exUWInsiderBody' };
+  const chevronMap = { news:'exNewsChevron', analyst:'exAnalystChevron', uwflow:'exUWFlowChevron', uwinsider:'exUWInsiderChevron' };
+  const body    = document.getElementById(bodyMap[section]);
+  const chevron = document.getElementById(chevronMap[section]);
+  if (!body) return;
   const open    = forceOpen !== undefined ? !forceOpen : body.style.display !== 'none';
-  body.style.display     = open ? 'none' : 'block';
-  chevron.style.transform = open ? '' : 'rotate(90deg)';
+  body.style.display      = open ? 'none' : 'block';
+  if (chevron) chevron.style.transform = open ? '' : 'rotate(90deg)';
 }
 
 function renderExplorerAnalyst(analyst) {
@@ -8087,10 +8351,16 @@ function switchWidgetTab(name) {
   document.querySelectorAll('.wta').forEach(a => {
     a.style.display = (a.id === `wta-${name}`) ? 'flex' : 'none';
   });
+  if (name !== 'uw_flow' && typeof _uwFlowTimer !== 'undefined' && _uwFlowTimer) {
+    clearTimeout(_uwFlowTimer); _uwFlowTimer = null;
+  }
   if (name === 'watchlist') loadDashboardWatchlist();
   if (name === 'positions') loadPnl();
   if (name === 'cp') initCatalystPerfTab();
   if (name === 'tradehistory') loadTrades();
+  if (name === 'uw_flow') loadUWFlow();
+  if (name === 'uw_insider') loadUWInsider();
+  if (name === 'uw_congress') loadUWCongress();
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -15447,6 +15717,28 @@ function exploreSymbol(sym) {
           <div id="exNewsInner" style="color:#8b949e;font-size:0.82rem">Loading…</div>
         </div>
       </div>
+      <!-- UW IV Rank + Options Flow -->
+      <div class="exnews-section" id="exUWFlowWrap" style="display:none">
+        <div class="exnews-toggle" onclick="toggleExSection('uwflow')">
+          <span class="exnews-chevron" id="exUWFlowChevron">▶</span>
+          <h4>🐋 Options Flow &amp; IV</h4>
+          <span id="exUWFlowSummary" style="font-size:0.75rem;color:#8b949e;margin-left:auto"></span>
+        </div>
+        <div id="exUWFlowBody" style="display:none">
+          <div id="exUWFlowInner" style="color:#8b949e;font-size:0.82rem">Loading…</div>
+        </div>
+      </div>
+      <!-- UW Insider Trades -->
+      <div class="exnews-section" id="exUWInsiderWrap" style="display:none">
+        <div class="exnews-toggle" onclick="toggleExSection('uwinsider')">
+          <span class="exnews-chevron" id="exUWInsiderChevron">▶</span>
+          <h4>👤 Insider Activity</h4>
+          <span id="exUWInsiderSummary" style="font-size:0.75rem;color:#8b949e;margin-left:auto"></span>
+        </div>
+        <div id="exUWInsiderBody" style="display:none">
+          <div id="exUWInsiderInner" style="color:#8b949e;font-size:0.82rem">Loading…</div>
+        </div>
+      </div>
     </div>
 
     <!-- Empty state -->
@@ -19667,6 +19959,179 @@ async function tdExecTrade(side) {
     showNotifToast({ type: 'alert', symbol: _tdSym, title: `❌ Trade failed — ${_tdSym}`, body: e.message || 'Network error' });
     btn.disabled = false; btn.textContent = side === 'buy' ? 'Buy' : 'Sell';
   }
+}
+
+// ─── Unusual Whales Widget Functions ─────────────────────────────────────────
+
+let _uwFlowTimer = null;
+
+async function loadUWFlow() {
+  const body = document.getElementById('uwFlowBody');
+  if (!body) return;
+  const ticker = (document.getElementById('uwFlowTicker')?.value || '').toUpperCase().trim();
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const url = ticker ? `/api/uw/options-flow?ticker=${ticker}&limit=50` : '/api/uw/options-flow?limit=50';
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = `<div style="color:#f78166;padding:16px">${d.error || 'Error loading options flow'}</div>`; return; }
+    const flows = d.flow || d.alerts || [];
+    if (!flows.length) { body.innerHTML = '<div style="color:#8b949e;padding:16px">No unusual options flow found.</div>'; return; }
+    const rows = flows.map(f => {
+      const sentColor = (f.sentiment||'').toLowerCase()==='bearish' ? '#f78166' : '#3fb950';
+      const premRaw = parseFloat(f.total_premium ?? f.premium ?? 0);
+      const premFmt = premRaw ? '$' + (premRaw/1e6).toFixed(2) + 'M' : '—';
+      return `<tr>
+        <td style="font-weight:700;color:#58a6ff">${f.ticker||f.symbol||'—'}</td>
+        <td style="color:${(f.type||'').toLowerCase()==='call'?'#3fb950':'#f78166'}">${(f.type||'').toUpperCase()}</td>
+        <td>${f.strike != null ? '$'+f.strike : '—'}</td>
+        <td>${f.expiry||f.exp||'—'}</td>
+        <td>${premFmt}</td>
+        <td>${f.volume != null ? Number(f.volume).toLocaleString() : '—'}</td>
+        <td>${f.open_interest != null ? Number(f.open_interest).toLocaleString() : '—'}</td>
+        <td style="color:${sentColor};font-weight:700">${f.sentiment||'—'}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d">
+        <th style="text-align:left;padding:6px 8px">Ticker</th>
+        <th style="text-align:left;padding:6px 8px">Side</th>
+        <th style="text-align:left;padding:6px 8px">Strike</th>
+        <th style="text-align:left;padding:6px 8px">Expiry</th>
+        <th style="text-align:left;padding:6px 8px">Premium</th>
+        <th style="text-align:left;padding:6px 8px">Volume</th>
+        <th style="text-align:left;padding:6px 8px">OI</th>
+        <th style="text-align:left;padding:6px 8px">Sentiment</th>
+      </tr></thead><tbody>${rows}</tbody>
+    </table></div>`;
+  } catch (e) { body.innerHTML = `<div style="color:#f78166;padding:16px">${e.message}</div>`; }
+  clearTimeout(_uwFlowTimer);
+  _uwFlowTimer = setTimeout(loadUWFlow, 60_000);
+}
+
+async function loadUWInsider() {
+  const body = document.getElementById('uwInsiderBody');
+  if (!body) return;
+  const ticker = (document.getElementById('uwInsiderTicker')?.value || '').toUpperCase().trim();
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const url = ticker ? `/api/uw/insider?ticker=${ticker}&limit=50` : '/api/uw/insider?limit=50';
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = `<div style="color:#f78166;padding:16px">${d.error || 'Error loading insider trades'}</div>`; return; }
+    const trades = d.trades || [];
+    if (!trades.length) { body.innerHTML = '<div style="color:#8b949e;padding:16px">No insider trades found.</div>'; return; }
+    const rows = trades.map(t => {
+      const txColor = (t.side||'').toLowerCase() === 'sell' ? '#f78166' : '#3fb950';
+      const amtFmt = t.amount != null ? '$' + Math.abs(t.amount/1e6).toFixed(2) + 'M' : '—';
+      const roleLabel = t.is_director ? 'Director' : t.is_officer ? 'Officer' : '—';
+      return `<tr>
+        <td style="font-weight:700;color:#58a6ff">${t.ticker||'—'}</td>
+        <td>${t.owner_name||'—'}</td>
+        <td style="color:#8b949e;font-size:0.8rem">${roleLabel}</td>
+        <td style="color:${txColor};font-weight:700">${(t.side||'—').toUpperCase()}</td>
+        <td>${amtFmt}</td>
+        <td>${t.price != null ? '$'+Number(t.price).toFixed(2) : '—'}</td>
+        <td style="color:#8b949e;font-size:0.8rem">${t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '—'}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d">
+        <th style="text-align:left;padding:6px 8px">Ticker</th>
+        <th style="text-align:left;padding:6px 8px">Insider</th>
+        <th style="text-align:left;padding:6px 8px">Role</th>
+        <th style="text-align:left;padding:6px 8px">Side</th>
+        <th style="text-align:left;padding:6px 8px">Amount</th>
+        <th style="text-align:left;padding:6px 8px">Price</th>
+        <th style="text-align:left;padding:6px 8px">Date</th>
+      </tr></thead><tbody>${rows}</tbody>
+    </table></div>`;
+  } catch (e) { body.innerHTML = `<div style="color:#f78166;padding:16px">${e.message}</div>`; }
+}
+
+async function loadUWCongress() {
+  const body = document.getElementById('uwCongressBody');
+  if (!body) return;
+  const ticker = (document.getElementById('uwCongressTicker')?.value || '').toUpperCase().trim();
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const url = ticker ? `/api/uw/congressional?ticker=${ticker}&limit=50` : '/api/uw/congressional?limit=50';
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = `<div style="color:#f78166;padding:16px">${d.error || 'Error loading congressional trades'}</div>`; return; }
+    const trades = d.trades || [];
+    if (!trades.length) { body.innerHTML = '<div style="color:#8b949e;padding:16px">No congressional trades found.</div>'; return; }
+    const rows = trades.map(t => {
+      const txn = (t.transaction_type||'').toLowerCase();
+      const txColor = (txn.includes('sell') || txn.includes('sale')) ? '#f78166' : '#3fb950';
+      const partyColor = (t.party||'').toLowerCase()==='democrat' ? '#58a6ff' : (t.party||'').toLowerCase()==='republican' ? '#f78166' : '#8b949e';
+      return `<tr>
+        <td style="font-weight:700;color:#58a6ff">${t.ticker||'—'}</td>
+        <td>${t.member_name||'—'}</td>
+        <td style="color:${partyColor};font-weight:700;font-size:0.8rem">${t.party||'—'}</td>
+        <td style="color:#8b949e;font-size:0.8rem">${t.chamber||'—'}</td>
+        <td style="color:${txColor};font-weight:700">${t.transaction_type||'—'}</td>
+        <td>${t.amount_range||'—'}</td>
+        <td style="color:#8b949e;font-size:0.8rem">${t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '—'}</td>
+        <td style="color:#8b949e;font-size:0.8rem">${t.filed_at ? new Date(t.filed_at).toLocaleDateString() : '—'}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d">
+        <th style="text-align:left;padding:6px 8px">Ticker</th>
+        <th style="text-align:left;padding:6px 8px">Member</th>
+        <th style="text-align:left;padding:6px 8px">Party</th>
+        <th style="text-align:left;padding:6px 8px">Chamber</th>
+        <th style="text-align:left;padding:6px 8px">Type</th>
+        <th style="text-align:left;padding:6px 8px">Amount</th>
+        <th style="text-align:left;padding:6px 8px">Traded</th>
+        <th style="text-align:left;padding:6px 8px">Filed</th>
+      </tr></thead><tbody>${rows}</tbody>
+    </table></div>`;
+  } catch (e) { body.innerHTML = `<div style="color:#f78166;padding:16px">${e.message}</div>`; }
+}
+
+function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+async function loadUWCorrelations() {
+  const body = document.getElementById('uwCorrBody');
+  if (!body) return;
+  const ticker = (document.getElementById('uwCorrTicker')?.value || '').toUpperCase().trim();
+  if (!ticker) { body.innerHTML = '<div style="color:#8b949e;padding:16px">Enter a ticker above and click Refresh.</div>'; return; }
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const r = await fetch(`/api/uw/correlations?ticker=${encodeURIComponent(ticker)}`);
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(d.error || 'Error loading correlations')}</div>`; return; }
+    const corrs = d.correlations || [];
+    if (!corrs.length) { body.innerHTML = `<div style="color:#8b949e;padding:16px">No correlation data found for ${_escHtml(ticker)}.</div>`; return; }
+    const rows = corrs.map(c => {
+      const c30 = c.correlation_30d ?? c.correlation;
+      const c90 = c.correlation_90d ?? null;
+      const barW = Math.abs(c30 ?? 0) * 100;
+      const barColor = (c30 ?? 0) > 0 ? '#3fb950' : '#f78166';
+      return `<tr>
+        <td style="font-weight:700;color:#e6edf3">${_escHtml(c.symbol||'—')}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="width:80px;height:8px;background:#21262d;border-radius:4px;overflow:hidden">
+              <div style="width:${barW.toFixed(0)}%;height:100%;background:${barColor};border-radius:4px"></div>
+            </div>
+            <span style="color:${barColor};font-weight:700">${c30 != null ? c30.toFixed(2) : '—'}</span>
+          </div>
+        </td>
+        <td style="color:#8b949e">${c90 != null ? c90.toFixed(2) : '—'}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `<div style="color:#8b949e;font-size:0.8rem;margin-bottom:8px">Showing correlations for <strong style="color:#58a6ff">${_escHtml(ticker)}</strong></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d">
+        <th style="text-align:left;padding:6px 8px">Symbol</th>
+        <th style="text-align:left;padding:6px 8px">30d Correlation</th>
+        <th style="text-align:left;padding:6px 8px">90d Correlation</th>
+      </tr></thead><tbody>${rows}</tbody>
+    </table></div>`;
+  } catch (e) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(e.message)}</div>`; }
 }
 
 </script>

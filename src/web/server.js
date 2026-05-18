@@ -56,6 +56,7 @@ import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 import { runCatalystScan } from '../core/catalyst-scanner.js';
 import { getBzNews, getBzOptionsActivity, getBzEarnings, getBzGuidance, getBzFDA, getBzDividends, getBzFundamentals, isBenzingaConfigured } from '../core/benzinga.js';
+import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getIpoCalendar, getCorrelations, getIvRank, getStockState, streamOptionsFlow, isUWConfigured } from '../core/unusual-whales.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
 import { checkUnusualOptions } from '../core/options-scanner.js';
 
@@ -2881,12 +2882,7 @@ const INTRADAY_UNIVERSE = [
 ];
 
 async function fetchATRPct(symbol) {
-  // Tier 1: Moomoo (real-time OHLCV)
-  try {
-    const atr = await getMoomooAtrPct({ symbol, period: 14 });
-    if (atr != null) return atr;
-  } catch { /* fall through */ }
-  // Tier 2: Yahoo Finance fallback
+  // Yahoo Finance only — skip Moomoo to prevent TCP connection storms during scans
   try {
     const r = await fetch(
       `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=30d`,
@@ -2909,18 +2905,7 @@ async function fetchATRPct(symbol) {
 }
 
 async function fetchRVOL(symbol) {
-  // Tier 1: Moomoo KLines (real-time volume)
-  try {
-    const result = await getMoomooKLines({ symbol, klType: 'day', count: 22 });
-    if (result?.success && result.candles?.length >= 5) {
-      const candles = result.candles;
-      const today   = candles.at(-1)?.volume ?? 0;
-      const prev    = candles.slice(0, -1);
-      const avgVol  = prev.reduce((s, c) => s + (c.volume ?? 0), 0) / prev.length;
-      return avgVol > 0 ? +(today / avgVol).toFixed(2) : null;
-    }
-  } catch { /* fall through */ }
-  // Tier 2: Yahoo Finance fallback
+  // Yahoo Finance only — skip Moomoo to prevent TCP connection storms during scans
   try {
     const r = await fetch(
       `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=30d`,
@@ -6208,6 +6193,185 @@ app.get('/api/benzinga/dividends', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Unusual Whales ───────────────────────────────────────────────────────────
+
+/**
+ * GET /api/uw/flow-alerts
+ *
+ * Returns recent unusual options flow alerts from Unusual Whales.
+ *
+ * Query params:
+ *   symbol  {string}  Optional — filter to a single ticker (e.g. ?symbol=NVDA)
+ *   limit   {number}  Max alerts to return, 1–100 (default 25)
+ *
+ * Response: { alerts: [...], count: N, source: "unusualwhales", cached: bool }
+ *
+ * Each alert object includes:
+ *   ticker            Stock symbol
+ *   type              "call" | "put"
+ *   strike            Strike price (string)
+ *   expiry            Expiration date (YYYY-MM-DD)
+ *   total_premium     Total premium paid in dollars (string)
+ *   volume            Total contracts traded
+ *   open_interest     Open interest at time of alert
+ *   underlying_price  Stock price at time of alert (string)
+ *   has_sweep         true if aggressor swept multiple exchanges
+ *   has_floor         true if floor / block trade
+ *   alert_rule        Rule that fired: RepeatedHits | RepeatedHitsDescendingFill | …
+ *   sector            GICS sector name
+ *   next_earnings_date  Next earnings date (YYYY-MM-DD) or null
+ *   created_at        ISO timestamp of alert
+ *   option_chain      Full OCC symbol (e.g. "NVDA260620C00130000")
+ *   iv_start / iv_end Implied volatility range across the trade sequence
+ *   sentiment         Derived: "bullish" | "bearish" | "neutral"
+ *
+ * Caching: 60 seconds (in unusual-whales.js)
+ * Rate limit: counted against 120 req/min UW quota
+ */
+app.get('/api/uw/flow-alerts', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.query.symbol || req.query.ticker || '').toUpperCase().trim() || undefined;
+  const limit  = Math.min(parseInt(req.query.limit) || 25, 100);
+  try {
+    const alerts = await getFlowAlerts({ ticker, limit });
+    res.json({ alerts, count: alerts.length, source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/flow-alerts]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/market-tide
+ *
+ * Returns intraday market tide — net call vs put premium in 5-minute bars
+ * for the current trading session, plus a computed session summary.
+ *
+ * No query parameters.
+ *
+ * Response:
+ *   bars[]              Array of 5-minute bars (oldest → newest)
+ *     .timestamp        ISO timestamp (Eastern time)
+ *     .date             Date string (YYYY-MM-DD)
+ *     .net_call_premium Net call premium for this bar ($ string, can be negative)
+ *     .net_put_premium  Net put premium for this bar ($ string, can be negative)
+ *     .net_volume       Net options volume (negative = more puts than calls)
+ *   summary             Computed aggregate for the full session so far
+ *     .total_net_call   Cumulative net call premium today ($)
+ *     .total_net_put    Cumulative net put premium today ($)
+ *     .bias             "bullish" | "bearish" | "neutral"
+ *     .bias_pct         Strength of bias as a percentage (0–100)
+ *     .last_updated     Timestamp of most recent bar
+ *     .bar_count        Number of 5-min bars today
+ *
+ * Caching: 5 minutes (in unusual-whales.js)
+ * Rate limit: counted against 120 req/min UW quota
+ */
+app.get('/api/uw/market-tide', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  try {
+    const result = await getMarketTide();
+    res.json({ ...result, source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/market-tide]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/options-flow?ticker=AAPL&limit=50
+ * Returns recent unusual options flow alerts from Unusual Whales.
+ * Fields: ticker, side (call/put), strike, expiry, premium, volume, open_interest, sentiment
+ * Caching: 60 seconds (in unusual-whales.js)
+ */
+app.get('/api/uw/options-flow', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  try {
+    const ticker = (req.query.ticker || '').toUpperCase().trim() || undefined;
+    const limit  = Math.min(parseInt(req.query.limit) || 50, 200);
+    const result = await getOptionsFlow({ ticker, limit });
+    res.json({ flow: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/options-flow]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/insider?ticker=AAPL&limit=50
+ * Returns recent insider trading filings.
+ * Fields: ticker, insider_name, role, transaction_type, shares, price, value, filed_at
+ * Caching: 15 minutes (in unusual-whales.js)
+ */
+app.get('/api/uw/insider', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  try {
+    const ticker = (req.query.ticker || '').toUpperCase().trim() || undefined;
+    const limit  = Math.min(parseInt(req.query.limit) || 50, 200);
+    const result = await getInsiderTrades({ ticker, limit });
+    res.json({ trades: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/insider]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/congressional?ticker=AAPL&limit=50
+ * Returns recent congressional trading disclosures.
+ * Fields: ticker, member_name, party, chamber, transaction_type, amount_range, traded_at, filed_at
+ * Caching: 60 minutes (in unusual-whales.js)
+ */
+app.get('/api/uw/congressional', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  try {
+    const ticker = (req.query.ticker || '').toUpperCase().trim() || undefined;
+    const limit  = Math.min(parseInt(req.query.limit) || 50, 200);
+    const result = await getCongressionalTrades({ ticker, limit });
+    res.json({ trades: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/congressional]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/movers?limit=20
+ * Returns top market movers (bullish/bearish flow leaders).
+ * Fields: ticker, direction, flow_score, premium_total, unusual_count
+ * Caching: 5 minutes (in unusual-whales.js)
+ */
+app.get('/api/uw/movers', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const result = await getTopMovers({ limit });
+    res.json({ movers: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/movers]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/correlations?ticker=AAPL
+ * Returns correlation data between ticker and market instruments.
+ * Fields: ticker, correlations array (symbol, correlation_30d, correlation_90d)
+ * Caching: 60 minutes (in unusual-whales.js)
+ */
+app.get('/api/uw/correlations', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.query.ticker || '').toUpperCase().trim();
+  if (!ticker) return res.status(400).json({ error: 'ticker required' });
+  try {
+    const result = await getCorrelations({ tickers: [ticker] });
+    res.json({ correlations: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/correlations]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Dip analysis — worst drops with reasons
 app.get('/api/research/dips', async (req, res) => {
   try {
@@ -7952,6 +8116,101 @@ cron.schedule('15 4 * * 1', async () => {
   console.log('[guardian] Monday pre-market holdings check');
   try { await checkPreMarketHoldings(); } catch (e) { console.error('[guardian]', e.message); }
 }, { timezone: 'America/New_York' });
+
+// ─── Unusual Whales background ingestion ──────────────────────────────────────
+
+// Every 5 min weekdays — persist top movers to DB
+cron.schedule('*/5 * * * 1-5', async () => {
+  if (!isUWConfigured()) return;
+  try {
+    const result = await getTopMovers({ limit: 50 });
+    if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
+    for (const m of result) {
+      await query(
+        `INSERT INTO uw_options_flow (ticker, sentiment, raw, ingested_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT DO NOTHING`,
+        [m.ticker, m.direction, JSON.stringify(m)]
+      ).catch(() => {});
+    }
+  } catch (e) { console.error('[uw-cron/movers]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// Every 15 min weekdays — persist insider trades
+cron.schedule('*/15 * * * 1-5', async () => {
+  if (!isUWConfigured()) return;
+  try {
+    const result = await getInsiderTrades({ limit: 100 });
+    if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
+    for (const t of result) {
+      await query(
+        `INSERT INTO uw_insider_trades (ticker, insider_name, role, transaction_type, shares, price, value, filed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (ticker, insider_name, filed_at, transaction_type) DO NOTHING`,
+        [t.ticker, t.owner_name ?? null, t.role ?? null, t.side ?? null,
+         t.shares ?? null, t.price ?? null, t.amount ?? null,
+         t.transaction_date ? new Date(t.transaction_date) : null]
+      ).catch(() => {});
+    }
+  } catch (e) { console.error('[uw-cron/insider]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// Every hour weekdays — persist congressional trades
+cron.schedule('0 * * * 1-5', async () => {
+  if (!isUWConfigured()) return;
+  try {
+    const result = await getCongressionalTrades({ limit: 100 });
+    if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
+    for (const t of result) {
+      await query(
+        `INSERT INTO uw_congressional_trades (ticker, member_name, party, chamber, transaction_type, amount_range, traded_at, filed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (ticker, member_name, traded_at, transaction_type) DO NOTHING`,
+        [t.ticker, t.member_name, t.party, t.chamber, t.transaction_type,
+         t.amount_range, t.transaction_date ? new Date(t.transaction_date) : null,
+         t.filed_at ? new Date(t.filed_at) : null]
+      ).catch(() => {});
+    }
+  } catch (e) { console.error('[uw-cron/congress]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// 6 AM ET weekdays — fetch economic calendar (once daily is enough)
+cron.schedule('0 6 * * 1-5', async () => {
+  if (!isUWConfigured()) return;
+  try { await getEconomicCalendar(); } catch (e) { console.error('[uw-cron/econ-cal]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// 6 AM ET weekdays — fetch IPO calendar
+cron.schedule('5 6 * * 1-5', async () => {
+  if (!isUWConfigured()) return;
+  try { await getIpoCalendar(); } catch (e) { console.error('[uw-cron/ipo-cal]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// 6 PM ET weekdays — warm fundamentals cache for held positions
+cron.schedule('0 18 * * 1-5', async () => {
+  if (!isUWConfigured()) return;
+  try {
+    const positions = await getPositions().catch(() => []);
+    for (const p of positions.slice(0, 20)) {
+      await getIvRank({ ticker: p.symbol }).catch(() => {});
+      await new Promise(r => setTimeout(r, 600)); // gentle pacing
+    }
+  } catch (e) { console.error('[uw-cron/fundamentals]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// Start options flow WebSocket stream on server startup (if UW configured)
+if (isUWConfigured()) {
+  setTimeout(() => {
+    try {
+      streamOptionsFlow({
+        onTrade: (alert) => {
+          console.log('[uw-ws] flow alert:', alert?.ticker, alert?.sentiment);
+        },
+        onError: (e) => console.error('[uw-ws]', e),
+      });
+    } catch (e) { console.error('[uw-ws] startup error:', e.message); }
+  }, 5000);
+}
 
 // GET /api/guardian/check — manual trigger (any authenticated user)
 app.get('/api/guardian/check', requireAuth, async (req, res) => {

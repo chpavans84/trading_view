@@ -593,6 +593,55 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   execution_result JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_pending_actions_status ON pending_actions(status, expires_at);
+
+CREATE TABLE IF NOT EXISTS uw_options_flow (
+  id            SERIAL PRIMARY KEY,
+  ticker        VARCHAR(20)  NOT NULL,
+  side          VARCHAR(10),
+  strike        NUMERIC(12,4),
+  expiry        DATE,
+  premium       NUMERIC(14,2),
+  volume        INT,
+  open_interest INT,
+  sentiment     TEXT,
+  raw           JSONB,
+  ingested_at   TIMESTAMPTZ  DEFAULT NOW(),
+  UNIQUE(ticker, strike, expiry, ingested_at)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_options_flow_ticker ON uw_options_flow(ticker);
+CREATE INDEX IF NOT EXISTS idx_uw_options_flow_ingested ON uw_options_flow(ingested_at DESC);
+
+CREATE TABLE IF NOT EXISTS uw_insider_trades (
+  id               SERIAL PRIMARY KEY,
+  ticker           VARCHAR(20)  NOT NULL,
+  insider_name     TEXT,
+  role             TEXT,
+  transaction_type TEXT,
+  shares           NUMERIC(14,4),
+  price            NUMERIC(12,4),
+  value            NUMERIC(16,2),
+  filed_at         TIMESTAMPTZ,
+  ingested_at      TIMESTAMPTZ  DEFAULT NOW(),
+  UNIQUE(ticker, insider_name, filed_at, transaction_type)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_insider_ticker ON uw_insider_trades(ticker);
+CREATE INDEX IF NOT EXISTS idx_uw_insider_filed  ON uw_insider_trades(filed_at DESC);
+
+CREATE TABLE IF NOT EXISTS uw_congressional_trades (
+  id               SERIAL PRIMARY KEY,
+  ticker           VARCHAR(20)  NOT NULL,
+  member_name      TEXT,
+  party            TEXT,
+  chamber          TEXT,
+  transaction_type TEXT,
+  amount_range     TEXT,
+  traded_at        DATE,
+  filed_at         TIMESTAMPTZ,
+  ingested_at      TIMESTAMPTZ  DEFAULT NOW(),
+  UNIQUE(ticker, member_name, traded_at, transaction_type)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_congress_ticker ON uw_congressional_trades(ticker);
+CREATE INDEX IF NOT EXISTS idx_uw_congress_traded ON uw_congressional_trades(traded_at DESC);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
