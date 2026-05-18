@@ -2949,9 +2949,10 @@ async function fetchCurrentPrice(symbol) {
   const isPreSess  = mktState === 'PRE'  || mktState === 'PREPRE';
   const isPostSess = mktState === 'POST' || mktState === 'POSTPOST';
 
-  // Only connect to Moomoo during REGULAR session, or when Yahoo failed entirely.
+  // Only connect to Moomoo during REGULAR session. Skipping the !p fallback intentionally:
+  // calling Moomoo when Yahoo fails during off-hours would flood OpenD's accept queue.
   let mm = null;
-  if (mktState === 'REGULAR' || !p) {
+  if (mktState === 'REGULAR') {
     try { mm = await getMoomooQuote(symbol); } catch { /* ignore */ }
   }
 
@@ -6597,26 +6598,68 @@ function _ensurePriceTick() {
     _priceClients.forEach(syms => syms.forEach(s => allSyms.add(s)));
     if (!allSyms.size) return;
     const symList = [...allSyms];
-    const prices  = {};
-    // Process in batches of 80 so no subscribers are starved
-    for (let i = 0; i < symList.length; i += 80) {
-      const chunk   = symList.slice(i, i + 80);
-      const results = await Promise.allSettled(chunk.map(sym => fetchCurrentPrice(sym)));
-      chunk.forEach((sym, j) => {
-        const r = results[j];
-        if (r.status === 'fulfilled' && r.value?.price != null) {
-          prices[sym] = {
-            p:  r.value.price,
-            c:  r.value.change_pct          ?? null,
-            s:  r.value.session             ?? 'regular',
-            pp: r.value.pre_price           ?? null,
-            pc: r.value.pre_change_pct      ?? null,
-            po: r.value.post_price          ?? null,
-            oc: r.value.post_change_pct     ?? null,
-          };
-        }
-      });
+
+    // Step 1: Yahoo Finance for all symbols in parallel (HTTP, no TCP to OpenD).
+    const yfResults = await Promise.allSettled(
+      symList.map(sym => _yf.quoteSummary(sym, { modules: ['price'] }).catch(() => null))
+    );
+
+    // Determine market state from first successful Yahoo response.
+    const firstYfPrice = yfResults.find(r => r.status === 'fulfilled' && r.value?.price?.marketState)?.value?.price;
+    const tickMktState = firstYfPrice?.marketState ?? '';
+    const isRegular    = tickMktState === 'REGULAR';
+
+    // Step 2: ONE batch Moomoo call for all symbols during REGULAR session only.
+    // getQuotes() opens 1 TCP connection for all symbols (has 30s internal cache).
+    // This replaces the previous pattern of 1 TCP connection per symbol per tick.
+    const mmMap = {};
+    if (isRegular) {
+      for (let i = 0; i < symList.length; i += 80) {
+        try {
+          const batch = symList.slice(i, i + 80).map(toMoomooTicker);
+          const r = await getMoomooQuotes(batch);
+          (r.quotes || []).forEach(q => { mmMap[q.symbol] = q; });
+        } catch { /* OpenD unreachable — Yahoo prices used */ }
+      }
     }
+
+    // Step 3: Merge Yahoo + Moomoo into tick payload.
+    const prices = {};
+    symList.forEach((sym, j) => {
+      const yfd = yfResults[j].status === 'fulfilled' ? yfResults[j].value : null;
+      const p   = yfd?.price;
+      const mm  = mmMap[toMoomooTicker(sym)] ?? null;
+
+      const symState   = p?.marketState ?? tickMktState;
+      const isPreSess  = symState === 'PRE'  || symState === 'PREPRE';
+      const isPostSess = symState === 'POST' || symState === 'POSTPOST';
+
+      const regularClose = mm?.price ?? p?.regularMarketPrice;
+      const postRaw = isPostSess ? (mm?.after_market?.price ?? p?.postMarketPrice ?? null) : null;
+      const preRaw  = isPreSess  ? (mm?.pre_market?.price  ?? p?.preMarketPrice  ?? null) : null;
+
+      let price, changePct;
+      if (isRegular && mm?.price != null) {
+        price = +mm.price.toFixed(2);
+        changePct = mm.change_pct ?? null;
+      } else if (p?.regularMarketPrice != null) {
+        price = +p.regularMarketPrice.toFixed(2);
+        changePct = p.regularMarketChangePercent != null ? +(p.regularMarketChangePercent * 100).toFixed(2) : null;
+      } else {
+        return;
+      }
+
+      prices[sym] = {
+        p:  price,
+        c:  changePct                                                                                         ?? null,
+        s:  'regular',
+        pp: preRaw  != null ? +preRaw.toFixed(3)  : null,
+        pc: preRaw  != null && regularClose ? +((preRaw  - regularClose) / regularClose * 100).toFixed(2) : null,
+        po: postRaw != null ? +postRaw.toFixed(3) : null,
+        oc: postRaw != null && regularClose ? +((postRaw - regularClose) / regularClose * 100).toFixed(2) : null,
+      };
+    });
+
     const msg = JSON.stringify({ type: 'prices', data: prices, ts: Date.now() });
     _priceClients.forEach((_, ws) => {
       if (ws.readyState === ws.OPEN) try { ws.send(msg); } catch {}
