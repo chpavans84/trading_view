@@ -56,7 +56,10 @@ import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 import { runCatalystScan } from '../core/catalyst-scanner.js';
 import { getBzNews, getBzOptionsActivity, getBzEarnings, getBzGuidance, getBzFDA, getBzDividends, getBzFundamentals, isBenzingaConfigured } from '../core/benzinga.js';
-import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getIpoCalendar, getCorrelations, getIvRank, getStockState, streamOptionsFlow, isUWConfigured } from '../core/unusual-whales.js';
+import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getIpoCalendar, getCorrelations, getIvRank, getStockState, streamOptionsFlow, isUWConfigured, getQuota } from '../core/unusual-whales.js';
+import { auditUWSchemas } from '../core/uw-schema-linter.js';
+import { purgeOldUwRows } from '../core/uw-retention.js';
+import { dailyDataQualityReport } from '../core/uw-data-quality.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
 import { checkUnusualOptions } from '../core/options-scanner.js';
 
@@ -121,6 +124,9 @@ function ttlCache(key, ttlMs, fn) {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app  = express();
 const PORT = process.env.DASHBOARD_PORT || 3000;
+const driftLimit = parseFloat(process.env.SENTINEL_DRIFT_TOLERANCE || '0.02');
+// Strip trailing % / K / M suffixes UW sometimes includes in numeric strings
+const parseUWNum = v => { if (v == null) return null; const n = parseFloat(String(v).replace(/[%KkMm,\s]/g, '')); return isNaN(n) ? null : n; };
 
 // ─── Enforce required env vars at startup ────────────────────────────────────
 
@@ -765,7 +771,7 @@ app.get('/api/action/execute/:id', async (req, res) => {
 
   if (currentPrice && action.limit_price) {
     const drift = Math.abs((currentPrice - Number(action.limit_price)) / Number(action.limit_price));
-    if (drift > 0.05)
+    if (drift > driftLimit)
       return res.send(pagePriceMoved({ symbol: action.symbol, side: action.side, qty: action.qty, proposedPrice: action.limit_price, currentPrice }));
   }
 
@@ -782,7 +788,7 @@ app.post('/api/action/execute/:id', async (req, res) => {
 
   if (currentPrice && action.limit_price) {
     const drift = Math.abs((currentPrice - Number(action.limit_price)) / Number(action.limit_price));
-    if (drift > 0.05)
+    if (drift > driftLimit)
       return res.send(pagePriceMoved({ symbol: action.symbol, side: action.side, qty: action.qty, proposedPrice: action.limit_price, currentPrice }));
   }
 
@@ -6372,6 +6378,60 @@ app.get('/api/uw/correlations', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/uw/quota — live rate-limiter state (Items 5)
+app.get('/api/uw/quota', requireAuth, async (req, res) => {
+  try {
+    const q = getQuota();
+    res.json({ ...q, fetched_at: new Date().toISOString() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/uw/flow-alerts-history?hours=24&limit=50 — DB-backed history (Item 9)
+app.get('/api/uw/flow-alerts-history', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const hours = Math.min(parseInt(req.query.hours || '24', 10), 168);
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+    const minPremium = parseInt(req.query.min_premium || '0', 10);
+    const { rows } = await query(
+      `SELECT ticker, alert_type, side, strike, expiry, premium, volume, open_interest, sentiment, alerted_at
+       FROM uw_flow_alerts
+       WHERE alerted_at > NOW() - ($1 * INTERVAL '1 hour')
+         AND ($2 = 0 OR premium >= $2)
+       ORDER BY alerted_at DESC LIMIT $3`,
+      [hours, minPremium, limit]
+    );
+    res.json({ alerts: rows, count: rows.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/sentinel/recent?limit=20 — sentinel run history (Item 6)
+app.get('/api/sentinel/recent', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+    const { rows } = await query(
+      `SELECT id, mode, as_of, email_sent, error,
+              jsonb_array_length(COALESCE(risks_json, '[]'::jsonb)) AS risk_count,
+              jsonb_array_length(COALESCE(proposals_json, '[]'::jsonb)) AS proposal_count
+       FROM sentinel_runs
+       ORDER BY as_of DESC LIMIT $1`,
+      [limit]
+    );
+    res.json({ runs: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/sentinel/runs/:id — full sentinel run detail (Item 7)
+app.get('/api/sentinel/runs/:id', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const { rows } = await query(`SELECT * FROM sentinel_runs WHERE id = $1`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Dip analysis — worst drops with reasons
 app.get('/api/research/dips', async (req, res) => {
   try {
@@ -8119,21 +8179,61 @@ cron.schedule('15 4 * * 1', async () => {
 
 // ─── Unusual Whales background ingestion ──────────────────────────────────────
 
-// Every 5 min weekdays — persist top movers to DB
+// Every 5 min weekdays — persist top movers (all 3 directions) to uw_top_movers
 cron.schedule('*/5 * * * 1-5', async () => {
-  if (!isUWConfigured()) return;
+  if (!isUWConfigured() || !isDbAvailable()) return;
   try {
-    const result = await getTopMovers({ limit: 50 });
-    if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
-    for (const m of result) {
+    const captured_at = new Date(Math.floor(Date.now() / 300_000) * 300_000);
+    const [gainers, losers, active] = await Promise.all([
+      getTopMovers({ direction: 'gainers', limit: 50 }),
+      getTopMovers({ direction: 'losers',  limit: 50 }),
+      getTopMovers({ direction: 'active',  limit: 50 }),
+    ]);
+    for (const m of [...(gainers ?? []), ...(losers ?? []), ...(active ?? [])]) {
       await query(
-        `INSERT INTO uw_options_flow (ticker, sentiment, raw, ingested_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT DO NOTHING`,
-        [m.ticker, m.direction, JSON.stringify(m)]
+        `INSERT INTO uw_top_movers (ticker, direction, change_pct, price, volume, raw, captured_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (ticker, direction, captured_at) DO NOTHING`,
+        [m.ticker, m.direction ?? null, m.change_percent ?? m.change_pct ?? m.change ?? null,
+         m.price ?? null, m.volume ?? null, JSON.stringify(m), captured_at]
       ).catch(() => {});
     }
   } catch (e) { console.error('[uw-cron/movers]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// Every 2 min during market hours — persist options flow alerts to uw_flow_alerts
+cron.schedule('*/2 9-16 * * 1-5', async () => {
+  if (!isUWConfigured() || !isDbAvailable()) return;
+  try {
+    const alerts = await getFlowAlerts({ limit: 100 });
+    if (!Array.isArray(alerts) || !alerts.length) return;
+    for (const a of alerts) {
+      const side      = a.side ?? a.option_type ?? '';
+      const strike    = a.strike ?? -1;
+      const expiry    = a.expiry ? new Date(a.expiry) : new Date('1900-01-01');
+      const alertedAt = a.alerted_at ? new Date(a.alerted_at) : (a.created_at ? new Date(a.created_at) : new Date());
+      await query(
+        `INSERT INTO uw_flow_alerts
+           (ticker, alert_type, side, strike, expiry, premium, volume, open_interest, iv, sentiment, raw, alerted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (ticker, COALESCE(strike,-1), COALESCE(expiry,'1900-01-01'::date), COALESCE(side,''), alerted_at) DO NOTHING`,
+        [
+          a.ticker ?? a.underlying_symbol,
+          a.alert_type ?? a.type ?? null,
+          side,
+          strike,
+          expiry,
+          a.premium ?? a.total_premium ?? null,
+          a.volume ?? null,
+          a.open_interest ?? a.oi ?? null,
+          a.iv ?? a.implied_volatility ?? null,
+          a.sentiment ?? null,
+          JSON.stringify(a),
+          alertedAt,
+        ]
+      ).catch(() => {});
+    }
+  } catch (e) { console.error('[uw-cron/flow-alerts]', e.message); }
 }, { timezone: 'America/New_York' });
 
 // Every 15 min weekdays — persist insider trades
@@ -8143,13 +8243,15 @@ cron.schedule('*/15 * * * 1-5', async () => {
     const result = await getInsiderTrades({ limit: 100 });
     if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
     for (const t of result) {
+      const insiderName = t.owner_name ?? '';
+      const txType      = t.side ?? '';
+      const filedAt     = t.transaction_date ? new Date(t.transaction_date) : new Date('1900-01-01');
       await query(
         `INSERT INTO uw_insider_trades (ticker, insider_name, role, transaction_type, shares, price, value, filed_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (ticker, insider_name, filed_at, transaction_type) DO NOTHING`,
-        [t.ticker, t.owner_name ?? null, t.role ?? null, t.side ?? null,
-         t.shares ?? null, t.price ?? null, t.amount ?? null,
-         t.transaction_date ? new Date(t.transaction_date) : null]
+         ON CONFLICT (ticker, COALESCE(insider_name,''), COALESCE(filed_at,'1900-01-01'::timestamptz), COALESCE(transaction_type,'')) DO NOTHING`,
+        [t.ticker, insiderName, t.role ?? null, txType,
+         t.shares ?? null, t.price ?? null, t.amount ?? null, filedAt]
       ).catch(() => {});
     }
   } catch (e) { console.error('[uw-cron/insider]', e.message); }
@@ -8162,28 +8264,63 @@ cron.schedule('0 * * * 1-5', async () => {
     const result = await getCongressionalTrades({ limit: 100 });
     if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
     for (const t of result) {
+      const memberName = t.member_name ?? '';
+      const txType     = t.transaction_type ?? '';
+      const tradedAt   = t.transaction_date ? new Date(t.transaction_date) : new Date('1900-01-01');
       await query(
         `INSERT INTO uw_congressional_trades (ticker, member_name, party, chamber, transaction_type, amount_range, traded_at, filed_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (ticker, member_name, traded_at, transaction_type) DO NOTHING`,
-        [t.ticker, t.member_name, t.party, t.chamber, t.transaction_type,
-         t.amount_range, t.transaction_date ? new Date(t.transaction_date) : null,
+         ON CONFLICT (ticker, COALESCE(member_name,''), COALESCE(traded_at,'1900-01-01'::date), COALESCE(transaction_type,'')) DO NOTHING`,
+        [t.ticker, memberName, t.party ?? null, t.chamber ?? null, txType,
+         t.amount_range ?? null, tradedAt,
          t.filed_at ? new Date(t.filed_at) : null]
       ).catch(() => {});
     }
   } catch (e) { console.error('[uw-cron/congress]', e.message); }
 }, { timezone: 'America/New_York' });
 
-// 6 AM ET weekdays — fetch economic calendar (once daily is enough)
+// 6 AM ET weekdays — fetch economic calendar and persist to DB
 cron.schedule('0 6 * * 1-5', async () => {
   if (!isUWConfigured()) return;
-  try { await getEconomicCalendar(); } catch (e) { console.error('[uw-cron/econ-cal]', e.message); }
+  try {
+    const events = await getEconomicCalendar();
+    if (!Array.isArray(events) || !events.length || !isDbAvailable()) return;
+    for (const e of events) {
+      const eventDate = e.time ? e.time.slice(0, 10) : null;
+      if (!eventDate || !e.event) continue;
+      await query(
+        `INSERT INTO uw_economic_calendar (event_date, event_name, country, importance, actual, forecast, previous, raw)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (event_date, event_name, (COALESCE(country, ''))) DO UPDATE
+           SET actual = EXCLUDED.actual, ingested_at = NOW()`,
+        [eventDate, e.event, e.country ?? '', e.importance ?? e.type ?? null,
+         parseUWNum(e.actual), parseUWNum(e.forecast), parseUWNum(e.previous), JSON.stringify(e)]
+      ).catch(() => {});
+    }
+  } catch (e) { console.error('[uw-cron/econ-cal]', e.message); }
 }, { timezone: 'America/New_York' });
 
-// 6 AM ET weekdays — fetch IPO calendar
+// 6:05 AM ET weekdays — fetch IPO calendar and persist to DB
 cron.schedule('5 6 * * 1-5', async () => {
   if (!isUWConfigured()) return;
-  try { await getIpoCalendar(); } catch (e) { console.error('[uw-cron/ipo-cal]', e.message); }
+  try {
+    const ipos = await getIpoCalendar();
+    if (!Array.isArray(ipos) || !ipos.length || !isDbAvailable()) return;
+    for (const ipo of ipos) {
+      const ipoDate = ipo.ipo_date ?? ipo.date ?? null;
+      const ticker = ipo.ticker ?? ipo.symbol ?? null;
+      if (!ticker || !ipoDate) continue;
+      await query(
+        `INSERT INTO uw_ipo_calendar (ticker, company_name, ipo_date, price_low, price_high, shares, exchange, status, raw)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (ticker, ipo_date) DO UPDATE
+           SET status = EXCLUDED.status, ingested_at = NOW()`,
+        [ticker, ipo.company_name ?? ipo.name ?? null, new Date(ipoDate),
+         ipo.price_low ?? ipo.min_price ?? null, ipo.price_high ?? ipo.max_price ?? null,
+         ipo.shares ?? null, ipo.exchange ?? null, ipo.status ?? null, JSON.stringify(ipo)]
+      ).catch(() => {});
+    }
+  } catch (e) { console.error('[uw-cron/ipo-cal]', e.message); }
 }, { timezone: 'America/New_York' });
 
 // 6 PM ET weekdays — warm fundamentals cache for held positions
@@ -8196,6 +8333,66 @@ cron.schedule('0 18 * * 1-5', async () => {
       await new Promise(r => setTimeout(r, 600)); // gentle pacing
     }
   } catch (e) { console.error('[uw-cron/fundamentals]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// 3 AM ET daily — purge old UW rows (Item 3)
+cron.schedule('0 3 * * *', async () => {
+  if (!isDbAvailable()) return;
+  try {
+    const r = await purgeOldUwRows();
+    const total = Object.values(r).reduce((s, n) => s + n, 0);
+    if (total > 0) console.log('[uw-retention] purged:', JSON.stringify(r));
+  } catch (e) { console.error('[uw-retention]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// 4 AM ET daily — quota low-water alarm (Item 5)
+cron.schedule('0 4 * * *', async () => {
+  try {
+    const q = getQuota();
+    if (q && q.remaining_day < 5000) {
+      console.warn('[uw-quota] LOW DAILY: remaining=', q.remaining_day);
+    }
+  } catch (e) { console.error('[uw-quota]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// 7 AM ET daily — UW schema linter (Item 2)
+cron.schedule('0 7 * * *', async () => {
+  if (!isDbAvailable()) return;
+  try {
+    const report = await auditUWSchemas();
+    const drift = Object.entries(report).filter(([, r]) =>
+      (r.unknown_keys?.length || 0) + (r.missing_keys?.length || 0) > 0
+    );
+    if (drift.length) {
+      console.warn('[uw-schema-linter] DRIFT detected:', JSON.stringify(drift, null, 2));
+    } else {
+      console.log('[uw-schema-linter] all UW schemas match expected keys');
+    }
+  } catch (e) { console.error('[uw-schema-linter]', e.message); }
+}, { timezone: 'America/New_York' });
+
+// 8 AM ET daily — data-quality report (Item 8)
+cron.schedule('0 8 * * *', async () => {
+  if (!isDbAvailable()) return;
+  try {
+    const report = await dailyDataQualityReport();
+    const alarms = [];
+    for (const [table, r] of Object.entries(report)) {
+      if (r.error) { alarms.push(`${table}: error — ${r.error}`); continue; }
+      if (r.rows_24h === 0) alarms.push(`${table}: zero rows in 24h`);
+      if (r.rows_24h > 0 && r.oldest_24h_row_age_minutes > 60) {
+        alarms.push(`${table}: stale (${Math.round(r.oldest_24h_row_age_minutes)}min)`);
+      }
+      for (const [col, pct] of Object.entries(r.null_rates || {})) {
+        if (pct > 20) alarms.push(`${table}.${col}: ${pct}% NULL`);
+      }
+    }
+    if (alarms.length) {
+      console.warn('[uw-quality]', JSON.stringify(alarms));
+    } else {
+      console.log('[uw-quality] all UW tables healthy');
+    }
+  } catch (e) { console.error('[uw-quality]', e.message); }
 }, { timezone: 'America/New_York' });
 
 // Start options flow WebSocket stream on server startup (if UW configured)
