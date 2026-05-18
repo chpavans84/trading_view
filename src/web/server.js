@@ -6589,14 +6589,18 @@ const rejectUpgrade = (socket, status, msg) => {
 const wssPrice  = new WebSocketServer({ noServer: true });
 const _priceClients = new Map();   // ws → Set<symbol>
 let   _priceTick    = null;
+let   _tickRunning  = false;       // guard: prevents overlapping async tick executions
 
 function _ensurePriceTick() {
   if (_priceTick) return;
   _priceTick = setInterval(async () => {
+    if (_tickRunning) return;      // previous tick still in flight — skip this interval
+    _tickRunning = true;
+    try {
     if (_priceClients.size === 0) { clearInterval(_priceTick); _priceTick = null; return; }
     const allSyms = new Set();
     _priceClients.forEach(syms => syms.forEach(s => allSyms.add(s)));
-    if (!allSyms.size) return;
+    if (!allSyms.size) { return; }
     const symList = [...allSyms];
 
     // Step 1: Yahoo Finance for all symbols in parallel (HTTP, no TCP to OpenD).
@@ -6664,6 +6668,7 @@ function _ensurePriceTick() {
     _priceClients.forEach((_, ws) => {
       if (ws.readyState === ws.OPEN) try { ws.send(msg); } catch {}
     });
+    } finally { _tickRunning = false; }
   }, 3000);
 }
 
