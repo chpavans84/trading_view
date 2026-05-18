@@ -538,7 +538,7 @@ export async function getStockState(ticker) {
  * @param {Function} [opts.onError]   — called with error message string
  * @returns {{ close: () => void, subscribed: boolean }}
  */
-export function streamOptionsFlow({ tickers = [], onTrade, onError } = {}) {
+export function streamOptionsFlow({ tickers = [], onTrade, onError, onFlap } = {}) {
   if (!key()) {
     console.warn('[UW-WS] UW_API_KEY not set — streaming disabled');
     return { close: () => {}, subscribed: false };
@@ -548,6 +548,7 @@ export function streamOptionsFlow({ tickers = [], onTrade, onError } = {}) {
   let closed = false;
   let backoff = 1000;
   let heartbeatInterval = null;
+  let failCount = 0;
 
   function connect() {
     if (closed) return;
@@ -558,6 +559,7 @@ export function streamOptionsFlow({ tickers = [], onTrade, onError } = {}) {
     ws.on('open', () => {
       console.log('[UW-WS] connected');
       backoff = 1000;
+      failCount = 0;
       // Subscribe to option_trades channel
       const sub = { action: 'subscribe', channel: 'option_trades' };
       if (tickers.length) sub.tickers = tickers.map(t => t.toUpperCase());
@@ -588,7 +590,12 @@ export function streamOptionsFlow({ tickers = [], onTrade, onError } = {}) {
     ws.on('close', (code, reason) => {
       clearInterval(heartbeatInterval);
       if (closed) { console.log('[UW-WS] closed (requested)'); return; }
-      console.warn(`[UW-WS] disconnected (${code}) — reconnecting in ${backoff}ms`);
+      failCount++;
+      const lastError = reason?.toString() || `code ${code}`;
+      console.warn(`[UW-WS] disconnected (${code}) — reconnecting in ${backoff}ms (attempt ${failCount})`);
+      if (failCount >= 5 && backoff >= 30_000) {
+        onFlap?.({ attempts: failCount, last_error: lastError });
+      }
       setTimeout(() => {
         backoff = Math.min(backoff * 2, 30_000);
         connect();

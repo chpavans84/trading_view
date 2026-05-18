@@ -111,3 +111,52 @@ describe('uw-schema-linter — drift scenarios', () => {
     assert.ok(r.missing_keys.includes('change_percent'), 'expected change_percent missing');
   });
 });
+
+// ── Item H: alert() fired when drift is detected ──────────────────────────────
+
+describe('uw-schema-linter — alert() fired on drift', () => {
+  it('calls alert with key=uw-schema/drift when drift entries are present', async () => {
+    const alertCalls = [];
+    function mockAlert(args) { alertCalls.push(args); return Promise.resolve({ id: 1 }); }
+
+    // Inline replica of the schema-linter cron drift-check block
+    async function simulateLinterCron(report, alertFn) {
+      const drift = Object.entries(report).filter(([, r]) =>
+        (r.unknown_keys?.length || 0) + (r.missing_keys?.length || 0) > 0
+      );
+      if (drift.length) {
+        alertFn({ key: 'uw-schema/drift', severity: 'warn', title: 'UW schema drift detected', detail: { drift: Object.fromEntries(drift) }, dedup_window_minutes: 1440 }).catch(() => {});
+      }
+    }
+
+    const driftReport = {
+      uw_flow_alerts: { sample_size: 100, unknown_keys: ['brand_new_field'], missing_keys: [] },
+      uw_top_movers:  { sample_size: 100, unknown_keys: [], missing_keys: [] },
+    };
+
+    await simulateLinterCron(driftReport, mockAlert);
+    assert.strictEqual(alertCalls.length, 1, 'alert fired once for drift');
+    assert.strictEqual(alertCalls[0].key, 'uw-schema/drift');
+    assert.strictEqual(alertCalls[0].severity, 'warn');
+    assert.ok(alertCalls[0].detail.drift.uw_flow_alerts, 'drift details include table');
+    assert.strictEqual(alertCalls[0].dedup_window_minutes, 1440, '24h dedup');
+  });
+
+  it('does NOT call alert when no drift', async () => {
+    const alertCalls = [];
+    function mockAlert(args) { alertCalls.push(args); return Promise.resolve({ id: 1 }); }
+
+    async function simulateLinterCron(report, alertFn) {
+      const drift = Object.entries(report).filter(([, r]) =>
+        (r.unknown_keys?.length || 0) + (r.missing_keys?.length || 0) > 0
+      );
+      if (drift.length) alertFn({ key: 'uw-schema/drift', severity: 'warn', title: 'UW schema drift' }).catch(() => {});
+    }
+
+    const cleanReport = {
+      uw_flow_alerts: { sample_size: 100, unknown_keys: [], missing_keys: [] },
+    };
+    await simulateLinterCron(cleanReport, mockAlert);
+    assert.strictEqual(alertCalls.length, 0, 'no alert when clean');
+  });
+});

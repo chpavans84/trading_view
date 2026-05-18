@@ -235,6 +235,7 @@
       <button class="widget-tab" onclick="switchWidgetTab('uw_correlations')">🔗 Correlations</button>
       <button class="widget-tab" onclick="switchWidgetTab('uw_flow_history')">📊 Flow History</button>
       <button class="widget-tab" onclick="switchWidgetTab('sentinel_runs')">📨 Sentinel Activity</button>
+      <button class="widget-tab" onclick="switchWidgetTab('sys_alerts')">🚨 System Alerts</button>
       <div style="flex:1;min-width:8px"></div>
       <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
         <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
@@ -421,6 +422,34 @@
             <button onclick="document.getElementById('sentinelRunModal').style.display='none'" style="background:none;border:none;color:#8b949e;font-size:1.4rem;cursor:pointer">×</button>
           </div>
           <pre id="sentinelRunDetail" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:0.78rem;color:#e6edf3;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Alerts panel -->
+    <div class="widget-panel" id="widget-panel-sys_alerts">
+      <div class="table-wrap">
+        <div class="table-head">
+          <h3>🚨 System Alerts <span id="sysAlertCounts" style="font-size:0.75rem;color:#8b949e;font-weight:400"></span></h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="sysAlertFilter" onchange="renderSysAlerts()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+              <option value="all">All</option>
+              <option value="critical">Critical only</option>
+              <option value="hour">Last hour</option>
+            </select>
+            <button class="refresh-btn" onclick="loadSysAlerts()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="sysAlertsBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+      </div>
+      <!-- Detail modal -->
+      <div id="sysAlertModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px">
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:800px;margin:0 auto;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0;color:#e6edf3">Alert Detail</h3>
+            <button onclick="document.getElementById('sysAlertModal').style.display='none'" style="background:none;border:none;color:#8b949e;font-size:1.4rem;cursor:pointer">×</button>
+          </div>
+          <pre id="sysAlertDetail" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:0.78rem;color:#e6edf3;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word"></pre>
         </div>
       </div>
     </div>
@@ -8405,6 +8434,9 @@ function switchWidgetTab(name) {
   if (name !== 'sentinel_runs' && typeof _sentinelTimer !== 'undefined' && _sentinelTimer) {
     clearTimeout(_sentinelTimer); _sentinelTimer = null;
   }
+  if (name !== 'sys_alerts' && typeof _sysAlertTimer !== 'undefined' && _sysAlertTimer) {
+    clearTimeout(_sysAlertTimer); _sysAlertTimer = null;
+  }
   if (name === 'watchlist') loadDashboardWatchlist();
   if (name === 'positions') loadPnl();
   if (name === 'cp') initCatalystPerfTab();
@@ -8414,6 +8446,7 @@ function switchWidgetTab(name) {
   if (name === 'uw_congress') loadUWCongress();
   if (name === 'uw_flow_history') loadFlowAlertsHistory();
   if (name === 'sentinel_runs') loadSentinelActivity();
+  if (name === 'sys_alerts') loadSysAlerts();
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -20233,6 +20266,94 @@ async function openSentinelRunDetail(id) {
   modal.style.display = 'block';
   try {
     const r = await fetch(`/api/sentinel/runs/${encodeURIComponent(id)}`);
+    const d = await r.json();
+    if (!r.ok || d.error) { detail.textContent = d.error || 'Error'; return; }
+    detail.textContent = JSON.stringify(d, null, 2);
+  } catch (e) { detail.textContent = e.message; }
+}
+
+// ── System Alerts widget ──────────────────────────────────────────────────────
+
+let _sysAlertsData = [];
+let _sysAlertTimer = null;
+
+async function loadSysAlerts() {
+  const body = document.getElementById('sysAlertsBody');
+  if (!body) return;
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const r = await fetch('/api/system-alerts/recent?limit=200');
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(d.error || 'Error')}</div>`; return; }
+    _sysAlertsData = d.alerts || [];
+    renderSysAlerts();
+  } catch (e) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(e.message)}</div>`; }
+  clearTimeout(_sysAlertTimer);
+  _sysAlertTimer = setTimeout(loadSysAlerts, 60_000);
+}
+
+function renderSysAlerts() {
+  const body   = document.getElementById('sysAlertsBody');
+  const counts = document.getElementById('sysAlertCounts');
+  const filter = document.getElementById('sysAlertFilter')?.value || 'all';
+  if (!body) return;
+
+  const now   = Date.now();
+  const oneHr = 60 * 60 * 1000;
+  let rows = _sysAlertsData;
+  if (filter === 'critical') rows = rows.filter(a => a.severity === 'critical');
+  if (filter === 'hour')     rows = rows.filter(a => now - new Date(a.created_at).getTime() < oneHr);
+
+  // Counts last 24h
+  const h24 = now - 24 * 3600 * 1000;
+  const data24 = _sysAlertsData.filter(a => new Date(a.created_at).getTime() > h24);
+  const crit24 = data24.filter(a => a.severity === 'critical').length;
+  const warn24 = data24.filter(a => a.severity === 'warn').length;
+  const unsent = data24.filter(a => !a.email_sent && !a.email_suppressed).length;
+  if (counts) counts.textContent = `— ${warn24} warn · ${crit24} critical · ${unsent} unsent (24h)`;
+
+  if (!rows.length) { body.innerHTML = '<div style="color:#8b949e;padding:16px">No alerts found.</div>'; return; }
+
+  const badgeStyle = (s) => {
+    const c = s === 'critical' ? '#dc2626' : s === 'info' ? '#16a34a' : '#d97706';
+    return `background:${c};color:#fff;padding:1px 7px;border-radius:4px;font-size:0.78rem;font-weight:700;white-space:nowrap`;
+  };
+  const emailStatus = (a) => {
+    if (a.email_sent)       return '<span style="color:#3fb950">✓ sent</span>';
+    if (a.email_suppressed) return '<span style="color:#8b949e">⏸ suppressed</span>';
+    if (a.email_error)      return `<span style="color:#f78166" title="${_escHtml(a.email_error)}">✗ failed</span>`;
+    return '<span style="color:#8b949e">pending</span>';
+  };
+
+  const tableRows = rows.map(a => `<tr style="cursor:pointer;border-bottom:1px solid #21262d" onclick="openSysAlertDetail('${_escHtml(String(a.id))}')">
+    <td style="padding:7px 8px;color:#8b949e;font-size:0.78rem;white-space:nowrap">${new Date(a.created_at).toLocaleTimeString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+    <td style="padding:7px 8px"><span style="${badgeStyle(a.severity)}">${_escHtml(a.severity)}</span></td>
+    <td style="padding:7px 8px;color:#8b949e;font-size:0.8rem;font-family:monospace">${_escHtml(a.key)}</td>
+    <td style="padding:7px 8px;color:#e6edf3">${_escHtml(a.title)}</td>
+    <td style="padding:7px 8px;font-size:0.8rem">${emailStatus(a)}</td>
+  </tr>`).join('');
+
+  body.innerHTML = `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d;font-size:0.78rem">
+        <th style="text-align:left;padding:6px 8px">Time</th>
+        <th style="text-align:left;padding:6px 8px">Severity</th>
+        <th style="text-align:left;padding:6px 8px">Key</th>
+        <th style="text-align:left;padding:6px 8px">Title</th>
+        <th style="text-align:left;padding:6px 8px">Email</th>
+      </thead><tbody>${tableRows}</tbody>
+    </table>
+  </div>`;
+}
+
+async function openSysAlertDetail(id) {
+  const modal  = document.getElementById('sysAlertModal');
+  const detail = document.getElementById('sysAlertDetail');
+  if (!modal || !detail) return;
+  detail.textContent = 'Loading…';
+  modal.style.display = 'block';
+  try {
+    const r = await fetch(`/api/system-alerts/${encodeURIComponent(id)}`);
     const d = await r.json();
     if (!r.ok || d.error) { detail.textContent = d.error || 'Error'; return; }
     detail.textContent = JSON.stringify(d, null, 2);

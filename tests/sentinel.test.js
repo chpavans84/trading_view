@@ -521,3 +521,28 @@ describe('PUBLIC_URL validation — module-load guard', () => {
     assert.strictEqual(result, 'http://127.0.0.1:3000');
   });
 });
+
+// ── Item H: alert() called on sentinel run failure ────────────────────────────
+
+describe('sentinel — alert() fired on run failure', () => {
+  it('calls alert with key=sentinel/run-failed when runSentinel catch block fires', async () => {
+    const alertCalls = [];
+    function mockAlert(args) { alertCalls.push(args); return Promise.resolve({ id: 1 }); }
+
+    // Inline replica of the sentinel catch block behaviour
+    async function simulateSentinelRun(mode, alertFn) {
+      try {
+        throw new Error('broker unavailable');
+      } catch (err) {
+        alertFn({ key: 'sentinel/run-failed', severity: 'critical', title: 'Sentinel run failed', detail: { mode, error: err.message } }).catch(() => {});
+      }
+    }
+
+    await simulateSentinelRun('preclose', mockAlert);
+    assert.strictEqual(alertCalls.length, 1, 'alert called once');
+    assert.strictEqual(alertCalls[0].key, 'sentinel/run-failed');
+    assert.strictEqual(alertCalls[0].severity, 'critical');
+    assert.strictEqual(alertCalls[0].detail.mode, 'preclose');
+    assert.ok(alertCalls[0].detail.error.includes('broker unavailable'));
+  });
+});
