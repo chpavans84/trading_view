@@ -233,6 +233,8 @@
       <button class="widget-tab" onclick="switchWidgetTab('uw_insider')">👤 Insider</button>
       <button class="widget-tab" onclick="switchWidgetTab('uw_congress')">🏛️ Congress</button>
       <button class="widget-tab" onclick="switchWidgetTab('uw_correlations')">🔗 Correlations</button>
+      <button class="widget-tab" onclick="switchWidgetTab('uw_flow_history')">📊 Flow History</button>
+      <button class="widget-tab" onclick="switchWidgetTab('sentinel_runs')">📨 Sentinel Activity</button>
       <div style="flex:1;min-width:8px"></div>
       <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
         <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
@@ -374,6 +376,52 @@
           </div>
         </div>
         <div id="uwCongressBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- UW Flow Alerts History panel -->
+    <div class="widget-panel" id="widget-panel-uw_flow_history">
+      <div class="table-wrap">
+        <div class="table-head">
+          <h3>📊 Flow Alerts History <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— DB-backed, last 24h</span></h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="uwFlowHistHours" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+              <option value="6">Last 6h</option>
+              <option value="24" selected>Last 24h</option>
+              <option value="48">Last 48h</option>
+              <option value="168">Last 7d</option>
+            </select>
+            <select id="uwFlowHistMinPrem" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+              <option value="0">All premiums</option>
+              <option value="100000" selected>≥$100K</option>
+              <option value="500000">≥$500K</option>
+              <option value="1000000">≥$1M</option>
+            </select>
+            <button class="refresh-btn" onclick="loadFlowAlertsHistory()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="uwFlowHistBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- Sentinel Activity panel -->
+    <div class="widget-panel" id="widget-panel-sentinel_runs">
+      <div class="table-wrap">
+        <div class="table-head">
+          <h3>📨 Sentinel Activity <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— last 20 runs</span></h3>
+          <button class="refresh-btn" onclick="loadSentinelActivity()">↻ Refresh</button>
+        </div>
+        <div id="sentinelRunsBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+      </div>
+      <!-- Detail modal -->
+      <div id="sentinelRunModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px">
+        <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:800px;margin:0 auto;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="margin:0;color:#e6edf3">Sentinel Run Detail</h3>
+            <button onclick="document.getElementById('sentinelRunModal').style.display='none'" style="background:none;border:none;color:#8b949e;font-size:1.4rem;cursor:pointer">×</button>
+          </div>
+          <pre id="sentinelRunDetail" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:0.78rem;color:#e6edf3;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word"></pre>
+        </div>
       </div>
     </div>
 
@@ -8354,6 +8402,9 @@ function switchWidgetTab(name) {
   if (name !== 'uw_flow' && typeof _uwFlowTimer !== 'undefined' && _uwFlowTimer) {
     clearTimeout(_uwFlowTimer); _uwFlowTimer = null;
   }
+  if (name !== 'sentinel_runs' && typeof _sentinelTimer !== 'undefined' && _sentinelTimer) {
+    clearTimeout(_sentinelTimer); _sentinelTimer = null;
+  }
   if (name === 'watchlist') loadDashboardWatchlist();
   if (name === 'positions') loadPnl();
   if (name === 'cp') initCatalystPerfTab();
@@ -8361,6 +8412,8 @@ function switchWidgetTab(name) {
   if (name === 'uw_flow') loadUWFlow();
   if (name === 'uw_insider') loadUWInsider();
   if (name === 'uw_congress') loadUWCongress();
+  if (name === 'uw_flow_history') loadFlowAlertsHistory();
+  if (name === 'sentinel_runs') loadSentinelActivity();
 }
 
 // ── Helpers ───────────────────────────────────────────
@@ -20092,6 +20145,99 @@ async function loadUWCongress() {
 }
 
 function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+let _sentinelTimer = null;
+
+async function loadFlowAlertsHistory() {
+  const body = document.getElementById('uwFlowHistBody');
+  if (!body) return;
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const hours    = document.getElementById('uwFlowHistHours')?.value || '24';
+    const minPrem  = document.getElementById('uwFlowHistMinPrem')?.value || '100000';
+    const r = await fetch(`/api/uw/flow-alerts-history?hours=${hours}&limit=50&min_premium=${minPrem}`);
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(d.error || 'Error')}</div>`; return; }
+    const alerts = d.alerts || [];
+    if (!alerts.length) { body.innerHTML = '<div style="color:#8b949e;padding:16px">No alerts in this window.</div>'; return; }
+    const rows = alerts.map(a => {
+      const sentColor = (a.sentiment||'').toLowerCase()==='bearish' ? '#f78166' : '#3fb950';
+      const premFmt = a.premium ? '$'+(Number(a.premium)/1e6).toFixed(2)+'M' : '—';
+      return `<tr>
+        <td style="color:#8b949e;font-size:0.78rem">${a.alerted_at ? new Date(a.alerted_at).toLocaleString() : '—'}</td>
+        <td style="font-weight:700;color:#58a6ff">${_escHtml(a.ticker||'—')}</td>
+        <td style="color:${(a.side||'').toLowerCase()==='call'?'#3fb950':'#f78166'}">${_escHtml((a.side||'').toUpperCase()||'—')}</td>
+        <td>${a.strike != null && a.strike != -1 ? '$'+a.strike : '—'}</td>
+        <td>${a.expiry && a.expiry !== '1900-01-01' ? a.expiry : '—'}</td>
+        <td>${premFmt}</td>
+        <td style="color:${sentColor};font-weight:700">${_escHtml(a.sentiment||'—')}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d">
+        <th style="text-align:left;padding:6px 8px">Time</th>
+        <th style="text-align:left;padding:6px 8px">Ticker</th>
+        <th style="text-align:left;padding:6px 8px">Side</th>
+        <th style="text-align:left;padding:6px 8px">Strike</th>
+        <th style="text-align:left;padding:6px 8px">Expiry</th>
+        <th style="text-align:left;padding:6px 8px">Premium</th>
+        <th style="text-align:left;padding:6px 8px">Sentiment</th>
+      </tr></thead><tbody>${rows}</tbody>
+    </table></div><div style="color:#8b949e;font-size:0.75rem;padding:8px 0">${alerts.length} alerts — auto-refreshes every 60s</div>`;
+  } catch (e) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(e.message)}</div>`; }
+  clearTimeout(_uwFlowTimer);
+  _uwFlowTimer = setTimeout(loadFlowAlertsHistory, 60_000);
+}
+
+async function loadSentinelActivity() {
+  const body = document.getElementById('sentinelRunsBody');
+  if (!body) return;
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  try {
+    const r = await fetch('/api/sentinel/recent?limit=20');
+    const d = await r.json();
+    if (!r.ok || d.error) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(d.error || 'Error')}</div>`; return; }
+    const runs = d.runs || [];
+    if (!runs.length) { body.innerHTML = '<div style="color:#8b949e;padding:16px">No sentinel runs found.</div>'; return; }
+    const rows = runs.map(run => {
+      const errTrunc = run.error ? _escHtml(String(run.error).slice(0, 80)) : '';
+      return `<tr style="cursor:pointer" onclick="openSentinelRunDetail('${_escHtml(String(run.id))}')">
+        <td style="color:#8b949e;font-size:0.78rem">${run.as_of ? new Date(run.as_of).toLocaleString() : '—'}</td>
+        <td><span style="color:#58a6ff;font-weight:700">${_escHtml(run.mode||'—')}</span></td>
+        <td style="text-align:center">${run.risk_count ?? 0}</td>
+        <td style="text-align:center">${run.proposal_count ?? 0}</td>
+        <td style="text-align:center">${run.email_sent ? '<span style="color:#3fb950">✓</span>' : '–'}</td>
+        <td style="color:#f78166;font-size:0.78rem">${errTrunc}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+      <thead><tr style="color:#8b949e;border-bottom:1px solid #30363d">
+        <th style="text-align:left;padding:6px 8px">As-of</th>
+        <th style="text-align:left;padding:6px 8px">Mode</th>
+        <th style="text-align:center;padding:6px 8px">Risks</th>
+        <th style="text-align:center;padding:6px 8px">Proposals</th>
+        <th style="text-align:center;padding:6px 8px">Email</th>
+        <th style="text-align:left;padding:6px 8px">Error</th>
+      </tr></thead><tbody>${rows}</tbody>
+    </table></div><div style="color:#8b949e;font-size:0.75rem;padding:8px 0">Click row for detail · auto-refreshes every 5min</div>`;
+  } catch (e) { body.innerHTML = `<div style="color:#f78166;padding:16px">${_escHtml(e.message)}</div>`; }
+  clearTimeout(_sentinelTimer);
+  _sentinelTimer = setTimeout(loadSentinelActivity, 300_000);
+}
+
+async function openSentinelRunDetail(id) {
+  const modal  = document.getElementById('sentinelRunModal');
+  const detail = document.getElementById('sentinelRunDetail');
+  if (!modal || !detail) return;
+  detail.textContent = 'Loading…';
+  modal.style.display = 'block';
+  try {
+    const r = await fetch(`/api/sentinel/runs/${encodeURIComponent(id)}`);
+    const d = await r.json();
+    if (!r.ok || d.error) { detail.textContent = d.error || 'Error'; return; }
+    detail.textContent = JSON.stringify(d, null, 2);
+  } catch (e) { detail.textContent = e.message; }
+}
 
 async function loadUWCorrelations() {
   const body = document.getElementById('uwCorrBody');
