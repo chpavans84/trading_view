@@ -43,7 +43,17 @@ const TRD_ENV    = { SIMULATE: 0, REAL: 1 };
 
 // Trading-specific enums
 const TRD_SIDE      = { Buy: 1, Sell: 2, SellShort: 3 };
-const ORDER_TYPE    = { Normal: 1, Market: 2, Stop: 10, MarketIfTouched: 12, TrailingStop: 14 };
+const ORDER_TYPE    = {
+  Normal: 1, Market: 2,
+  Stop: 10, StopLimit: 11,
+  MarketIfTouched: 12, LimitIfTouched: 13,
+  TrailingStop: 14, TrailingStopLimit: 15,
+  TWAP: 16, VWAP: 18,
+};
+// Session enum (Common.Session) — controls which trading hours the order is active
+const SESSION       = { None: 0, RTH: 1, ETH: 2, All: 3, Overnight: 4 };
+// TimeInForce enum — Day=0 (default), GTC=1
+const TIME_IN_FORCE = { Day: 0, GTC: 1 };
 const MODIFY_OP     = { Normal: 1, Cancel: 2 };
 // SecurityFirm: 1=Futu HK, 2=Moomoo US (FutuInc)
 const SECURITY_FIRM = { FutuSecurities: 1, FutuInc: 2 };
@@ -423,7 +433,7 @@ async function unlockTrade(client, trdEnv) {
 }
 
 /** Low-level single order placer. Called inside withClient so client is already connected. */
-async function placeSingleOrder(client, { accID, trdEnv, symbol, side, qty, orderType, price, auxPrice, remark }) {
+async function placeSingleOrder(client, { accID, trdEnv, symbol, side, qty, orderType, price, auxPrice, session, timeInForce, remark }) {
   const c2s = {
     packetID:  makePacketID(client),
     header:    { trdEnv, accID },
@@ -431,11 +441,15 @@ async function placeSingleOrder(client, { accID, trdEnv, symbol, side, qty, orde
     orderType,
     code:      symbol.toUpperCase(),
     qty,
-    secMarket: TRD_MARKET.US, // TrdSecMarket_US = 2, same value as TRD_MARKET.US
+    secMarket: TRD_MARKET.US,
   };
-  if (price    != null) c2s.price    = price;
-  if (auxPrice != null) c2s.auxPrice = auxPrice;
-  if (remark)           c2s.remark   = String(remark).slice(0, 64);
+  if (price        != null) c2s.price        = price;
+  if (auxPrice     != null) c2s.auxPrice     = auxPrice;
+  if (session      != null) c2s.session      = session;
+  if (timeInForce  != null) c2s.timeInForce  = timeInForce;
+  // fillOutsideRTH for legacy OpenD versions that don't support session field
+  if (session != null && session !== SESSION.RTH) c2s.fillOutsideRTH = true;
+  if (remark)               c2s.remark       = String(remark).slice(0, 64);
 
   const resp = await client.sendProto(
     PROTO.PlaceOrder, 'Trd_PlaceOrder.Request', 'Trd_PlaceOrder.Response', { c2s }
@@ -457,10 +471,35 @@ async function placeSingleOrder(client, { accID, trdEnv, symbol, side, qty, orde
  *
  * Returns all three order IDs so the caller can track and cancel them.
  */
-export async function placeMoomooTrade({ symbol, side = 'buy', qty, stop_price = null, take_profit_price = null, trailing_pct = null, acc_id = null }) {
+export async function placeMoomooTrade({ symbol, side = 'buy', qty,
+  order_type = 'market', limit_price = null, stop_price = null, trail_percent = null,
+  moo_session = SESSION.All, moo_tif = TIME_IN_FORCE.Day,
+  take_profit_price = null, trailing_pct = null, acc_id = null }) {
   const trdEnv  = MOOMOO_TRADE_ENV_VALUE;
   const mooSide = side === 'buy' ? TRD_SIDE.Buy : TRD_SIDE.Sell;
   const sellSide = TRD_SIDE.Sell;
+
+  // Map UI order_type → Moomoo ORDER_TYPE + price/auxPrice for entry
+  const _mooTypeMap = {
+    market:               ORDER_TYPE.Market,
+    limit:                ORDER_TYPE.Normal,
+    stop:                 ORDER_TYPE.Stop,
+    stop_limit:           ORDER_TYPE.StopLimit,
+    market_if_touched:    ORDER_TYPE.MarketIfTouched,
+    limit_if_touched:     ORDER_TYPE.LimitIfTouched,
+    trailing_stop:        ORDER_TYPE.TrailingStop,
+    trailing_stop_limit:  ORDER_TYPE.TrailingStopLimit,
+    twap:                 ORDER_TYPE.TWAP,
+    vwap:                 ORDER_TYPE.VWAP,
+  };
+  const entryOrderType = _mooTypeMap[order_type] || ORDER_TYPE.Market;
+  // price = limit price for limit-style orders; auxPrice = trigger/trail for conditional orders
+  const _needsLimitPrice   = ['limit','stop_limit','limit_if_touched'];
+  const _needsTriggerPrice = ['stop','stop_limit','market_if_touched','limit_if_touched'];
+  const _needsTrailPct     = ['trailing_stop','trailing_stop_limit'];
+  const entryPrice    = _needsLimitPrice.includes(order_type)   ? (limit_price   || 0) : 0;
+  const entryAuxPrice = _needsTriggerPrice.includes(order_type) ? (stop_price    || 0) :
+                        _needsTrailPct.includes(order_type)     ? (trail_percent || 0) : 0;
 
   return withClient(async (client) => {
     const acc = await pickAccount(client, trdEnv, acc_id);
@@ -469,16 +508,21 @@ export async function placeMoomooTrade({ symbol, side = 'buy', qty, stop_price =
 
     await unlockTrade(client, trdEnv);
 
-    // 1. Entry — market order
+    // 1. Entry order (type determined by caller)
     const entry = await placeSingleOrder(client, {
       accID, trdEnv, symbol, side: mooSide, qty,
-      orderType: ORDER_TYPE.Market,
+      orderType:   entryOrderType,
+      price:       entryPrice,
+      auxPrice:    entryAuxPrice || undefined,
+      session:     moo_session,
+      timeInForce: moo_tif,
       remark: 'entry',
     });
 
-    // 2. Stop-loss — stop-market sell (triggered when price drops to stop_price)
+    // 2. Stop-loss bracket — only for plain market entry orders
+    //    (for non-market entries, stop_price is already the entry trigger, not a bracket)
     let stopOrder = null;
-    if (stop_price != null && side === 'buy') {
+    if (order_type === 'market' && stop_price != null && side === 'buy') {
       stopOrder = await placeSingleOrder(client, {
         accID, trdEnv, symbol, side: sellSide, qty,
         orderType: ORDER_TYPE.Stop,
@@ -490,14 +534,14 @@ export async function placeMoomooTrade({ symbol, side = 'buy', qty, stop_price =
     // 3. Take-profit — market-if-touched sell (triggered when price rises to target)
     //    If trailing_pct is set, use TrailingStop instead of fixed take-profit
     let tpOrder = null;
-    if (trailing_pct != null && side === 'buy') {
+    if (order_type === 'market' && trailing_pct != null && side === 'buy') {
       tpOrder = await placeSingleOrder(client, {
         accID, trdEnv, symbol, side: sellSide, qty,
         orderType: ORDER_TYPE.TrailingStop,
         auxPrice:  trailing_pct,  // trail % for TrailingStop orders
         remark: 'trailing_stop',
       });
-    } else if (take_profit_price != null && side === 'buy') {
+    } else if (order_type === 'market' && take_profit_price != null && side === 'buy') {
       tpOrder = await placeSingleOrder(client, {
         accID, trdEnv, symbol, side: sellSide, qty,
         orderType: ORDER_TYPE.MarketIfTouched,

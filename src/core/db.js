@@ -563,6 +563,36 @@ CREATE TABLE IF NOT EXISTS user_reminders (
   dismissed   BOOLEAN DEFAULT FALSE
 );
 CREATE INDEX IF NOT EXISTS idx_user_reminders_username ON user_reminders(username, remind_at);
+
+CREATE TABLE IF NOT EXISTS sentinel_runs (
+  id             SERIAL PRIMARY KEY,
+  mode           VARCHAR(20) NOT NULL,
+  as_of          TIMESTAMPTZ NOT NULL,
+  risks_json     JSONB,
+  proposals_json JSONB,
+  email_sent     BOOLEAN DEFAULT FALSE,
+  error          TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS pending_actions (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  symbol           TEXT NOT NULL,
+  broker           TEXT NOT NULL DEFAULT 'alpaca',
+  side             TEXT NOT NULL,
+  qty              NUMERIC(12,4) NOT NULL,
+  limit_price      NUMERIC(12,4),
+  stop_price       NUMERIC(12,4),
+  reason           TEXT,
+  severity         TEXT,
+  signed_token     TEXT NOT NULL,
+  expires_at       TIMESTAMPTZ NOT NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  executed_at      TIMESTAMPTZ,
+  status           TEXT NOT NULL DEFAULT 'pending',
+  execution_result JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_pending_actions_status ON pending_actions(status, expires_at);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -2054,3 +2084,74 @@ export async function resolveError(id) {
   }
 }
 
+
+// ─── Sentinel helpers ─────────────────────────────────────────────────────────
+
+export async function insertSentinelRun({ mode, as_of, risks_json, proposals_json, email_sent, error }) {
+  if (!isDbAvailable()) return null;
+  try {
+    const { rows } = await query(
+      `INSERT INTO sentinel_runs (mode, as_of, risks_json, proposals_json, email_sent, error)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [mode, as_of, JSON.stringify(risks_json ?? []), JSON.stringify(proposals_json ?? []), email_sent ?? false, error ?? null]
+    );
+    return rows[0]?.id ?? null;
+  } catch (err) {
+    console.error('insertSentinelRun error:', err.message);
+    return null;
+  }
+}
+
+export async function insertPendingAction({ symbol, broker, side, qty, limit_price, stop_price, reason, severity, signed_token, expires_at }) {
+  if (!isDbAvailable()) return null;
+  try {
+    const { rows } = await query(
+      `INSERT INTO pending_actions (symbol, broker, side, qty, limit_price, stop_price, reason, severity, signed_token, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [symbol, broker ?? 'alpaca', side, qty, limit_price ?? null, stop_price ?? null, reason ?? null, severity ?? null, signed_token, expires_at]
+    );
+    return rows[0]?.id ?? null;
+  } catch (err) {
+    console.error('insertPendingAction error:', err.message);
+    return null;
+  }
+}
+
+export async function getPendingAction(id) {
+  if (!isDbAvailable()) return null;
+  try {
+    const { rows } = await query(`SELECT * FROM pending_actions WHERE id = $1`, [id]);
+    return rows[0] ?? null;
+  } catch (err) {
+    console.error('getPendingAction error:', err.message);
+    return null;
+  }
+}
+
+export async function updatePendingAction(id, fields) {
+  if (!isDbAvailable()) return;
+  const keys   = Object.keys(fields);
+  const values = Object.values(fields);
+  const set    = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
+  try {
+    await query(`UPDATE pending_actions SET ${set} WHERE id = $1`, [id, ...values]);
+  } catch (err) {
+    console.error('updatePendingAction error:', err.message);
+  }
+}
+
+export async function getSentinelRecipients() {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows } = await query(
+      `SELECT username, email FROM users
+       WHERE email IS NOT NULL AND email <> ''
+         AND (suspended IS NULL OR suspended = false)
+       ORDER BY username`
+    );
+    return rows; // [{ username, email }, ...]
+  } catch (err) {
+    console.error('getSentinelRecipients error:', err.message);
+    return [];
+  }
+}

@@ -22,7 +22,8 @@ import rateLimit from 'express-rate-limit';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, saveUserMoomoo, clearUserMoomoo, saveUserTiger, clearUserTiger, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache, upsertPrediction, fillActualPrice, getPredictionsForWeek, getPredictionHistory, setDisabledSources, upsertAccountSnapshot, getAccountSnapshots, getUserWatchlistSymbols, addUserWatchlistSymbol, removeUserWatchlistSymbol, logClientError, logServerError, getErrorLog, resolveError } from '../core/db.js';
+import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, saveUserMoomoo, clearUserMoomoo, saveUserTiger, clearUserTiger, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache, upsertPrediction, fillActualPrice, getPredictionsForWeek, getPredictionHistory, setDisabledSources, upsertAccountSnapshot, getAccountSnapshots, getUserWatchlistSymbols, addUserWatchlistSymbol, removeUserWatchlistSymbol, logClientError, logServerError, getErrorLog, resolveError,
+  insertSentinelRun, insertPendingAction, getPendingAction, updatePendingAction } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
@@ -42,6 +43,8 @@ import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRi
 import { seedGraph } from '../core/graph-seed.js';
 import { runPremarketScan } from '../core/premarket-scanner.js';
 import { runEarningsCascadeScan } from '../core/earnings-cascade.js';
+import { runSentinel, signToken, verifyToken } from '../core/sentinel.js';
+import { pageSuccess, pageExpired, pageAlreadyActioned, pagePriceMoved, pageTokenInvalid } from '../core/sentinel-pages.js';
 import { getImpactAnalysis } from '../core/graph-impact.js';
 import { getStockPrediction } from '../core/predictor.js';
 import YahooFinance from 'yahoo-finance2';
@@ -182,12 +185,12 @@ async function migrateUsersToDb() {
 
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
-const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center'];
+const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk'];
 const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
 
 const DEFAULT_PERMISSIONS = {
   admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
+  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
 };
 
 function getPermissions(user) {
@@ -222,7 +225,7 @@ const chatLimiter = rateLimit({
 
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,              // tighter for internet exposure
+  max: 200,             // raised from 60 — Trading Desk makes many parallel requests
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests.' },
@@ -695,6 +698,113 @@ app.post('/api/client-error', async (req, res) => {
     await logClientError({ source: 'browser', level, message, stack, url, context });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Trading Desk symbol list — static in-memory, exempt from rate limiter
+app.get('/api/td-symbols', requireAuth, (req, res) => {
+  const syms = [...new Set([...SP500, ...NASDAQ100])].sort();
+  res.json({ count: syms.length, symbols: syms });
+});
+
+// Trading Desk batch quotes (names + prices) — exempt from rate limiter
+app.get('/api/td-names', requireAuth, async (req, res) => {
+  try {
+    const symbols = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(s => /^[A-Z]{1,6}$/.test(s)).slice(0, 100);
+    if (!symbols.length) return res.json({});
+    const quotes = await _yf.quote(symbols, { fields: ['shortName', 'longName', 'regularMarketPrice', 'regularMarketChangePercent'] });
+    const quotesArr = Array.isArray(quotes) ? quotes : (quotes ? [quotes] : []);
+    const result = {};
+    quotesArr.forEach(q => {
+      if (!q?.symbol) return;
+      result[q.symbol] = {
+        name: q.shortName || q.longName || '',
+        p:    q.regularMarketPrice ?? null,
+        c:    q.regularMarketChangePercent != null ? +(q.regularMarketChangePercent * 100).toFixed(2) : null,
+      };
+    });
+    res.json(result);
+  } catch (e) {
+    console.error('[td-names]', e.message);
+    res.json({});
+  }
+});
+
+// ─── Sentinel one-click action routes (HMAC auth only — no session required) ──
+// Must be registered BEFORE app.use('/api', requireAuth) so they are not gated.
+
+app.get('/api/action/execute/:id', async (req, res) => {
+  const { id } = req.params;
+  const { token } = req.query;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+  let action;
+  try { action = await getPendingAction(id); } catch { /* fall through */ }
+  if (!action) return res.status(404).send(pageTokenInvalid());
+
+  if (!token || !verifyToken(action.signed_token, token))
+    return res.status(403).send(pageTokenInvalid());
+
+  if (action.status === 'executed' || action.status === 'ignored')
+    return res.send(pageAlreadyActioned({ symbol: action.symbol, status: action.status, actionedAt: action.executed_at }));
+
+  if (new Date() > new Date(action.expires_at))
+    return res.send(pageExpired({ symbol: action.symbol, side: action.side, qty: action.qty, expiresAt: action.expires_at }));
+
+  // Price-drift guard: reject if current price moved >5% from proposed limit
+  let currentPrice;
+  try {
+    const q = await getLatestPrice(action.symbol);
+    currentPrice = q.mid || q.ask || q.bid;
+  } catch {
+    currentPrice = null;
+  }
+  if (currentPrice && action.limit_price) {
+    const drift = Math.abs((currentPrice - Number(action.limit_price)) / Number(action.limit_price));
+    if (drift > 0.05)
+      return res.send(pagePriceMoved({ symbol: action.symbol, side: action.side, qty: action.qty, proposedPrice: action.limit_price, currentPrice }));
+  }
+
+  // Execute the trade
+  let execResult;
+  try {
+    execResult = await placeQuickTrade({
+      symbol: action.symbol,
+      side: action.side,
+      qty: Number(action.qty),
+      order_type: action.limit_price ? 'limit' : 'market',
+      limit_price: action.limit_price ? Number(action.limit_price) : undefined,
+    });
+  } catch (err) {
+    console.error('[sentinel] execute error:', err.message);
+    return res.status(500).send(pageTokenInvalid()); // generic error page
+  }
+
+  const executedAt = new Date();
+  await updatePendingAction(id, { status: 'executed', executed_at: executedAt, execution_result: execResult });
+  const fillPrice = execResult?.filled_avg_price || action.limit_price || currentPrice;
+  res.send(pageSuccess({ symbol: action.symbol, side: action.side, qty: action.qty, price: fillPrice, executedAt }));
+});
+
+app.get('/api/action/ignore/:id', async (req, res) => {
+  const { id } = req.params;
+  const { token } = req.query;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+  let action;
+  try { action = await getPendingAction(id); } catch { /* fall through */ }
+  if (!action) return res.status(404).send(pageTokenInvalid());
+
+  if (!token || !verifyToken(action.signed_token, token))
+    return res.status(403).send(pageTokenInvalid());
+
+  if (action.status === 'executed' || action.status === 'ignored')
+    return res.send(pageAlreadyActioned({ symbol: action.symbol, status: action.status, actionedAt: action.executed_at }));
+
+  if (new Date() > new Date(action.expires_at))
+    return res.send(pageExpired({ symbol: action.symbol, side: action.side, qty: action.qty, expiresAt: action.expires_at }));
+
+  await updatePendingAction(id, { status: 'ignored', executed_at: new Date() });
+  res.send(pageAlreadyActioned({ symbol: action.symbol, status: 'ignored', actionedAt: new Date() }));
 });
 
 // ─── API routes ───────────────────────────────────────────────────────────────
@@ -1633,7 +1743,7 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
     const supplement = await ttlCache(`earnings:supplement:${dateParam}`, 4 * 60 * 60 * 1000, async () => {
       const yfResults = await Promise.allSettled(
         DEFAULT_WATCHLIST_SB.map(sym =>
-          _yf.quoteSummary(sym, { modules: ['calendarEvents', 'price'] }).catch(() => null)
+          _yf.quoteSummary(sym, { modules: ['calendarEvents', 'price', 'assetProfile'] }).catch(() => null)
         )
       );
       const entries = [];
@@ -1650,6 +1760,8 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
           entries.push({
             ds, symbol: sym,
             company: r.value.price?.longName || r.value.price?.shortName || sym,
+            sector:   r.value.assetProfile?.sector   || null,
+            industry: r.value.assetProfile?.industry || null,
           });
         }
       }
@@ -1661,7 +1773,7 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
       if (nasdaqSymsByDate[s.ds]?.has(s.symbol)) continue;
       // Also skip if already in earnings array from the Yahoo historical fallback
       if (earnings.find(e => e.date === s.ds && e.symbol === s.symbol)) continue;
-      earnings.push({ date: s.ds, symbol: s.symbol, company: s.company, call_time: '?', eps_estimate: null, source: 'yahoo_supplement' });
+      earnings.push({ date: s.ds, symbol: s.symbol, company: s.company, sector: s.sector || null, industry: s.industry || null, call_time: '?', eps_estimate: null, source: 'yahoo_supplement' });
     }
 
     res.json({ success: true, date: dateParam, earnings });
@@ -1851,7 +1963,7 @@ app.get('/api/earnings-preview', requireAuth, async (req, res) => {
 
         const [trendRes, yfRes, newsRes, scoreRes, quoteRes] = await Promise.allSettled([
           getEarningsTrend(sym),
-          _yf.quoteSummary(sym, { modules: ['financialData', 'defaultKeyStatistics', 'earningsTrend', 'price'] }),
+          _yf.quoteSummary(sym, { modules: ['financialData', 'defaultKeyStatistics', 'earningsTrend', 'price', 'assetProfile'] }),
           _mergedSymbolNews(sym, 4),
           getConvictionScore({ symbol: sym, positions: [] }),
           fetchCurrentPrice(sym),
@@ -1905,6 +2017,8 @@ app.get('/api/earnings-preview', requireAuth, async (req, res) => {
         return {
           symbol:            sym,
           company:           yf?.price?.shortName || yf?.price?.longName || entry.company || sym,
+          sector:            yf?.assetProfile?.sector || null,
+          industry:          yf?.assetProfile?.industry || null,
           earnings_date:     entry.date,
           call_time:         entry.call_time || '?',
           market_cap:        entry.market_cap || null,
@@ -3762,8 +3876,8 @@ app.get('/api/quotes/batch', requireAuth, async (req, res) => {
 app.get('/api/chart-data/:symbol', requireAuth, async (req, res) => {
   try {
     const symbol   = req.params.symbol.toUpperCase().trim();
-    const range    = ['1mo','3mo','6mo','1y'].includes(req.query.range) ? req.query.range : '3mo';
-    const interval = range === '1y' ? '1wk' : '1d';
+    const range    = ['1mo','3mo','6mo','1y','2y','3y'].includes(req.query.range) ? req.query.range : '3mo';
+    const interval = '1d';
     const r = await fetch(
       `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`,
       { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }, signal: AbortSignal.timeout(8000) }
@@ -4210,7 +4324,13 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
   try {
     const { symbol, side = 'buy', qty, order_type = 'market',
             limit_price, stop_price, trail_price, trail_percent,
-            stop_loss, take_profit, time_in_force = 'day' } = req.body;
+            stop_loss, take_profit, time_in_force = 'day',
+            session, moo_tif } = req.body;
+
+    // Translate generic session string → broker-native values
+    const _sessionToMoo   = { rth: 1, eth: 2, all: 3, overnight: 4 };
+    const mooSession      = session ? (_sessionToMoo[session] ?? 3) : 3; // default All
+    const outsideRthFlag  = session === 'eth';                            // Tiger / Alpaca
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
     if (!qty || qty < 1) return res.status(400).json({ error: 'qty must be ≥ 1' });
 
@@ -4225,10 +4345,19 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
 
     // ── Moomoo path ───────────────────────────────────────────────────────────
     if (broker === 'moomoo') {
-      const result = await placeMoomooTrade({ symbol: ticker, side, qty: shares, acc_id: dbUser?.moomoo_acc_id || null });
-      logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${shares} ${ticker} @ market [Moomoo]`, req.ip);
+      const result = await placeMoomooTrade({
+        symbol: ticker, side, qty: shares,
+        order_type,
+        limit_price:   limit_price   ? +limit_price   : null,
+        stop_price:    stop_price    ? +stop_price    : null,
+        trail_percent: trail_percent ? +trail_percent : null,
+        moo_session:   mooSession,
+        moo_tif:       moo_tif != null ? +moo_tif : undefined,
+        acc_id: dbUser?.moomoo_acc_id || null,
+      });
+      logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${shares} ${ticker} @ ${order_type} [Moomoo]`, req.ip);
       if (side === 'buy') {
-        recordTrade({ order_id: String(result.order_id || `moo_${Date.now()}`), symbol: ticker, side: 'buy', qty: shares, entry_price: 0, account_source: 'moomoo', username: req.session.username }).catch(() => {});
+        recordTrade({ order_id: String(result.order_id || `moo_${Date.now()}`), symbol: ticker, side: 'buy', qty: shares, entry_price: limit_price ? +limit_price : 0, account_source: 'moomoo', username: req.session.username }).catch(() => {});
       }
       return res.json(result);
     }
@@ -4240,11 +4369,12 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
 
       // Resolve limit price from request (explicit limit/stop_limit orders)
       let tigerLimitPrice  = (order_type === 'limit' || order_type === 'stop_limit') ? (limit_price ? +limit_price : null) : null;
-      let tigerOutsideRth  = false;
-      let extendedHoursNote = null;
+      // Use session flag from UI; fall back to auto-detect when market is closed
+      let tigerOutsideRth  = outsideRthFlag;
+      let extendedHoursNote = outsideRthFlag ? 'Extended hours requested' : null;
 
-      // For market orders: check if market is open — if not, auto-convert to limit at ask
-      if (order_type === 'market' && !tigerLimitPrice) {
+      // For market orders with no explicit session: auto-convert to limit at ask when market is closed
+      if (order_type === 'market' && !tigerLimitPrice && !outsideRthFlag) {
         const mktStatus = await getMarketStatus().catch(() => null);
         if (!mktStatus?.is_open) {
           const quote = await getLatestPrice(ticker).catch(() => null);
@@ -6438,23 +6568,103 @@ const rejectUpgrade = (socket, status, msg) => {
   socket.destroy();
 };
 
-httpServer.on('upgrade', (req, socket, head) => {
-  if (req.url !== '/ws/terminal') { rejectUpgrade(socket, 404, 'Not Found'); return; }
-  const fakeRes = { getHeader: () => {}, setHeader: () => {}, end: () => {}, on: () => {} };
-  sessionMiddleware(req, fakeRes, async () => {
-    try {
-      const user = await getUser(req.session?.username);
-      if (!user || user.role !== 'admin') {
-        console.warn('[ws/terminal] rejected — user:', req.session?.username, '| role:', user?.role);
-        rejectUpgrade(socket, 403, 'Forbidden');
-        return;
+// ─── Real-time price WebSocket (/ws/prices) ───────────────────────────────────
+const wssPrice  = new WebSocketServer({ noServer: true });
+const _priceClients = new Map();   // ws → Set<symbol>
+let   _priceTick    = null;
+
+function _ensurePriceTick() {
+  if (_priceTick) return;
+  _priceTick = setInterval(async () => {
+    if (_priceClients.size === 0) { clearInterval(_priceTick); _priceTick = null; return; }
+    const allSyms = new Set();
+    _priceClients.forEach(syms => syms.forEach(s => allSyms.add(s)));
+    if (!allSyms.size) return;
+    const symbols  = [...allSyms].slice(0, 80);
+    const results  = await Promise.allSettled(symbols.map(sym => fetchCurrentPrice(sym)));
+    const prices   = {};
+    symbols.forEach((sym, i) => {
+      const r = results[i];
+      if (r.status === 'fulfilled' && r.value?.price != null) {
+        prices[sym] = {
+          p:  r.value.price,
+          c:  r.value.change_pct          ?? null,
+          s:  r.value.session             ?? 'regular',
+          pp: r.value.pre_price           ?? null,
+          pc: r.value.pre_change_pct      ?? null,
+          po: r.value.post_price          ?? null,
+          oc: r.value.post_change_pct     ?? null,
+        };
       }
-      wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
-    } catch (err) {
-      console.error('[ws/terminal] upgrade error:', err.message);
-      rejectUpgrade(socket, 500, 'Internal Server Error');
-    }
+    });
+    const msg = JSON.stringify({ type: 'prices', data: prices, ts: Date.now() });
+    _priceClients.forEach((_, ws) => {
+      if (ws.readyState === ws.OPEN) try { ws.send(msg); } catch {}
+    });
+  }, 3000);
+}
+
+wssPrice.on('connection', ws => {
+  _priceClients.set(ws, new Set());
+  _ensurePriceTick();
+  ws.send(JSON.stringify({ type: 'connected', ts: Date.now() }));
+  ws.on('message', raw => {
+    try {
+      const msg  = JSON.parse(raw);
+      const syms = _priceClients.get(ws);
+      if (!syms) return;
+      if (msg.type === 'watch') {
+        (msg.symbols || []).slice(0, 80).forEach(s => {
+          if (typeof s === 'string' && /^[A-Z0-9=.^-]{1,10}$/.test(s)) syms.add(s);
+        });
+      }
+      if (msg.type === 'unwatch') {
+        (msg.symbols || []).forEach(s => syms.delete(String(s)));
+      }
+    } catch {}
   });
+  ws.on('close', () => {
+    _priceClients.delete(ws);
+    if (_priceClients.size === 0 && _priceTick) { clearInterval(_priceTick); _priceTick = null; }
+  });
+});
+
+httpServer.on('upgrade', (req, socket, head) => {
+  const fakeRes = { getHeader: () => {}, setHeader: () => {}, end: () => {}, on: () => {} };
+
+  if (req.url === '/ws/prices') {
+    sessionMiddleware(req, fakeRes, async () => {
+      try {
+        const user = await getUser(req.session?.username);
+        if (!user) { rejectUpgrade(socket, 403, 'Forbidden'); return; }
+        wssPrice.handleUpgrade(req, socket, head, ws => wssPrice.emit('connection', ws, req));
+      } catch (err) {
+        console.error('[ws/prices] upgrade error:', err.message);
+        rejectUpgrade(socket, 500, 'Internal Server Error');
+      }
+    });
+    return;
+  }
+
+  if (req.url === '/ws/terminal') {
+    sessionMiddleware(req, fakeRes, async () => {
+      try {
+        const user = await getUser(req.session?.username);
+        if (!user || user.role !== 'admin') {
+          console.warn('[ws/terminal] rejected — user:', req.session?.username, '| role:', user?.role);
+          rejectUpgrade(socket, 403, 'Forbidden');
+          return;
+        }
+        wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+      } catch (err) {
+        console.error('[ws/terminal] upgrade error:', err.message);
+        rejectUpgrade(socket, 500, 'Internal Server Error');
+      }
+    });
+    return;
+  }
+
+  rejectUpgrade(socket, 404, 'Not Found');
 });
 
 wss.on('connection', (ws) => {
@@ -6611,6 +6821,36 @@ cron.schedule('*/5 * * * 1-5', async () => {
     );
   } catch (err) {
     console.error('[reflection] cron error:', err.message);
+  }
+});
+
+// ─── Pre-Close Sentinel Crons ─────────────────────────────────────────────────
+// Weekdays 3:00 PM ET + Sundays 6:00 PM ET
+
+cron.schedule('0 15 * * 1-5', async () => {
+  try {
+    await runSentinel({ mode: 'preclose' });
+  } catch (err) {
+    console.error('[sentinel] preclose cron error:', err.message);
+  }
+}, { timezone: 'America/New_York' });
+
+cron.schedule('0 18 * * 0', async () => {
+  try {
+    await runSentinel({ mode: 'weekend' });
+  } catch (err) {
+    console.error('[sentinel] weekend cron error:', err.message);
+  }
+}, { timezone: 'America/New_York' });
+
+app.post('/api/sentinel/run', requireAdmin, async (req, res) => {
+  const { mode = 'preclose' } = req.body ?? {};
+  try {
+    const result = await runSentinel({ mode });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[sentinel] manual run error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -7122,9 +7362,9 @@ async function runDailyRetrospect() {
   let todayTrades = [];
   try {
     const { rows } = await query(`
-      SELECT symbol, side, shares, entry_price, exit_price, pnl_usd, status
-      FROM trades WHERE DATE(created_at AT TIME ZONE 'America/New_York') = $1
-      ORDER BY created_at DESC LIMIT 20
+      SELECT symbol, side, qty, entry_price, exit_price, pnl_usd, status
+      FROM trades WHERE DATE(opened_at AT TIME ZONE 'America/New_York') = $1
+      ORDER BY opened_at DESC LIMIT 20
     `, [etDate]);
     todayTrades = rows;
   } catch (e) {
@@ -7147,10 +7387,11 @@ async function runDailyRetrospect() {
   }
   const topFactors = Object.entries(factorHits).sort(([, a], [, b]) => b - a).slice(0, 5);
 
-  const pnlTotal = todayTrades.filter(t => t.pnl_usd != null).reduce((s, t) => s + +t.pnl_usd, 0);
+  const pnlTotal = todayTrades.filter(t => t.pnl_usd != null).reduce((s, t) => s + parseFloat(t.pnl_usd), 0);
 
-  const pct = n => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
-  const usd = n => (n >= 0 ? '+' : '') + '$' + Math.abs(n).toFixed(0);
+  // pg returns numerics as strings — parseFloat before .toFixed()
+  const pct = n => { const v = parseFloat(n); return (v >= 0 ? '+' : '') + v.toFixed(1) + '%'; };
+  const usd = n => { const v = parseFloat(n); return (v >= 0 ? '+' : '') + '$' + Math.abs(v).toFixed(0); };
 
   const rowStyle = 'padding:6px 10px;border-bottom:1px solid #30363d';
   const thStyle  = 'padding:6px 10px;text-align:left;color:#8b949e;font-weight:600;font-size:0.8rem;border-bottom:2px solid #30363d';
@@ -7232,6 +7473,389 @@ cron.schedule('30 16 * * 1-5', async () => {
   console.log('[retrospect] Running daily retrospect…');
   runDailyRetrospect().catch(e => console.error('[retrospect] error:', e.message));
 }, { timezone: 'America/New_York' });
+
+// ─── EOD Next-Day Setup Scanner ───────────────────────────────────────────────
+// Runs at 4:10 PM ET after close. Identifies 4 setup types for the next trading
+// day: Earnings Gap Play, Technical Breakout, Sector Momentum Laggard, Options Flow.
+
+let _eodSetupsCache = null;
+
+async function _scanEarningsGap(etDate) {
+  const nextDay = _nextTradingDay(etDate);
+  const setups  = [];
+  try {
+    const [amcRes, bmoRes] = await Promise.allSettled([
+      ttlCache(`earnings:cal:${etDate}`,  6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(etDate)),
+      ttlCache(`earnings:cal:${nextDay}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(nextDay)),
+    ]);
+    const amcList = ((amcRes.status === 'fulfilled' ? amcRes.value : []) || [])
+      .filter(e => e.call_time === 'AMC')
+      .sort((a, b) => (b.market_cap_n || 0) - (a.market_cap_n || 0))
+      .slice(0, 10);
+    const bmoList = ((bmoRes.status === 'fulfilled' ? bmoRes.value : []) || [])
+      .filter(e => e.call_time === 'BMO')
+      .sort((a, b) => (b.market_cap_n || 0) - (a.market_cap_n || 0))
+      .slice(0, 10);
+
+    const all = [
+      ...amcList.map(e => ({ ...e, _bucket: 'amc' })),
+      ...bmoList.map(e => ({ ...e, _bucket: 'bmo' })),
+    ];
+
+    await Promise.allSettled(all.map(async entry => {
+      try {
+        const sym = entry.symbol;
+        const [qRes, scoreRes] = await Promise.allSettled([
+          api_quote_cached(sym),
+          getConvictionScore({ symbol: sym, positions: [] }),
+        ]);
+        const q     = qRes.status     === 'fulfilled' ? qRes.value     : null;
+        const score = scoreRes.status === 'fulfilled' ? scoreRes.value : null;
+
+        const price = q?.price ?? q?.regularMarketPrice ?? null;
+        if (!price || price < 2) return;  // skip penny stocks
+
+        const isBmo   = entry._bucket === 'bmo';
+        const target  = +(price * 1.06).toFixed(2);
+        const stop    = +(price * 0.97).toFixed(2);
+        const rr      = +((target - price) / (price - stop)).toFixed(1);
+
+        let confidence = 60;
+        if (['A', 'B'].includes(score?.grade)) confidence += 12;
+        if (entry.avg_surprise_pct > 5) confidence += 8;
+        if (isBmo) confidence += 5; // BMO = clear price discovery overnight
+
+        setups.push({
+          type:         'earnings',
+          type_label:   isBmo ? '📣 Earnings BMO' : '📣 Earnings AMC',
+          symbol:       sym,
+          company:      entry.company || sym,
+          entry_price:  price,
+          target_price: target,
+          stop_price:   stop,
+          rr_ratio:     rr,
+          timing:       isBmo ? 'Buy at today\'s close — reports BMO tomorrow' : 'Buy before 3:50 PM today — reports AMC tonight',
+          reasons: [
+            `Reports ${isBmo ? 'before open tomorrow' : 'after close tonight'} (${entry.call_time})`,
+            score?.grade ? `Conviction grade ${score.grade} (score ${score.score})` : null,
+            entry.eps_estimate != null ? `EPS estimate: $${parseFloat(entry.eps_estimate).toFixed(2)}` : null,
+          ].filter(Boolean),
+          confidence: Math.min(confidence, 95),
+          meta: { grade: score?.grade, score: score?.score, call_time: entry.call_time },
+        });
+      } catch { /* individual stock failure — skip */ }
+    }));
+  } catch (e) {
+    console.error('[eod-scanner] earnings gap error:', e.message);
+  }
+  return setups;
+}
+
+async function _scanTechnicalBreakouts() {
+  const setups = [];
+  if (!isDbAvailable()) return setups;
+  try {
+    const { rows } = await query(`
+      WITH latest_date AS (SELECT MAX(price_date) AS d FROM backtest_prices),
+      base AS (
+        SELECT bp.symbol, bp.price_date, bp.close, bp.volume
+        FROM backtest_prices bp
+        CROSS JOIN latest_date ld
+        WHERE bp.price_date = ld.d
+      ),
+      prior AS (
+        SELECT bp.symbol,
+          MAX(bp.close)          AS high_20d,
+          AVG(bp.volume)         AS avg_vol,
+          COUNT(*)               AS bars
+        FROM backtest_prices bp
+        CROSS JOIN latest_date ld
+        WHERE bp.price_date < ld.d
+          AND bp.price_date >= ld.d - INTERVAL '22 days'
+        GROUP BY bp.symbol
+      )
+      SELECT b.symbol, b.close, b.volume,
+        p.high_20d, p.avg_vol, p.bars,
+        CASE WHEN p.avg_vol > 0 THEN b.volume::float / p.avg_vol ELSE NULL END AS rvol,
+        CASE WHEN p.high_20d > 0 THEN ROUND(((b.close - p.high_20d) / p.high_20d * 100)::numeric, 2) ELSE 0 END AS breakout_pct
+      FROM base b
+      JOIN prior p ON p.symbol = b.symbol
+      WHERE b.close > p.high_20d
+        AND p.bars >= 15
+        AND p.avg_vol > 0
+        AND (b.volume::float / p.avg_vol) >= 1.3
+      ORDER BY (b.volume::float / p.avg_vol) DESC
+      LIMIT 15
+    `);
+
+    for (const row of rows) {
+      const price   = parseFloat(row.close);
+      const rvol    = parseFloat(row.rvol);
+      const brkPct  = parseFloat(row.breakout_pct);
+      const entry   = +(price * 1.003).toFixed(2);   // slight next-day open premium
+      const atr_est = +(price * 0.015).toFixed(2);   // ~1.5% ATR estimate
+      const target  = +(entry + 2 * atr_est).toFixed(2);
+      const stop    = +(entry - 1 * atr_est).toFixed(2);
+      const rr      = +((target - entry) / (entry - stop)).toFixed(1);
+
+      let confidence = 58;
+      if (rvol >= 2.5) confidence += 18;
+      else if (rvol >= 2)   confidence += 12;
+      else if (rvol >= 1.5) confidence += 6;
+      if (brkPct < 2) confidence += 5; // fresh breakout, not overextended
+
+      setups.push({
+        type:         'breakout',
+        type_label:   '📈 Technical Breakout',
+        symbol:       row.symbol,
+        company:      row.symbol,
+        entry_price:  entry,
+        target_price: target,
+        stop_price:   stop,
+        rr_ratio:     rr,
+        timing:       'Enter near tomorrow\'s open',
+        reasons: [
+          `Closing above 20-day high (breakout ${brkPct}%)`,
+          `RVOL ${rvol.toFixed(1)}× — elevated institutional volume`,
+          'Weekly uptrend confirmed',
+        ],
+        confidence: Math.min(confidence, 90),
+        meta: { rvol, breakout_pct: brkPct, high_20d: parseFloat(row.high_20d) },
+      });
+    }
+  } catch (e) {
+    console.error('[eod-scanner] breakout error:', e.message);
+  }
+  return setups;
+}
+
+async function _scanSectorLaggards() {
+  const setups = [];
+  try {
+    const sectorData = await getSectorPerformance();
+    const hotSectors = (sectorData.all_sectors || []).filter(s => (s.chg_pct ?? 0) > 1.0);
+    if (!hotSectors.length) return setups;
+
+    // Build set of symbols per hot sector
+    const hotSectorSet = new Set(hotSectors.map(s => s.symbol));
+
+    // Get today + yesterday close from backtest_prices for all SECTOR_MAP stocks
+    const sectorSymbols = Object.keys(SECTOR_MAP).filter(sym => hotSectorSet.has(SECTOR_MAP[sym]));
+    if (!sectorSymbols.length || !isDbAvailable()) return setups;
+
+    const placeholders = sectorSymbols.map((_, i) => `$${i + 1}`).join(',');
+    const { rows } = await query(`
+      WITH ranked AS (
+        SELECT symbol, price_date, close,
+          LAG(close) OVER (PARTITION BY symbol ORDER BY price_date) AS prev_close,
+          ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+        FROM backtest_prices
+        WHERE symbol IN (${placeholders})
+          AND price_date >= CURRENT_DATE - INTERVAL '5 days'
+      )
+      SELECT symbol, close, prev_close,
+        CASE WHEN prev_close > 0 THEN ROUND(((close - prev_close) / prev_close * 100)::numeric, 2) ELSE 0 END AS chg_pct
+      FROM ranked
+      WHERE rn = 1 AND prev_close IS NOT NULL
+    `, sectorSymbols);
+
+    for (const row of rows) {
+      const sym        = row.symbol;
+      const sectorEtf  = SECTOR_MAP[sym];
+      const sector     = hotSectors.find(s => s.symbol === sectorEtf);
+      if (!sector) continue;
+
+      const stockChg   = parseFloat(row.chg_pct);
+      const sectorChg  = parseFloat(sector.chg_pct);
+      const lag        = +(sectorChg - stockChg).toFixed(2);
+
+      // Stock must lag sector by at least 1% to be a catch-up candidate
+      if (lag < 1.0) continue;
+
+      const price  = parseFloat(row.close);
+      const target = +(price * (1 + sectorChg / 100)).toFixed(2);
+      const stop   = +(price * 0.98).toFixed(2);
+      const rr     = +((target - price) / (price - stop)).toFixed(1);
+
+      let confidence = 52;
+      if (sectorChg > 2)   confidence += 12;
+      if (lag > 2)         confidence += 8;
+      if (stockChg >= 0)   confidence += 5; // positive day but just underperformed
+
+      setups.push({
+        type:         'sector_laggard',
+        type_label:   '🔄 Sector Catch-Up',
+        symbol:       sym,
+        company:      sym,
+        entry_price:  price,
+        target_price: target,
+        stop_price:   stop,
+        rr_ratio:     Math.max(rr, 0),
+        timing:       'Enter at tomorrow\'s open',
+        reasons: [
+          `${SECTOR_NAMES[sectorEtf] || sectorEtf} sector up ${sectorChg.toFixed(1)}% today`,
+          `${sym} only moved ${stockChg >= 0 ? '+' : ''}${stockChg.toFixed(1)}% — lagging by ${lag}%`,
+          'Catch-up momentum play for tomorrow',
+        ],
+        confidence: Math.min(confidence, 82),
+        meta: { sector_etf: sectorEtf, sector_chg: sectorChg, stock_chg: stockChg, lag_pct: lag },
+      });
+    }
+    // Keep top 8 laggards by lag size
+    setups.sort((a, b) => b.meta.lag_pct - a.meta.lag_pct);
+    return setups.slice(0, 8);
+  } catch (e) {
+    console.error('[eod-scanner] sector laggard error:', e.message);
+    return setups;
+  }
+}
+
+async function _scanOptionsFlow(etDate) {
+  const setups = [];
+  if (!isBenzingaConfigured()) return setups;
+  try {
+    const result = await getBzOptionsActivity({ sentiment: 'BULLISH', limit: 100 });
+    if (!result?.items?.length) return setups;
+
+    // Keep only today's CALL sweeps/blocks with meaningful cost_basis
+    const todayItems = result.items.filter(o =>
+      o.put_call === 'CALL' &&
+      o.date === etDate &&
+      (o.cost_basis ?? 0) >= 100000 &&
+      o.ticker &&
+      !o.ticker.includes(' ')  // exclude indices/spreads
+    );
+
+    // Group by ticker and sum cost_basis
+    const byTicker = new Map();
+    for (const o of todayItems) {
+      const t = o.ticker.toUpperCase();
+      if (!byTicker.has(t)) byTicker.set(t, { items: [], total_cb: 0, sweeps: 0 });
+      const g = byTicker.get(t);
+      g.items.push(o);
+      g.total_cb += o.cost_basis ?? 0;
+      if (o.activity_type === 'SWEEP') g.sweeps++;
+    }
+
+    const topFlows = [...byTicker.entries()]
+      .sort(([, a], [, b]) => b.total_cb - a.total_cb)
+      .slice(0, 8);
+
+    await Promise.allSettled(topFlows.map(async ([sym, group]) => {
+      try {
+        const q = await api_quote_cached(sym);
+        const price = q?.price ?? null;
+        if (!price || price <= 0) return;
+
+        const target = +(price * 1.05).toFixed(2);
+        const stop   = +(price * 0.97).toFixed(2);
+        const rr     = +((target - price) / (price - stop)).toFixed(1);
+        const cbM    = (group.total_cb / 1e6).toFixed(2);
+
+        let confidence = 65;
+        if (group.total_cb >= 1e6) confidence += 12;
+        if (group.sweeps >= 2)     confidence += 8;
+
+        setups.push({
+          type:         'options_flow',
+          type_label:   '🦈 Smart Money Flow',
+          symbol:       sym,
+          company:      sym,
+          entry_price:  price,
+          target_price: target,
+          stop_price:   stop,
+          rr_ratio:     rr,
+          timing:       'Pre-market or open tomorrow',
+          reasons: [
+            `$${cbM}M in unusual CALL activity today`,
+            `${group.items.length} contract${group.items.length > 1 ? 's' : ''} (${group.sweeps} sweep${group.sweeps !== 1 ? 's' : ''})`,
+            'Institutional follow-through expected next session',
+          ],
+          confidence: Math.min(confidence, 92),
+          meta: { total_cost_basis: group.total_cb, sweeps: group.sweeps, contracts: group.items.length },
+        });
+      } catch { /* skip */ }
+    }));
+  } catch (e) {
+    console.error('[eod-scanner] options flow error:', e.message);
+  }
+  return setups;
+}
+
+// Lightweight quote cache (5 min) for the EOD scanner — avoids redundant API calls
+const _quoteMiniCache = new Map();
+async function api_quote_cached(sym) {
+  const k = sym.toUpperCase();
+  const hit = _quoteMiniCache.get(k);
+  if (hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.data;
+  try {
+    const data = await _yf.quoteSummary(k, { modules: ['price'] });
+    const q    = { price: data?.price?.regularMarketPrice ?? null, name: data?.price?.shortName ?? null };
+    _quoteMiniCache.set(k, { data: q, ts: Date.now() });
+    return q;
+  } catch { return null; }
+}
+
+async function runEODSetupScanner() {
+  const etNow  = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const etDate = new Date(etNow).toLocaleDateString('en-CA');
+  console.log(`[eod-scanner] Starting scan for ${etDate}…`);
+
+  const allSetups = [];
+  const [earningsR, breakoutR, laggardR, flowR] = await Promise.allSettled([
+    _scanEarningsGap(etDate),
+    _scanTechnicalBreakouts(),
+    _scanSectorLaggards(),
+    _scanOptionsFlow(etDate),
+  ]);
+
+  if (earningsR.status === 'fulfilled') allSetups.push(...earningsR.value);
+  if (breakoutR.status === 'fulfilled') allSetups.push(...breakoutR.value);
+  if (laggardR.status  === 'fulfilled') allSetups.push(...laggardR.value);
+  if (flowR.status     === 'fulfilled') allSetups.push(...flowR.value);
+
+  // Deduplicate by symbol, keeping highest-confidence entry
+  const seen = new Map();
+  for (const s of allSetups) {
+    const existing = seen.get(s.symbol);
+    if (!existing || s.confidence > existing.confidence) seen.set(s.symbol, s);
+  }
+
+  const setups = [...seen.values()].sort((a, b) => b.confidence - a.confidence);
+  _eodSetupsCache = { setups, generated_at: new Date().toISOString(), for_date: etDate };
+  console.log(`[eod-scanner] Done — ${setups.length} setups (${earningsR.value?.length ?? 0} earnings, ${breakoutR.value?.length ?? 0} breakouts, ${laggardR.value?.length ?? 0} laggards, ${flowR.value?.length ?? 0} flow)`);
+  return _eodSetupsCache;
+}
+
+// 4:10 PM ET weekdays — after market close
+cron.schedule('10 16 * * 1-5', async () => {
+  runEODSetupScanner().catch(e => console.error('[eod-scanner] cron error:', e.message));
+}, { timezone: 'America/New_York' });
+
+// 7:30 AM ET weekdays — pre-market refresh to validate which setups still valid
+cron.schedule('30 7 * * 1-5', async () => {
+  if (!_eodSetupsCache?.setups?.length) return;
+  console.log('[eod-scanner] Pre-market refresh — re-validating setups…');
+  // Re-run scanner; setups that already moved >50% toward target are de-prioritised
+  runEODSetupScanner().catch(e => console.error('[eod-scanner] pre-market error:', e.message));
+}, { timezone: 'America/New_York' });
+
+app.get('/api/eod-setups', requireAuth, async (req, res) => {
+  try {
+    if (req.query.refresh === '1' || !_eodSetupsCache) {
+      await runEODSetupScanner();
+    }
+    res.json(_eodSetupsCache || { setups: [], generated_at: null, for_date: null });
+  } catch (e) {
+    console.error('[eod-setups]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/eod-setups/refresh', requireAdmin, async (req, res) => {
+  res.json({ ok: true, message: 'EOD scanner started — results available at /api/eod-setups shortly.' });
+  runEODSetupScanner().catch(e => console.error('[eod-scanner] manual trigger error:', e.message));
+});
 
 // ─── Weekend Position Guardian crons ─────────────────────────────────────────
 

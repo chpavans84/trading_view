@@ -252,6 +252,8 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 │  prediction_errors             ← one row per filled prediction for analysis        │
 │  user_activity       ← all UI actions                                              │
 │  conversation_history← chat context per chatId (20-message rolling window)        │
+│  sentinel_runs       ← one row per sentinel execution (mode, risks, proposals)    │
+│  pending_actions     ← HMAC-signed one-click trade proposals; expires in 30 min   │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
@@ -266,6 +268,8 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 **Knowledge routing:** keyword search uses min word length ≥ 5 and requires score ≥ 2 to avoid false positives · vector search uses nomic-embed-text (Ollama) with similarity threshold 0.55 · `isKnowledgeQuestion()` blocks prediction/forecast/explain patterns and routes them to Claude instead · Ollama Q&A is fully removed — fallback on error is `{ source: 'error' }` → Claude handles it
 
 **Pipeline npm scripts:** `research:download` → `research:scores` → `research:backtest` → `research:train`
+
+**Pre-Close Sentinel** (`src/core/sentinel.js`): Runs weekdays 3 PM ET + Sundays 6 PM ET. Scans all Alpaca + Moomoo positions for 5 risk signals (earnings, news, calibration accuracy, sector concentration, macro events). High-severity risks get deterministic one-click HMAC-signed trade proposals. Claude (sonnet-4-6) writes ONLY the prose explanation from pre-built facts — it never invents tickers, prices, or quantities. LLM output is never parsed for trade parameters; every number in a proposal is decided in Node code. One-click links: `GET /api/action/execute/:id?token=` and `GET /api/action/ignore/:id?token=` — registered before `requireAuth`, use HMAC-SHA256 token auth only. Manual trigger: `POST /api/sentinel/run` (admin only). HTML response pages in `src/core/sentinel-pages.js`. Env vars required: `SENTINEL_EMAIL_FROM`, `SENTINEL_EMAIL_TO`, `PUBLIC_URL`, `ACTION_SIGNING_SECRET`.
 
 **Custom Ollama model:** `npm run ollama:build` → generates `trading-coach.Modelfile` from last 90 days of PostgreSQL trade data → `ollama create trading-coach -f trading-coach.Modelfile`
 
@@ -283,6 +287,7 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 | tab-docs | Docs | Architecture docs, DB schema |
 | tab-calendar | Calendar | Earnings calendar, FDA, dividends |
 | tab-signal-center | Signal Center | Catalyst scan, signal graph |
+| tab-trading-desk | Trading Desk | Moomoo-style 3-column layout: watchlist left, chart+header center, stats/signals/conviction right. Live WebSocket prices. APIs: /api/watchlist, /api/quote/:sym, /api/explorer/extras, /api/chart-data/:sym |
 | tab-research | Research | Research pipeline |
 | tab-users | Users | Admin only |
 | tab-admin | Admin | Admin only |

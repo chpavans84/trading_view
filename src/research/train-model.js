@@ -1,6 +1,6 @@
 /**
  * Logistic regression classifier trained from backtest data.
- * Predicts: will ret_1w > 0.5%? (label=1 vs label=0)
+ * Predicts: will ret_1w > 1.5%? (label=1 vs label=0)
  *
  * No external ML libraries — pure JS math from scratch.
  *
@@ -16,33 +16,67 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const LEARNING_RATE    = 0.1;
 const EPOCHS           = 500;
 const TEST_FRAC        = 0.20;   // newest 20% → test
-const TARGET_THRESHOLD = 0.005;  // ret_1w > 0.5% → label 1
+const TARGET_THRESHOLD = 0.015;  // ret_1w > 1.5% → label 1 (cleaner signal)
 
 const FEATURE_NAMES = [
-  'rsi_norm', 'macd_sign', 'ema_above', 'bb_pos',
-  'vol_ratio', 'score_norm', 'vix_norm', 'dow',
+  'rsi_norm',      // (RSI − 50) / 50
+  'macd_sign',     // sign of MACD histogram: −1 | 0 | +1
+  'ema_above',     // price above both EMA20 + EMA50
+  'bb_pos',        // (close − bb_mid) / (bb_upper − bb_mid), clamped ±1.5
+  'vol_ratio',     // (day_volume / avg_vol_20d) − 1, clamped [−1, 4]
+  'score_norm',    // (conviction score − 50) / 50
+  'vix_norm',      // (VIX − 20) / 15
+  'vix_above_20',  // regime binary: 1 if VIX > 20
+  'rs_vs_spy',     // 20-day return vs SPY (relative strength)
+  'pct_from_52wh', // (close − 52w_high) / 52w_high ≤ 0
+  'is_monday',     // Monday gap-down risk flag
 ];
 
 // ── Feature engineering ───────────────────────────────────────────────────────
 
 function toFeatures(row) {
-  const date = new Date(row.score_date);
-  const vix = row.vix_close ?? row.vix ?? null;
+  const date   = new Date(row.score_date);
+  const vix    = parseFloat(row.vix_close) || 20;
+  const close  = parseFloat(row.close)     || null;
+  const bbU    = parseFloat(row.bb_upper)  || null;
+  const bbM    = parseFloat(row.bb_mid)    || null;
+  const h52    = parseFloat(row.high_52w)  || null;
+  const dayVol = parseFloat(row.day_volume)  || null;
+  const avgVol = parseFloat(row.avg_vol_20d) || null;
+
+  // Bollinger position: where in the band is price?
+  let bb_pos = 0;
+  if (close && bbU && bbM && (bbU - bbM) > 0) {
+    bb_pos = Math.max(-1.5, Math.min(1.5, (close - bbM) / (bbU - bbM)));
+  }
+
+  // Volume surge: today vs 20-day average, centred at 0
+  const vol_ratio = (dayVol && avgVol && avgVol > 0)
+    ? Math.max(-1, Math.min(4, dayVol / avgVol - 1))
+    : 0;
+
+  // Distance from 52-week high: always ≤ 0
+  const pct_from_52wh = (close && h52 && h52 > 0)
+    ? Math.max(-1, (close - h52) / h52)
+    : 0;
+
   return [
-    ((row.rsi      ?? 50) - 50) / 50,                   // rsi_norm
-    Math.sign(row.macd_hist ?? 0),                       // macd_sign  −1|0|+1
-    row.above_emas ? 1 : 0,                              // ema_above  (bool col)
-    0,                                                   // bb_pos placeholder (not stored)
-    0,                                                   // vol_ratio placeholder (not stored)
-    ((row.score    ?? 50) - 50) / 50,                   // score_norm
-    vix != null ? (vix - 20) / 15 : 0,                  // vix_norm
-    date.getDay() / 4,                                   // dow  Mon=0.25 … Fri=1.25
+    ((parseFloat(row.rsi)   ?? 50) - 50) / 50,                        // rsi_norm
+    Math.sign(parseFloat(row.macd_hist) ?? 0),                         // macd_sign
+    row.above_emas ? 1 : 0,                                            // ema_above
+    bb_pos,                                                            // bb_pos
+    vol_ratio,                                                         // vol_ratio
+    ((parseFloat(row.score) ?? 50) - 50) / 50,                        // score_norm
+    (vix - 20) / 15,                                                   // vix_norm
+    vix > 20 ? 1 : 0,                                                  // vix_above_20
+    Math.max(-0.5, Math.min(0.5, parseFloat(row.rs_vs_spy) ?? 0)),    // rs_vs_spy
+    pct_from_52wh,                                                     // pct_from_52wh
+    date.getDay() === 1 ? 1 : 0,                                       // is_monday
   ];
 }
 
 function buildRow(row) {
   const feats = toFeatures(row);
-  // Coerce any NaN to 0 (handles NULL columns returned as null by pg)
   return [1, ...feats.map(v => (Number.isFinite(v) ? v : 0))]; // bias prepended
 }
 
@@ -53,22 +87,40 @@ function toLabel(row) {
 // ── Data loading ──────────────────────────────────────────────────────────────
 
 async function loadData() {
-  const vixExpr = 'NULL::float AS vix'; // vix_close already selected directly
-
+  // CTE computes 52-week high and 20-day avg volume per (symbol, date) on the fly.
+  // This avoids storing derived columns in backtest_prices.
   const { rows } = await pool.query(`
+    WITH price_stats AS (
+      SELECT
+        symbol,
+        price_date,
+        close,
+        volume,
+        MAX(high)           OVER w252 AS high_52w,
+        AVG(volume::float)  OVER w20  AS avg_vol_20d
+      FROM backtest_prices
+      WINDOW
+        w252 AS (PARTITION BY symbol ORDER BY price_date ROWS BETWEEN 251 PRECEDING AND CURRENT ROW),
+        w20  AS (PARTITION BY symbol ORDER BY price_date ROWS BETWEEN 19  PRECEDING AND CURRENT ROW)
+    )
     SELECT
       s.symbol, s.score_date, s.score, s.grade,
-      s.rsi, s.macd_hist,
-      s.above_emas,
+      s.rsi, s.macd_hist, s.above_emas,
+      s.bb_upper, s.bb_mid, s.rs_vs_spy,
       s.vix_close,
-      ${vixExpr},
-      r.ret_1w, r.ret_1m
+      p.close,
+      p.high_52w,
+      p.volume     AS day_volume,
+      p.avg_vol_20d,
+      r.ret_1w
     FROM backtest_scores s
     JOIN backtest_returns r
       ON  r.symbol     = s.symbol
       AND r.score_date = s.score_date
+    LEFT JOIN price_stats p
+      ON  p.symbol     = s.symbol
+      AND p.price_date = s.score_date
     WHERE r.ret_1w IS NOT NULL
-      AND r.ret_1m IS NOT NULL
     ORDER BY s.score_date ASC
   `);
 
@@ -87,12 +139,26 @@ function dot(a, b) {
   return s;
 }
 
-// ── Logistic regression (gradient descent) ────────────────────────────────────
+// ── Class weights (inverse frequency) ────────────────────────────────────────
+// Prevents the model from always predicting the majority class.
+// Each sample is weighted by N / (2 * class_count).
+
+function computeClassWeights(y) {
+  const N        = y.length;
+  const posCount = y.reduce((s, v) => s + v, 0);
+  const negCount = N - posCount;
+  const wPos     = posCount > 0 ? N / (2 * posCount) : 1;
+  const wNeg     = negCount > 0 ? N / (2 * negCount) : 1;
+  return y.map(v => (v === 1 ? wPos : wNeg));
+}
+
+// ── Logistic regression (weighted gradient descent) ───────────────────────────
 
 function trainLR(X, y) {
-  const N = X.length;
-  const D = X[0].length; // 9: bias + 8 features
-  const W = new Float64Array(D); // initialise to 0
+  const N       = X.length;
+  const D       = X[0].length;
+  const W       = new Float64Array(D);
+  const weights = computeClassWeights(y);
 
   for (let epoch = 0; epoch < EPOCHS; epoch++) {
     let loss = 0;
@@ -102,8 +168,9 @@ function trainLR(X, y) {
     for (let i = 0; i < N; i++) {
       const p   = sigmoid(dot(X[i], W));
       const err = p - y[i];
-      loss += -(y[i] * Math.log(p + EPS) + (1 - y[i]) * Math.log(1 - p + EPS));
-      for (let j = 0; j < D; j++) grad[j] += err * X[i][j];
+      const w   = weights[i];
+      loss += -w * (y[i] * Math.log(p + EPS) + (1 - y[i]) * Math.log(1 - p + EPS));
+      for (let j = 0; j < D; j++) grad[j] += w * err * X[i][j];
     }
 
     loss /= N;
@@ -149,7 +216,7 @@ function evaluateMetrics(probs, labels) {
     else                 cumFP++;
     const tpr = totalPos > 0 ? cumTP / totalPos : 0;
     const fpr = totalNeg > 0 ? cumFP / totalNeg : 0;
-    auc    += (fpr - prevFPR) * (tpr + prevTPR) / 2; // trapezoid
+    auc    += (fpr - prevFPR) * (tpr + prevTPR) / 2;
     prevTPR = tpr;
     prevFPR = fpr;
   }
@@ -157,9 +224,26 @@ function evaluateMetrics(probs, labels) {
   return { accuracy, precision, recall, f1, auc, tp, fp, tn, fn };
 }
 
+// ── Feature importance ────────────────────────────────────────────────────────
+// Ranks features by absolute weight — larger magnitude = stronger signal.
+
+function printFeatureImportance(W) {
+  const ranked = FEATURE_NAMES
+    .map((name, i) => ({ name, weight: W[i + 1] }))
+    .sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
+
+  const maxAbs = Math.abs(ranked[0].weight) || 1;
+
+  console.log('\n── Feature Importance (ranked by |weight|) ─────');
+  for (const { name, weight } of ranked) {
+    const bar    = '█'.repeat(Math.round(Math.abs(weight) / maxAbs * 20));
+    const dir    = weight >= 0 ? '+' : '−';
+    const pct    = (Math.abs(weight) / maxAbs * 100).toFixed(0).padStart(3);
+    console.log(`  ${name.padEnd(16)} ${dir} ${pct}%  ${bar}`);
+  }
+}
+
 // ── Grade bonus adjustments ───────────────────────────────────────────────────
-// For each grade, compute mean predicted probability on train set.
-// Convert to an integer score bonus: (meanProb − 0.5) × 20, clamped ±10.
 
 function computeGradeAdjustments(rows, W, trainCount) {
   const sums   = {};
@@ -230,14 +314,18 @@ async function saveResults({ trainRows, testRows, metrics, W, gradeAdj }) {
 
 async function main() {
   console.log('══════════════════════════════════════════');
-  console.log('  Logistic Regression Trainer');
+  console.log('  Logistic Regression Trainer  v2');
   console.log('══════════════════════════════════════════\n');
+  console.log(`  Target  : ret_1w > ${(TARGET_THRESHOLD * 100).toFixed(1)}%`);
+  console.log(`  Features: ${FEATURE_NAMES.length} (was 8)`);
+  console.log(`  Balancing: class-weighted loss\n`);
 
+  console.log('Loading data (computing 52w high + vol averages)…');
   const rows = await loadData();
   console.log(`Loaded ${rows.length} labelled rows\n`);
 
   if (rows.length < 50) {
-    console.error('Not enough rows (need ≥50 with non-null ret_1w and ret_1m).');
+    console.error('Not enough rows (need ≥50 with non-null ret_1w).');
     process.exit(1);
   }
 
@@ -252,9 +340,14 @@ async function main() {
   const Xtest    = X.slice(splitIdx);
   const ytest    = y.slice(splitIdx);
 
-  const posRate = (ytrain.reduce((s, v) => s + v, 0) / ytrain.length * 100).toFixed(1);
+  const posCount   = ytrain.reduce((s, v) => s + v, 0);
+  const posRate    = (posCount / ytrain.length * 100).toFixed(1);
+  const wPos       = (ytrain.length / (2 * posCount)).toFixed(3);
+  const wNeg       = (ytrain.length / (2 * (ytrain.length - posCount))).toFixed(3);
+
   console.log(`Train: ${Xtrain.length} rows | Test: ${Xtest.length} rows`);
-  console.log(`Train positive rate (ret_1w > 0.5%): ${posRate}%\n`);
+  console.log(`Train positive rate (ret_1w > ${(TARGET_THRESHOLD * 100).toFixed(1)}%): ${posRate}%`);
+  console.log(`Class weights → positive: ×${wPos}  negative: ×${wNeg}\n`);
   console.log('Training…');
 
   const W = trainLR(Xtrain, ytrain);
@@ -273,16 +366,17 @@ async function main() {
   console.log(`  AUC-ROC  : ${metrics.auc.toFixed(4)}`);
   console.log(`  Confusion : TP=${metrics.tp} FP=${metrics.fp} TN=${metrics.tn} FN=${metrics.fn}`);
 
-  console.log('\n── Feature Weights ─────────────────────────────');
-  console.log(`  ${'bias'.padEnd(14)}: ${W[0] >= 0 ? '+' : ''}${W[0].toFixed(4)}`);
+  printFeatureImportance(W);
+
+  console.log('\n── All Feature Weights (raw) ───────────────────');
+  console.log(`  ${'bias'.padEnd(16)}: ${W[0] >= 0 ? '+' : ''}${W[0].toFixed(4)}`);
   for (let i = 0; i < FEATURE_NAMES.length; i++) {
     const w = W[i + 1];
-    console.log(`  ${FEATURE_NAMES[i].padEnd(14)}: ${w >= 0 ? '+' : ''}${w.toFixed(4)}`);
+    console.log(`  ${FEATURE_NAMES[i].padEnd(16)}: ${w >= 0 ? '+' : ''}${w.toFixed(4)}`);
   }
 
   console.log('\n── Grade Score Adjustments (bonus points) ──────');
-  const gradeOrder = ['A', 'B', 'C', 'D', 'F'];
-  for (const g of gradeOrder) {
+  for (const g of ['A', 'B', 'C', 'D', 'F']) {
     if (gradeAdj[g] === undefined) continue;
     const v = gradeAdj[g];
     console.log(`  ${g}: ${v >= 0 ? '+' : ''}${v}`);

@@ -26,6 +26,7 @@
     "smoke": "node scripts/smoke-test.js 3000",
     "smoke:staging": "node scripts/smoke-test.js 3001",
     "test:dashboard": "node --test --test-reporter=spec tests/dashboard.test.js",
+    "test:sentinel": "node --experimental-test-module-mocks --test tests/sentinel.test.js",
     "research:download": "node --env-file=.env src/research/download-prices.js",
     "research:scores": "node --env-file=.env src/research/compute-scores.js",
     "research:backtest": "node --env-file=.env src/research/backtest.js",
