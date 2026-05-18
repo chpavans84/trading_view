@@ -742,6 +742,22 @@ CREATE INDEX IF NOT EXISTS idx_uw_ipo_date ON uw_ipo_calendar(ipo_date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_actions_unique_pending
   ON pending_actions(symbol, side, qty)
   WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS system_alerts (
+  id                SERIAL PRIMARY KEY,
+  key               VARCHAR(120) NOT NULL,
+  severity          VARCHAR(20)  NOT NULL,
+  title             TEXT NOT NULL,
+  detail            JSONB,
+  email_sent        BOOLEAN NOT NULL DEFAULT FALSE,
+  email_suppressed  BOOLEAN NOT NULL DEFAULT FALSE,
+  email_error       TEXT,
+  hostname          VARCHAR(120),
+  pid               INTEGER,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_system_alerts_key_time ON system_alerts(key, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_system_alerts_severity ON system_alerts(severity, created_at DESC);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────

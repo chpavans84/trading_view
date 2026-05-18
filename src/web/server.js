@@ -4,6 +4,7 @@
  * Protected by DASHBOARD_PASSWORD env var (required — no default)
  */
 
+import os from 'os';
 import net from 'net';
 import fs from 'fs';
 import http from 'http';
@@ -60,8 +61,20 @@ import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCong
 import { auditUWSchemas } from '../core/uw-schema-linter.js';
 import { purgeOldUwRows } from '../core/uw-retention.js';
 import { dailyDataQualityReport } from '../core/uw-data-quality.js';
+import { alert as sysAlert } from '../core/system-alerts.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
 import { checkUnusualOptions } from '../core/options-scanner.js';
+
+// ─── Process-level error handlers ─────────────────────────────────────────────
+process.on('uncaughtException', async (e) => {
+  console.error('[uncaught]', e);
+  try { await sysAlert({ key: 'system/uncaught', severity: 'critical', title: 'uncaughtException', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }); } catch {}
+  process.exit(1);
+});
+process.on('unhandledRejection', async (e) => {
+  console.error('[unhandled-rejection]', e);
+  try { await sysAlert({ key: 'system/unhandled-rejection', severity: 'critical', title: 'unhandledRejection', detail: { error: String(e), stack: e?.stack?.split('\n').slice(0, 5).join('\n') } }); } catch {}
+});
 
 // Generate a stable numeric chat ID per user so each user has their own
 // Use username string directly as chat key — no hash collision possible.
@@ -803,6 +816,7 @@ app.post('/api/action/execute/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('[sentinel] execute error:', err.message);
+    sysAlert({ key: 'sentinel/execute-failed', severity: 'critical', title: 'Sentinel one-click trade execute failed', detail: { id: req.params.id, symbol: action.symbol, side: action.side, qty: action.qty, broker: action.broker, error: err.message } }).catch(() => {});
     return res.status(500).send(pageTokenInvalid());
   }
 
@@ -6432,6 +6446,38 @@ app.get('/api/sentinel/runs/:id', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── System Alerts routes ─────────────────────────────────────────────────────
+
+app.get('/api/system-alerts/recent', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+    const r = await query(
+      `SELECT id, key, severity, title, email_sent, email_suppressed, email_error, created_at
+       FROM system_alerts ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json({ alerts: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/system-alerts/:id', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const r = await query(`SELECT * FROM system_alerts WHERE id = $1`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not found' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/system-alerts/test', requireAuth, requireAdmin, async (req, res) => {
+  const { severity = 'warn', title = 'Test alert' } = req.body || {};
+  try {
+    const row = await sysAlert({ key: 'system/test', severity, title, detail: { triggered_by: req.session?.username } });
+    res.json({ ok: true, row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Dip analysis — worst drops with reasons
 app.get('/api/research/dips', async (req, res) => {
   try {
@@ -7124,6 +7170,7 @@ cron.schedule('0 15 * * 1-5', async () => {
     await runSentinel({ mode: 'preclose' });
   } catch (err) {
     console.error('[sentinel] preclose cron error:', err.message);
+    sysAlert({ key: 'sentinel/run-failed', severity: 'critical', title: 'Sentinel preclose run failed', detail: { mode: 'preclose', error: err.message, stack: err.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
   }
 }, { timezone: 'America/New_York' });
 
@@ -7132,6 +7179,7 @@ cron.schedule('0 18 * * 0', async () => {
     await runSentinel({ mode: 'weekend' });
   } catch (err) {
     console.error('[sentinel] weekend cron error:', err.message);
+    sysAlert({ key: 'sentinel/run-failed', severity: 'critical', title: 'Sentinel weekend run failed', detail: { mode: 'weekend', error: err.message, stack: err.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
   }
 }, { timezone: 'America/New_York' });
 
@@ -8156,25 +8204,37 @@ app.post('/api/eod-setups/refresh', requireAdmin, async (req, res) => {
 // Friday 3:30 PM ET — warn about positions going into earnings over the weekend
 cron.schedule('30 15 * * 5', async () => {
   console.log('[guardian] Friday earnings risk check');
-  try { await checkEarningsRisk(); } catch (e) { console.error('[guardian]', e.message); }
+  try { await checkEarningsRisk(); } catch (e) {
+    console.error('[guardian]', e.message);
+    sysAlert({ key: 'guardian/earnings-risk', severity: 'critical', title: 'Guardian earnings risk check failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // Friday 6:00 PM ET — first after-hours check after market close
 cron.schedule('0 18 * * 5', async () => {
   console.log('[guardian] Friday AH move check');
-  try { await checkAfterHoursMove(); } catch (e) { console.error('[guardian]', e.message); }
+  try { await checkAfterHoursMove(); } catch (e) {
+    console.error('[guardian]', e.message);
+    sysAlert({ key: 'guardian/ah-move', severity: 'critical', title: 'Guardian after-hours move check failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // Saturday 10:00 AM ET — catch any late AH / extended-hours moves
 cron.schedule('0 10 * * 6', async () => {
   console.log('[guardian] Saturday morning AH check');
-  try { await checkAfterHoursMove(); } catch (e) { console.error('[guardian]', e.message); }
+  try { await checkAfterHoursMove(); } catch (e) {
+    console.error('[guardian]', e.message);
+    sysAlert({ key: 'guardian/ah-move', severity: 'critical', title: 'Guardian after-hours move check failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // Monday 4:15 AM ET — pre-market check before the open
 cron.schedule('15 4 * * 1', async () => {
   console.log('[guardian] Monday pre-market holdings check');
-  try { await checkPreMarketHoldings(); } catch (e) { console.error('[guardian]', e.message); }
+  try { await checkPreMarketHoldings(); } catch (e) {
+    console.error('[guardian]', e.message);
+    sysAlert({ key: 'guardian/pre-market', severity: 'critical', title: 'Guardian pre-market check failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // ─── Unusual Whales background ingestion ──────────────────────────────────────
@@ -8198,7 +8258,10 @@ cron.schedule('*/5 * * * 1-5', async () => {
          m.price ?? null, m.volume ?? null, JSON.stringify(m), captured_at]
       ).catch(() => {});
     }
-  } catch (e) { console.error('[uw-cron/movers]', e.message); }
+  } catch (e) {
+    console.error('[uw-cron/movers]', e.message);
+    sysAlert({ key: 'uw-cron/movers', severity: 'critical', title: 'UW movers cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // Every 2 min during market hours — persist options flow alerts to uw_flow_alerts
@@ -8233,7 +8296,10 @@ cron.schedule('*/2 9-16 * * 1-5', async () => {
         ]
       ).catch(() => {});
     }
-  } catch (e) { console.error('[uw-cron/flow-alerts]', e.message); }
+  } catch (e) {
+    console.error('[uw-cron/flow-alerts]', e.message);
+    sysAlert({ key: 'uw-cron/flow-alerts', severity: 'critical', title: 'UW flow-alerts cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // Every 15 min weekdays — persist insider trades
@@ -8254,7 +8320,10 @@ cron.schedule('*/15 * * * 1-5', async () => {
          t.shares ?? null, t.price ?? null, t.amount ?? null, filedAt]
       ).catch(() => {});
     }
-  } catch (e) { console.error('[uw-cron/insider]', e.message); }
+  } catch (e) {
+    console.error('[uw-cron/insider]', e.message);
+    sysAlert({ key: 'uw-cron/insider', severity: 'critical', title: 'UW insider cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // Every hour weekdays — persist congressional trades
@@ -8276,7 +8345,10 @@ cron.schedule('0 * * * 1-5', async () => {
          t.filed_at ? new Date(t.filed_at) : null]
       ).catch(() => {});
     }
-  } catch (e) { console.error('[uw-cron/congress]', e.message); }
+  } catch (e) {
+    console.error('[uw-cron/congress]', e.message);
+    sysAlert({ key: 'uw-cron/congress', severity: 'critical', title: 'UW congress cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // 6 AM ET weekdays — fetch economic calendar and persist to DB
@@ -8297,7 +8369,10 @@ cron.schedule('0 6 * * 1-5', async () => {
          parseUWNum(e.actual), parseUWNum(e.forecast), parseUWNum(e.previous), JSON.stringify(e)]
       ).catch(() => {});
     }
-  } catch (e) { console.error('[uw-cron/econ-cal]', e.message); }
+  } catch (e) {
+    console.error('[uw-cron/econ-cal]', e.message);
+    sysAlert({ key: 'uw-cron/econ-cal', severity: 'critical', title: 'UW econ-cal cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // 6:05 AM ET weekdays — fetch IPO calendar and persist to DB
@@ -8320,7 +8395,10 @@ cron.schedule('5 6 * * 1-5', async () => {
          ipo.shares ?? null, ipo.exchange ?? null, ipo.status ?? null, JSON.stringify(ipo)]
       ).catch(() => {});
     }
-  } catch (e) { console.error('[uw-cron/ipo-cal]', e.message); }
+  } catch (e) {
+    console.error('[uw-cron/ipo-cal]', e.message);
+    sysAlert({ key: 'uw-cron/ipo-cal', severity: 'critical', title: 'UW ipo-cal cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // 6 PM ET weekdays — warm fundamentals cache for held positions
@@ -8332,7 +8410,10 @@ cron.schedule('0 18 * * 1-5', async () => {
       await getIvRank({ ticker: p.symbol }).catch(() => {});
       await new Promise(r => setTimeout(r, 600)); // gentle pacing
     }
-  } catch (e) { console.error('[uw-cron/fundamentals]', e.message); }
+  } catch (e) {
+    console.error('[uw-cron/fundamentals]', e.message);
+    sysAlert({ key: 'uw-cron/fundamentals', severity: 'warn', title: 'UW fundamentals cache warmup failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // 3 AM ET daily — purge old UW rows (Item 3)
@@ -8342,20 +8423,36 @@ cron.schedule('0 3 * * *', async () => {
     const r = await purgeOldUwRows();
     const total = Object.values(r).reduce((s, n) => s + n, 0);
     if (total > 0) console.log('[uw-retention] purged:', JSON.stringify(r));
-  } catch (e) { console.error('[uw-retention]', e.message); }
+  } catch (e) {
+    console.error('[uw-retention]', e.message);
+    sysAlert({ key: 'uw-retention', severity: 'critical', title: 'UW retention purge failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
-// 4 AM ET daily — quota low-water alarm (Item 5)
+// 4 AM ET daily — quota low-water alarm
+let _quotaMinuteLowCount = 0;
 cron.schedule('0 4 * * *', async () => {
   try {
     const q = getQuota();
     if (q && q.remaining_day < 5000) {
       console.warn('[uw-quota] LOW DAILY: remaining=', q.remaining_day);
+      sysAlert({ key: 'uw-quota/low-day', severity: 'critical', title: 'UW daily quota critically low', detail: { remaining_day: q.remaining_day, day_used: q.day_used } }).catch(() => {});
     }
-  } catch (e) { console.error('[uw-quota]', e.message); }
+    if (q && q.remaining_minute < 10) {
+      _quotaMinuteLowCount++;
+      if (_quotaMinuteLowCount >= 3) {
+        sysAlert({ key: 'uw-quota/low-minute', severity: 'warn', title: 'UW per-minute quota low', detail: { remaining_minute: q.remaining_minute, count: _quotaMinuteLowCount }, dedup_window_minutes: 360 }).catch(() => {});
+      }
+    } else {
+      _quotaMinuteLowCount = 0;
+    }
+  } catch (e) {
+    console.error('[uw-quota]', e.message);
+    sysAlert({ key: 'uw-quota', severity: 'warn', title: 'UW quota check failed', detail: { error: e.message } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
-// 7 AM ET daily — UW schema linter (Item 2)
+// 7 AM ET daily — UW schema linter
 cron.schedule('0 7 * * *', async () => {
   if (!isDbAvailable()) return;
   try {
@@ -8365,34 +8462,44 @@ cron.schedule('0 7 * * *', async () => {
     );
     if (drift.length) {
       console.warn('[uw-schema-linter] DRIFT detected:', JSON.stringify(drift, null, 2));
+      sysAlert({ key: 'uw-schema/drift', severity: 'warn', title: 'UW schema drift detected', detail: { drift: Object.fromEntries(drift) }, dedup_window_minutes: 1440 }).catch(() => {});
     } else {
       console.log('[uw-schema-linter] all UW schemas match expected keys');
     }
-  } catch (e) { console.error('[uw-schema-linter]', e.message); }
+  } catch (e) {
+    console.error('[uw-schema-linter]', e.message);
+    sysAlert({ key: 'uw-schema-linter', severity: 'critical', title: 'UW schema linter failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
-// 8 AM ET daily — data-quality report (Item 8)
+// 8 AM ET daily — data-quality report
 cron.schedule('0 8 * * *', async () => {
   if (!isDbAvailable()) return;
   try {
     const report = await dailyDataQualityReport();
-    const alarms = [];
     for (const [table, r] of Object.entries(report)) {
-      if (r.error) { alarms.push(`${table}: error — ${r.error}`); continue; }
-      if (r.rows_24h === 0) alarms.push(`${table}: zero rows in 24h`);
+      if (r.error) {
+        sysAlert({ key: `uw-quality/${table}-error`, severity: 'warn', title: `UW data-quality error: ${table}`, detail: { error: r.error }, dedup_window_minutes: 720 }).catch(() => {});
+        continue;
+      }
+      if (r.rows_24h === 0) {
+        sysAlert({ key: `uw-quality/${table}-zero-rows`, severity: 'warn', title: `UW ${table}: zero rows in 24h`, detail: { table, rows_24h: 0 }, dedup_window_minutes: 720 }).catch(() => {});
+      }
       if (r.rows_24h > 0 && r.oldest_24h_row_age_minutes > 60) {
-        alarms.push(`${table}: stale (${Math.round(r.oldest_24h_row_age_minutes)}min)`);
+        sysAlert({ key: `uw-quality/${table}-stale`, severity: 'warn', title: `UW ${table} stale`, detail: { table, age_minutes: Math.round(r.oldest_24h_row_age_minutes) }, dedup_window_minutes: 720 }).catch(() => {});
       }
       for (const [col, pct] of Object.entries(r.null_rates || {})) {
-        if (pct > 20) alarms.push(`${table}.${col}: ${pct}% NULL`);
+        if (pct > 20) {
+          sysAlert({ key: `uw-quality/${table}-${col}-nulls`, severity: 'warn', title: `UW ${table}.${col}: ${pct}% NULL`, detail: { table, column: col, null_pct: pct }, dedup_window_minutes: 720 }).catch(() => {});
+        }
       }
     }
-    if (alarms.length) {
-      console.warn('[uw-quality]', JSON.stringify(alarms));
-    } else {
-      console.log('[uw-quality] all UW tables healthy');
-    }
-  } catch (e) { console.error('[uw-quality]', e.message); }
+    const hasAlarms = Object.values(report).some(r => r.error || r.rows_24h === 0 || (r.rows_24h > 0 && r.oldest_24h_row_age_minutes > 60) || Object.values(r.null_rates || {}).some(p => p > 20));
+    if (!hasAlarms) console.log('[uw-quality] all UW tables healthy');
+  } catch (e) {
+    console.error('[uw-quality]', e.message);
+    sysAlert({ key: 'uw-quality', severity: 'critical', title: 'UW data-quality report failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
+  }
 }, { timezone: 'America/New_York' });
 
 // Start options flow WebSocket stream on server startup (if UW configured)
@@ -8400,10 +8507,13 @@ if (isUWConfigured()) {
   setTimeout(() => {
     try {
       streamOptionsFlow({
-        onTrade: (alert) => {
-          console.log('[uw-ws] flow alert:', alert?.ticker, alert?.sentiment);
+        onTrade: (flowAlert) => {
+          console.log('[uw-ws] flow alert:', flowAlert?.ticker, flowAlert?.sentiment);
         },
         onError: (e) => console.error('[uw-ws]', e),
+        onFlap: ({ attempts, last_error }) => {
+          sysAlert({ key: 'uw-ws/down', severity: 'critical', title: 'UW WebSocket repeatedly failing to reconnect', detail: { attempts, last_error }, dedup_window_minutes: 360 }).catch(() => {});
+        },
       });
     } catch (e) { console.error('[uw-ws] startup error:', e.message); }
   }, 5000);
@@ -8525,6 +8635,9 @@ seedKnowledge()
   .catch(e => console.error('[knowledge] seed error:', e.message));
 await pgStore._ensureTable();
 await migrateUsersToDb();
+
+// Boot alert — fire after DB is ready
+sysAlert({ key: 'system/boot', severity: 'info', title: 'trading-dashboard booted', detail: { hostname: os.hostname(), pid: process.pid, node: process.version }, dedup_window_minutes: 5 }).catch(() => {});
 // ─── Reminder email cron (check every minute) ─────────────────────────────────
 setInterval(async () => {
   if (!isDbAvailable() || !resend) return;

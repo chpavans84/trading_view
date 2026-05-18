@@ -10,6 +10,7 @@
 
 import crypto       from 'crypto';
 import { Resend }   from 'resend';
+import { alert as sysAlert } from './system-alerts.js';
 import Anthropic    from '@anthropic-ai/sdk';
 import YahooFinance from 'yahoo-finance2';
 
@@ -666,6 +667,7 @@ export async function runSentinel({ mode = 'preclose' } = {}) {
   } catch (err) {
     runError = err.message;
     console.error('[sentinel] run failed:', err.message);
+    sysAlert({ key: 'sentinel/run-failed', severity: 'critical', title: 'Sentinel run failed', detail: { mode, error: err.message, stack: err.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
   }
 
   // 9. Log run to DB
