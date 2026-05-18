@@ -2937,21 +2937,23 @@ async function fetchRVOL(symbol) {
 }
 
 async function fetchCurrentPrice(symbol) {
-  // Run Moomoo and Yahoo Finance in parallel.
-  // Main price = regular-session price always (real-time from Moomoo during REGULAR,
-  // else last close from Yahoo). Extended hours shown as sub-lines only.
-  const [mmSettled, yfSettled] = await Promise.allSettled([
-    getMoomooQuote(symbol),
-    _yf.quoteSummary(symbol, { modules: ['price'] }),
-  ]);
+  // Get Yahoo Finance first (HTTP, zero TCP overhead) to determine marketState.
+  // Only open a Moomoo TCP connection during REGULAR session — outside market hours
+  // Moomoo real-time data is never used as the main price (line below gates on REGULAR),
+  // so opening connections during pre/post/closed hours only floods OpenD's accept queue.
+  let yfd = null;
+  try { yfd = await _yf.quoteSummary(symbol, { modules: ['price'] }); } catch { /* ignore */ }
+  const p        = yfd?.price;
+  const mktState = p?.marketState ?? '';
 
-  const mm  = mmSettled.status === 'fulfilled' ? mmSettled.value : null;
-  const yfd = yfSettled.status === 'fulfilled' ? yfSettled.value : null;
-  const p   = yfd?.price;
-
-  const mktState   = p?.marketState ?? '';
   const isPreSess  = mktState === 'PRE'  || mktState === 'PREPRE';
   const isPostSess = mktState === 'POST' || mktState === 'POSTPOST';
+
+  // Only connect to Moomoo during REGULAR session, or when Yahoo failed entirely.
+  let mm = null;
+  if (mktState === 'REGULAR' || !p) {
+    try { mm = await getMoomooQuote(symbol); } catch { /* ignore */ }
+  }
 
   // Extended hours sub-line prices.
   // Prefer Moomoo real-time data; fall back to Yahoo Finance (gated on session).
