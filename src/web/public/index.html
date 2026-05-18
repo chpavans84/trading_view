@@ -19065,7 +19065,7 @@ function _tdRefreshWatchlist() {
         priceEl.textContent = p;
         priceEl.classList.remove('td-tick-up','td-tick-down');
         void priceEl.offsetWidth;
-        priceEl.classList.add(c >= 0 ? 'td-tick-up' : 'td-tick-down');
+        if (c != null) priceEl.classList.add(c >= 0 ? 'td-tick-up' : 'td-tick-down');
       }
     }
     if (chgEl) {
@@ -19192,7 +19192,7 @@ function _tdUpdateHeaderPrice(q) {
       priceEl.textContent = pStr;
       priceEl.classList.remove('td-tick-up','td-tick-down');
       void priceEl.offsetWidth;
-      priceEl.classList.add(c >= 0 ? 'td-tick-up' : 'td-tick-down');
+      if (c != null) priceEl.classList.add(c >= 0 ? 'td-tick-up' : 'td-tick-down');
     }
   }
   if (c != null) {

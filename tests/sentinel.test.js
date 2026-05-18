@@ -316,23 +316,15 @@ describe('runSentinel — sector concentration', () => {
     assert.ok(concRisks[0].detail.concentration_pct >= 40);
   });
 
-  it('no concentration risk when no single sector exceeds 40%', async () => {
+  it('two sectors each at 50% → both trigger concentration risk', async () => {
     resetState();
-    // NVDA (SOXX 30%) + AAPL (XLK 30%) + MSFT (XLK 40%) — XLK is 70%, triggers
-    // Let me use a balanced portfolio instead
+    // NVDA = SOXX 50%, AAPL = XLK 50% — both exceed the 40% threshold
     state.alpacaPositions = [
       { symbol: 'NVDA', qty: '3', avg_entry_price: '100', market_value: '300', current_price: '100', unrealized_pl_pct: '0' },
       { symbol: 'AAPL', qty: '3', avg_entry_price: '100', market_value: '300', current_price: '100', unrealized_pl_pct: '0' },
-      // 3rd position with no sector mapping = 'Other'
     ];
-    // NVDA = SOXX 50%, AAPL = XLK 50% — each is exactly 50%, both > 40%
-    // So just use different sizes to keep below 40%
-    // Actually with only 2 stocks each is 50%, which IS > 40%
-    // To avoid concentration, need >= 3 different sectors each < 40%
-    // Skip this test variant — it's hard to craft without more mock symbols
 
     const result = await runSentinel({ mode: 'preclose' });
-    // With 2 stocks in 2 sectors each at 50%, both should trigger > 40%
     const concRisks = result.facts.risks.filter(r => r.type === 'concentration');
     assert.ok(concRisks.length >= 1);
   });

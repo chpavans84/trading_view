@@ -101,7 +101,7 @@ function getDrawdownRisk(symbol, unrealizedPlPct) {
   if (pct >= -5) return null;
   return {
     unrealized_pl_pct: +pct.toFixed(2),
-    severity: pct <= -15 ? 'high' : pct <= -10 ? 'high' : 'med',
+    severity: pct <= -10 ? 'high' : 'med',
   };
 }
 

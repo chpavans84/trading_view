@@ -48,7 +48,7 @@ const ORDER_TYPE    = {
   Stop: 10, StopLimit: 11,
   MarketIfTouched: 12, LimitIfTouched: 13,
   TrailingStop: 14, TrailingStopLimit: 15,
-  TWAP: 16, VWAP: 18,
+  TWAP: 16, TWAP_LIMIT: 17,
 };
 // Session enum (Common.Session) — controls which trading hours the order is active
 const SESSION       = { None: 0, RTH: 1, ETH: 2, All: 3, Overnight: 4 };
@@ -490,7 +490,7 @@ export async function placeMoomooTrade({ symbol, side = 'buy', qty,
     trailing_stop:        ORDER_TYPE.TrailingStop,
     trailing_stop_limit:  ORDER_TYPE.TrailingStopLimit,
     twap:                 ORDER_TYPE.TWAP,
-    vwap:                 ORDER_TYPE.VWAP,
+    twap_limit:           ORDER_TYPE.TWAP_LIMIT,
   };
   const entryOrderType = _mooTypeMap[order_type] || ORDER_TYPE.Market;
   // price = limit price for limit-style orders; auxPrice = trigger/trail for conditional orders

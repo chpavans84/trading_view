@@ -105,6 +105,47 @@ export function pagePriceMoved({ symbol, side, qty, proposedPrice, currentPrice 
 <p class="ts">No trade was placed. You can close this tab.</p>`);
 }
 
+export function pageConfirmExecute({ id, token, symbol, side, qty, limitPrice, currentPrice }) {
+  const sideLabel = side === 'sell' || side === 'trim' ? 'SELL' : 'BUY';
+  const colorClass = sideLabel === 'SELL' ? 'red' : 'green';
+  const priceRow = limitPrice
+    ? `<div class="row"><span class="label">Limit Price</span><span class="value">$${Number(limitPrice).toFixed(2)}</span></div>`
+    : '';
+  const curRow = currentPrice
+    ? `<div class="row"><span class="label">Current Price</span><span class="value">$${Number(currentPrice).toFixed(2)}</span></div>`
+    : '';
+  return base('Confirm Trade', `
+<div class="icon">⚠️</div>
+<h1>Confirm Trade</h1>
+<p class="sub">Review the details below before confirming. This will place a live order.</p>
+<div class="detail">
+  <div class="row"><span class="label">Symbol</span><span class="value">${symbol}</span></div>
+  <div class="row"><span class="label">Action</span><span class="value ${colorClass}">${sideLabel}</span></div>
+  <div class="row"><span class="label">Quantity</span><span class="value">${qty} shares</span></div>
+  ${priceRow}${curRow}
+</div>
+<form method="POST" action="/api/action/execute/${id}?token=${encodeURIComponent(token)}" style="margin-bottom:12px">
+  <button type="submit" class="btn btn-danger">✓ Confirm — Place Order</button>
+</form>
+<a href="/api/action/ignore/${id}?token=${encodeURIComponent(token)}" class="btn btn-muted" style="display:block;text-align:center;padding:12px;border-radius:8px;text-decoration:none;color:#94a3b8">Cancel — Ignore this proposal</a>
+<p class="ts">Clicking Confirm will immediately place a live order with your broker.</p>`);
+}
+
+export function pageConfirmIgnore({ id, token, symbol, side, qty }) {
+  return base('Ignore Proposal', `
+<div class="icon">🚫</div>
+<h1>Ignore this Proposal?</h1>
+<p class="sub">The sentinel suggested acting on <strong>${symbol}</strong>. Confirm below to dismiss it.</p>
+<div class="detail">
+  <div class="row"><span class="label">Symbol</span><span class="value">${symbol}</span></div>
+  <div class="row"><span class="label">Proposed</span><span class="value">${side?.toUpperCase()} ${qty} shares</span></div>
+</div>
+<form method="POST" action="/api/action/ignore/${id}?token=${encodeURIComponent(token)}">
+  <button type="submit" class="btn btn-muted">Yes, ignore this proposal</button>
+</form>
+<p class="ts">No trade will be placed.</p>`);
+}
+
 export function pageTokenInvalid() {
   return base('Invalid Link', `
 <div class="icon">🔒</div>

@@ -60,16 +60,21 @@ function toFeatures(row) {
     ? Math.max(-1, (close - h52) / h52)
     : 0;
 
+  const rsi      = parseFloat(row.rsi);
+  const macdHist = parseFloat(row.macd_hist);
+  const score    = parseFloat(row.score);
+  const rsVsSpy  = parseFloat(row.rs_vs_spy);
+
   return [
-    ((parseFloat(row.rsi)   ?? 50) - 50) / 50,                        // rsi_norm
-    Math.sign(parseFloat(row.macd_hist) ?? 0),                         // macd_sign
+    ((isNaN(rsi)      ? 50 : rsi)      - 50) / 50,                    // rsi_norm
+    Math.sign(isNaN(macdHist) ? 0 : macdHist),                        // macd_sign
     row.above_emas ? 1 : 0,                                            // ema_above
     bb_pos,                                                            // bb_pos
     vol_ratio,                                                         // vol_ratio
-    ((parseFloat(row.score) ?? 50) - 50) / 50,                        // score_norm
+    ((isNaN(score)    ? 50 : score)    - 50) / 50,                    // score_norm
     (vix - 20) / 15,                                                   // vix_norm
     vix > 20 ? 1 : 0,                                                  // vix_above_20
-    Math.max(-0.5, Math.min(0.5, parseFloat(row.rs_vs_spy) ?? 0)),    // rs_vs_spy
+    Math.max(-0.5, Math.min(0.5, isNaN(rsVsSpy) ? 0 : rsVsSpy)),     // rs_vs_spy
     pct_from_52wh,                                                     // pct_from_52wh
     date.getDay() === 1 ? 1 : 0,                                       // is_monday
   ];

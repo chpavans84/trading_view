@@ -44,7 +44,7 @@ import { seedGraph } from '../core/graph-seed.js';
 import { runPremarketScan } from '../core/premarket-scanner.js';
 import { runEarningsCascadeScan } from '../core/earnings-cascade.js';
 import { runSentinel, signToken, verifyToken } from '../core/sentinel.js';
-import { pageSuccess, pageExpired, pageAlreadyActioned, pagePriceMoved, pageTokenInvalid } from '../core/sentinel-pages.js';
+import { pageSuccess, pageExpired, pageAlreadyActioned, pagePriceMoved, pageTokenInvalid, pageConfirmExecute, pageConfirmIgnore } from '../core/sentinel-pages.js';
 import { getImpactAnalysis } from '../core/graph-impact.js';
 import { getStockPrediction } from '../core/predictor.js';
 import YahooFinance from 'yahoo-finance2';
@@ -732,78 +732,91 @@ app.get('/api/td-names', requireAuth, async (req, res) => {
 // ─── Sentinel one-click action routes (HMAC auth only — no session required) ──
 // Must be registered BEFORE app.use('/api', requireAuth) so they are not gated.
 
-app.get('/api/action/execute/:id', async (req, res) => {
+// ── shared helper: validate token + state, return action or send error page ───
+async function _resolveAction(req, res) {
   const { id } = req.params;
   const { token } = req.query;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
   let action;
   try { action = await getPendingAction(id); } catch { /* fall through */ }
-  if (!action) return res.status(404).send(pageTokenInvalid());
+  if (!action) { res.status(404).send(pageTokenInvalid()); return null; }
 
   if (!token || !verifyToken(action.signed_token, token))
-    return res.status(403).send(pageTokenInvalid());
+    { res.status(403).send(pageTokenInvalid()); return null; }
 
   if (action.status === 'executed' || action.status === 'ignored')
-    return res.send(pageAlreadyActioned({ symbol: action.symbol, status: action.status, actionedAt: action.executed_at }));
+    { res.send(pageAlreadyActioned({ symbol: action.symbol, status: action.status, actionedAt: action.executed_at })); return null; }
 
   if (new Date() > new Date(action.expires_at))
-    return res.send(pageExpired({ symbol: action.symbol, side: action.side, qty: action.qty, expiresAt: action.expires_at }));
+    { res.send(pageExpired({ symbol: action.symbol, side: action.side, qty: action.qty, expiresAt: action.expires_at })); return null; }
 
-  // Price-drift guard: reject if current price moved >5% from proposed limit
-  let currentPrice;
-  try {
-    const q = await getLatestPrice(action.symbol);
-    currentPrice = q.mid || q.ask || q.bid;
-  } catch {
-    currentPrice = null;
-  }
+  return action;
+}
+
+// GET — show confirmation page (safe for link previews / browser prefetch)
+app.get('/api/action/execute/:id', async (req, res) => {
+  const action = await _resolveAction(req, res);
+  if (!action) return;
+
+  let currentPrice = null;
+  try { const q = await getLatestPrice(action.symbol); currentPrice = q.mid || q.ask || q.bid; } catch { /* ok */ }
+
   if (currentPrice && action.limit_price) {
     const drift = Math.abs((currentPrice - Number(action.limit_price)) / Number(action.limit_price));
     if (drift > 0.05)
       return res.send(pagePriceMoved({ symbol: action.symbol, side: action.side, qty: action.qty, proposedPrice: action.limit_price, currentPrice }));
   }
 
-  // Execute the trade
+  res.send(pageConfirmExecute({ id: req.params.id, token: req.query.token, symbol: action.symbol, side: action.side, qty: action.qty, limitPrice: action.limit_price, currentPrice }));
+});
+
+// POST — actually execute the trade
+app.post('/api/action/execute/:id', async (req, res) => {
+  const action = await _resolveAction(req, res);
+  if (!action) return;
+
+  let currentPrice = null;
+  try { const q = await getLatestPrice(action.symbol); currentPrice = q.mid || q.ask || q.bid; } catch { /* ok */ }
+
+  if (currentPrice && action.limit_price) {
+    const drift = Math.abs((currentPrice - Number(action.limit_price)) / Number(action.limit_price));
+    if (drift > 0.05)
+      return res.send(pagePriceMoved({ symbol: action.symbol, side: action.side, qty: action.qty, proposedPrice: action.limit_price, currentPrice }));
+  }
+
   let execResult;
   try {
     execResult = await placeQuickTrade({
-      symbol: action.symbol,
-      side: action.side,
-      qty: Number(action.qty),
-      order_type: action.limit_price ? 'limit' : 'market',
+      symbol:      action.symbol,
+      side:        action.side,
+      qty:         Number(action.qty),
+      order_type:  action.limit_price ? 'limit' : 'market',
       limit_price: action.limit_price ? Number(action.limit_price) : undefined,
     });
   } catch (err) {
     console.error('[sentinel] execute error:', err.message);
-    return res.status(500).send(pageTokenInvalid()); // generic error page
+    return res.status(500).send(pageTokenInvalid());
   }
 
   const executedAt = new Date();
-  await updatePendingAction(id, { status: 'executed', executed_at: executedAt, execution_result: execResult });
+  await updatePendingAction(req.params.id, { status: 'executed', executed_at: executedAt, execution_result: execResult });
   const fillPrice = execResult?.filled_avg_price || action.limit_price || currentPrice;
   res.send(pageSuccess({ symbol: action.symbol, side: action.side, qty: action.qty, price: fillPrice, executedAt }));
 });
 
+// GET — show ignore confirmation page
 app.get('/api/action/ignore/:id', async (req, res) => {
-  const { id } = req.params;
-  const { token } = req.query;
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  const action = await _resolveAction(req, res);
+  if (!action) return;
+  res.send(pageConfirmIgnore({ id: req.params.id, token: req.query.token, symbol: action.symbol, side: action.side, qty: action.qty }));
+});
 
-  let action;
-  try { action = await getPendingAction(id); } catch { /* fall through */ }
-  if (!action) return res.status(404).send(pageTokenInvalid());
-
-  if (!token || !verifyToken(action.signed_token, token))
-    return res.status(403).send(pageTokenInvalid());
-
-  if (action.status === 'executed' || action.status === 'ignored')
-    return res.send(pageAlreadyActioned({ symbol: action.symbol, status: action.status, actionedAt: action.executed_at }));
-
-  if (new Date() > new Date(action.expires_at))
-    return res.send(pageExpired({ symbol: action.symbol, side: action.side, qty: action.qty, expiresAt: action.expires_at }));
-
-  await updatePendingAction(id, { status: 'ignored', executed_at: new Date() });
+// POST — mark as ignored
+app.post('/api/action/ignore/:id', async (req, res) => {
+  const action = await _resolveAction(req, res);
+  if (!action) return;
+  await updatePendingAction(req.params.id, { status: 'ignored', executed_at: new Date() });
   res.send(pageAlreadyActioned({ symbol: action.symbol, status: 'ignored', actionedAt: new Date() }));
 });
 
@@ -4330,7 +4343,7 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
     // Translate generic session string → broker-native values
     const _sessionToMoo   = { rth: 1, eth: 2, all: 3, overnight: 4 };
     const mooSession      = session ? (_sessionToMoo[session] ?? 3) : 3; // default All
-    const outsideRthFlag  = session === 'eth';                            // Tiger / Alpaca
+    const outsideRthFlag  = ['eth', 'all', 'overnight'].includes(session); // Tiger / Alpaca
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
     if (!qty || qty < 1) return res.status(400).json({ error: 'qty must be ≥ 1' });
 
@@ -4357,7 +4370,8 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
       });
       logActivity(req.session.username, 'quick_trade', `${side.toUpperCase()} ${shares} ${ticker} @ ${order_type} [Moomoo]`, req.ip);
       if (side === 'buy') {
-        recordTrade({ order_id: String(result.order_id || `moo_${Date.now()}`), symbol: ticker, side: 'buy', qty: shares, entry_price: limit_price ? +limit_price : 0, account_source: 'moomoo', username: req.session.username }).catch(() => {});
+        const entryPrice = limit_price ? +limit_price : (result?.filled_avg_price ?? result?.estimated_price ?? null);
+        recordTrade({ order_id: String(result.order_id || `moo_${Date.now()}`), symbol: ticker, side: 'buy', qty: shares, entry_price: entryPrice, account_source: 'moomoo', username: req.session.username }).catch(() => {});
       }
       return res.json(result);
     }
@@ -6580,23 +6594,27 @@ function _ensurePriceTick() {
     const allSyms = new Set();
     _priceClients.forEach(syms => syms.forEach(s => allSyms.add(s)));
     if (!allSyms.size) return;
-    const symbols  = [...allSyms].slice(0, 80);
-    const results  = await Promise.allSettled(symbols.map(sym => fetchCurrentPrice(sym)));
-    const prices   = {};
-    symbols.forEach((sym, i) => {
-      const r = results[i];
-      if (r.status === 'fulfilled' && r.value?.price != null) {
-        prices[sym] = {
-          p:  r.value.price,
-          c:  r.value.change_pct          ?? null,
-          s:  r.value.session             ?? 'regular',
-          pp: r.value.pre_price           ?? null,
-          pc: r.value.pre_change_pct      ?? null,
-          po: r.value.post_price          ?? null,
-          oc: r.value.post_change_pct     ?? null,
-        };
-      }
-    });
+    const symList = [...allSyms];
+    const prices  = {};
+    // Process in batches of 80 so no subscribers are starved
+    for (let i = 0; i < symList.length; i += 80) {
+      const chunk   = symList.slice(i, i + 80);
+      const results = await Promise.allSettled(chunk.map(sym => fetchCurrentPrice(sym)));
+      chunk.forEach((sym, j) => {
+        const r = results[j];
+        if (r.status === 'fulfilled' && r.value?.price != null) {
+          prices[sym] = {
+            p:  r.value.price,
+            c:  r.value.change_pct          ?? null,
+            s:  r.value.session             ?? 'regular',
+            pp: r.value.pre_price           ?? null,
+            pc: r.value.pre_change_pct      ?? null,
+            po: r.value.post_price          ?? null,
+            oc: r.value.post_change_pct     ?? null,
+          };
+        }
+      });
+    }
     const msg = JSON.stringify({ type: 'prices', data: prices, ts: Date.now() });
     _priceClients.forEach((_, ws) => {
       if (ws.readyState === ws.OPEN) try { ws.send(msg); } catch {}
@@ -7522,7 +7540,6 @@ async function _scanEarningsGap(etDate) {
 
         let confidence = 60;
         if (['A', 'B'].includes(score?.grade)) confidence += 12;
-        if (entry.avg_surprise_pct > 5) confidence += 8;
         if (isBmo) confidence += 5; // BMO = clear price discovery overnight
 
         setups.push({
@@ -7842,7 +7859,10 @@ cron.schedule('30 7 * * 1-5', async () => {
 
 app.get('/api/eod-setups', requireAuth, async (req, res) => {
   try {
-    if (req.query.refresh === '1' || !_eodSetupsCache) {
+    if (req.query.refresh === '1') {
+      if (req.session?.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+      await runEODSetupScanner();
+    } else if (!_eodSetupsCache) {
       await runEODSetupScanner();
     }
     res.json(_eodSetupsCache || { setups: [], generated_at: null, for_date: null });
