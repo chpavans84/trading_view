@@ -342,9 +342,208 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 ### Server ops
 - PM2 processes: `trading-dashboard` (port 3000, production) · `trading-staging` (UAT) · `trading-bot` (cron bot)
 - Restart: `pm2 restart trading-dashboard trading-staging` — **never use pkill**
-- After modifying `.env`, restart with `pm2 restart trading-dashboard --update-env` — plain `pm2 restart` does NOT re-read env vars. Same applies to `trading-bot` and any other PM2 app.
+- **After modifying `.env`, ALWAYS restart with `--update-env`**: `pm2 restart trading-dashboard --update-env`. Plain `pm2 restart` does NOT re-read env vars (PM2 caches them at spawn time). Same for all PM2 apps.
 - Images served from: `images/` project root → `/images/` URL path
 - Background image: `images/New_backgraound.PNG` (NYSE bull, opacity 0.18)
 - GARUDA AI logo: `images/GARUDA_SEARCH.PNG`
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`
+
+---
+
+## Sentinel + UW + System Alerts (shipped May 2026)
+
+This section captures the durable design, operational state, and user preferences from the May 2026 build arc. Survives context compression — read this before making changes to sentinel, UW, or alerting code.
+
+### What was built (commits on `main`)
+- `3e63487` — Pre-close sentinel core
+- `05744e9` — 12 CodeRabbit fixes (GET/POST split, ORDER_TYPE.TWAP_LIMIT, etc.)
+- `cb8626d` — Unusual Whales full integration (client, cron, sentinel hooks)
+- `730df04` — Data integrity (NULL-safe UNIQUE indexes, PUBLIC_URL validation)
+- `b20635d` — Observability (schema linter, retention, data-quality, routes)
+- `e4e9691` — UI tabs (Flow History, Sentinel Activity)
+- `a8597d5` — System-alerts module + DB table + routes + boot/uncaught wiring
+- `0fca15a` — Wired system-alerts into all 14 cron handlers + WS flap counter + UI tab
+
+### Pre-Close Sentinel (`src/core/sentinel.js`)
+
+**Schedule:** Mon–Fri 3:00 PM ET (`'0 15 * * 1-5'`) + Sun 6:00 PM ET (`'0 18 * * 0'`), America/New_York timezone.
+
+**Architecture rule (non-negotiable):** Deterministic Node code builds risk facts AND trade proposals (qty, side, limit_price, stop_price). Claude Sonnet 4.6 writes ONLY the prose email body from those facts. LLM output is NEVER parsed for trade parameters. Every number in a proposal is decided in Node code.
+
+**Risk types detected per holding:**
+- `earnings` — next earnings within 5 trading days (Yahoo `calendarEvents`)
+- `news` — Benzinga headlines in last 24h
+- `calibration` — `prediction_calibration` shows dir_accuracy < 0.35 AND 30d move > +20%
+- `concentration` — any sector > 40% of portfolio
+- `macro` — economic events in next 2 trading days (from UW `getEconomicCalendar()`)
+- `unusual_options` — UW options flow > $500k contradicting position direction
+- `insider_selling` — insider sold > $1M in last 7 days
+- `congressional_activity` — Congress member transacted in last 14 days
+- `drawdown` — unrealized P/L < −5%
+
+**Proposal rules (deterministic):**
+- Earnings ≤ 2 days + position > 5% → trim to 5%
+- Calibration warning (dir_acc < 0.30 + 30d > +25%) + position > 3% → trim to 3%
+- High news severity + unrealized > +15% → tighten stop to (entry + 50% of gain)
+- Sector concentration > 50% → trim largest by 25%
+
+**One-click confirm flow:**
+- Email contains `[Execute]` and `[Ignore]` links — HMAC-SHA256 signed tokens, 30-min expiry
+- `GET /api/action/execute/:id?token=...` — shows confirm page (safe for email/link previews)
+- `POST /api/action/execute/:id` — actually executes; re-fetches live price; refuses if drift > `SENTINEL_DRIFT_TOLERANCE` (default 0.02)
+- Idempotent — second click renders "already actioned" page
+- Token verified via `crypto.timingSafeEqual` (never `===` or `Buffer.compare`)
+
+**Env vars required (sentinel will throw at boot if missing in production):**
+- `ACTION_SIGNING_SECRET` — must be ≥32 chars. Generate: `openssl rand -hex 32`. NO fallback — throws if missing.
+- `PUBLIC_URL` — must be valid https:// (or http://localhost). Throws if placeholder.
+- `SENTINEL_EMAIL_FROM`, `SENTINEL_EMAIL_TO` — Resend transport
+- `SENTINEL_DRIFT_TOLERANCE` — default `0.02` (2%). Higher = more permissive
+- Email transport is **Resend** (not nodemailer/SMTP). Uses `RESEND_API` env var.
+
+**Persistence:**
+- `sentinel_runs` — every run logged (mode, as_of, risks_json, proposals_json, email_sent, error)
+- `pending_actions` — UUID PK, partial UNIQUE index `(symbol, side, qty) WHERE status='pending'` prevents duplicate proposals
+- Routes: `GET /api/sentinel/recent`, `GET /api/sentinel/runs/:id`, `POST /api/sentinel/run` (admin trigger)
+
+### Unusual Whales Integration
+
+**License: PERSONAL USE ONLY.** Never expose UW data via any public API or to other users. UW actively polices this. Multi-tenant or external API endpoints serving UW data violate ToS.
+
+**Plan:** API Advanced — 120 req/min, 80,000 req/day, WebSocket streaming, 90-day historical lookback.
+
+**Single client:** `src/core/unusual-whales.js`. ALL UW calls go through it. Real token-bucket rate limiter (dual minute + day enforcement). Per-endpoint in-memory cache with explicit TTL. **DO NOT modify rate-limit or cache internals** — sealed. Add new fetch methods if needed, following the existing pattern.
+
+**Cron schedule (`src/web/server.js`):**
+
+| Cron | Schedule | Action |
+|---|---|---|
+| `uw-cron/movers` | `*/5 * * * 1-5` | Persist top movers (3 directions parallel) to `uw_top_movers` with 5-min-rounded `captured_at` |
+| `uw-cron/insider` | `*/15 * * * 1-5` | Persist Form 4 insider trades to `uw_insider_trades` |
+| `uw-cron/congress` | `0 * * * 1-5` | Persist congressional trades to `uw_congressional_trades` |
+| `uw-cron/flow-alerts` | `*/2 9-16 * * 1-5` | Persist real-time options flow to `uw_flow_alerts` (~20K rows/day) |
+| `uw-cron/econ-cal` | `0 6 * * 1-5` | UPSERT economic calendar to `uw_economic_calendar` |
+| `uw-cron/ipo-cal` | `5 6 * * 1-5` | UPSERT IPO calendar to `uw_ipo_calendar` |
+| `uw-cron/fundamentals-warmup` | `0 18 * * 1-5` | Cache fundamentals for held positions |
+| `uw-schema-linter` | `0 7 * * *` | Audit raw JSONB vs `EXPECTED_KEYS`; alert on drift |
+| `uw-retention` | `0 3 * * *` | Purge old rows past retention window |
+| `uw-quality` | `0 8 * * *` | NULL-rate + freshness audit; alert on anomalies |
+
+**Retention defaults (env-overridable):**
+- `UW_FLOW_RETENTION_DAYS=90`
+- `UW_MOVERS_RETENTION_DAYS=30`
+- `UW_OPTIONS_FLOW_RETENTION_DAYS=90`
+- Other UW tables kept indefinitely (low volume, high historical value)
+
+**Field mapping gotchas:**
+- UW returns numeric values sometimes as strings with `%` suffix — use `parseUWNum()` helper to strip
+- Flow alerts have nullable `strike`/`side` — UNIQUE indexes use COALESCE expression indexes (Postgres NULL ≠ NULL)
+- Insert sentinel values (`''`, `-1`, `'1900-01-01'`) instead of NULL to match the expression indexes
+- If `EXPECTED_KEYS` drift detected by `uw-schema-linter`, update both the cron INSERT and the EXPECTED_KEYS map
+
+### System Alerts Layer (`src/core/system-alerts.js`)
+
+**Purpose: no silent failures.** Every cron catch, sentinel error, execute-route failure, schema drift, low quota, WS flap, uncaught exception, and boot event flows through one alerting pipeline.
+
+**API:**
+```js
+await alert({
+  key: 'uw-cron/<task>',         // stable string for dedup
+  severity: 'info'|'warn'|'critical',
+  title: '...',
+  detail: { ... },                // redacted before storage (secret|token|password|api_key|cookie stripped)
+  dedup_window_minutes: 60,        // default
+});
+```
+
+**Severity rules:**
+- `info` — log + DB row; emails dedup'd at 5-min window (`system/boot` etc.)
+- `warn` — log + DB row + email dedup'd at `ALERT_DEDUP_WINDOW_MIN` (default 60)
+- `critical` — log + DB row + email **bypasses dedup** (every critical fires)
+
+**Email format:** Subject prefixed `[OK]` / `[WARN]` / `[CRITICAL]` for inbox filtering.
+
+**Inbox filter rules (Gmail/Apple Mail):**
+
+| Subject | Action |
+|---|---|
+| `[CRITICAL]` | Star + VIP folder + push notification + sound |
+| `[WARN]` | Label + skip inbox |
+| `[OK]` | Label + skip inbox + mark read |
+
+**Routes:**
+- `GET /api/system-alerts/recent?limit=N` — auth-gated history
+- `GET /api/system-alerts/:id` — full detail
+- `POST /api/system-alerts/test` — admin-only manual trigger (for testing pipeline)
+
+**Persistence:** `system_alerts` table — every alert stored even when email is suppressed by dedup. Has `email_sent`, `email_suppressed`, `email_error` columns for forensics.
+
+**Env vars:**
+- `ALERT_EMAIL` — recipient (defaults to `SENTINEL_EMAIL_TO` if unset)
+- `ALERT_DEDUP_WINDOW_MIN` — default 60
+
+**Critical-bypass-dedup means:** if you trigger 3 critical alerts in 30s with the same key, you get 3 emails. Use `severity: 'warn'` if you only want one alert per hour for repeating issues.
+
+### User preferences (durable — DO NOT violate)
+
+1. **No silent failures.** Every cron catch, every error path, every threshold breach calls `alert()`. If you add new background work, wire it through `system-alerts`.
+
+2. **LLM never writes trade params.** Claude only writes prose explanations. All numbers (qty, side, price, stop) are decided in Node code. Never parse LLM output for trade values.
+
+3. **CodeRabbit reviews before push.** Stage diff, get CodeRabbit pass, then commit. The 12 fixes from `05744e9` are the historical precedent — pre-empt them by reading what CodeRabbit usually catches: GET/POST split, idempotency, resource cleanup, secret fallbacks, ORDER_TYPE strings, NULL handling.
+
+4. **Personal use only on UW data.** Never expose UW data via public routes or multi-tenant APIs. Internal owner-only routes are fine.
+
+5. **Additive enrichment, not replacement.** When integrating UW into existing widgets (e.g. Tomorrow's Catalysts), keep the existing source as primary and add UW as a parallel `Promise.allSettled` enrichment. Don't replace Nasdaq earnings cal, Yahoo `quoteSummary`, or Benzinga news — augment them.
+
+6. **`--update-env` after `.env` changes.** `pm2 restart trading-dashboard --update-env`. Plain restart doesn't re-read env vars.
+
+7. **Don't refactor what's working.** The `src/core/unusual-whales.js` client rate-limit and cache internals are sealed. Add new methods, don't change the bucket logic.
+
+### Deferred items (do NOT rebuild unless explicitly asked)
+
+- **PM2 ingestor service refactor** — splitting UW work into a 3rd PM2 process. Discussed; deferred. Revisit only if cron-in-web-server causes actual pain (UW outage slowing dashboard, day quota exhausted).
+- **Pine_analyze 403 tests** — pre-existing failures, currently `it.skip`'d. Cosmetic.
+- **Sentinel "cancel all" UX** — clicking Ignore on one proposal in an email doesn't cancel siblings. UX nicety only.
+- **UW quota proactive monitor cron** — `/api/uw/quota` route exists. A daily cron that emails when day quota < 5,000 was specced but not yet built. Add only if quota becomes a real concern (currently at 0.7% daily utilization).
+- **Resend production domain setup** — operational, not code. Verify when scaling beyond personal use.
+
+### DB tables added in this build arc
+
+Append to the "Key DB tables" list above:
+- `sentinel_runs` (mode, as_of, risks_json, proposals_json, email_sent, error)
+- `pending_actions` (UUID, symbol, side, qty, signed_token, expires_at, status; partial UNIQUE on pending status)
+- `system_alerts` (key, severity, title, detail JSONB, email_sent, email_suppressed, email_error)
+- `uw_options_flow` · `uw_top_movers` · `uw_flow_alerts` · `uw_insider_trades` · `uw_congressional_trades` · `uw_economic_calendar` · `uw_ipo_calendar`
+
+### Dashboard widget tabs added
+
+Append to the "Dashboard widget tabs" table:
+- `uw_flow_history` 🐋 Flow History — `uw_flow_alerts` last 24h, auto-refresh 60s
+- `sentinel_runs` 📨 Sentinel Activity — `/api/sentinel/recent`, row click → detail modal
+- `sys_alerts` 🚨 System Alerts — severity-colored, 24h counts, row click → detail modal
+
+### Verification queries (run after any sentinel/UW change)
+
+```sql
+-- 24h health summary (system-alerts)
+SELECT severity, COUNT(*) AS count_24h, MAX(created_at) AS most_recent
+FROM system_alerts WHERE created_at > NOW() - INTERVAL '24 hours'
+GROUP BY severity ORDER BY severity;
+
+-- UW ingestion rates last 24h
+SELECT 'flow_alerts' AS t, COUNT(*) FROM uw_flow_alerts WHERE alerted_at > NOW() - INTERVAL '24 hours'
+UNION ALL SELECT 'movers', COUNT(*) FROM uw_top_movers WHERE captured_at > NOW() - INTERVAL '24 hours'
+UNION ALL SELECT 'insider', COUNT(*) FROM uw_insider_trades WHERE ingested_at > NOW() - INTERVAL '24 hours'
+UNION ALL SELECT 'congress', COUNT(*) FROM uw_congressional_trades WHERE ingested_at > NOW() - INTERVAL '24 hours';
+
+-- Sentinel run history
+SELECT mode, COUNT(*), COUNT(*) FILTER (WHERE email_sent) AS sent,
+       COUNT(*) FILTER (WHERE error IS NOT NULL) AS failed
+FROM sentinel_runs WHERE as_of > NOW() - INTERVAL '7 days' GROUP BY mode;
+```
+
+### Test invocation
+
+`npm test` runs: e2e + pine_analyze + sentinel + unusual-whales + uw-schema-linter + uw-retention + uw-null-unique + system-alerts. Uses `--experimental-test-module-mocks` flag (Node 22+ required). `NODE_ENV=test` allows `ACTION_SIGNING_SECRET` + `PUBLIC_URL` to use test defaults.
