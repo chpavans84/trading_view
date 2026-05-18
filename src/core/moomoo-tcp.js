@@ -110,7 +110,10 @@ class FutuTCPClient {
 
   connect() {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('TCP connection timed out')), 10000);
+      const timer = setTimeout(() => {
+        this.socket.destroy();           // kill the socket so it doesn't linger in SYN_SENT
+        reject(new Error('TCP connection timed out'));
+      }, 10000);
       this.socket = new net.Socket();
 
       this.socket.on('data', (data) => {
@@ -120,6 +123,7 @@ class FutuTCPClient {
 
       this.socket.on('error', (err) => {
         clearTimeout(timer);
+        this.socket.destroy();
         reject(err);
       });
 
@@ -136,6 +140,7 @@ class FutuTCPClient {
           await this._initConnect();
           resolve();
         } catch (e) {
+          this.socket.destroy();
           reject(e);
         }
       });
