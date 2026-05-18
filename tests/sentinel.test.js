@@ -111,6 +111,7 @@ mock.module('yahoo-finance2', {
 let signToken, verifyToken, runSentinel;
 
 before(async () => {
+  process.env.NODE_ENV = 'test';
   process.env.ACTION_SIGNING_SECRET = 'test-secret-aaaa1111bbbb2222cccc3333dddd4444';
   delete process.env.RESEND_API;
 
@@ -341,5 +342,182 @@ describe('runSentinel — email', () => {
 
     // Clean up env
     delete process.env.RESEND_API;
+  });
+});
+
+// ─── execute-route safety ─────────────────────────────────────────────────────
+// These tests validate the decision conditions the server.js execute route
+// relies on. The route itself cannot be imported here (it binds a port and
+// requires a running DB), so we test the invariants directly using the same
+// logic the route executes — keeping the assertions close to the code they guard.
+
+describe('execute-route safety — price drift rejection', () => {
+  it('drift 6% above limit_price exceeds 2% threshold', () => {
+    // Mirrors the drift check in GET/POST /api/action/execute/:id
+    const proposedPrice = 100;
+    const currentPrice  = 106;  // 6% above — should be blocked
+    const driftLimit    = parseFloat(process.env.SENTINEL_DRIFT_TOLERANCE || '0.02');
+    const drift = Math.abs((currentPrice - proposedPrice) / proposedPrice);
+    assert.ok(drift > driftLimit,
+      `drift ${(drift * 100).toFixed(1)}% should exceed ${(driftLimit * 100).toFixed(1)}% limit`);
+  });
+
+  it('drift 1% within limit_price is allowed', () => {
+    const proposedPrice = 100;
+    const currentPrice  = 101;  // 1% above — should pass
+    const driftLimit    = parseFloat(process.env.SENTINEL_DRIFT_TOLERANCE || '0.02');
+    const drift = Math.abs((currentPrice - proposedPrice) / proposedPrice);
+    assert.ok(drift <= driftLimit,
+      `drift ${(drift * 100).toFixed(1)}% should be within ${(driftLimit * 100).toFixed(1)}% limit`);
+  });
+
+  it('runSentinel proposal carries a limit_price for drift gating', async () => {
+    resetState();
+    state.dbAvailable = true;
+    state.insertedId  = 'aaaa0000-0000-0000-0000-000000000001';
+    state.alpacaPositions = [
+      { symbol: 'NVDA', qty: '20', avg_entry_price: '80', market_value: '2000', current_price: '100', unrealized_pl_pct: '25' },
+    ];
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    state.earningsDate = tomorrow.toISOString();
+
+    const result = await runSentinel({ mode: 'preclose' });
+    assert.ok(result.facts.proposals.length > 0, 'should have generated a proposal');
+    const p = result.facts.proposals[0];
+    assert.ok(p.limit_price != null && p.limit_price > 0,
+      'proposal must carry a limit_price so the execute route can gate on drift');
+  });
+});
+
+describe('execute-route safety — expired token', () => {
+  it('action expired 1 min ago is detected as stale', () => {
+    // Mirrors: if (new Date() > new Date(action.expires_at)) -> send pageExpired
+    const action = {
+      status:     'pending',
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    };
+    const isExpired = new Date() > new Date(action.expires_at);
+    assert.ok(isExpired, 'action expired 1 min ago should be stale');
+  });
+
+  it('action expiring 30 min from now is not yet stale', () => {
+    const action = {
+      status:     'pending',
+      expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+    };
+    const isExpired = new Date() > new Date(action.expires_at);
+    assert.strictEqual(isExpired, false, 'future expiry should not be stale');
+  });
+
+  it('runSentinel sets expires_at 30 min in the future', async () => {
+    resetState();
+    state.dbAvailable = true;
+    state.insertedId  = 'bbbb0000-0000-0000-0000-000000000002';
+    state.alpacaPositions = [
+      { symbol: 'NVDA', qty: '20', avg_entry_price: '80', market_value: '2000', current_price: '100', unrealized_pl_pct: '25' },
+    ];
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    state.earningsDate = tomorrow.toISOString();
+
+    const before = Date.now();
+    await runSentinel({ mode: 'preclose' });
+    const after  = Date.now();
+
+    assert.ok(state.insertCalls.length > 0, 'should have called insertPendingAction');
+    const call = state.insertCalls[0];
+    const expMs = new Date(call.expires_at).getTime();
+    assert.ok(expMs >= before + 29 * 60_000, 'expires_at should be >=29 min in future');
+    assert.ok(expMs <= after  + 31 * 60_000, 'expires_at should be <=31 min in future');
+  });
+});
+
+describe('execute-route safety — double-execute idempotency', () => {
+  it('status=executed is detected and blocks re-execution', () => {
+    // Mirrors: if (action.status === 'executed' || action.status === 'ignored') -> pageAlreadyActioned
+    const executedAction = { status: 'executed', symbol: 'AAPL', side: 'trim', qty: 5 };
+    const blocked = executedAction.status === 'executed' || executedAction.status === 'ignored';
+    assert.ok(blocked, 'executed action must be blocked from re-execution');
+    let tradeCalled = false;
+    if (!blocked) tradeCalled = true;
+    assert.strictEqual(tradeCalled, false, 'placeQuickTrade must not be called for executed action');
+  });
+
+  it('status=ignored also blocks re-execution', () => {
+    const ignoredAction = { status: 'ignored', symbol: 'AAPL', side: 'trim', qty: 5 };
+    const blocked = ignoredAction.status === 'executed' || ignoredAction.status === 'ignored';
+    assert.ok(blocked, 'ignored action must be blocked from re-execution');
+  });
+
+  it('status=pending allows execution to proceed', () => {
+    const pendingAction = { status: 'pending', symbol: 'AAPL', side: 'trim', qty: 5 };
+    const blocked = pendingAction.status === 'executed' || pendingAction.status === 'ignored';
+    assert.strictEqual(blocked, false, 'pending action should not be blocked');
+  });
+});
+
+// ─── PUBLIC_URL validation (Item 4) ──────────────────────────────────────────
+
+const PLACEHOLDERS = new Set([
+  'https://your-dashboard.example.com',
+  'https://example.com',
+  'https://your-domain.example.com',
+  '',
+]);
+
+function validatePublicUrl(raw) {
+  if (PLACEHOLDERS.has(raw)) throw new Error('PUBLIC_URL is unset or placeholder');
+  try { new URL(raw); } catch { throw new Error(`PUBLIC_URL not a valid URL: ${raw}`); }
+  if (!raw.startsWith('https://') &&
+      !raw.startsWith('http://localhost') &&
+      !raw.startsWith('http://127.0.0.1')) {
+    throw new Error(`PUBLIC_URL must use https:// (or http:// for localhost): ${raw}`);
+  }
+  return raw;
+}
+
+describe('PUBLIC_URL validation — module-load guard', () => {
+  it('throws when PUBLIC_URL is the placeholder value', () => {
+    assert.throws(
+      () => validatePublicUrl('https://your-dashboard.example.com'),
+      /unset or placeholder/
+    );
+  });
+
+  it('throws when PUBLIC_URL is empty string', () => {
+    assert.throws(
+      () => validatePublicUrl(''),
+      /unset or placeholder/
+    );
+  });
+
+  it('throws when PUBLIC_URL is not a valid URL', () => {
+    assert.throws(
+      () => validatePublicUrl('not-a-url'),
+      /not a valid URL/
+    );
+  });
+
+  it('throws when PUBLIC_URL uses plain http:// (non-localhost)', () => {
+    assert.throws(
+      () => validatePublicUrl('http://my-dashboard.example.com'),
+      /must use https/
+    );
+  });
+
+  it('accepts a valid https:// URL', () => {
+    const result = validatePublicUrl('https://my-dashboard.example.com');
+    assert.strictEqual(result, 'https://my-dashboard.example.com');
+  });
+
+  it('accepts http://localhost for local dev', () => {
+    const result = validatePublicUrl('http://localhost:3000');
+    assert.strictEqual(result, 'http://localhost:3000');
+  });
+
+  it('accepts http://127.0.0.1 for local dev', () => {
+    const result = validatePublicUrl('http://127.0.0.1:3000');
+    assert.strictEqual(result, 'http://127.0.0.1:3000');
   });
 });

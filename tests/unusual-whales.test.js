@@ -7,6 +7,8 @@
 import { describe, it, before, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
+process.env.NODE_ENV = 'test';
+
 // ─── Shared state across mocks ────────────────────────────────────────────────
 
 const state = {

@@ -27,6 +27,48 @@ import {
 const yf         = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ─── Secret validation ────────────────────────────────────────────────────────
+// Fail loud at module load rather than silently sign with a weak default.
+const _signingSecret = (() => {
+  const s = process.env.ACTION_SIGNING_SECRET;
+  if (!s || s.length < 32) {
+    if (process.env.NODE_ENV === 'test') return 'test-secret-not-for-production';
+    throw new Error(
+      'ACTION_SIGNING_SECRET must be set (>=32 chars). ' +
+      'Generate with: openssl rand -hex 32'
+    );
+  }
+  return s;
+})();
+
+// ─── PUBLIC_URL validation ────────────────────────────────────────────────────
+// Fail loud so every email action link is never silently broken.
+const _PLACEHOLDER_URLS = new Set([
+  'https://your-dashboard.example.com',
+  'https://example.com',
+  'https://your-domain.example.com',
+  '',
+]);
+export const PUBLIC_URL = (() => {
+  const raw = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
+  if (process.env.NODE_ENV === 'test') return raw || 'http://localhost:3000';
+  if (_PLACEHOLDER_URLS.has(raw)) {
+    throw new Error(
+      'PUBLIC_URL is unset or still using the placeholder. ' +
+      'Set it to your real dashboard URL in .env so email action links work.'
+    );
+  }
+  try { new URL(raw); } catch {
+    throw new Error(`PUBLIC_URL must be a valid URL, got: ${raw}`);
+  }
+  if (!raw.startsWith('https://') &&
+      !raw.startsWith('http://localhost') &&
+      !raw.startsWith('http://127.0.0.1')) {
+    throw new Error(`PUBLIC_URL must use https:// (or http:// for localhost), got: ${raw}`);
+  }
+  return raw;
+})();
+
 // ─── Macro event calendar — static fallback + dynamic UW source ──────────────
 // sectors_at_risk uses the same ETF keys as SECTOR_MAP values (XLK, SOXX, etc.)
 const MACRO_EVENTS_STATIC = [
@@ -113,8 +155,7 @@ function etNow() {
 // ─── Token signing ────────────────────────────────────────────────────────────
 
 export function signToken(id, symbol, qty) {
-  const secret = process.env.ACTION_SIGNING_SECRET || 'dev-secret-change-me';
-  return crypto.createHmac('sha256', secret)
+  return crypto.createHmac('sha256', _signingSecret)
     .update(`${id}:${symbol}:${qty}`)
     .digest('hex');
 }
@@ -313,7 +354,7 @@ async function buildProposals(risks, positions, totalValue) {
   const proposals = [];
   if (!isDbAvailable()) return proposals;
 
-  const publicUrl = (process.env.PUBLIC_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const publicUrl = PUBLIC_URL;
 
   for (const risk of risks) {
     if (risk.severity !== 'high') continue;

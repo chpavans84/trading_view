@@ -621,8 +621,17 @@ CREATE TABLE IF NOT EXISTS uw_insider_trades (
   price            NUMERIC(12,4),
   value            NUMERIC(16,2),
   filed_at         TIMESTAMPTZ,
-  ingested_at      TIMESTAMPTZ  DEFAULT NOW(),
-  UNIQUE(ticker, insider_name, filed_at, transaction_type)
+  ingested_at      TIMESTAMPTZ  DEFAULT NOW()
+);
+-- Migration: replace nullable-column UNIQUE with expression index (NULL != NULL in plain UNIQUE)
+DO $$ BEGIN
+  ALTER TABLE uw_insider_trades DROP CONSTRAINT IF EXISTS "uw_insider_trades_ticker_insider_name_filed_at_transaction__key";
+EXCEPTION WHEN others THEN NULL; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uw_insider_unique ON uw_insider_trades(
+  ticker,
+  COALESCE(insider_name, ''),
+  COALESCE(filed_at, '1900-01-01'::timestamptz),
+  COALESCE(transaction_type, '')
 );
 CREATE INDEX IF NOT EXISTS idx_uw_insider_ticker ON uw_insider_trades(ticker);
 CREATE INDEX IF NOT EXISTS idx_uw_insider_filed  ON uw_insider_trades(filed_at DESC);
@@ -637,11 +646,102 @@ CREATE TABLE IF NOT EXISTS uw_congressional_trades (
   amount_range     TEXT,
   traded_at        DATE,
   filed_at         TIMESTAMPTZ,
-  ingested_at      TIMESTAMPTZ  DEFAULT NOW(),
-  UNIQUE(ticker, member_name, traded_at, transaction_type)
+  ingested_at      TIMESTAMPTZ  DEFAULT NOW()
+);
+-- Migration: replace nullable-column UNIQUE with expression index
+DO $$ BEGIN
+  ALTER TABLE uw_congressional_trades DROP CONSTRAINT IF EXISTS "uw_congressional_trades_ticker_member_name_traded_at_transa_key";
+EXCEPTION WHEN others THEN NULL; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uw_congress_unique ON uw_congressional_trades(
+  ticker,
+  COALESCE(member_name, ''),
+  COALESCE(traded_at, '1900-01-01'::date),
+  COALESCE(transaction_type, '')
 );
 CREATE INDEX IF NOT EXISTS idx_uw_congress_ticker ON uw_congressional_trades(ticker);
 CREATE INDEX IF NOT EXISTS idx_uw_congress_traded ON uw_congressional_trades(traded_at DESC);
+
+CREATE TABLE IF NOT EXISTS uw_top_movers (
+  id            SERIAL PRIMARY KEY,
+  ticker        VARCHAR(20)  NOT NULL,
+  direction     VARCHAR(20)  NOT NULL,
+  change_pct    NUMERIC(10,4),
+  price         NUMERIC(12,4),
+  volume        BIGINT,
+  raw           JSONB,
+  captured_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  ingested_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE (ticker, direction, captured_at)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_movers_captured ON uw_top_movers(captured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uw_movers_ticker   ON uw_top_movers(ticker);
+
+CREATE TABLE IF NOT EXISTS uw_flow_alerts (
+  id              SERIAL PRIMARY KEY,
+  ticker          VARCHAR(20) NOT NULL,
+  alert_type      VARCHAR(40),
+  side            VARCHAR(10),
+  strike          NUMERIC(12,4),
+  expiry          DATE,
+  premium         NUMERIC(14,2),
+  volume          BIGINT,
+  open_interest   BIGINT,
+  iv              NUMERIC(8,4),
+  sentiment       VARCHAR(20),
+  raw             JSONB,
+  alerted_at      TIMESTAMPTZ NOT NULL,
+  ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Migration: replace nullable-column UNIQUE with expression index
+DO $$ BEGIN
+  ALTER TABLE uw_flow_alerts DROP CONSTRAINT IF EXISTS "uw_flow_alerts_ticker_strike_expiry_side_alerted_at_key";
+EXCEPTION WHEN others THEN NULL; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uw_flow_alerts_unique ON uw_flow_alerts(
+  ticker,
+  COALESCE(strike, -1),
+  COALESCE(expiry, '1900-01-01'::date),
+  COALESCE(side, ''),
+  alerted_at
+);
+CREATE INDEX IF NOT EXISTS idx_uw_flow_alerted_at ON uw_flow_alerts(alerted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uw_flow_ticker     ON uw_flow_alerts(ticker, alerted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uw_flow_premium    ON uw_flow_alerts(premium DESC) WHERE premium > 100000;
+
+CREATE TABLE IF NOT EXISTS uw_economic_calendar (
+  id            SERIAL PRIMARY KEY,
+  event_date    DATE NOT NULL,
+  event_name    TEXT NOT NULL,
+  country       VARCHAR(10) NOT NULL DEFAULT '',
+  importance    VARCHAR(20),
+  actual        NUMERIC,
+  forecast      NUMERIC,
+  previous      NUMERIC,
+  raw           JSONB,
+  ingested_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Expression index handles NULL country equivalence (NULL != NULL in plain UNIQUE)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uw_econ_unique ON uw_economic_calendar(event_date, event_name, COALESCE(country, ''));
+CREATE INDEX IF NOT EXISTS idx_uw_econ_date ON uw_economic_calendar(event_date);
+
+CREATE TABLE IF NOT EXISTS uw_ipo_calendar (
+  id            SERIAL PRIMARY KEY,
+  ticker        VARCHAR(20),
+  company_name  TEXT,
+  ipo_date      DATE,
+  price_low     NUMERIC(10,4),
+  price_high    NUMERIC(10,4),
+  shares        BIGINT,
+  exchange      VARCHAR(20),
+  status        VARCHAR(20),
+  raw           JSONB,
+  ingested_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (ticker, ipo_date)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_ipo_date ON uw_ipo_calendar(ipo_date);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_actions_unique_pending
+  ON pending_actions(symbol, side, qty)
+  WHERE status = 'pending';
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -2161,6 +2261,10 @@ export async function insertPendingAction({ symbol, broker, side, qty, limit_pri
     );
     return rows[0]?.id ?? null;
   } catch (err) {
+    if (err.code === '23505') {
+      console.log(`[sentinel] duplicate proposal suppressed for ${symbol}/${side}/${qty}`);
+      return null;
+    }
     console.error('insertPendingAction error:', err.message);
     return null;
   }
