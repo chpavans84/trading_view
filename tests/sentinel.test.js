@@ -71,10 +71,11 @@ mock.module('../src/core/sentiment.js', {
 
 mock.module('../src/core/db.js', {
   exports: {
-    isDbAvailable:       () => state.dbAvailable,
-    query:               async () => ({ rows: [] }),
-    insertSentinelRun:   async (args) => { state.sentinelRunCalls.push(args); },
-    insertPendingAction: async (args) => { state.insertCalls.push(args); return state.insertedId; },
+    isDbAvailable:         () => state.dbAvailable,
+    query:                 async () => ({ rows: [] }),
+    insertSentinelRun:     async (args) => { state.sentinelRunCalls.push(args); },
+    insertPendingAction:   async (args) => { state.insertCalls.push(args); return state.insertedId; },
+    getSentinelRecipients: async () => [{ username: 'admin', email: 'admin@example.com' }],
   },
 });
 
@@ -86,12 +87,10 @@ mock.module('@anthropic-ai/sdk', {
   },
 });
 
-mock.module('nodemailer', {
+mock.module('resend', {
   exports: {
-    default: {
-      createTransport: () => ({
-        sendMail: async () => { state.emailSent = true; return { messageId: 'mock' }; },
-      }),
+    Resend: class Resend {
+      emails = { send: async () => { state.emailSent = true; return { id: 'mock-id' }; } };
     },
   },
 });
@@ -113,8 +112,7 @@ let signToken, verifyToken, runSentinel;
 
 before(async () => {
   process.env.ACTION_SIGNING_SECRET = 'test-secret-aaaa1111bbbb2222cccc3333dddd4444';
-  delete process.env.SMTP_USER;
-  delete process.env.SMTP_PASS;
+  delete process.env.RESEND_API;
 
   const mod = await import('../src/core/sentinel.js');
   signToken   = mod.signToken;
@@ -335,17 +333,13 @@ describe('runSentinel — sector concentration', () => {
 describe('runSentinel — email', () => {
   it('sends email when SMTP_USER and SMTP_PASS are set', async () => {
     resetState();
-    process.env.SMTP_USER = 'test@example.com';
-    process.env.SMTP_PASS = 'password123';
-    process.env.SENTINEL_EMAIL_TO = 'recipient@example.com';
+    process.env.RESEND_API = 'test-resend-key';
 
     const result = await runSentinel({ mode: 'preclose' });
     assert.ok(result.email_sent, 'email_sent should be true');
-    assert.ok(state.emailSent, 'sendMail mock should have been called');
+    assert.ok(state.emailSent, 'Resend mock should have been called');
 
     // Clean up env
-    delete process.env.SMTP_USER;
-    delete process.env.SMTP_PASS;
-    delete process.env.SENTINEL_EMAIL_TO;
+    delete process.env.RESEND_API;
   });
 });
