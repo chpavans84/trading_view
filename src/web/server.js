@@ -57,7 +57,7 @@ import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 import { runCatalystScan } from '../core/catalyst-scanner.js';
 import { getBzNews, getBzOptionsActivity, getBzEarnings, getBzGuidance, getBzFDA, getBzDividends, getBzFundamentals, isBenzingaConfigured } from '../core/benzinga.js';
-import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getIpoCalendar, getFundamentals, getEarningsTranscript, getCorrelations, getIvRank, getStockState, streamOptionsFlow, isUWConfigured, getQuota } from '../core/unusual-whales.js';
+import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getIpoCalendar, getFundamentals, getEarningsTranscript, getCorrelations, getIvRank, getStockState, streamOptionsFlow, isUWConfigured, getQuota, getOptionChain, getAtmChains, getExpiryBreakdown, getOptionsVolume, getGreekExposure, getMaxPain, getContractHistory, getContractVolumeProfile } from '../core/unusual-whales.js';
 import { auditUWSchemas } from '../core/uw-schema-linter.js';
 import { purgeOldUwRows } from '../core/uw-retention.js';
 import { getUwConvictionForSymbol, getUwConvictionForSymbols } from '../core/uw-conviction.js';
@@ -6484,6 +6484,280 @@ app.get('/api/uw/conviction', requireAuth, async (req, res) => {
     const map = await getUwConvictionForSymbols(symbols);
     res.json(Object.fromEntries(map));
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Full options data (UW) ───────────────────────────────────────────────────
+
+const TICKER_RE = /^[A-Z]{1,8}$/;
+const CONTRACT_RE = /^[A-Z0-9_]{6,40}$/;
+
+/**
+ * GET /api/uw/option-chain/:ticker?expiry=YYYY-MM-DD
+ * Returns full option chain (all strikes × all expiries, or filtered to one expiry).
+ * Caching: 60 s (in unusual-whales.js)
+ */
+app.get('/api/uw/option-chain/:ticker', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.params.ticker || '').toUpperCase();
+  if (!TICKER_RE.test(ticker)) return res.status(400).json({ error: 'invalid ticker' });
+  if (req.query.expiry && !/^\d{4}-\d{2}-\d{2}$/.test(req.query.expiry))
+    return res.status(400).json({ error: 'Invalid expiry date; expected YYYY-MM-DD' });
+  const expiry = req.query.expiry || undefined;
+  try {
+    const result = await getOptionChain(ticker, expiry);
+    res.json({ ticker, expiry: expiry || null, chain: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/option-chain]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/atm-chain/:ticker?expirations=YYYY-MM-DD,YYYY-MM-DD
+ * Returns at-the-money option contracts only (smaller payload than full chain).
+ * If no expirations given, auto-resolves the 2 nearest from expiry-breakdown.
+ * Caching: 60 s
+ */
+app.get('/api/uw/atm-chain/:ticker', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.params.ticker || '').toUpperCase();
+  if (!TICKER_RE.test(ticker)) return res.status(400).json({ error: 'invalid ticker' });
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const rawExpirations = (req.query.expirations || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (rawExpirations.some(s => !DATE_RE.test(s)))
+    return res.status(400).json({ error: 'Invalid expiration date; expected YYYY-MM-DD' });
+  const expirations = rawExpirations;
+  try {
+    const result = await getAtmChains(ticker, expirations);
+    res.json({ ticker, expirations: expirations.length ? expirations : 'auto', chain: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/atm-chain]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/expiry-breakdown/:ticker
+ * Returns call/put volume + OI bucketed per expiry.
+ * Caching: 5 min
+ */
+app.get('/api/uw/expiry-breakdown/:ticker', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.params.ticker || '').toUpperCase();
+  if (!TICKER_RE.test(ticker)) return res.status(400).json({ error: 'invalid ticker' });
+  try {
+    const result = await getExpiryBreakdown(ticker);
+    res.json({ ticker, expiries: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/expiry-breakdown]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/options-volume/:ticker
+ * Returns daily aggregate call/put volume + premiums (historical).
+ * Caching: 15 min · Persists each day-row to uw_options_volume (UPSERT on (ticker, trade_date)).
+ *
+ * UW fields per day: date, call_volume, put_volume, call_open_interest, put_open_interest,
+ * call_premium, put_premium, bullish_premium, bearish_premium, net_call_premium, net_put_premium,
+ * plus 3/7/30-day volume averages (kept in raw JSONB).
+ */
+app.get('/api/uw/options-volume/:ticker', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.params.ticker || '').toUpperCase();
+  if (!TICKER_RE.test(ticker)) return res.status(400).json({ error: 'invalid ticker' });
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    const result = await getOptionsVolume(ticker, { limit });
+    const rows = Array.isArray(result) ? result : (result ? [result] : []);
+    if (rows.length && isDbAvailable()) {
+      try {
+        for (const r of rows) {
+          if (!r.date) continue;
+          await query(
+            `INSERT INTO uw_options_volume
+               (ticker, trade_date, call_volume, put_volume,
+                call_open_interest, put_open_interest,
+                call_premium, put_premium, bullish_premium, bearish_premium,
+                net_call_premium, net_put_premium, raw)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+             ON CONFLICT (ticker, trade_date) DO UPDATE
+               SET call_volume        = EXCLUDED.call_volume,
+                   put_volume         = EXCLUDED.put_volume,
+                   call_open_interest = EXCLUDED.call_open_interest,
+                   put_open_interest  = EXCLUDED.put_open_interest,
+                   call_premium       = EXCLUDED.call_premium,
+                   put_premium        = EXCLUDED.put_premium,
+                   bullish_premium    = EXCLUDED.bullish_premium,
+                   bearish_premium    = EXCLUDED.bearish_premium,
+                   net_call_premium   = EXCLUDED.net_call_premium,
+                   net_put_premium    = EXCLUDED.net_put_premium,
+                   raw                = EXCLUDED.raw,
+                   ingested_at        = NOW()`,
+            [
+              ticker, r.date,
+              r.call_volume        ?? null,
+              r.put_volume         ?? null,
+              r.call_open_interest ?? null,
+              r.put_open_interest  ?? null,
+              r.call_premium       ?? null,
+              r.put_premium        ?? null,
+              r.bullish_premium    ?? null,
+              r.bearish_premium    ?? null,
+              r.net_call_premium   ?? null,
+              r.net_put_premium    ?? null,
+              JSON.stringify(r),
+            ]
+          );
+        }
+      } catch (dbErr) {
+        console.error('[uw/options-volume] persist failed:', dbErr.message);
+      }
+    }
+    res.json({ ticker, days: rows, source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/options-volume]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/gex/:ticker
+ * Returns dealer greek exposure as a time series — one row per day with
+ * call/put gamma, delta, charm, vanna.
+ * Caching: 5 min · UPSERTs each daily row into uw_greek_exposure.
+ */
+app.get('/api/uw/gex/:ticker', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.params.ticker || '').toUpperCase();
+  if (!TICKER_RE.test(ticker)) return res.status(400).json({ error: 'invalid ticker' });
+  try {
+    const result = await getGreekExposure(ticker);
+    const rows = Array.isArray(result) ? result : (result ? [result] : []);
+    if (rows.length && isDbAvailable()) {
+      try {
+        for (const r of rows) {
+          if (!r.date) continue;
+          await query(
+            `INSERT INTO uw_greek_exposure
+               (ticker, as_of_date,
+                call_gamma, put_gamma, call_delta, put_delta,
+                call_charm, put_charm, call_vanna, put_vanna, raw)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+             ON CONFLICT (ticker, as_of_date) DO UPDATE
+               SET call_gamma = EXCLUDED.call_gamma,
+                   put_gamma  = EXCLUDED.put_gamma,
+                   call_delta = EXCLUDED.call_delta,
+                   put_delta  = EXCLUDED.put_delta,
+                   call_charm = EXCLUDED.call_charm,
+                   put_charm  = EXCLUDED.put_charm,
+                   call_vanna = EXCLUDED.call_vanna,
+                   put_vanna  = EXCLUDED.put_vanna,
+                   raw        = EXCLUDED.raw,
+                   ingested_at = NOW()`,
+            [
+              ticker, r.date,
+              r.call_gamma ?? null, r.put_gamma ?? null,
+              r.call_delta ?? null, r.put_delta ?? null,
+              r.call_charm ?? null, r.put_charm ?? null,
+              r.call_vanna ?? null, r.put_vanna ?? null,
+              JSON.stringify(r),
+            ]
+          );
+        }
+      } catch (dbErr) {
+        console.error('[uw/gex] persist failed:', dbErr.message);
+      }
+    }
+    res.json({ ticker, gex: rows, source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/gex]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/max-pain/:ticker
+ * Returns max-pain strike per expiry, plus open/close, lower/upper strikes.
+ * Caching: 30 min · Persists each expiry row to uw_max_pain.
+ *
+ * UW fields per expiry: expiry, max_pain, open, close, next_lower_strike, next_upper_strike.
+ */
+app.get('/api/uw/max-pain/:ticker', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const ticker = (req.params.ticker || '').toUpperCase();
+  if (!TICKER_RE.test(ticker)) return res.status(400).json({ error: 'invalid ticker' });
+  try {
+    const result = await getMaxPain(ticker);
+    const rows = Array.isArray(result) ? result : (result ? [result] : []);
+    if (rows.length && isDbAvailable()) {
+      try {
+        for (const r of rows) {
+          if (!r.expiry) continue;
+          await query(
+            `INSERT INTO uw_max_pain
+               (ticker, expiry, max_pain_strike, spot_price, open_price,
+                next_lower_strike, next_upper_strike, raw)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+             ON CONFLICT (ticker, expiry, captured_at) DO NOTHING`,
+            [
+              ticker, r.expiry,
+              r.max_pain          ?? null,
+              r.close             ?? null,
+              r.open              ?? null,
+              r.next_lower_strike ?? null,
+              r.next_upper_strike ?? null,
+              JSON.stringify(r),
+            ]
+          );
+        }
+      } catch (dbErr) {
+        console.error('[uw/max-pain] persist failed:', dbErr.message);
+      }
+    }
+    res.json({ ticker, expiries: rows, source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/max-pain]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/contract/:id/history
+ * Returns historical price/volume/IV for a specific option contract.
+ * :id is the UW option symbol (e.g. NVDA260117C00500000).
+ * Caching: 5 min
+ */
+app.get('/api/uw/contract/:id/history', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const id = (req.params.id || '').toUpperCase();
+  if (!CONTRACT_RE.test(id)) return res.status(400).json({ error: 'invalid contract id' });
+  try {
+    const result = await getContractHistory(id);
+    res.json({ contract_id: id, history: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/contract/history]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/uw/contract/:id/volume
+ * Returns volume-by-price-level profile for a specific option contract.
+ * Caching: 5 min
+ */
+app.get('/api/uw/contract/:id/volume', requireAuth, async (req, res) => {
+  if (!isUWConfigured()) return res.status(503).json({ error: 'UW_API_KEY not configured' });
+  const id = (req.params.id || '').toUpperCase();
+  if (!CONTRACT_RE.test(id)) return res.status(400).json({ error: 'invalid contract id' });
+  try {
+    const result = await getContractVolumeProfile(id);
+    res.json({ contract_id: id, profile: result ?? [], source: 'unusualwhales' });
+  } catch (e) {
+    console.error('[uw/contract/volume]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/sentinel/recent?limit=20 — sentinel run history (Item 6)

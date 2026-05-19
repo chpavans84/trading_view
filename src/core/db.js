@@ -743,6 +743,60 @@ CREATE TABLE IF NOT EXISTS uw_ipo_calendar (
 );
 CREATE INDEX IF NOT EXISTS idx_uw_ipo_date ON uw_ipo_calendar(ipo_date);
 
+-- Greek exposure: UW returns an array of daily snapshots, each with call/put gamma/delta/charm/vanna.
+CREATE TABLE IF NOT EXISTS uw_greek_exposure (
+  id          SERIAL PRIMARY KEY,
+  ticker      VARCHAR(20) NOT NULL,
+  as_of_date  DATE NOT NULL,
+  call_gamma  NUMERIC(20,4),
+  put_gamma   NUMERIC(20,4),
+  call_delta  NUMERIC(20,4),
+  put_delta   NUMERIC(20,4),
+  call_charm  NUMERIC(20,4),
+  put_charm   NUMERIC(20,4),
+  call_vanna  NUMERIC(20,4),
+  put_vanna   NUMERIC(20,4),
+  raw         JSONB,
+  ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (ticker, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_gex_ticker_date ON uw_greek_exposure(ticker, as_of_date DESC);
+
+CREATE TABLE IF NOT EXISTS uw_max_pain (
+  id                SERIAL PRIMARY KEY,
+  ticker            VARCHAR(20) NOT NULL,
+  expiry            DATE NOT NULL,
+  max_pain_strike   NUMERIC(12,4),
+  spot_price        NUMERIC(12,4),
+  open_price        NUMERIC(12,4),
+  next_lower_strike NUMERIC(12,4),
+  next_upper_strike NUMERIC(12,4),
+  raw               JSONB,
+  captured_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (ticker, expiry, captured_at)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_max_pain_ticker ON uw_max_pain(ticker, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS uw_options_volume (
+  id                SERIAL PRIMARY KEY,
+  ticker            VARCHAR(20) NOT NULL,
+  trade_date        DATE NOT NULL,
+  call_volume       BIGINT,
+  put_volume        BIGINT,
+  call_open_interest BIGINT,
+  put_open_interest  BIGINT,
+  call_premium      NUMERIC(20,2),
+  put_premium       NUMERIC(20,2),
+  bullish_premium   NUMERIC(20,2),
+  bearish_premium   NUMERIC(20,2),
+  net_call_premium  NUMERIC(20,2),
+  net_put_premium   NUMERIC(20,2),
+  raw               JSONB,
+  ingested_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (ticker, trade_date)
+);
+CREATE INDEX IF NOT EXISTS idx_uw_options_volume_ticker ON uw_options_volume(ticker, trade_date DESC);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_actions_unique_pending
   ON pending_actions(symbol, side, qty)
   WHERE status = 'pending';

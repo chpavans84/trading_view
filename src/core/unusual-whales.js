@@ -48,6 +48,14 @@ function makeStub() {
     getDrawdown:            async () => null,
     getIvRank:              async () => null,
     getStockState:          async () => null,
+    getOptionChain:           async () => null,
+    getAtmChains:             async () => null,
+    getExpiryBreakdown:       async () => null,
+    getOptionsVolume:         async () => null,
+    getGreekExposure:         async () => null,
+    getMaxPain:               async () => null,
+    getContractHistory:       async () => null,
+    getContractVolumeProfile: async () => null,
   };
   return stub;
 }
@@ -127,6 +135,14 @@ const TTL = {
   drawdown:        60 * 60_000,
   iv_rank:         60 * 60_000,
   stock_state:     60_000,
+  option_chain:     60_000,
+  atm_chain:        60_000,
+  expiry_breakdown: 5 * 60_000,
+  options_volume:   15 * 60_000,
+  greek_exposure:   5 * 60_000,
+  max_pain:         30 * 60_000,
+  contract_history: 5 * 60_000,
+  contract_volume:  5 * 60_000,
 };
 
 function fromCache(k) {
@@ -444,11 +460,28 @@ export async function getAnalystTargets(ticker) {
  * Cache: 7 days
  *
  * @param {string} ticker
- * @param {string} quarter — e.g. "Q1-2026"
+ * @param {string} quarter — "YYYYQn" format (e.g. "2025Q4") or "latest" to auto-resolve
  */
+
+function _dateToQuarter(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return null;
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1;
+  const q = month <= 3 ? 1 : month <= 6 ? 2 : month <= 9 ? 3 : 4;
+  return `${year}Q${q}`;
+}
+
 export async function getEarningsTranscript({ ticker, quarter }) {
   if (!ticker || !quarter) return null;
-  const json = await uw(`/companies/${ticker.toUpperCase()}/transcripts/${quarter}`, {}, 'transcript');
+  let q = quarter;
+  if (q === 'latest') {
+    const fund = await getFundamentals(ticker);
+    q = fund?.latest_quarter ? _dateToQuarter(fund.latest_quarter) : null;
+    if (!q) return null;
+  }
+  const json = await uw(`/companies/${ticker.toUpperCase()}/transcripts/${q}`, {}, 'transcript');
   return json?.data ?? null;
 }
 
@@ -522,6 +555,129 @@ export async function getIvRank(ticker) {
 export async function getStockState(ticker) {
   if (!ticker) return null;
   const json = await uw(`/stock/${ticker.toUpperCase()}/stock-state`, {}, 'stock_state');
+  return json?.data ?? null;
+}
+
+// ─── Full options data ────────────────────────────────────────────────────────
+
+/**
+ * getOptionChain — full option chain (all strikes × all expiries)
+ * UW endpoint: GET /api/stock/{ticker}/option-chains
+ * Cache: 60 s
+ *
+ * @param {string} ticker
+ * @param {string} [expiry] — optional YYYY-MM-DD filter to one expiry
+ *
+ * Per-contract fields typically: option_symbol, option_type (call|put), strike,
+ * expiry, bid, ask, last, volume, open_interest, iv, delta, gamma, theta, vega, rho.
+ */
+export async function getOptionChain(ticker, expiry) {
+  if (!ticker) return null;
+  const params = expiry ? { expiry } : {};
+  const json = await uw(`/stock/${ticker.toUpperCase()}/option-chains`, params, 'option_chain');
+  return json?.data ?? null;
+}
+
+/**
+ * getAtmChains — ATM-only option contracts (cheaper/faster than full chain)
+ * UW endpoint: GET /api/stock/{ticker}/atm-chains?expirations[]=YYYY-MM-DD
+ * Cache: 60 s
+ *
+ * UW requires the `expirations[]` array param. If none provided, this helper
+ * auto-resolves the 2 nearest expiries via getExpiryBreakdown.
+ *
+ * @param {string} ticker
+ * @param {string[]} [expirations] — YYYY-MM-DD list. Defaults to nearest 2 expiries.
+ */
+export async function getAtmChains(ticker, expirations) {
+  if (!ticker) return null;
+  let exps = Array.isArray(expirations) ? expirations.filter(Boolean) : [];
+  if (!exps.length) {
+    const breakdown = await getExpiryBreakdown(ticker);
+    const rows = Array.isArray(breakdown) ? breakdown : [];
+    exps = rows.map(r => r.expires || r.expiry || r.expiration).filter(Boolean).slice(0, 2);
+  }
+  if (!exps.length) return null;
+  const qs = '?' + exps.map(e => `expirations[]=${encodeURIComponent(e)}`).join('&');
+  const json = await uw(`/stock/${ticker.toUpperCase()}/atm-chains${qs}`, {}, 'atm_chain');
+  return json?.data ?? null;
+}
+
+/**
+ * getExpiryBreakdown — call/put volume + OI bucketed per expiry
+ * UW endpoint: GET /api/stock/{ticker}/expiry-breakdown
+ * Cache: 5 min
+ *
+ * Per-expiry fields typically: expiry, call_volume, put_volume, call_oi, put_oi.
+ */
+export async function getExpiryBreakdown(ticker) {
+  if (!ticker) return null;
+  const json = await uw(`/stock/${ticker.toUpperCase()}/expiry-breakdown`, {}, 'expiry_breakdown');
+  return json?.data ?? null;
+}
+
+/**
+ * getOptionsVolume — daily aggregate call vs put volume (historical)
+ * UW endpoint: GET /api/stock/{ticker}/options-volume
+ * Cache: 15 min
+ *
+ * Per-day fields typically: date, call_volume, put_volume, call_oi, put_oi,
+ * avg_iv, total_premium.
+ */
+export async function getOptionsVolume(ticker, { limit = 30 } = {}) {
+  if (!ticker) return null;
+  const json = await uw(`/stock/${ticker.toUpperCase()}/options-volume`, { limit: Math.min(limit, 100) }, 'options_volume');
+  return json?.data ?? null;
+}
+
+/**
+ * getGreekExposure — dealer positioning (GEX / charm / vanna)
+ * UW endpoint: GET /api/stock/{ticker}/greek-exposure
+ * Cache: 5 min
+ *
+ * Fields typically: call_gex, put_gex, net_gex, zero_gamma (price level),
+ * spot_price, charm, vanna, and a per-strike breakdown.
+ */
+export async function getGreekExposure(ticker) {
+  if (!ticker) return null;
+  const json = await uw(`/stock/${ticker.toUpperCase()}/greek-exposure`, {}, 'greek_exposure');
+  return json?.data ?? null;
+}
+
+/**
+ * getMaxPain — max-pain strike per expiry
+ * UW endpoint: GET /api/stock/{ticker}/max-pain
+ * Cache: 30 min
+ *
+ * Per-expiry fields typically: expiry, max_pain_strike, total_pain, spot_price.
+ */
+export async function getMaxPain(ticker) {
+  if (!ticker) return null;
+  const json = await uw(`/stock/${ticker.toUpperCase()}/max-pain`, {}, 'max_pain');
+  return json?.data ?? null;
+}
+
+/**
+ * getContractHistory — historical price/volume/IV for a specific option contract
+ * UW endpoint: GET /api/option-contract/{id}/historic
+ * Cache: 5 min
+ *
+ * @param {string} contractId — UW option_symbol (e.g. NVDA260117C00500000)
+ */
+export async function getContractHistory(contractId) {
+  if (!contractId) return null;
+  const json = await uw(`/option-contract/${encodeURIComponent(contractId)}/historic`, {}, 'contract_history');
+  return json?.data ?? null;
+}
+
+/**
+ * getContractVolumeProfile — volume by price level for a specific contract
+ * UW endpoint: GET /api/option-contract/{id}/volume-profile
+ * Cache: 5 min
+ */
+export async function getContractVolumeProfile(contractId) {
+  if (!contractId) return null;
+  const json = await uw(`/option-contract/${encodeURIComponent(contractId)}/volume-profile`, {}, 'contract_volume');
   return json?.data ?? null;
 }
 
