@@ -57,9 +57,10 @@ import { selectBestTrade } from '../core/stock-selector.js';
 import { trainCalibration, applyCalibration, applyCalibrationToDay, getFailureAnalysis } from '../core/prediction-calibration.js';
 import { runCatalystScan } from '../core/catalyst-scanner.js';
 import { getBzNews, getBzOptionsActivity, getBzEarnings, getBzGuidance, getBzFDA, getBzDividends, getBzFundamentals, isBenzingaConfigured } from '../core/benzinga.js';
-import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getIpoCalendar, getCorrelations, getIvRank, getStockState, streamOptionsFlow, isUWConfigured, getQuota } from '../core/unusual-whales.js';
+import { getFlowAlerts, getMarketTide, getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getIpoCalendar, getFundamentals, getEarningsTranscript, getCorrelations, getIvRank, getStockState, streamOptionsFlow, isUWConfigured, getQuota } from '../core/unusual-whales.js';
 import { auditUWSchemas } from '../core/uw-schema-linter.js';
 import { purgeOldUwRows } from '../core/uw-retention.js';
+import { getUwConvictionForSymbol, getUwConvictionForSymbols } from '../core/uw-conviction.js';
 import { dailyDataQualityReport } from '../core/uw-data-quality.js';
 import { alert as sysAlert } from '../core/system-alerts.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
@@ -1866,18 +1867,22 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
       const bmoList   = sortCap(bmo_raw, 12);
       const driftList = sortCap(drift_raw, 12);
 
-      // Enrich each symbol: consensus, target, avg historical move, latest headline
+      // Enrich each symbol: consensus, target, avg historical move, latest headline + UW context
       const enrich = async (entry) => {
         const sym = entry.symbol;
-        const [scoreRes, yfRes, newsRes] = await Promise.allSettled([
+        const [scoreRes, yfRes, newsRes, uwFundRes, uwTransRes] = await Promise.allSettled([
           getConvictionScore({ symbol: sym, positions: [] }),
           _yf.quoteSummary(sym, { modules: ['financialData', 'earningsTrend', 'earningsHistory', 'price'] }),
           _mergedSymbolNews(sym, 2),
+          getFundamentals(sym),
+          getEarningsTranscript({ ticker: sym, quarter: 'latest' }),
         ]);
 
-        const score = scoreRes.status === 'fulfilled' ? scoreRes.value : null;
-        const yf    = yfRes.status   === 'fulfilled' ? yfRes.value   : null;
-        const news  = newsRes.status === 'fulfilled' ? newsRes.value : [];
+        const score   = scoreRes.status  === 'fulfilled' ? scoreRes.value  : null;
+        const yf      = yfRes.status     === 'fulfilled' ? yfRes.value     : null;
+        const news    = newsRes.status   === 'fulfilled' ? newsRes.value   : [];
+        const uwFund  = uwFundRes.status === 'fulfilled' ? uwFundRes.value : null;
+        const uwTrans = uwTransRes.status === 'fulfilled' ? uwTransRes.value : null;
 
         // Avg historical earnings surprise % — calc from epsActual vs epsEstimate
         const hist = yf?.earningsHistory?.history ?? [];
@@ -1906,6 +1911,36 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
         const post_chg_pct = tcIsPostSess && yf?.price?.postMarketChangePercent != null && typeof yf.price.postMarketChangePercent !== 'object'
           ? yf.price.postMarketChangePercent * 100 : null;
 
+        // UW fundamentals fields
+        const uw_analyst_count = uwFund ? (
+          (uwFund.analyst_rating_buy        || 0) +
+          (uwFund.analyst_rating_hold       || 0) +
+          (uwFund.analyst_rating_sell       || 0) +
+          (uwFund.analyst_rating_strong_buy  || 0) +
+          (uwFund.analyst_rating_strong_sell || 0)
+        ) : null;
+        const _lq = uwFund?.latest_quarter;
+        const uw_last_quarter = _lq ? (() => {
+          const d = new Date(_lq + 'T00:00:00Z');
+          const m = d.getUTCMonth() + 1;
+          const y = d.getUTCFullYear();
+          return `Q${m <= 3 ? 1 : m <= 6 ? 2 : m <= 9 ? 3 : 4} ${y}`;
+        })() : null;
+
+        // UW transcript sentiment derivation
+        let uw_transcript_label = null, uw_transcript_score = null, uw_transcript_quote = null;
+        if (uwTrans?.statements?.length) {
+          const sentMap = { positive: 1, bullish: 1, negative: -1, bearish: -1, neutral: 0 };
+          const nums = uwTrans.statements
+            .map(s => typeof s.sentiment === 'number' ? s.sentiment : (sentMap[String(s.sentiment ?? '').toLowerCase()] ?? null))
+            .filter(v => v !== null);
+          const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+          uw_transcript_score = +((avg + 1) / 2).toFixed(3);
+          uw_transcript_label = avg > 0.15 ? 'bullish' : avg < -0.15 ? 'bearish' : 'neutral';
+          const exec = uwTrans.statements.find(s => /CEO|CFO|Chief Executive|Chief Financial/i.test(s.title || s.speaker || ''));
+          uw_transcript_quote = exec?.content ? exec.content.slice(0, 140).trim() : null;
+        }
+
         return {
           symbol:            sym,
           company:           yf?.price?.shortName || entry.company || sym,
@@ -1925,6 +1960,13 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
           conviction_grade:  score?.grade ?? null,
           avg_surprise_pct,
           top_news: news.length ? { title: news[0].title, url: news[0].url, published: news[0].published } : null,
+          uw_analyst_target_avg:  uwFund?.analyst_target_price ?? null,
+          uw_analyst_count:       uw_analyst_count && uw_analyst_count > 0 ? uw_analyst_count : null,
+          uw_last_quarter,
+          uw_transcript_label,
+          uw_transcript_score,
+          uw_transcript_quote,
+          uw_transcript_quarter:  uwTrans?.quarter ?? null,
         };
       };
 
@@ -2193,6 +2235,9 @@ async function generateWeekPredictions(weekStart) {
             has_earnings: !!earningsDate, earnings_date: earningsDate,
             adjusted_change_pct: adjChangePct,
             confidence: cal?.confidence ?? null,
+            uw_modifier_delta:  cal?._uw_modifier?.delta  ?? null,
+            uw_modifier_reason: cal?._uw_modifier?.reason ?? null,
+            uw_modifier_label:  cal?._uw_modifier?.uw_label ?? null,
           });
         }
         done++;
@@ -2266,6 +2311,9 @@ app.get('/api/forecast', requireAuth, async (req, res) => {
         predicted_change_pct: n(r.predicted_change_pct),
         adjusted_change_pct:  n(r.adjusted_change_pct),
         confidence:           r.confidence != null ? +r.confidence : null,
+        uw_modifier_delta:    r.uw_modifier_delta  != null ? +r.uw_modifier_delta  : null,
+        uw_modifier_reason:   r.uw_modifier_reason ?? null,
+        uw_modifier_label:    r.uw_modifier_label  ?? null,
         actual_price:         n(r.actual_price),
         actual_change_pct:    n(r.actual_change_pct),
         error_pct:            n(r.error_pct),
@@ -6419,6 +6467,25 @@ app.get('/api/uw/flow-alerts-history', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/uw/conviction/:symbol — UW conviction for a single symbol
+app.get('/api/uw/conviction/:symbol', requireAuth, async (req, res) => {
+  try {
+    const c = await getUwConvictionForSymbol(req.params.symbol.toUpperCase());
+    res.json(c);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/uw/conviction?symbols=AAPL,NVDA — UW conviction for up to 50 symbols
+app.get('/api/uw/conviction', requireAuth, async (req, res) => {
+  try {
+    const symbols = (req.query.symbols || '').split(',').filter(Boolean).map(s => s.toUpperCase());
+    if (!symbols.length) return res.status(400).json({ error: 'symbols=AAPL,NVDA required' });
+    if (symbols.length > 50) return res.status(400).json({ error: 'max 50 symbols' });
+    const map = await getUwConvictionForSymbols(symbols);
+    res.json(Object.fromEntries(map));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/sentinel/recent?limit=20 — sentinel run history (Item 6)
 app.get('/api/sentinel/recent', requireAuth, async (req, res) => {
   if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
@@ -6475,6 +6542,167 @@ app.post('/api/system-alerts/test', requireAuth, requireAdmin, async (req, res) 
   try {
     const row = await sysAlert({ key: 'system/test', severity, title, detail: { triggered_by: req.session?.username } });
     res.json({ ok: true, row });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Web-push subscriptions ────────────────────────────────────────────────────
+
+app.get('/api/push/vapid-key', (req, res) => {
+  const key = process.env.VAPID_PUBLIC_KEY;
+  if (!key) return res.status(503).json({ error: 'VAPID not configured' });
+  res.json({ vapidPublicKey: key });
+});
+
+app.post('/api/push/subscribe', requireAuth, async (req, res) => {
+  const { endpoint, keys } = req.body || {};
+  if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    return res.status(400).json({ error: 'Missing subscription fields' });
+  }
+  const username = req.session.username;
+  try {
+    await query(
+      `INSERT INTO push_subscriptions (username, endpoint, p256dh, auth)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (username, endpoint) DO UPDATE SET p256dh=$3, auth=$4`,
+      [username, endpoint, keys.p256dh, keys.auth]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/push/unsubscribe', requireAuth, async (req, res) => {
+  const { endpoint } = req.body || {};
+  if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });
+  const username = req.session.username;
+  try {
+    await query('DELETE FROM push_subscriptions WHERE username=$1 AND endpoint=$2', [username, endpoint]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── WebAuthn ──────────────────────────────────────────────────────────────────
+
+let _wa = null;
+async function getWebAuthn() {
+  if (_wa) return _wa;
+  const mod = await import('@simplewebauthn/server');
+  _wa = mod;
+  return _wa;
+}
+
+function getWaRpId() {
+  try {
+    const pub = process.env.PUBLIC_URL || 'http://localhost:3000';
+    return new URL(pub).hostname;
+  } catch { return 'localhost'; }
+}
+
+app.post('/api/webauthn/register/begin', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  const username = req.session.username;
+  try {
+    const wa = await getWebAuthn();
+    const { rows: existing } = await query(
+      'SELECT credential_id FROM webauthn_credentials WHERE username=$1', [username]
+    );
+    const excludeCredentials = existing.map(r => ({
+      id: r.credential_id,
+      type: 'public-key',
+    }));
+    const options = await wa.generateRegistrationOptions({
+      rpName:               process.env.WA_RP_NAME || 'Trading Dashboard',
+      rpID:                 getWaRpId(),
+      userID:               Buffer.from(username),
+      userName:             username,
+      attestationType:      'none',
+      excludeCredentials,
+      authenticatorSelection: { userVerification: 'required', residentKey: 'preferred' },
+    });
+    req.session.webauthn_challenge = options.challenge;
+    res.json(options);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/webauthn/register/finish', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  const username   = req.session.username;
+  const challenge  = req.session.webauthn_challenge;
+  if (!challenge) return res.status(400).json({ error: 'No challenge in session' });
+  try {
+    const wa = await getWebAuthn();
+    const verification = await wa.verifyRegistrationResponse({
+      response:             req.body,
+      expectedChallenge:    challenge,
+      expectedOrigin:       process.env.PUBLIC_URL || `http://localhost:${PORT}`,
+      expectedRPID:         getWaRpId(),
+      requireUserVerification: true,
+    });
+    if (!verification.verified) return res.status(400).json({ error: 'Verification failed' });
+    const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
+    const deviceName = req.body.deviceName || req.headers['user-agent']?.slice(0, 80) || 'Unknown device';
+    await query(
+      `INSERT INTO webauthn_credentials (username, credential_id, public_key, counter, device_name)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (credential_id) DO UPDATE SET counter=$4`,
+      [username, Buffer.from(credentialID), Buffer.from(credentialPublicKey), counter, deviceName]
+    );
+    delete req.session.webauthn_challenge;
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/webauthn/authenticate/begin', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  const username = req.session.username;
+  try {
+    const wa = await getWebAuthn();
+    const { rows } = await query(
+      'SELECT credential_id FROM webauthn_credentials WHERE username=$1', [username]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'No credentials registered' });
+    const allowCredentials = rows.map(r => ({ id: r.credential_id, type: 'public-key' }));
+    const options = await wa.generateAuthenticationOptions({
+      rpID:               getWaRpId(),
+      allowCredentials,
+      userVerification:   'required',
+    });
+    req.session.webauthn_challenge = options.challenge;
+    res.json(options);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/webauthn/authenticate/finish', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  const username  = req.session.username;
+  const challenge = req.session.webauthn_challenge;
+  if (!challenge) return res.status(400).json({ error: 'No challenge in session' });
+  try {
+    const wa = await getWebAuthn();
+    const credId = Buffer.from(req.body.rawId || req.body.id, 'base64url');
+    const { rows } = await query(
+      'SELECT * FROM webauthn_credentials WHERE username=$1 AND credential_id=$2',
+      [username, credId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Credential not found' });
+    const cred = rows[0];
+    const verification = await wa.verifyAuthenticationResponse({
+      response:             req.body,
+      expectedChallenge:    challenge,
+      expectedOrigin:       process.env.PUBLIC_URL || `http://localhost:${PORT}`,
+      expectedRPID:         getWaRpId(),
+      authenticator: {
+        credentialID:        cred.credential_id,
+        credentialPublicKey: cred.public_key,
+        counter:             Number(cred.counter),
+      },
+      requireUserVerification: true,
+    });
+    if (!verification.verified) return res.status(400).json({ error: 'Authentication failed' });
+    await query('UPDATE webauthn_credentials SET counter=$1 WHERE id=$2',
+      [verification.authenticationInfo.newCounter, cred.id]);
+    delete req.session.webauthn_challenge;
+    req.session.biometric_verified = true;
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

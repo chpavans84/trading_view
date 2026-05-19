@@ -154,5 +154,51 @@ export async function alert({ key, severity = 'warn', title, detail = {}, dedup_
     row.email_error = errMsg;
   }
 
+  // 6. Fire push notification for critical alerts (fire-and-forget)
+  if (severity === 'critical') {
+    sendCriticalPush(row, title, key).catch(e =>
+      console.warn('[system-alerts] push failed (non-fatal):', e.message)
+    );
+  }
+
   return row;
+}
+
+// ── Web-push for critical alerts ──────────────────────────────────────────────
+
+async function sendCriticalPush(row, title, key) {
+  if (!isDbAvailable()) return;
+
+  const vapidPublic  = process.env.VAPID_PUBLIC_KEY;
+  const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
+  const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:info@trading.dlpinnovations.com';
+  if (!vapidPublic || !vapidPrivate) return;
+
+  const { default: webpush } = await import('web-push');
+  webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
+
+  const { rows: subs } = await query('SELECT endpoint, p256dh, auth FROM push_subscriptions');
+  if (!subs.length) return;
+
+  const payload = JSON.stringify({
+    title: title || 'Critical Alert',
+    body:  row?.detail ? Object.values(row.detail)[0] ?? '' : '',
+    key,
+    alert_id: row?.id ?? null,
+    url: '/mobile.html',
+  });
+
+  await Promise.allSettled(
+    subs.map(sub =>
+      webpush.sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        payload
+      ).catch(e => {
+        // Remove stale subscriptions (410 Gone)
+        if (e.statusCode === 410) {
+          query('DELETE FROM push_subscriptions WHERE endpoint=$1', [sub.endpoint]).catch(() => {});
+        }
+      })
+    )
+  );
 }

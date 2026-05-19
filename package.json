@@ -15,7 +15,7 @@
     "start": "node src/server.js",
     "dev": "nodemon --env-file=.env src/web/server.js",
     "tv": "node src/cli/index.js",
-    "test": "NODE_ENV=test node --experimental-test-module-mocks --test tests/e2e.test.js tests/pine_analyze.test.js tests/sentinel.test.js tests/unusual-whales.test.js tests/uw-null-unique.test.js tests/uw-schema-linter.test.js tests/uw-retention.test.js tests/system-alerts.test.js",
+    "test": "NODE_ENV=test node --experimental-test-module-mocks --test tests/e2e.test.js tests/pine_analyze.test.js tests/sentinel.test.js tests/unusual-whales.test.js tests/uw-null-unique.test.js tests/uw-schema-linter.test.js tests/uw-retention.test.js tests/system-alerts.test.js tests/catalyst-enrichment.test.js tests/uw-conviction.test.js tests/prediction-calibration.test.js",
     "test:e2e": "node --test tests/e2e.test.js",
     "test:unit": "node --test tests/pine_analyze.test.js tests/cli.test.js",
     "test:cli": "node --test tests/cli.test.js",
@@ -38,6 +38,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@simplewebauthn/server": "^13.3.0",
     "bcrypt": "^6.0.0",
     "chrome-remote-interface": "^0.33.2",
     "compression": "^1.8.1",
@@ -55,6 +56,7 @@
     "pg": "^8.20.0",
     "protobufjs": "^8.2.0",
     "resend": "^6.12.2",
+    "web-push": "^3.6.7",
     "ws": "^8.20.0",
     "yahoo-finance2": "^3.14.0"
   },

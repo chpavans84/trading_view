@@ -58,6 +58,18 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   position:relative;transition:color .15s
 }
 .tb-btn:active{color:var(--text)}
+#push-chip{
+  display:none;font-size:.65rem;font-weight:700;padding:4px 9px;
+  background:var(--accent);color:#fff;border:none;border-radius:20px;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;line-height:1.4;
+  white-space:nowrap
+}
+.pos-row-pending{opacity:.7;animation:pendFade 1.4s ease infinite alternate}
+@keyframes pendFade{from{opacity:.45}to{opacity:.8}}
+.pend-badge{
+  font-size:.55rem;font-weight:800;padding:1px 5px;background:var(--orange);
+  color:#fff;border-radius:10px;margin-left:5px;vertical-align:middle
+}
 #market-dot{
   width:8px;height:8px;border-radius:50%;background:var(--text3);
   display:inline-block;margin-right:3px;transition:background .3s
@@ -772,9 +784,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);
     </div>
     <div id="topbar-right">
       <span id="market-dot" title="Market status"></span>
+      <button id="push-chip" aria-label="Enable push alerts" onclick="subscribePush()">🔔 Alerts</button>
       <button class="tb-btn" id="notif-btn" aria-label="Notifications">
         🔔<span id="bell-badge"></span>
       </button>
+      <button class="tb-btn" id="biometric-btn" aria-label="Register biometric" onclick="registerBiometric()" style="display:none;font-size:.85rem">🔐</button>
       <button class="tb-btn" id="menu-btn" aria-label="Menu">☰</button>
     </div>
   </div>
@@ -1039,6 +1053,143 @@ async function apiFetch(path, opts = {}) {
 const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
 function haptic(pattern = 10) {
   if (!mq.matches && navigator.vibrate) navigator.vibrate(pattern);
+}
+
+/* ── Service Worker + Web Push ───────────────────────────────────────── */
+let _pushSub = null;
+
+function _b64ToUint8(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function _ensurePushSubscribed() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { _pushSub = sub; return; }
+    const { vapidPublicKey } = await apiFetch('/api/push/vapid-key');
+    if (!vapidPublicKey) return;
+    const newSub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _b64ToUint8(vapidPublicKey),
+    });
+    _pushSub = newSub;
+    const j = newSub.toJSON();
+    await apiFetch('/api/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys }),
+    });
+  } catch (_) {}
+}
+
+async function subscribePush() {
+  const chip = document.getElementById('push-chip');
+  haptic(10);
+  try {
+    if (!('PushManager' in window)) { toast('Push not supported on this browser', 3000); return; }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { chip.style.display = 'none'; toast('Notifications blocked', 2500); return; }
+    const { vapidPublicKey } = await apiFetch('/api/push/vapid-key');
+    if (!vapidPublicKey) { toast('Push not configured on server', 3000); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _b64ToUint8(vapidPublicKey),
+    });
+    _pushSub = sub;
+    const j = sub.toJSON();
+    await apiFetch('/api/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys }),
+    });
+    chip.style.display = 'none';
+    toast('🔔 Push alerts enabled');
+    haptic(10);
+  } catch (e) {
+    toast('Could not enable notifications', 3000);
+  }
+}
+
+/* ── WebAuthn / Biometric ─────────────────────────────────────────────── */
+
+function _credToB64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+
+async function registerBiometric() {
+  haptic(10);
+  if (!window.PublicKeyCredential) { toast('WebAuthn not supported', 3000); return; }
+  try {
+    const opts = await apiFetch('/api/webauthn/register/begin', { method: 'POST', body: '{}' });
+    if (opts.error) throw new Error(opts.error);
+    // Convert base64url-encoded challenge and user.id
+    opts.challenge = _b64ToUint8(opts.challenge);
+    opts.user.id   = _b64ToUint8(opts.user.id);
+    if (opts.excludeCredentials) {
+      opts.excludeCredentials = opts.excludeCredentials.map(c => ({
+        ...c, id: _b64ToUint8(c.id),
+      }));
+    }
+    const cred = await navigator.credentials.create({ publicKey: opts });
+    const payload = {
+      id:   cred.id,
+      rawId: _credToB64(cred.rawId),
+      type: cred.type,
+      response: {
+        attestationObject: _credToB64(cred.response.attestationObject),
+        clientDataJSON:    _credToB64(cred.response.clientDataJSON),
+      },
+    };
+    const fin = await apiFetch('/api/webauthn/register/finish', {
+      method: 'POST', body: JSON.stringify(payload),
+    });
+    if (fin.error) throw new Error(fin.error);
+    toast('🔐 Biometric registered');
+    haptic([10, 30, 10]);
+  } catch (e) {
+    toast('Biometric registration failed: ' + (e.message || 'Unknown error'), 3500);
+  }
+}
+
+async function authenticateBiometric() {
+  haptic(10);
+  if (!window.PublicKeyCredential) { toast('WebAuthn not supported', 3000); return false; }
+  try {
+    const opts = await apiFetch('/api/webauthn/authenticate/begin', { method: 'POST', body: '{}' });
+    if (opts.error) throw new Error(opts.error);
+    opts.challenge = _b64ToUint8(opts.challenge);
+    if (opts.allowCredentials) {
+      opts.allowCredentials = opts.allowCredentials.map(c => ({
+        ...c, id: _b64ToUint8(c.id),
+      }));
+    }
+    opts.userVerification = 'required';
+    const assertion = await navigator.credentials.get({ publicKey: opts });
+    const payload = {
+      id:   assertion.id,
+      rawId: _credToB64(assertion.rawId),
+      type: assertion.type,
+      response: {
+        authenticatorData: _credToB64(assertion.response.authenticatorData),
+        clientDataJSON:    _credToB64(assertion.response.clientDataJSON),
+        signature:         _credToB64(assertion.response.signature),
+        userHandle: assertion.response.userHandle
+          ? _credToB64(assertion.response.userHandle) : null,
+      },
+    };
+    const fin = await apiFetch('/api/webauthn/authenticate/finish', {
+      method: 'POST', body: JSON.stringify(payload),
+    });
+    if (fin.error) throw new Error(fin.error);
+    toast('🔐 Biometric verified');
+    haptic([10, 30, 10]);
+    return true;
+  } catch (e) {
+    toast('Biometric auth failed: ' + (e.message || 'Unknown error'), 3500);
+    return false;
+  }
 }
 
 /* ── Toast ───────────────────────────────────────────────────────────── */
@@ -1416,6 +1567,7 @@ async function loadHome() {
 }
 
 /* ── Alert badge polling ─────────────────────────────────────────────── */
+let _prevCritCount = 0;
 async function pollAlertBadge() {
   try {
     const data = await apiFetch('/api/system-alerts/recent?severity=critical&limit=5');
@@ -1423,6 +1575,8 @@ async function pollAlertBadge() {
     const badge = document.getElementById('alerts-badge');
     const bell = document.getElementById('bell-badge');
     const n = alerts.length;
+    if (n > _prevCritCount) haptic(200);
+    _prevCritCount = n;
     badge.textContent = n || '';
     badge.style.display = n ? '' : 'none';
     bell.textContent = n || '';
@@ -1869,24 +2023,44 @@ async function _qtPlace(btn) {
   btn.textContent = 'Placing…';
   haptic(20);
 
-  const src    = _QT_SRCS.find(s => s.key === _qt.srcKey) || _QT_SRCS[0];
-  const qty    = _qt.qtyMode === 'dollars' && _qt.livePrice
+  const src = _QT_SRCS.find(s => s.key === _qt.srcKey) || _QT_SRCS[0];
+  const qty = _qt.qtyMode === 'dollars' && _qt.livePrice
     ? Math.max(1, Math.floor(_qt.qty / _qt.livePrice))
     : _qt.qty;
-  const body   = { symbol: _qt.sym, side: _qt.side, qty, order_type: _qt.otype, source: src.api };
+  const body = { symbol: _qt.sym, side: _qt.side, qty, order_type: _qt.otype, source: src.api };
   if (_qt.otype !== 'market' && _qt.limitPrice) body.limit_price = _qt.limitPrice;
+
+  // Optimistic UI — inject pending row in positions list before server responds
+  let _pendEl = null;
+  if (_qt.side === 'buy') {
+    const posBody = document.getElementById('positions-body');
+    if (posBody) {
+      // Remove "no positions" empty state if present
+      const empty = posBody.querySelector('.empty-state');
+      if (empty) empty.remove();
+      _pendEl = document.createElement('div');
+      _pendEl.className = 'pos-row pos-row-pending';
+      _pendEl.innerHTML = `<div>
+        <div class="pos-sym">${escapeHtml(_qt.sym)}<span class="pend-badge">PENDING</span></div>
+        <div class="pos-name">${qty} shares · ${src.label}</div>
+      </div>
+      <div class="pos-right"><div class="pos-mkt" style="color:var(--text2)">Placing…</div></div>`;
+      posBody.insertAdjacentElement('afterbegin', _pendEl);
+    }
+  }
 
   try {
     const res = await apiFetch('/api/trade/quick', { method:'POST', body:JSON.stringify(body) });
     if (res.error) throw new Error(res.error);
-    haptic([20, 50, 20]);
+    haptic([30, 50, 30]);
+    if (_pendEl) _pendEl.remove();
     toast(`✅ ${_qt.side.toUpperCase()} ${qty} ${_qt.sym} placed · ${src.label}`);
     closeSheet();
-    // Refresh home if active
     _loaded['home'] = false;
     if (_activeTab === 'home') loadHome();
   } catch (err) {
     haptic([30, 20, 30]);
+    if (_pendEl) _pendEl.remove();
     toast(`❌ ${err.message || 'Order failed'}`, 4000);
     btn.disabled    = false;
     btn.textContent = `✓ Place ${_qt.side==='buy'?'Buy':'Sell'} Order`;
@@ -2833,6 +3007,36 @@ window.addEventListener('DOMContentLoaded', () => {
   pollAlertBadge();
   setInterval(pollAlertBadge, 60_000);
   window.addEventListener('resize', () => { applyTopPad(); applyChatHeight(); });
+
+  // Register service worker (push notifications + offline cache)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(async () => {
+        // If already granted, silently ensure we have a push subscription
+        if ('PushManager' in window && Notification.permission === 'granted') {
+          _ensurePushSubscribed();
+        }
+      })
+      .catch(() => {});
+  }
+
+  // Show push opt-in chip after first user interaction (never on page load — Safari rate-limits)
+  function _onFirstInteraction() {
+    document.removeEventListener('click', _onFirstInteraction, true);
+    document.removeEventListener('touchend', _onFirstInteraction, true);
+    if (!('PushManager' in window)) return;
+    if (Notification.permission === 'granted') { _ensurePushSubscribed(); return; }
+    if (Notification.permission !== 'denied') {
+      document.getElementById('push-chip').style.display = '';
+    }
+  }
+  document.addEventListener('click',    _onFirstInteraction, { capture: true, once: true });
+  document.addEventListener('touchend', _onFirstInteraction, { capture: true, once: true });
+
+  // Show biometric button if WebAuthn is supported
+  if (window.PublicKeyCredential) {
+    document.getElementById('biometric-btn').style.display = '';
+  }
 });
 </script>
 </body>

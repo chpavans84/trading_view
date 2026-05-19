@@ -464,6 +464,10 @@ CREATE INDEX IF NOT EXISTS stock_predictions_target_idx  ON stock_predictions(ta
 -- Calibration columns added after initial schema (safe to re-run)
 ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS adjusted_change_pct NUMERIC(8,4);
 ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS confidence          INTEGER;
+-- UW conviction modifier columns (additive — does NOT drop or rename existing columns)
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS uw_modifier_delta   INTEGER;
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS uw_modifier_reason  VARCHAR(50);
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS uw_modifier_label   VARCHAR(30);
 
 CREATE TABLE IF NOT EXISTS prediction_calibration (
   symbol       VARCHAR(20) NOT NULL,
@@ -758,6 +762,28 @@ CREATE TABLE IF NOT EXISTS system_alerts (
 );
 CREATE INDEX IF NOT EXISTS idx_system_alerts_key_time ON system_alerts(key, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_system_alerts_severity ON system_alerts(severity, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id          SERIAL PRIMARY KEY,
+  username    TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+  endpoint    TEXT NOT NULL,
+  p256dh      TEXT NOT NULL,
+  auth        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (username, endpoint)
+);
+CREATE INDEX IF NOT EXISTS idx_push_subs_username ON push_subscriptions(username);
+
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  id             SERIAL PRIMARY KEY,
+  username       TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+  credential_id  BYTEA UNIQUE NOT NULL,
+  public_key     BYTEA NOT NULL,
+  counter        BIGINT NOT NULL DEFAULT 0,
+  device_name    TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_username ON webauthn_credentials(username);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -2032,8 +2058,8 @@ export async function upsertPrediction(row) {
     `INSERT INTO stock_predictions
        (symbol, week_start, target_date, predicted_price, predicted_change_pct,
         base_price, algorithm_signal, slope_per_day, r_squared, has_earnings, earnings_date,
-        adjusted_change_pct, confidence)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        adjusted_change_pct, confidence, uw_modifier_delta, uw_modifier_reason, uw_modifier_label)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (symbol, week_start, target_date) DO UPDATE SET
        predicted_price      = EXCLUDED.predicted_price,
        predicted_change_pct = EXCLUDED.predicted_change_pct,
@@ -2045,11 +2071,15 @@ export async function upsertPrediction(row) {
        earnings_date        = EXCLUDED.earnings_date,
        adjusted_change_pct  = EXCLUDED.adjusted_change_pct,
        confidence           = EXCLUDED.confidence,
+       uw_modifier_delta    = EXCLUDED.uw_modifier_delta,
+       uw_modifier_reason   = EXCLUDED.uw_modifier_reason,
+       uw_modifier_label    = EXCLUDED.uw_modifier_label,
        updated_at           = NOW()`,
     [row.symbol, row.week_start, row.target_date, row.predicted_price,
      row.predicted_change_pct, row.base_price, row.algorithm_signal,
      row.slope_per_day, row.r_squared, row.has_earnings, row.earnings_date ?? null,
-     row.adjusted_change_pct ?? null, row.confidence ?? null]
+     row.adjusted_change_pct ?? null, row.confidence ?? null,
+     row.uw_modifier_delta ?? null, row.uw_modifier_reason ?? null, row.uw_modifier_label ?? null]
   );
 }
 

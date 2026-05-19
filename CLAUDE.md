@@ -337,7 +337,33 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 | bluematrix | Cyan-on-black, Share Tech Mono font |
 
 ### Key DB tables (web dashboard)
-`trades` · `conviction_scores` · `trade_rejections` · `knowledge_chunks` · `fundamentals` · `backtest_*` · `model_results` · `stock_predictions` · `prediction_calibration*` · `prediction_errors` · `user_activity` · `conversation_history` · `user_reminders` · **`user_notes`** (title, body, username, created_at) · `uw_flow_alerts` (alerted_at, premium, sentiment — 2-min cron, 90d retention) · `uw_top_movers` (captured_at, direction — 5-min cron, 30d retention) · `uw_economic_calendar` (event_date, event_name, country — 6 AM cron) · `uw_ipo_calendar` (ticker, ipo_date — 6 AM cron)
+`trades` · `conviction_scores` · `trade_rejections` · `knowledge_chunks` · `fundamentals` · `backtest_*` · `model_results` · `stock_predictions` · `prediction_calibration*` · `prediction_errors` · `user_activity` · `conversation_history` · `user_reminders` · **`user_notes`** (title, body, username, created_at) · `uw_flow_alerts` (alerted_at, premium, sentiment — 2-min cron, 90d retention) · `uw_top_movers` (captured_at, direction — 5-min cron, 30d retention) · `uw_economic_calendar` (event_date, event_name, country — 6 AM cron) · `uw_ipo_calendar` (ticker, ipo_date — 6 AM cron) · `push_subscriptions` (username, endpoint, p256dh, auth — UNIQUE(username,endpoint)) · `webauthn_credentials` (username, credential_id BYTEA UNIQUE, public_key BYTEA, counter BIGINT, device_name)
+
+### Phase 5 — PWA Push + Biometric (mobile.html)
+- **Service worker**: `src/web/public/sw.js` — scope `/`, handles push events + notificationclick deep-link to `/mobile.html`
+- **Push opt-in**: non-blocking chip `#push-chip` shown after first user interaction (never on page load — Safari rate-limits). Click calls `subscribePush()` → `Notification.requestPermission()` → `PushManager.subscribe()` → `POST /api/push/subscribe`
+- **Critical push**: `system-alerts.js` calls `sendCriticalPush()` fire-and-forget when `severity='critical'`; stale subscriptions (HTTP 410) auto-deleted
+- **WebAuthn**: `registerBiometric()` → `/api/webauthn/register/begin|finish`; `authenticateBiometric()` → `/api/webauthn/authenticate/begin|finish`. `userVerification:'required'` on both. Button `#biometric-btn` shown when `window.PublicKeyCredential` is available.
+- **Optimistic UI**: Buy order injects pending `.pos-row-pending` card into `#positions-body` before server responds; reconciled on result (removed + home refresh on success, removed + toast on error)
+- **Haptic**: 200ms on new critical alert in `pollAlertBadge`; [30,50,30] on order placed success
+
+#### New API routes (Phase 5)
+| Route | Auth | Description |
+|-------|------|-------------|
+| `GET /api/push/vapid-key` | none | Returns `{ vapidPublicKey }` (public key safe to expose) |
+| `POST /api/push/subscribe` | required | Upsert push subscription for session user |
+| `DELETE /api/push/unsubscribe` | required | Remove push subscription by endpoint |
+| `POST /api/webauthn/register/begin` | required | Generate WebAuthn registration options |
+| `POST /api/webauthn/register/finish` | required | Verify + store credential |
+| `POST /api/webauthn/authenticate/begin` | required | Generate authentication options |
+| `POST /api/webauthn/authenticate/finish` | required | Verify assertion, sets `req.session.biometric_verified=true` |
+
+#### Env vars (Phase 5)
+- `VAPID_PUBLIC_KEY` — base64url VAPID public key (generate with `npx web-push generate-vapid-keys`)
+- `VAPID_PRIVATE_KEY` — base64url VAPID private key (never commit)
+- `VAPID_SUBJECT` — `mailto:` or `https:` URL identifying sender
+- `WA_RP_NAME` — Relying Party name shown in biometric prompts (default: `Trading Dashboard`)
+- `PUBLIC_URL` — also used as WebAuthn expected origin (already required by Sentinel)
 
 ### Server ops
 - PM2 processes: `trading-dashboard` (port 3000, production) · `trading-staging` (UAT) · `trading-bot` (cron bot)
