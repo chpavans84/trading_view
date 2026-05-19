@@ -604,6 +604,158 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   background:none;border:none;color:var(--accent);font-size:.78rem;
   font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;padding:0
 }
+
+/* ── Bottom Sheet ────────────────────────────────────────────────────── */
+#bs-backdrop{
+  position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0);
+  pointer-events:none;transition:background .25s ease
+}
+#bs-backdrop.open{background:rgba(0,0,0,.62);pointer-events:all}
+#bs-sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:501;
+  background:var(--surface);border-radius:22px 22px 0 0;
+  max-height:92dvh;max-height:92vh;
+  display:none;flex-direction:column;
+  will-change:transform;touch-action:none;
+  padding-bottom:env(safe-area-inset-bottom,0px)
+}
+.bs-handle-wrap{
+  flex-shrink:0;padding:14px 0 6px;display:flex;justify-content:center;
+  touch-action:none;cursor:grab
+}
+.bs-handle{width:40px;height:4px;border-radius:2px;background:var(--border)}
+.bs-hdr{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  padding:4px 18px 12px;flex-shrink:0;border-bottom:1px solid var(--border2)
+}
+.bs-title-sym{font-size:1.05rem;font-weight:900;letter-spacing:-.02em}
+.bs-title-sub{font-size:.74rem;color:var(--text2);margin-top:2px}
+.bs-close{
+  background:var(--surface2);border:none;width:28px;height:28px;border-radius:50%;
+  color:var(--text2);font-size:.8rem;cursor:pointer;flex-shrink:0;margin-top:2px;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent
+}
+.bs-body{
+  flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:14px 16px 20px;overscroll-behavior:contain;touch-action:pan-y
+}
+
+/* Stock detail sheet */
+.sds-price{font-size:2rem;font-weight:900;letter-spacing:-.04em;line-height:1}
+.sds-change{font-size:.88rem;font-weight:700;margin-top:5px}
+.sds-score-val{font-size:1.65rem;font-weight:900;line-height:1}
+.sds-score-lbl{font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:3px}
+.sds-signal-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:7px 0;border-bottom:1px solid var(--border2);font-size:.8rem
+}
+.sds-signal-row:last-child{border-bottom:none}
+.sds-signal-key{color:var(--text2)}
+.sds-news-item{padding:7px 0;border-bottom:1px solid var(--border2)}
+.sds-news-item:last-child{border-bottom:none}
+.sds-news-title{font-size:.81rem;font-weight:600;line-height:1.4;margin-bottom:3px}
+.sds-news-meta{font-size:.67rem;color:var(--text3)}
+.bs-trade-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.bs-trade-btn{
+  padding:13px 10px;border-radius:12px;border:none;font-size:.88rem;font-weight:800;
+  cursor:pointer;-webkit-tap-highlight-color:transparent
+}
+.bs-trade-btn:active{opacity:.75}
+.bs-buy{background:rgba(63,185,80,.18);color:var(--green)}
+.bs-sell{background:rgba(248,81,73,.18);color:var(--red)}
+
+/* Quick trade */
+.qt-toggle{display:flex;border-radius:10px;overflow:hidden;border:1px solid var(--border);margin-bottom:14px}
+.qt-toggle-btn{
+  flex:1;padding:10px;background:none;border:none;color:var(--text2);
+  font-size:.82rem;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent
+}
+.qt-toggle-btn.active-buy{background:rgba(63,185,80,.18);color:var(--green)}
+.qt-toggle-btn.active-sell{background:rgba(248,81,73,.18);color:var(--red)}
+.qt-toggle-btn.active-seg{background:var(--surface2);color:var(--text)}
+.qt-label{font-size:.68rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.qt-acct-row{display:flex;gap:6px;margin-bottom:14px}
+.qt-acct-btn{
+  flex:1;padding:8px 2px;border-radius:8px;border:1px solid var(--border);
+  background:none;color:var(--text2);font-size:.7rem;font-weight:700;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;text-align:center
+}
+.qt-acct-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(88,166,255,.1)}
+.qt-sym-input{
+  width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);font-size:1rem;font-weight:800;
+  text-transform:uppercase;outline:none;margin-bottom:14px;font-family:inherit;
+  -webkit-appearance:none
+}
+.qt-sym-input:focus{border-color:var(--accent)}
+.qt-stepper{display:flex;align-items:center;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.qt-step-btn{
+  width:46px;height:46px;background:var(--surface2);border:none;color:var(--text);
+  font-size:1.3rem;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0
+}
+.qt-step-btn:active{background:var(--border2)}
+.qt-qty-input{
+  flex:1;height:46px;background:none;border:none;text-align:center;
+  color:var(--text);font-size:1rem;font-weight:800;outline:none;font-family:inherit
+}
+.qt-otype-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.qt-otype-btn{
+  padding:7px 12px;border-radius:8px;border:1px solid var(--border);
+  background:none;color:var(--text2);font-size:.74rem;font-weight:700;cursor:pointer;
+  -webkit-tap-highlight-color:transparent
+}
+.qt-otype-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(88,166,255,.1)}
+.qt-limit-input{
+  width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);
+  background:var(--surface2);color:var(--text);font-size:.95rem;font-weight:700;
+  text-align:center;outline:none;margin-bottom:10px;font-family:inherit;
+  -webkit-appearance:none
+}
+.qt-limit-input:focus{border-color:var(--accent)}
+.qt-price-hint{font-size:.71rem;color:var(--text3);text-align:center;margin-bottom:12px}
+.qt-total{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:12px 0;border-top:1px solid var(--border2);border-bottom:1px solid var(--border2);
+  margin-bottom:14px
+}
+.qt-total-lbl{font-size:.78rem;color:var(--text2)}
+.qt-total-val{font-size:1rem;font-weight:800}
+.qt-cta{
+  width:100%;padding:14px;border-radius:12px;border:none;
+  font-size:.95rem;font-weight:800;cursor:pointer;-webkit-tap-highlight-color:transparent
+}
+.qt-cta:active{opacity:.8}
+.qt-cta:disabled{opacity:.5;cursor:default}
+.qt-cta.buy{background:var(--green);color:#000}
+.qt-cta.sell{background:var(--red);color:#fff}
+.qt-review-card{
+  background:var(--surface2);border-radius:12px;padding:14px;
+  margin-bottom:16px;border:1px solid var(--border)
+}
+.qt-review-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:.82rem}
+.qt-review-row.total-row{
+  border-top:1px solid var(--border2);padding-top:12px;margin-top:4px;
+  font-size:.9rem;font-weight:800
+}
+.qt-back-btn{
+  background:none;border:none;color:var(--text2);font-size:.82rem;
+  padding:10px 0;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  display:flex;align-items:center;gap:4px;margin-bottom:12px
+}
+
+/* Long-press popover */
+#lp-pop{
+  position:fixed;z-index:600;background:var(--surface2);border:1px solid var(--border);
+  border-radius:14px;padding:6px;min-width:185px;display:none;
+  box-shadow:0 8px 32px rgba(0,0,0,.55)
+}
+.lp-pop-item{
+  display:block;width:100%;padding:11px 14px;background:none;border:none;
+  color:var(--text);font-size:.86rem;text-align:left;cursor:pointer;
+  border-radius:8px;-webkit-tap-highlight-color:transparent
+}
+.lp-pop-item:active{background:var(--border2)}
 </style>
 </head>
 <body>
@@ -819,6 +971,23 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 
 </div><!-- /main -->
 
+<!-- ── Bottom Sheet ──────────────────────────────────────────────────── -->
+<div id="bs-backdrop" onclick="closeSheet()"></div>
+<div id="bs-sheet" role="dialog" aria-modal="true" aria-labelledby="bs-title">
+  <div class="bs-handle-wrap" id="bs-handle"><div class="bs-handle"></div></div>
+  <div class="bs-hdr">
+    <div>
+      <div class="bs-title-sym" id="bs-title"></div>
+      <div class="bs-title-sub" id="bs-subtitle"></div>
+    </div>
+    <button class="bs-close" onclick="closeSheet()" aria-label="Close">✕</button>
+  </div>
+  <div class="bs-body" id="bs-body"></div>
+</div>
+
+<!-- ── Long-press popover ─────────────────────────────────────────────── -->
+<div id="lp-pop" role="menu" aria-label="Quick actions"></div>
+
 <!-- ── Bottom Nav ───────────────────────────────────────────────────── -->
 <nav id="bottomnav" role="navigation" aria-label="Main navigation">
   <button class="nav-btn active" data-tab="home" aria-label="Home" aria-selected="true" role="tab">
@@ -915,6 +1084,8 @@ const _loaded = {};
 
 function showTab(id) {
   haptic(10);
+  closeLpPop?.();
+  closeSheet?.();
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => {
     const active = b.dataset.tab === id;
@@ -1301,8 +1472,8 @@ async function pollAlertBadge() {
 
 /* ── FAB ─────────────────────────────────────────────────────────────── */
 document.getElementById('fab').addEventListener('click', () => {
-  haptic(10);
-  toast('⚡ Quick Trade — coming in Phase 4');
+  haptic(15);
+  openQuickTrade('', 'buy');
 });
 
 /* ── Menu + notif stubs ──────────────────────────────────────────────── */
@@ -1315,11 +1486,491 @@ document.getElementById('notif-btn').addEventListener('click', () => {
   showTab('alerts');
 });
 
-/* ── Stock detail stub ───────────────────────────────────────────────── */
-function openStock(symbol) {
-  haptic(10);
-  toast(`Opening ${symbol}… (Phase 4)`);
+/* openStock is defined in PHASE 4 block below */
+
+/* ════════════════════════════════════════════════════════════════════════
+   PHASE 4 — Bottom Sheets · FAB · Stock Detail · Quick Trade · Long-press
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── Bottom Sheet Engine ─────────────────────────────────────────────── */
+const _bsSheet    = document.getElementById('bs-sheet');
+const _bsBackdrop = document.getElementById('bs-backdrop');
+let _bsOpen = false;
+let _bsRaf  = null;
+let _bsCur  = 0;   // current translateY in px  (0 = fully visible)
+let _bsTgt  = 0;   // target translateY
+let _bsH    = 0;   // measured sheet height
+
+function _bsApply(y) {
+  _bsCur = y;
+  _bsSheet.style.transform = `translateY(${y}px)`;
 }
+
+function _bsSpring() {
+  const d = _bsTgt - _bsCur;
+  if (Math.abs(d) < 0.35) {
+    _bsApply(_bsTgt);
+    if (_bsTgt >= _bsH) {          // fully dismissed
+      _bsSheet.style.display  = 'none';
+      _bsBackdrop.classList.remove('open');
+      document.body.style.overflow = '';
+      _bsOpen = false;
+    }
+    _bsRaf = null;
+    return;
+  }
+  _bsApply(_bsCur + d * 0.22);    // spring coefficient — 60fps feels natural
+  _bsRaf = requestAnimationFrame(_bsSpring);
+}
+
+function openSheet(title, subtitle, html) {
+  document.getElementById('bs-title').textContent    = title || '';
+  document.getElementById('bs-subtitle').textContent = subtitle || '';
+  document.getElementById('bs-body').innerHTML       = html || '';
+  _bsSheet.style.display    = 'flex';
+  _bsSheet.style.transform  = 'translateY(100%)';
+  _bsBackdrop.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  requestAnimationFrame(() => {   // measure after display:flex
+    _bsH   = _bsSheet.getBoundingClientRect().height;
+    _bsCur = _bsH;
+    _bsTgt = 0;
+    _bsOpen = true;
+    cancelAnimationFrame(_bsRaf);
+    _bsRaf = requestAnimationFrame(_bsSpring);
+  });
+}
+
+function _bsSetContent(title, subtitle, html) {
+  document.getElementById('bs-title').textContent    = title || '';
+  document.getElementById('bs-subtitle').textContent = subtitle || '';
+  document.getElementById('bs-body').innerHTML       = html || '';
+}
+
+function closeSheet() {
+  if (!_bsOpen) return;
+  haptic(10);
+  _bsH   = _bsSheet.getBoundingClientRect().height;
+  _bsTgt = _bsH;
+  cancelAnimationFrame(_bsRaf);
+  _bsRaf = requestAnimationFrame(_bsSpring);
+}
+
+/* Drag handle — RAF-gated touchmove for 60fps */
+(function() {
+  const handle = document.getElementById('bs-handle');
+  let startY = 0, startCur = 0, lastY = 0, lastT = 0, dragRaf = null;
+
+  handle.addEventListener('touchstart', e => {
+    if (!_bsOpen) return;
+    startY = e.touches[0].clientY;  startCur = _bsCur;
+    lastY  = startY;  lastT = Date.now();
+    cancelAnimationFrame(_bsRaf);  _bsRaf = null;
+  }, { passive: true });
+
+  handle.addEventListener('touchmove', e => {
+    if (!_bsOpen) return;
+    const dy = e.touches[0].clientY - startY;
+    _bsCur = Math.max(0, startCur + dy);
+    lastY  = e.touches[0].clientY;  lastT = Date.now();
+    if (!dragRaf) dragRaf = requestAnimationFrame(() => {
+      _bsSheet.style.transform = `translateY(${_bsCur}px)`;
+      dragRaf = null;
+    });
+  }, { passive: true });
+
+  handle.addEventListener('touchend', () => {
+    if (!_bsOpen) return;
+    cancelAnimationFrame(dragRaf);  dragRaf = null;
+    const elapsed = Math.max(1, Date.now() - lastT);
+    const vel     = (lastY - startY) / elapsed * 1000;   // px/s
+    if (_bsCur > _bsH * 0.36 || vel > 440) {
+      if (_bsCur > _bsH * 0.36) haptic(18);              // threshold crossed
+      _bsTgt = _bsH;
+    } else {
+      _bsTgt = 0;
+    }
+    cancelAnimationFrame(_bsRaf);
+    _bsRaf = requestAnimationFrame(_bsSpring);
+  }, { passive: true });
+})();
+
+/* ── Stock Detail Sheet ──────────────────────────────────────────────── */
+async function openStock(symbol) {
+  if (!symbol) return;
+  haptic(10);
+  closeLpPop();
+  openSheet(symbol, 'Loading…',
+    `<div class="skel" style="height:72px;border-radius:10px;margin-bottom:12px"></div>
+     <div class="skel skel-card"></div>
+     <div class="skel skel-card"></div>`);
+
+  try {
+    const [qRes, eRes] = await Promise.allSettled([
+      apiFetch('/api/quote/' + symbol),
+      apiFetch('/api/explorer/extras?symbol=' + symbol),
+    ]);
+    const q = qRes.status === 'fulfilled' ? qRes.value : {};
+    const e = eRes.status === 'fulfilled' ? eRes.value : {};
+
+    const price   = q.price ?? q.c ?? null;
+    const chg     = q.change ?? 0;
+    const chgPct  = q.change_pct ?? 0;
+    const score   = e.analyst?.score ?? e.score ?? null;
+    const grade   = e.analyst?.grade ?? null;
+    const signals = e.signals || {};
+    const news    = (e.news || []).slice(0, 2);
+
+    // Update subtitle with live price
+    const priceStr = price != null ? `$${fmt2(price)}  ${fmtPct(chgPct)}` : '';
+    document.getElementById('bs-subtitle').textContent = priceStr;
+    document.getElementById('bs-subtitle').className   = 'bs-title-sub ' + colorClass(chgPct);
+
+    const sigRows = [
+      signals.rsi       != null ? { k: 'RSI',       v: signals.rsi.toFixed(1),      cls: signals.rsi > 70 ? 'neg' : signals.rsi < 30 ? 'pos' : '' } : null,
+      signals.rvol      != null ? { k: 'Rel Vol',    v: signals.rvol.toFixed(2)+'x', cls: signals.rvol > 2 ? 'pos' : '' } : null,
+      signals.macd_signal       ? { k: 'MACD',       v: signals.macd_signal,          cls: signals.macd_signal === 'bullish' ? 'pos' : 'neg' } : null,
+      signals.ema_trend         ? { k: 'EMA Trend',  v: signals.ema_trend,            cls: signals.ema_trend  === 'bullish' ? 'pos' : 'neg' } : null,
+      signals.weekly_trend      ? { k: 'Weekly',     v: signals.weekly_trend,          cls: signals.weekly_trend === 'bullish' ? 'pos' : 'neg' } : null,
+    ].filter(Boolean);
+
+    document.getElementById('bs-body').innerHTML = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div class="sds-price">${price != null ? '$'+fmt2(price) : '—'}</div>
+          <div class="sds-change ${colorClass(chg)}">${chg>=0?'+':''}${fmtDollar(chg)} (${fmtPct(chgPct)})</div>
+        </div>
+        ${score != null ? `<div style="text-align:center">
+          <div class="sds-score-val" style="color:${score>=70?'var(--green)':score>=40?'var(--yellow)':'var(--red)'}">${Math.round(score)}</div>
+          ${grade ? `<span class="chip ${score>=70?'chip-green':score>=40?'chip-yellow':'chip-red'}" style="font-size:.62rem">${grade}</span>` : ''}
+          <div class="sds-score-lbl">Conviction</div>
+        </div>` : ''}
+      </div>
+
+      ${sigRows.length ? `<div style="margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:8px">Signals</div>
+        ${sigRows.map(r => `<div class="sds-signal-row">
+          <span class="sds-signal-key">${r.k}</span>
+          <span class="${r.cls}" style="font-weight:700">${escapeHtml(String(r.v))}</span>
+        </div>`).join('')}
+      </div>` : ''}
+
+      ${news.length ? `<div style="margin-bottom:16px">
+        <div class="card-title" style="margin-bottom:8px">News</div>
+        ${news.map(n => `<div class="sds-news-item">
+          <div class="sds-news-title">${escapeHtml(n.title||'')}</div>
+          <div class="sds-news-meta">${escapeHtml(n.source||'')}${n.published?' · '+timeAgo(n.published):''}</div>
+        </div>`).join('')}
+      </div>` : ''}
+
+      <div class="bs-trade-btns">
+        <button class="bs-trade-btn bs-buy"  onclick="openQuickTrade('${symbol}','buy')">📈 Buy ${symbol}</button>
+        <button class="bs-trade-btn bs-sell" onclick="openQuickTrade('${symbol}','sell')">📉 Sell ${symbol}</button>
+      </div>`;
+  } catch (err) {
+    document.getElementById('bs-body').innerHTML =
+      `<div class="err-state">${escapeHtml(symbol)} data unavailable<br>
+       <button class="retry-btn" onclick="openStock('${escapeHtml(symbol)}')">Retry</button></div>`;
+  }
+}
+
+/* ── Quick Trade — 2-step: build → review → place ───────────────────── */
+const _QT_SRCS = [
+  { key:'paper',       api:'paper',       label:'📄 Paper' },
+  { key:'moomoo',      api:'moomoo',      label:'💰 Moomoo' },
+  { key:'alpaca_live', api:'alpaca_live', label:'🔴 Live' },
+];
+let _qt = { sym:'', side:'buy', srcKey:'paper', qtyMode:'shares', qty:1, otype:'market', limitPrice:null, livePrice:null };
+
+function _qtSrcDefault() {
+  return SOURCE === 'moomoo' ? 'moomoo' : SOURCE === 'alpaca_live' ? 'alpaca_live' : 'paper';
+}
+
+function _qtSync() {
+  const s = document.getElementById('qt-sym');
+  const q = document.getElementById('qt-qty');
+  const l = document.getElementById('qt-limit');
+  if (s) _qt.sym        = s.value.trim().toUpperCase();
+  if (q) _qt.qty        = Math.max(1, +q.value || 1);
+  if (l && l.value) _qt.limitPrice = +l.value;
+}
+
+function _buildStep1Html() {
+  const src = _QT_SRCS.find(s => s.key === _qt.srcKey) || _QT_SRCS[0];
+  return `
+    <div class="qt-toggle">
+      <button class="qt-toggle-btn ${_qt.side==='buy'?'active-buy':''}"  onclick="_qtSetSide('buy')">Buy</button>
+      <button class="qt-toggle-btn ${_qt.side==='sell'?'active-sell':''}" onclick="_qtSetSide('sell')">Sell</button>
+    </div>
+
+    <div class="qt-label">Symbol</div>
+    <input id="qt-sym" class="qt-sym-input" type="text" value="${escapeHtml(_qt.sym)}"
+      maxlength="8" placeholder="e.g. AAPL"
+      oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9.]/g,'');_qt.sym=this.value">
+
+    <div class="qt-label">Account</div>
+    <div class="qt-acct-row">
+      ${_QT_SRCS.map(s => `<button class="qt-acct-btn ${s.key===_qt.srcKey?'active':''}"
+        onclick="_qtSetSrc('${s.key}')">${s.label}</button>`).join('')}
+    </div>
+
+    <div class="qt-label">Quantity</div>
+    <div class="qt-toggle" style="margin-bottom:8px">
+      <button class="qt-toggle-btn ${_qt.qtyMode==='shares'?'active-seg':''}" onclick="_qtSetMode('shares')">Shares</button>
+      <button class="qt-toggle-btn ${_qt.qtyMode==='dollars'?'active-seg':''}" onclick="_qtSetMode('dollars')">Dollars $</button>
+    </div>
+    <div class="qt-stepper">
+      <button class="qt-step-btn" onclick="_qtAdj(-1)">−</button>
+      <input class="qt-qty-input" id="qt-qty" type="number" min="1" step="1" value="${_qt.qty}"
+        oninput="_qt.qty=Math.max(1,+this.value||1);_qtCalcTotal()">
+      <button class="qt-step-btn" onclick="_qtAdj(1)">+</button>
+    </div>
+
+    <div class="qt-label">Order Type</div>
+    <div class="qt-otype-row">
+      <button class="qt-otype-btn ${_qt.otype==='market'?'active':''}"     onclick="_qtSetOtype('market')">Market</button>
+      <button class="qt-otype-btn ${_qt.otype==='limit'?'active':''}"      onclick="_qtSetOtype('limit')">Limit</button>
+      <button class="qt-otype-btn ${_qt.otype==='stop_limit'?'active':''}" onclick="_qtSetOtype('stop_limit')">Stop Limit</button>
+    </div>
+
+    <div id="qt-limit-wrap" style="display:${_qt.otype!=='market'?'block':'none'}">
+      <input class="qt-limit-input" id="qt-limit" type="number" step="0.01" min="0.01"
+        value="${_qt.limitPrice != null ? _qt.limitPrice.toFixed(2) : ''}"
+        placeholder="Limit price"
+        oninput="_qt.limitPrice=+this.value||null;_qtCalcTotal()">
+    </div>
+    <div class="qt-price-hint" id="qt-hint">${_qt.livePrice ? 'Live: $'+fmt2(_qt.livePrice) : 'Fetching price…'}</div>
+
+    <div class="qt-total">
+      <span class="qt-total-lbl">Est. ${_qt.qtyMode==='dollars'?'Shares':'Total'}</span>
+      <span class="qt-total-val" id="qt-est"></span>
+    </div>
+
+    <button class="qt-cta ${_qt.side}" onclick="_qtReview()">
+      Review ${_qt.side==='buy'?'Buy':'Sell'} Order →
+    </button>`;
+}
+
+function _qtCalcTotal() {
+  const el = document.getElementById('qt-est');
+  if (!el) return;
+  const price = _qt.otype !== 'market' ? _qt.limitPrice : _qt.livePrice;
+  if (_qt.qtyMode === 'dollars') {
+    el.textContent = price && _qt.qty ? Math.floor(_qt.qty / price) + ' shares' : '—';
+  } else {
+    el.textContent = price && _qt.qty ? fmtDollar(price * _qt.qty) : '—';
+  }
+}
+
+function _qtRenderStep1() {
+  _bsSetContent(
+    _qt.sym || 'Quick Trade',
+    _qt.side === 'buy' ? '📈 Buy Order' : '📉 Sell Order',
+    _buildStep1Html()
+  );
+  _qtCalcTotal();
+}
+
+function _qtSetSide(s)  { _qtSync(); _qt.side  = s; _qtRenderStep1(); }
+function _qtSetSrc(k)   { _qtSync(); _qt.srcKey = k; _qtRenderStep1(); }
+function _qtSetMode(m)  { _qtSync(); _qt.qtyMode = m; _qtRenderStep1(); }
+function _qtSetOtype(t) {
+  _qtSync(); _qt.otype = t;
+  const w = document.getElementById('qt-limit-wrap');
+  if (w) { w.style.display = t !== 'market' ? 'block' : 'none'; }
+  else _qtRenderStep1();
+  _qtCalcTotal();
+}
+function _qtAdj(d) {
+  _qt.qty = Math.max(1, (_qt.qty || 1) + d);
+  const el = document.getElementById('qt-qty');
+  if (el) el.value = _qt.qty;
+  haptic(5);
+  _qtCalcTotal();
+}
+
+async function openQuickTrade(symbol, side) {
+  closeLpPop();
+  _qt = {
+    sym:        symbol ? symbol.toUpperCase() : '',
+    side:       side || 'buy',
+    srcKey:     _qtSrcDefault(),
+    qtyMode:    'shares',
+    qty:        1,
+    otype:      'market',
+    limitPrice: null,
+    livePrice:  null,
+  };
+  if (_bsOpen) {
+    _qtRenderStep1();
+  } else {
+    openSheet(_qt.sym || 'Quick Trade', _qt.side==='buy' ? '📈 Buy Order' : '📉 Sell Order', _buildStep1Html());
+    _qtCalcTotal();
+  }
+  // Fetch live price async
+  if (_qt.sym) _qtFetchPrice(_qt.sym);
+}
+
+async function _qtFetchPrice(sym) {
+  try {
+    const q = await apiFetch('/api/quote/' + sym);
+    _qt.livePrice = q?.price ?? q?.c ?? null;
+    if (_qt.livePrice) {
+      const hint = document.getElementById('qt-hint');
+      if (hint) hint.textContent = 'Live: $' + fmt2(_qt.livePrice);
+      const lim = document.getElementById('qt-limit');
+      if (lim && !lim.value) lim.value = _qt.livePrice.toFixed(2);
+      _qtCalcTotal();
+    }
+  } catch (_) {}
+}
+
+function _qtReview() {
+  _qtSync();
+  if (!_qt.sym) { toast('Enter a symbol'); return; }
+  if (_qt.otype !== 'market' && !_qt.limitPrice) { toast('Enter a limit price'); return; }
+  if (_qt.qty < 1) { toast('Quantity must be at least 1'); return; }
+
+  const src = _QT_SRCS.find(s => s.key === _qt.srcKey) || _QT_SRCS[0];
+  const resolvedQty = _qt.qtyMode === 'dollars' && _qt.livePrice
+    ? Math.max(1, Math.floor(_qt.qty / _qt.livePrice))
+    : _qt.qty;
+  const price    = _qt.otype !== 'market' ? _qt.limitPrice : _qt.livePrice;
+  const estTotal = price ? price * resolvedQty : null;
+  const isBuy    = _qt.side === 'buy';
+
+  _bsSetContent(
+    _qt.sym,
+    isBuy ? '📈 Review Buy Order' : '📉 Review Sell Order',
+    `<button class="qt-back-btn" onclick="openQuickTrade('${_qt.sym}','${_qt.side}')">← Edit Order</button>
+     <div class="qt-review-card">
+       <div class="qt-review-row"><span>Symbol</span><strong>${escapeHtml(_qt.sym)}</strong></div>
+       <div class="qt-review-row"><span>Side</span>
+         <strong class="${isBuy?'pos':'neg'}">${_qt.side.toUpperCase()}</strong></div>
+       <div class="qt-review-row"><span>Quantity</span>
+         <span>${resolvedQty} share${resolvedQty!==1?'s':''}</span></div>
+       <div class="qt-review-row"><span>Order Type</span>
+         <span>${_qt.otype==='market'?'Market':_qt.otype==='limit'?'Limit @ $'+_qt.limitPrice?.toFixed(2):'Stop Limit @ $'+_qt.limitPrice?.toFixed(2)}</span></div>
+       <div class="qt-review-row"><span>Account</span><span>${src.label}</span></div>
+       ${_qt.livePrice ? `<div class="qt-review-row"><span>Live Price</span><span>$${fmt2(_qt.livePrice)}</span></div>` : ''}
+       <div class="qt-review-row total-row">
+         <span>Est. Total</span><span>${estTotal!=null?fmtDollar(estTotal):'—'}</span>
+       </div>
+     </div>
+     <button id="qt-place-btn" class="qt-cta ${_qt.side}" onclick="_qtPlace(this)">
+       ✓ Place ${isBuy?'Buy':'Sell'} Order
+     </button>`
+  );
+  haptic(10);
+}
+
+async function _qtPlace(btn) {
+  btn.disabled    = true;
+  btn.textContent = 'Placing…';
+  haptic(20);
+
+  const src    = _QT_SRCS.find(s => s.key === _qt.srcKey) || _QT_SRCS[0];
+  const qty    = _qt.qtyMode === 'dollars' && _qt.livePrice
+    ? Math.max(1, Math.floor(_qt.qty / _qt.livePrice))
+    : _qt.qty;
+  const body   = { symbol: _qt.sym, side: _qt.side, qty, order_type: _qt.otype, source: src.api };
+  if (_qt.otype !== 'market' && _qt.limitPrice) body.limit_price = _qt.limitPrice;
+
+  try {
+    const res = await apiFetch('/api/trade/quick', { method:'POST', body:JSON.stringify(body) });
+    if (res.error) throw new Error(res.error);
+    haptic([20, 50, 20]);
+    toast(`✅ ${_qt.side.toUpperCase()} ${qty} ${_qt.sym} placed · ${src.label}`);
+    closeSheet();
+    // Refresh home if active
+    _loaded['home'] = false;
+    if (_activeTab === 'home') loadHome();
+  } catch (err) {
+    haptic([30, 20, 30]);
+    toast(`❌ ${err.message || 'Order failed'}`, 4000);
+    btn.disabled    = false;
+    btn.textContent = `✓ Place ${_qt.side==='buy'?'Buy':'Sell'} Order`;
+  }
+}
+
+/* ── Long-press Quick Actions ────────────────────────────────────────── */
+const _lpPop = document.getElementById('lp-pop');
+let _lpSym = '', _lpTimer = null, _lpFired = false, _lpX0 = 0, _lpY0 = 0;
+
+function closeLpPop() { _lpPop.style.display = 'none'; _lpSym = ''; }
+
+function _lpShow(sym, x, y) {
+  _lpSym = sym;
+  _lpPop.innerHTML =
+    `<button class="lp-pop-item" onclick="_lpAct('detail')">🔍 View Detail</button>
+     <button class="lp-pop-item" onclick="_lpAct('buy')">📈 Quick Buy</button>
+     <button class="lp-pop-item" onclick="_lpAct('sell')">📉 Quick Sell</button>
+     <button class="lp-pop-item" onclick="_lpAct('watchlist')">❤️ Add to Watchlist</button>`;
+  const pw = 190, ph = 188;
+  _lpPop.style.left    = Math.min(x, window.innerWidth  - pw - 8) + 'px';
+  _lpPop.style.top     = Math.min(y - 10, window.innerHeight - ph - 8) + 'px';
+  _lpPop.style.display = 'block';
+}
+
+async function _lpAct(action) {
+  const sym = _lpSym;
+  closeLpPop();
+  if      (action === 'detail')    openStock(sym);
+  else if (action === 'buy')       openQuickTrade(sym, 'buy');
+  else if (action === 'sell')      openQuickTrade(sym, 'sell');
+  else if (action === 'watchlist') {
+    try {
+      await apiFetch('/api/watchlist/add', { method:'POST', body:JSON.stringify({ symbol:sym }) });
+      toast(`❤️ ${sym} added to watchlist`);
+    } catch (e) { toast('Failed to add to watchlist'); }
+  }
+}
+
+/* Event delegation — long-press on any stock row in #main */
+(function() {
+  const main = document.getElementById('main');
+
+  function _extractSym(el) {
+    for (let i = 0; i < 5 && el; i++, el = el.parentElement) {
+      const m = (el.getAttribute?.('onclick') || '').match(/openStock\(['"]([A-Z0-9.\-]{1,10})['"]\)/);
+      if (m) return m[1];
+    }
+    return null;
+  }
+
+  main.addEventListener('pointerdown', e => {
+    const sym = _extractSym(e.target);
+    if (!sym) return;
+    _lpX0 = e.clientX;  _lpY0 = e.clientY;
+    _lpFired = false;
+    _lpTimer = setTimeout(() => {
+      haptic([15, 30, 15]);
+      _lpFired = true;
+      _lpShow(sym, _lpX0, _lpY0);
+    }, 500);
+  });
+
+  main.addEventListener('pointermove', e => {
+    if (!_lpTimer) return;
+    if (Math.abs(e.clientX - _lpX0) > 10 || Math.abs(e.clientY - _lpY0) > 10) {
+      clearTimeout(_lpTimer);  _lpTimer = null;
+    }
+  });
+
+  const _lpCancel = () => { clearTimeout(_lpTimer); _lpTimer = null; };
+  main.addEventListener('pointerup',     _lpCancel);
+  main.addEventListener('pointercancel', _lpCancel);
+
+  // Swallow the click that follows a long-press (capture phase, before onclick fires)
+  main.addEventListener('click', e => {
+    if (_lpFired) { _lpFired = false; e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
+
+  // Dismiss popover on outside touch
+  document.addEventListener('pointerdown', e => {
+    if (_lpPop.style.display !== 'none' && !_lpPop.contains(e.target)) closeLpPop();
+  }, { capture: true });
+})();
 
 /* ── Utility: time ago ───────────────────────────────────────────────── */
 function timeAgo(ts) {
