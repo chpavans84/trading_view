@@ -838,6 +838,40 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_webauthn_username ON webauthn_credentials(username);
+
+CREATE TABLE IF NOT EXISTS benzinga_news (
+  id            BIGSERIAL PRIMARY KEY,
+  article_id    TEXT UNIQUE NOT NULL,
+  title         TEXT NOT NULL,
+  teaser        TEXT,
+  url           TEXT,
+  source        TEXT,
+  author        TEXT,
+  image_url     TEXT,
+  channels      JSONB,
+  tickers       JSONB,
+  sentiment     TEXT,
+  published_at  TIMESTAMPTZ NOT NULL,
+  updated_at    TIMESTAMPTZ,
+  raw           JSONB,
+  ingested_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_bz_news_published ON benzinga_news(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bz_news_tickers   ON benzinga_news USING GIN(tickers);
+CREATE INDEX IF NOT EXISTS idx_bz_news_sentiment ON benzinga_news(sentiment) WHERE sentiment IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bz_news_source    ON benzinga_news(source);
+CREATE INDEX IF NOT EXISTS idx_bz_news_search    ON benzinga_news USING GIN(
+  to_tsvector('english', coalesce(title,'') || ' ' || coalesce(teaser,''))
+);
+
+CREATE TABLE IF NOT EXISTS news_saved (
+  id          BIGSERIAL PRIMARY KEY,
+  username    TEXT NOT NULL,
+  article_id  TEXT NOT NULL,
+  saved_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (username, article_id)
+);
+CREATE INDEX IF NOT EXISTS idx_news_saved_user ON news_saved(username, saved_at DESC);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────

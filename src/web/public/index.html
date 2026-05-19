@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260518d">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260519o">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -166,6 +166,7 @@
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
+    <button class="tab" id="tab-discover" onclick="showPage('discover',this)">🔥 Discover</button>
     <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)">Signal Center</button>
     <button class="tab" id="tab-trading-desk" onclick="showPage('trading-desk',this)">Trading Desk</button>
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
@@ -443,6 +444,7 @@
         <div id="sysAlertsBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
       </div>
       <!-- Detail modal -->
+
       <div id="sysAlertModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px">
         <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:800px;margin:0 auto;padding:24px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -626,90 +628,6 @@
 
   <div>
 
-    <!-- Earnings Calendar -->
-    <div style="margin-bottom:28px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
-        <h3 style="margin:0;font-size:1rem;font-weight:700;color:var(--text)">📅 Earnings Calendar</h3>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <button onclick="earningsCalNav(-7)" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:0.85rem;cursor:pointer">‹‹</button>
-          <span id="earningsCalLabel" style="font-size:0.85rem;font-weight:600;color:var(--text);min-width:160px;text-align:center">—</span>
-          <button onclick="earningsCalNav(7)"  style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:0.85rem;cursor:pointer">››</button>
-          <button onclick="earningsCalReset()" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--accent);font-size:0.8rem;cursor:pointer;font-weight:600">Today</button>
-          <input type="date" id="earningsCalJumpInput" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:3px 7px;color:var(--text);font-size:0.78rem;cursor:pointer" title="Jump to date" onchange="earningsCalJump(this.value)">
-          <button onclick="loadEarningsCalendar(true)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
-        </div>
-      </div>
-      <div style="position:relative;margin-bottom:12px">
-        <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:#8b949e" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input id="earningsCalSearch" type="text" placeholder="Search ticker or company…"
-          style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 34px 8px 32px;color:#e6edf3;font-size:0.83rem;outline:none;transition:border-color .15s"
-          oninput="earningsCalSetSearch(this.value)"
-          onfocus="this.style.borderColor='#58a6ff';this.style.boxShadow='0 0 0 3px rgba(88,166,255,0.12)'"
-          onblur="this.style.borderColor='#30363d';this.style.boxShadow='none'">
-        <button id="earningsCalClear" onclick="document.getElementById('earningsCalSearch').value='';earningsCalSetSearch('')"
-          style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#8b949e;cursor:pointer;font-size:0.9rem;line-height:1;padding:2px 4px">✕</button>
-      </div>
-      <div id="earningsCalGrid" class="ecal-grid">
-        <div class="loading" style="grid-column:1/-1;padding:32px;text-align:center">Loading earnings…</div>
-      </div>
-    </div>
-
-    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
-
-    <!-- ── Earnings Preview — deep weekly research ── -->
-    <div style="margin-bottom:28px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
-        <div>
-          <h3 style="margin:0 0 2px;font-size:1rem;font-weight:700;color:var(--text)">📊 Earnings Preview — Next Week <button class="doc-btn" onclick="openResearchDoc('earnings_preview')" title="How this works">?</button></h3>
-          <div style="font-size:0.73rem;color:var(--text2)">Deep trend · last 4 quarters · analyst estimates · live news</div>
-        </div>
-        <button id="epRefreshBtn" onclick="loadEarningsPreview(true)"
-          style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻ Refresh</button>
-      </div>
-      <div id="epBody">
-        <div style="padding:32px;text-align:center;color:#6e7681;font-size:0.85rem">Click ↻ Refresh to load earnings preview…</div>
-      </div>
-    </div>
-
-    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
-
-    <!-- ── Earnings Reaction Analysis ── -->
-    <div style="margin-bottom:28px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
-        <div>
-          <h3 style="margin:0 0 2px;font-size:1rem;font-weight:700;color:var(--text)">📊 Earnings Reaction Analysis</h3>
-          <div style="font-size:0.73rem;color:var(--text2)">Day before / Earnings day / Day after — price, volume, change% — last 3 years</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <input id="erSymInput" type="text" placeholder="NVDA" maxlength="8"
-            style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#e6edf3;font-size:0.82rem;width:80px;outline:none;text-transform:uppercase"
-            oninput="this.value=this.value.toUpperCase()"
-            onkeydown="if(event.key==='Enter')loadEarningsReaction(this.value.trim())">
-          <button onclick="loadEarningsReaction(document.getElementById('erSymInput').value.trim()||'NVDA')"
-            style="background:#1f6feb;border:1px solid #388bfd;border-radius:6px;padding:5px 10px;color:#fff;font-size:0.8rem;cursor:pointer">Go</button>
-          <div style="display:flex;gap:5px;flex-wrap:wrap" id="erQuickBtns">
-            <button class="er-sym-btn active" onclick="erQuickSelect('NVDA')">NVDA</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('AAPL')">AAPL</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('MSFT')">MSFT</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('META')">META</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('GOOGL')">GOOGL</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('AMZN')">AMZN</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('TSLA')">TSLA</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('AMD')">AMD</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('NFLX')">NFLX</button>
-            <button class="er-sym-btn" onclick="erQuickSelect('CRM')">CRM</button>
-          </div>
-          <button onclick="loadEarningsReaction(_erCurrentSym, true)"
-            style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
-        </div>
-      </div>
-      <div id="erBody">
-        <div class="loading" style="padding:30px;text-align:center">Select a symbol to load earnings reaction data…</div>
-      </div>
-    </div>
-
-    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
-
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
@@ -779,6 +697,41 @@
       <div id="bzDividendsBody"><div class="loading" style="padding:16px">Loading dividend calendar…</div></div>
     </div>
 
+  </div>
+</div>
+
+<!-- ═══════════════════════ DISCOVER PAGE ════════════════════════ -->
+<div class="page" id="page-discover">
+  <div class="disc-header">
+    <h2 class="disc-title">🔥 Discover <span class="disc-stats" id="discStats"></span></h2>
+    <div class="disc-filter-bar">
+      <input id="discSearch" class="disc-search" type="text" placeholder="Search headlines &amp; teasers…"
+             oninput="discDebounceReload()">
+      <input id="discTickerFilter" class="disc-filter-input" type="text" placeholder="Ticker (e.g. NVDA)" maxlength="8"
+             oninput="this.value=this.value.toUpperCase()" onchange="discApplyFilters()">
+      <select id="discSentiment" class="disc-filter-select" onchange="discApplyFilters()">
+        <option value="">All sentiment</option>
+        <option value="positive">🟢 Positive</option>
+        <option value="negative">🔴 Negative</option>
+        <option value="neutral">⚪ Neutral</option>
+      </select>
+      <select id="discSource" class="disc-filter-select" onchange="discApplyFilters()">
+        <option value="">All sources</option>
+      </select>
+      <label class="disc-saved-toggle">
+        <input type="checkbox" id="discSavedOnly" onchange="discApplyFilters()">
+        <span>🔖 Saved only</span>
+      </label>
+      <button class="disc-refresh-btn" onclick="discReload(true)" title="Refresh">↻</button>
+    </div>
+    <div id="discChipRow" class="disc-chip-row"></div>
+    <div id="discNewPill" class="disc-new-pill" style="display:none" onclick="discApplyNewArticles()"></div>
+  </div>
+  <div id="discFeed" class="disc-feed">
+    <div class="disc-empty">Loading…</div>
+  </div>
+  <div class="disc-load-more-wrap">
+    <button id="discLoadMore" class="disc-load-more" onclick="discLoadOlder()" style="display:none">Load older</button>
   </div>
 </div>
 
@@ -959,6 +912,90 @@
       </div>
     </div>
 
+    <!-- ── Earnings Calendar ──────────────────────────────────────────────── -->
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
+        <h3 style="margin:0;font-size:1rem;font-weight:700;color:var(--text)">📅 Earnings Calendar</h3>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button onclick="earningsCalNav(-7)" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:0.85rem;cursor:pointer">‹‹</button>
+          <span id="earningsCalLabel" style="font-size:0.85rem;font-weight:600;color:var(--text);min-width:160px;text-align:center">—</span>
+          <button onclick="earningsCalNav(7)"  style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:0.85rem;cursor:pointer">››</button>
+          <button onclick="earningsCalReset()" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--accent);font-size:0.8rem;cursor:pointer;font-weight:600">Today</button>
+          <input type="date" id="earningsCalJumpInput" style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:3px 7px;color:var(--text);font-size:0.78rem;cursor:pointer" title="Jump to date" onchange="earningsCalJump(this.value)">
+          <button onclick="loadEarningsCalendar(true)" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
+        </div>
+      </div>
+      <div style="position:relative;margin-bottom:12px">
+        <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:#8b949e" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="earningsCalSearch" type="text" placeholder="Search ticker or company…"
+          style="width:100%;box-sizing:border-box;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 34px 8px 32px;color:#e6edf3;font-size:0.83rem;outline:none;transition:border-color .15s"
+          oninput="earningsCalSetSearch(this.value)"
+          onfocus="this.style.borderColor='#58a6ff';this.style.boxShadow='0 0 0 3px rgba(88,166,255,0.12)'"
+          onblur="this.style.borderColor='#30363d';this.style.boxShadow='none'">
+        <button id="earningsCalClear" onclick="document.getElementById('earningsCalSearch').value='';earningsCalSetSearch('')"
+          style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#8b949e;cursor:pointer;font-size:0.9rem;line-height:1;padding:2px 4px">✕</button>
+      </div>
+      <div id="earningsCalGrid" class="ecal-grid">
+        <div class="loading" style="grid-column:1/-1;padding:32px;text-align:center">Loading earnings…</div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
+
+    <!-- ── Earnings Preview — Next Week ────────────────────────────────────── -->
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div>
+          <h3 style="margin:0 0 2px;font-size:1rem;font-weight:700;color:var(--text)">📊 Earnings Preview — Next Week <button class="doc-btn" onclick="openResearchDoc('earnings_preview')" title="How this works">?</button></h3>
+          <div style="font-size:0.73rem;color:var(--text2)">Deep trend · last 4 quarters · analyst estimates · live news</div>
+        </div>
+        <button id="epRefreshBtn" onclick="loadEarningsPreview(true)"
+          style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻ Refresh</button>
+      </div>
+      <div id="epBody">
+        <div style="padding:32px;text-align:center;color:#6e7681;font-size:0.85rem">Click ↻ Refresh to load earnings preview…</div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
+
+    <!-- ── Earnings Reaction Analysis ──────────────────────────────────────── -->
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div>
+          <h3 style="margin:0 0 2px;font-size:1rem;font-weight:700;color:var(--text)">📊 Earnings Reaction Analysis</h3>
+          <div style="font-size:0.73rem;color:var(--text2)">Day before / Earnings day / Day after — price, volume, change% — last 3 years</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <input id="erSymInput" type="text" placeholder="NVDA" maxlength="8"
+            style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#e6edf3;font-size:0.82rem;width:80px;outline:none;text-transform:uppercase"
+            oninput="this.value=this.value.toUpperCase()"
+            onkeydown="if(event.key==='Enter')loadEarningsReaction(this.value.trim())">
+          <button onclick="loadEarningsReaction(document.getElementById('erSymInput').value.trim()||'NVDA')"
+            style="background:#1f6feb;border:1px solid #388bfd;border-radius:6px;padding:5px 10px;color:#fff;font-size:0.8rem;cursor:pointer">Go</button>
+          <div style="display:flex;gap:5px;flex-wrap:wrap" id="erQuickBtns">
+            <button class="er-sym-btn active" onclick="erQuickSelect('NVDA')">NVDA</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('AAPL')">AAPL</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('MSFT')">MSFT</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('META')">META</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('GOOGL')">GOOGL</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('AMZN')">AMZN</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('TSLA')">TSLA</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('AMD')">AMD</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('NFLX')">NFLX</button>
+            <button class="er-sym-btn" onclick="erQuickSelect('CRM')">CRM</button>
+          </div>
+          <button onclick="loadEarningsReaction(_erCurrentSym, true)"
+            style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text2);font-size:0.8rem;cursor:pointer">↻</button>
+        </div>
+      </div>
+      <div id="erBody">
+        <div class="loading" style="padding:30px;text-align:center">Select a symbol to load earnings reaction data…</div>
+      </div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin-bottom:24px">
+
     <!-- ── Search bar + controls ───────────────────────────────────── -->
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
       <div style="position:relative;flex:1;min-width:200px;max-width:320px">
@@ -980,15 +1017,9 @@
     <!-- ── Unified layout: Earnings left | Graph right ────────────── -->
     <div id="sc-main-grid" style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start">
 
-      <!-- Left column: Upcoming Earnings + Pre-market -->
+      <!-- Left column: Pre-market -->
       <div>
-        <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
-          <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">📅 Upcoming Earnings</div>
-          <div id="sc-earnings-list" style="padding:8px 0">
-            <div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>
-          </div>
-        </div>
-        <div id="sc-premarket-wrap" style="margin-top:12px;display:none">
+        <div id="sc-premarket-wrap" style="display:none">
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden">
             <div style="padding:12px 16px;border-bottom:1px solid #21262d;font-size:0.85rem;font-weight:600;color:#e6edf3">🌅 Pre-Market Movers</div>
             <div id="sc-premarket-list" style="padding:8px 16px"></div>
@@ -4687,6 +4718,7 @@ const TAB_PAGE_MAP = {
   dashboard: 'dashboard', trades: 'trades',
   market: 'market', stats: 'stats', research: 'research',
   bot_rules: 'bot', admin_bot: 'admin', calendar: 'calendar',
+  discover:      'discover',
   signal_center: 'signal-center',
   trading_desk:  'trading-desk',
 };
@@ -5940,6 +5972,7 @@ let _explorerLiveQuote = null;
 let _explorerChart     = null;
 let _explorerView      = 'price';
 let _explorerEarnings  = null; // { symbol, events[] } from earnings-reaction
+let _explorerNews      = null; // { symbol, articles[] } from Benzinga news
 
 async function loadResearch() {
   loadTopPicks();
@@ -6514,6 +6547,7 @@ async function loadStockExplorer() {
   _explorerData      = null;
   _explorerLiveQuote = null;
   _explorerEarnings  = null;
+  _explorerNews      = null;
   if (_lwChart) { try { _lwChart.remove(); } catch {} _lwChart = null; }
 
   // Show loading state
@@ -6563,6 +6597,8 @@ async function loadStockExplorer() {
     loadExplorerExtras(symbol);
     // Load earnings dates lazily — adds markers to chart when ready
     loadExplorerEarnings(symbol);
+    // Load Benzinga news lazily — adds sentiment markers to chart when ready
+    loadExplorerNews(symbol);
     // Refresh company tab if it's currently visible
     if (document.getElementById('exViewPortfolio')?.style.display !== 'none') loadExplorerCompany();
   } catch (e) {
@@ -6882,6 +6918,16 @@ async function loadExplorerEarnings(symbol) {
   } catch {}
 }
 
+async function loadExplorerNews(symbol) {
+  try {
+    const data = await api(`/api/benzinga/news?symbol=${encodeURIComponent(symbol)}&limit=50`, 10000);
+    console.log('[news] api returned articles:', data?.articles?.length ?? 'null');
+    if (!_explorerData || _explorerData.symbol !== symbol) { console.log('[news] stale, skip'); return; }
+    _explorerNews = { symbol, articles: data?.articles || [] };
+    applyExplorerMarkers();
+  } catch(e) { console.error('[news] error:', e); }
+}
+
 function _buildExplorerMarkers() {
   const { scores } = _explorerData || {};
   const gradeColor = { A: '#3fb950', B: '#58a6ff', C: '#e3b341', F: '#f85149' };
@@ -6918,13 +6964,38 @@ function _buildExplorerMarkers() {
     }
   }
 
+  // News markers — Benzinga (Phase A)
+  if (_explorerNews?.articles?.length) {
+    const lastBar = _lwOhlcv?.length ? _lwOhlcv[_lwOhlcv.length - 1].time : null;
+    const byDate = new Map();
+    for (const a of _explorerNews.articles) {
+      if (!a.published_at) continue;
+      const raw = a.published_at.slice(0, 10);
+      const t = (lastBar && raw > lastBar) ? lastBar : raw;
+      if (!byDate.has(t)) byDate.set(t, []);
+      byDate.get(t).push(a);
+    }
+    for (const [t, articles] of byDate) {
+      const top = articles[0];
+      const s = (top.sentiment || '').toLowerCase();
+      const color = s === 'positive' ? '#10b981' : s === 'negative' ? '#f85149' : '#8b949e';
+      const shape = s === 'positive' ? 'arrowUp' : s === 'negative' ? 'arrowDown' : 'circle';
+      const countText = articles.length > 1 ? `📰${articles.length}` : '📰';
+      markers.push({ time: t, position: 'aboveBar', color, shape, text: countText, size: 1 });
+    }
+  }
+
   // LightweightCharts requires markers sorted by time
   return markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
 }
 
 function applyExplorerMarkers() {
-  if (!_lwMainSeries || !_explorerData) return;
-  try { _lwMainSeries.setMarkers(_buildExplorerMarkers()); } catch {}
+  if (!_lwMainSeries || !_explorerData) { console.log('[markers] skipped – no series or data'); return; }
+  try {
+    const m = _buildExplorerMarkers();
+    console.log('[markers] setMarkers', m.length, 'total | news:', m.filter(x=>(x.text||'').includes('📰')).length);
+    _lwMainSeries.setMarkers(m);
+  } catch(e) { console.error('[markers] setMarkers FAILED:', e); }
 }
 
 function renderTVChart(symbol) {
@@ -7085,6 +7156,61 @@ function renderTVChart(symbol) {
   // Redraw year separators on scroll/zoom
   chart.timeScale().subscribeVisibleTimeRangeChange(() =>
     requestAnimationFrame(drawYearSeparators));
+
+  // ── Marker tooltip on crosshair ────────────────────────────────────────────
+  // Created programmatically — container.innerHTML='' above destroys any static HTML child
+  const _ttEl = document.createElement('div');
+  _ttEl.className = 'ex-marker-tooltip';
+  _ttEl.style.display = 'none';
+  container.appendChild(_ttEl);
+  chart.subscribeCrosshairMove(param => {
+    if (!param.time || !param.point) { _ttEl.style.display = 'none'; return; }
+    const t = typeof param.time === 'string' ? param.time : null;
+    if (!t) { _ttEl.style.display = 'none'; return; }
+
+    const newsArticles  = (_explorerNews?.articles  || []).filter(a => {
+      if (!a.published_at) return false;
+      const raw = a.published_at.slice(0, 10);
+      const lastBar = _lwOhlcv?.length ? _lwOhlcv[_lwOhlcv.length-1].time : null;
+      const d = (lastBar && raw > lastBar) ? lastBar : raw;
+      return d === t;
+    });
+    const earnEvent = (_explorerEarnings?.events || []).find(e => e.earnings_date === t);
+
+    if (!newsArticles.length && !earnEvent) { _ttEl.style.display = 'none'; return; }
+
+    let html = '';
+    if (earnEvent) {
+      const beat = earnEvent.surprise_pct != null ? earnEvent.surprise_pct >= 0 : null;
+      const icon = beat === true ? '▲' : beat === false ? '▼' : '●';
+      const col  = beat === true ? '#10b981' : beat === false ? '#f85149' : '#f0883e';
+      html += `<div class="ex-tt-section"><span style="color:${col};font-weight:700">${icon} Earnings — ${earnEvent.earnings_date}</span>`;
+      if (earnEvent.eps_actual != null) html += `<br>EPS: $${Number(earnEvent.eps_actual).toFixed(2)} vs est $${Number(earnEvent.eps_est ?? earnEvent.eps_actual).toFixed(2)}`;
+      if (earnEvent.surprise_pct != null) html += ` <span style="color:${col}">(${earnEvent.surprise_pct > 0 ? '+' : ''}${Number(earnEvent.surprise_pct).toFixed(1)}%)</span>`;
+      html += '</div>';
+    }
+    if (newsArticles.length) {
+      const sentColor = s => s==='positive'?'#10b981':s==='negative'?'#f85149':'#8b949e';
+      const _escTt = s => String(s ?? '').replace(/[&<>"']/g, ch =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+      html += `<div class="ex-tt-section"><span style="color:#e6edf3;font-weight:600">📰 ${newsArticles.length} article${newsArticles.length>1?'s':''} · ${t}</span>`;
+      for (const a of newsArticles.slice(0, 5)) {
+        const sc = sentColor((a.sentiment||'').toLowerCase());
+        const title = _escTt((a.title||'').slice(0,68));
+        html += `<div class="ex-tt-row"><span style="color:${sc}">●</span> ${title}${(a.title||'').length>68?'…':''}</div>`;
+      }
+      if (newsArticles.length > 5) html += `<div class="ex-tt-more">+${newsArticles.length-5} more</div>`;
+      html += '</div>';
+    }
+
+    _ttEl.innerHTML = html;
+    _ttEl.style.display = 'block';
+    const cx = param.point.x, cy = param.point.y;
+    const w = _ttEl.offsetWidth || 260, h2 = _ttEl.offsetHeight || 80;
+    const cw = container.clientWidth, ch = container.clientHeight;
+    _ttEl.style.left = (cx + w + 12 > cw ? cx - w - 8 : cx + 12) + 'px';
+    _ttEl.style.top  = Math.max(4, Math.min(cy - 8, ch - h2 - 4)) + 'px';
+  });
 
   // ── Responsive resize ─────────────────────────────────────────────────────
   const ro = new ResizeObserver(() => {
@@ -8406,14 +8532,17 @@ async function logout() {
 }
 
 // ── Page navigation ───────────────────────────────────
+let _showPageCurrent = null;
 function showPage(name, btn) {
+  if (_showPageCurrent === 'discover' && name !== 'discover') discOnHide?.();
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   if (name !== 'trading-desk') _tdClearHeight?.();
   const page = document.getElementById('page-' + name);
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, 'signal-center': loadSignalCenter, 'trading-desk': loadTradingDesk };
+  _showPageCurrent = name;
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': loadSignalCenter, 'trading-desk': loadTradingDesk };
   loaders[name]?.();
 }
 
@@ -8748,6 +8877,8 @@ async function loadStrongBuys(force = false) {
 }
 
 // ── Tomorrow's Catalysts ──────────────────────────────
+let _tcConvictionMap = {};
+
 async function loadTomorrowCatalysts(force = false) {
   const body = document.getElementById('tcBody');
   const meta = document.getElementById('tcMeta');
@@ -8767,6 +8898,21 @@ async function loadTomorrowCatalysts(force = false) {
   const ts = d.generated_at ? new Date(d.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   const total = (d.amc_tonight?.length || 0) + (d.bmo_tomorrow?.length || 0) + (d.pre_drift?.length || 0);
   if (meta) meta.textContent = `${total} catalysts · ${ts}`;
+
+  // Batch-fetch conviction for all catalyst symbols (best-effort)
+  _tcConvictionMap = {};
+  try {
+    const allSyms = [
+      ...(d.amc_tonight  || []).map(e => e.symbol),
+      ...(d.bmo_tomorrow || []).map(e => e.symbol),
+      ...(d.pre_drift    || []).map(e => e.symbol),
+    ].filter(Boolean);
+    if (allSyms.length) {
+      const syms = [...new Set(allSyms)].slice(0, 50).join(',');
+      const cv = await api(`/api/uw/conviction?symbols=${syms}`, 8_000);
+      if (cv) _tcConvictionMap = cv;
+    }
+  } catch (_) {}
 
   renderTomorrowCatalysts(d);
 }
@@ -8798,10 +8944,38 @@ function renderTomorrowCatalysts(data) {
       ? `<div class="tc-news">${s.top_news.title.length > 90 ? s.top_news.title.slice(0, 90) + '…' : s.top_news.title}</div>`
       : '';
 
+    const uwHtml = (() => {
+      const parts = [];
+      if (s.uw_analyst_target_avg != null) {
+        const tgt = `$${(+s.uw_analyst_target_avg).toFixed(0)}`;
+        const diff = s.price != null ? ((s.uw_analyst_target_avg - s.price) / s.price * 100) : null;
+        const col = diff == null ? '#8b949e' : diff >= 5 ? '#3fb950' : diff <= -5 ? '#f85149' : '#d29922';
+        const diffStr = diff != null ? ` <span style="color:${col}">(${diff >= 0 ? '+' : ''}${diff.toFixed(0)}%)</span>` : '';
+        parts.push(`<div class="tc-uw-row"><span class="tc-uw-lbl">UW Analyst Target</span><span style="color:${col}">${tgt}${diffStr}</span>${s.uw_analyst_count ? `<span class="tc-uw-lbl">&nbsp;·&nbsp;${s.uw_analyst_count} analysts</span>` : ''}</div>`);
+      }
+      if (s.uw_last_quarter) {
+        parts.push(`<div class="tc-uw-row"><span class="tc-uw-lbl">Last Reported Quarter</span><span style="color:#8b949e">${s.uw_last_quarter}</span></div>`);
+      }
+      if (s.uw_transcript_label) {
+        const chipCol = s.uw_transcript_label === 'bullish' ? '#3fb950' : s.uw_transcript_label === 'bearish' ? '#f85149' : '#8b949e';
+        parts.push(`<div class="tc-uw-row"><span class="tc-uw-lbl">Transcript Tone</span><span class="tc-uw-chip" style="background:${chipCol}20;color:${chipCol};border:1px solid ${chipCol}40">${s.uw_transcript_label}</span></div>`);
+        if (s.uw_transcript_quote) {
+          parts.push(`<div class="tc-uw-quote">"${s.uw_transcript_quote}${s.uw_transcript_quote.length >= 140 ? '…' : ''}"</div>`);
+        }
+      }
+      if (!parts.length) return '';
+      const qLabel = s.uw_transcript_quarter ? ` · ${s.uw_transcript_quarter}` : '';
+      return `<details class="tc-uw-ctx"><summary>UW Context${qLabel}</summary><div class="tc-uw-body">${parts.join('')}</div></details>`;
+    })();
+
+    const convChip = renderConvictionChip((_tcConvictionMap || {})[s.symbol] || null);
     return `<div class="tc-card">
       <div class="tc-card-head">
         <div>
-          <div class="tc-sym sym-link" data-symbol="${s.symbol}">${s.symbol}</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <div class="tc-sym sym-link" data-symbol="${s.symbol}">${s.symbol}</div>
+            ${convChip}
+          </div>
           <div class="tc-co">${s.company || ''}</div>
         </div>
         <div style="text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px">
@@ -8817,6 +8991,7 @@ function renderTomorrowCatalysts(data) {
         <div class="tc-metric"><div class="tc-metric-lbl">Consensus</div><div class="tc-metric-val">${cons}</div></div>
       </div>
       ${newsHtml}
+      ${uwHtml}
     </div>`;
   }
 
@@ -9428,10 +9603,15 @@ function renderForecast() {
         const confBadge = conf != null
           ? `<div style="font-size:0.58rem;font-weight:700;color:${conf>=60?'#39d353':conf>=40?'#f0883e':'#f85149'};letter-spacing:0.02em" title="Confidence score (0–100)">${conf}</div>`
           : '';
+        const uwDelta = day.uw_modifier_delta;
+        const uwReason = day.uw_modifier_reason;
+        const uwModBadge = uwDelta != null && uwDelta !== 0
+          ? `<div style="font-size:0.56rem;font-weight:700;color:${uwDelta>0?'#58a6ff':'#bc8cff'};letter-spacing:0.02em" title="UW conviction modifier (${uwReason||''}): ${uwDelta>0?'+':''}${uwDelta}">🐋${uwDelta>0?'+':''}${uwDelta}</div>`
+          : '';
         predCell = `<td class="fc-day-cell ${colClass}" style="border-right:none">
           <div class="fc-pred">${fcFmt(day.predicted_price)}</div>
           <div class="fc-pred-chg" style="font-size:0.67rem;color:#8b949e">${fcPct(day.predicted_change_pct)}</div>
-          ${adjStr}${confBadge}
+          ${adjStr}${confBadge}${uwModBadge}
         </td>`;
       }
 
@@ -9680,12 +9860,36 @@ function renderFailureAnalysis(d) {
     symHtml += `</tbody></table></div>`;
   }
 
-  el.innerHTML = biasHtml + r2Html + dirHtml + symHtml;
+  // UW modifier stats
+  let uwHtml = '';
+  if (d.uw_modifier_stats && Object.keys(d.uw_modifier_stats).length) {
+    const uwColors = { aligned: '#39d353', conflicting: '#bc8cff', no_data: '#484f58' };
+    const uwLabels = { aligned: '🐋 Aligned', conflicting: '🐋 Conflicting', no_data: 'No UW signal' };
+    uwHtml = `<div style="margin-bottom:20px">
+      <div style="font-size:0.78rem;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">UW Conviction Modifier Impact</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">`;
+    for (const [key, r] of Object.entries(d.uw_modifier_stats)) {
+      const col = uwColors[key] || '#6e7681';
+      const lbl = uwLabels[key] || key;
+      const dir = r.dir_acc != null ? +r.dir_acc : null;
+      const err = r.avg_abs_error != null ? +r.avg_abs_error : null;
+      uwHtml += `<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 14px;min-width:120px;text-align:center">
+        <div style="font-size:0.75rem;color:${col};font-weight:600">${lbl}</div>
+        <div style="font-size:1.1rem;font-weight:700;color:#e6edf3">${r.count}</div>
+        <div style="font-size:0.68rem;color:${dir>=55?'#39d353':dir>=45?'#f0883e':'#f85149'}">${dir!=null?dir.toFixed(1)+'% dir':'—'}</div>
+        <div style="font-size:0.68rem;color:#6e7681">err ${err!=null?err.toFixed(1)+'%':'—'}</div>
+      </div>`;
+    }
+    uwHtml += `</div></div>`;
+  }
+
+  el.innerHTML = biasHtml + r2Html + dirHtml + uwHtml + symHtml;
 }
 
 // ── Earnings Calendar ─────────────────────────────────────────────
 let _earningsCalOffset = 0;
 const _earningsCalCache = new Map(); // dateStr → items[] (populated = fetched, even if empty)
+let _ecalConvMap = {}; // symbol → conviction object; populated by loadSignalCenter after cascade loads
 
 // Merge a flat earnings array into the per-date cache (dedupes by symbol)
 function _seedCalCache(earnings) {
@@ -9793,11 +9997,13 @@ function _ecalDayInner(stocks, dateStr) {
     const catCls = boom ? ` ecal-chip-${boom.cat}` : '';
     const badge  = boom ? `<span class="ecal-boom-badge">${boom.badge}</span>` : '';
     const desc   = boom?.desc ? `<span class="ecal-chip-desc">${boom.desc}</span>` : '';
+    const convChip = renderConvictionChip(_ecalConvMap[s.symbol] || null);
     return `<div class="ecal-chip ecal-chip-link${catCls}" title="${s.company||s.symbol}${s.call_time&&s.call_time!=='?'?' · '+s.call_time:''}${s.eps_estimate!=null?' · EPS est $'+s.eps_estimate:''}"
          onclick="calEarningClick('${s.symbol}')">
       <span class="ecal-chip-sym">${s.symbol}${badge}</span>
       <span class="ecal-chip-name">${s.company||''}</span>
       ${desc}
+      ${convChip ? `<span onclick="event.stopPropagation();showUwConvictionDetail('${s.symbol}')" style="display:inline-block;margin-top:3px">${convChip}</span>` : ''}
     </div>`;
   }).join('');
   return `${count}<div class="ecal-chips-wrap">${chips}</div>`;
@@ -9845,6 +10051,7 @@ function renderEarningsCalendar() {
 
 // ── Earnings Preview ──────────────────────────────────────────────
 let _epLoaded = false;
+let _epData   = null;
 
 async function loadEarningsPreview(force = false) {
   const body = document.getElementById('epBody');
@@ -9854,7 +10061,7 @@ async function loadEarningsPreview(force = false) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading…'; }
   try {
     const data = await api(`/api/earnings-preview${force ? '?force=1' : ''}`, 60000);
-    if (data?.stocks) { renderEarningsPreview(data); _epLoaded = true; }
+    if (data?.stocks) { _epData = data; renderEarningsPreview(data); _epLoaded = true; }
     else body.innerHTML = '<div style="padding:24px;text-align:center;color:#f85149">No data returned. Try again.</div>';
   } catch (err) {
     body.innerHTML = `<div style="padding:24px;text-align:center;color:#f85149">Error: ${err.message}</div>`;
@@ -9991,12 +10198,16 @@ function renderEarningsPreview(data) {
       </span>`;
     }
 
+    const uwChip = renderConvictionChip(_ecalConvMap[s.symbol] || null);
     html += `<div class="ep-footer">
       <div>
         <span class="ep-price">${priceStr}</span>
         ${chgStr ? `<span class="ep-chg" style="color:${chgColor};margin-left:6px">${chgStr}</span>` : ''}
       </div>
-      ${scorePill}
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        ${scorePill}
+        ${uwChip ? `<span onclick="event.stopPropagation();showUwConvictionDetail('${s.symbol}')" style="display:inline-block;cursor:pointer">${uwChip}</span>` : ''}
+      </div>
     </div>`;
 
     html += '</div>';  // end .ep-card
@@ -10013,7 +10224,352 @@ function renderEarningsPreview(data) {
 }
 
 // ── loadCalendar alias keeps showPage() loader working ────────────
-function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); loadEarningsCalendar(); loadEarningsReaction('NVDA'); loadEarningsPreview(); }
+function loadCalendar(force) { loadForecast(force); loadFailureAnalysis(force); }
+
+// ── UW Conviction chips ───────────────────────────────────────────────────────
+
+const _UW_CHIP_COLORS = {
+  strong_bullish: { bg: '#0d6e2a', text: '#fff', label: '🐂 Strong Bull', border: '#15803d' },
+  bullish:        { bg: '#2e8b46', text: '#fff', label: '🐂 Bull',         border: '#3fb950' },
+  neutral:        { bg: '#6c757d', text: '#fff', label: '⚖️ Mixed',        border: '#8b949e' },
+  bearish:        { bg: '#a02d2d', text: '#fff', label: '🐻 Bear',         border: '#f85149' },
+  strong_bearish: { bg: '#7c0a0a', text: '#fff', label: '🐻 Strong Bear',  border: '#c0392b' },
+};
+
+function renderConvictionChip(conviction) {
+  if (!conviction?.composite || conviction.composite.label === 'no_data') return '';
+  const c = _UW_CHIP_COLORS[conviction.composite.label] || _UW_CHIP_COLORS.neutral;
+  const score = conviction.composite.score != null ? ` (${conviction.composite.score.toFixed(2)})` : '';
+  return `<span class="uw-chip"
+    style="background:${c.bg};color:${c.text};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;display:inline-block;line-height:1.6;white-space:nowrap"
+    onclick="event.stopPropagation();showUwConvictionDetail('${conviction.symbol}')"
+    title="Options flow + insider activity composite. Click for details.">${c.label}${score}</span>`;
+}
+
+async function showUwConvictionDetail(symbol) {
+  const modal    = document.getElementById('uwConvictionModal');
+  const titleEl  = document.getElementById('uwConvictionModalTitle');
+  const bodyEl   = document.getElementById('uwConvictionModalBody');
+  if (!modal || !bodyEl) return;
+
+  if (titleEl) titleEl.textContent = `UW Conviction — ${symbol}`;
+  bodyEl.innerHTML = '<div style="color:#8b949e;padding:20px 0;text-align:center">Loading…</div>';
+  modal.style.display = 'block';
+
+  try {
+    const c = await api(`/api/uw/conviction/${symbol}`, 8_000);
+    if (!c) { bodyEl.innerHTML = '<div style="color:#f85149">Failed to load conviction data.</div>'; return; }
+
+    const chip = renderConvictionChip(c);
+    const fmtPrem = v => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}M` : v >= 1_000 ? `$${(v/1_000).toFixed(0)}K` : `$${v}`;
+    const fmtVal  = v => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}M` : v >= 1_000 ? `$${(v/1_000).toFixed(0)}K` : `$${v}`;
+
+    let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+      ${chip}
+      <button onclick="document.getElementById('uwConvictionModal').style.display='none';exploreSymbol('${symbol}')" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:3px 10px;color:#58a6ff;font-size:0.75rem;cursor:pointer;flex-shrink:0">🔍 Open Explorer</button>
+      <span style="font-size:0.78rem;color:#8b949e;margin-left:auto">Fetched ${c.fetched_at ? new Date(c.fetched_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—'}</span>
+    </div>`;
+
+    // Options flow section
+    if (c.options_flow_24h) {
+      const o = c.options_flow_24h;
+      const bullPct = o.total_premium > 0 ? (o.bullish_premium / o.total_premium * 100).toFixed(0) : 0;
+      const bearPct = o.total_premium > 0 ? (o.bearish_premium / o.total_premium * 100).toFixed(0) : 0;
+      html += `<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:10px">
+        <div style="font-size:0.8rem;font-weight:700;color:#bc8cff;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">🐋 Options Flow (last 24 h)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:8px">
+          <div><div style="font-size:0.65rem;color:#8b949e;margin-bottom:2px">BULLISH PREM</div><div style="color:#3fb950;font-weight:700">${fmtPrem(o.bullish_premium)}</div></div>
+          <div><div style="font-size:0.65rem;color:#8b949e;margin-bottom:2px">BEARISH PREM</div><div style="color:#f85149;font-weight:700">${fmtPrem(o.bearish_premium)}</div></div>
+          <div><div style="font-size:0.65rem;color:#8b949e;margin-bottom:2px">TOTAL</div><div style="color:#e6edf3;font-weight:700">${fmtPrem(o.total_premium)}</div></div>
+        </div>
+        <div style="background:#161b22;border-radius:4px;overflow:hidden;height:8px;margin-bottom:6px">
+          <div style="background:#3fb950;height:100%;width:${bullPct}%;border-radius:4px 0 0 4px;float:left"></div>
+          <div style="background:#f85149;height:100%;width:${bearPct}%;float:left"></div>
+        </div>
+        <div style="font-size:0.74rem;color:#8b949e">${o.alert_count} alerts · bias: <strong style="color:${o.bias==='bullish'?'#3fb950':o.bias==='bearish'?'#f85149':'#8b949e'}">${o.bias}</strong> · confidence: ${(o.confidence*100).toFixed(0)}%</div>
+      </div>`;
+    } else {
+      html += `<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;margin-bottom:10px;color:#8b949e;font-size:0.82rem">🐋 Options flow: no data in last 24 h (or total premium &lt; $100K)</div>`;
+    }
+
+    // Insider section
+    if (c.insider_7d) {
+      const ins = c.insider_7d;
+      html += `<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:14px;margin-bottom:10px">
+        <div style="font-size:0.8rem;font-weight:700;color:#e3b341;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.04em">👤 Insider Activity (last 7 d)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+          <div><div style="font-size:0.65rem;color:#8b949e;margin-bottom:2px">BUYS</div><div style="color:#3fb950;font-weight:700">${fmtVal(ins.buy_value)}</div></div>
+          <div><div style="font-size:0.65rem;color:#8b949e;margin-bottom:2px">SELLS</div><div style="color:#f85149;font-weight:700">${fmtVal(ins.sell_value)}</div></div>
+          <div><div style="font-size:0.65rem;color:#8b949e;margin-bottom:2px">NET</div><div style="color:${ins.net_value>=0?'#3fb950':'#f85149'};font-weight:700">${fmtVal(Math.abs(ins.net_value))}</div></div>
+        </div>
+        <div style="font-size:0.74rem;color:#8b949e;margin-top:6px">${ins.transaction_count} transaction${ins.transaction_count!==1?'s':''} · bias: <strong style="color:${ins.bias==='bullish'?'#3fb950':ins.bias==='bearish'?'#f85149':'#8b949e'}">${ins.bias}</strong></div>
+      </div>`;
+    } else {
+      html += `<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px;color:#8b949e;font-size:0.82rem">👤 Insider activity: no filings in last 7 d</div>`;
+    }
+
+    bodyEl.innerHTML = html;
+  } catch (e) {
+    bodyEl.innerHTML = `<div style="color:#f85149">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Discover tab — Benzinga news feed ────────────────────────────────────────
+let _discArticles      = [];
+let _discLatestSeen    = null;
+let _discPendingNew    = [];
+let _discFilters       = { ticker: '', sentiment: '', source: '', q: '', channel: '', saved: false };
+let _discPollInterval  = null;
+let _discSearchTimer   = null;
+const DISC_PAGE_SIZE   = 50;
+
+function discDebounceReload() {
+  clearTimeout(_discSearchTimer);
+  _discSearchTimer = setTimeout(() => discApplyFilters(), 300);
+}
+
+function discApplyFilters() {
+  _discFilters = {
+    ticker:    document.getElementById('discTickerFilter')?.value?.trim() || '',
+    sentiment: document.getElementById('discSentiment')?.value || '',
+    source:    document.getElementById('discSource')?.value || '',
+    q:         document.getElementById('discSearch')?.value?.trim() || '',
+    channel:   _discFilters.channel,   // preserved by discToggleChannel
+    saved:     document.getElementById('discSavedOnly')?.checked || false,
+  };
+  discReload(false);
+}
+
+function _discBuildQuery({ beforeTs, beforeId, since } = {}) {
+  const p = new URLSearchParams();
+  p.set('limit', DISC_PAGE_SIZE);
+  if (beforeTs && beforeId) {
+    p.set('before_ts', beforeTs);
+    p.set('before_id', beforeId);
+  }
+  if (since) p.set('since', since);
+  if (_discFilters.ticker)    p.set('ticker',    _discFilters.ticker);
+  if (_discFilters.sentiment) p.set('sentiment', _discFilters.sentiment);
+  if (_discFilters.source)    p.set('source',    _discFilters.source);
+  if (_discFilters.q)         p.set('q',         _discFilters.q);
+  if (_discFilters.channel)   p.set('channel',   _discFilters.channel);
+  return '/api/news/feed?' + p.toString();
+}
+
+async function discReload(showLoading) {
+  const feed = document.getElementById('discFeed');
+  if (!feed) return;
+  if (showLoading) feed.innerHTML = '<div class="disc-empty">Loading…</div>';
+  try {
+    const path = _discFilters.saved
+      ? '/api/news/saved?limit=' + DISC_PAGE_SIZE
+      : _discBuildQuery();
+    const data = await api(path, 15000);
+    _discArticles = data?.articles || [];
+    _discLatestSeen = _discArticles[0]?.published_at || null;
+    _discPendingNew = [];
+    document.getElementById('discNewPill').style.display = 'none';
+    _discRender();
+    document.getElementById('discLoadMore').style.display =
+      (_discArticles.length === DISC_PAGE_SIZE) ? '' : 'none';
+    discLoadStats();
+  } catch (e) {
+    feed.innerHTML = `<div class="disc-error">Error loading news: ${e.message}</div>`;
+  }
+}
+
+async function discLoadOlder() {
+  if (!_discArticles.length) return;
+  const last = _discArticles[_discArticles.length - 1];
+  try {
+    const data = await api(_discBuildQuery({
+      beforeTs: last.published_at,
+      beforeId: last.article_id,
+    }), 15000);
+    const older = data?.articles || [];
+    _discArticles.push(...older);
+    _discRender();
+    if (older.length < DISC_PAGE_SIZE) {
+      document.getElementById('discLoadMore').style.display = 'none';
+    }
+  } catch (e) {
+    console.error('[discover] load older failed:', e.message);
+  }
+}
+
+async function _discPollNew() {
+  if (!_discLatestSeen) return;
+  try {
+    const p = new URLSearchParams();
+    p.set('limit', '20');
+    p.set('since', _discLatestSeen);
+    if (_discFilters.ticker)    p.set('ticker',    _discFilters.ticker);
+    if (_discFilters.sentiment) p.set('sentiment', _discFilters.sentiment);
+    if (_discFilters.source)    p.set('source',    _discFilters.source);
+    if (_discFilters.q)         p.set('q',         _discFilters.q);
+    const data = await api('/api/news/feed?' + p.toString(), 10000);
+    const newArts = data?.articles || [];
+    if (newArts.length) {
+      _discPendingNew = newArts.concat(_discPendingNew);
+      const seen = new Set();
+      _discPendingNew = _discPendingNew.filter(a => {
+        if (seen.has(a.article_id)) return false;
+        seen.add(a.article_id);
+        return true;
+      });
+      const pill = document.getElementById('discNewPill');
+      if (pill) {
+        pill.textContent = `🆕 ${_discPendingNew.length} new article${_discPendingNew.length > 1 ? 's' : ''} — click to show`;
+        pill.style.display = '';
+      }
+    }
+  } catch {}
+}
+
+function discApplyNewArticles() {
+  if (!_discPendingNew.length) return;
+  _discArticles = _discPendingNew.concat(_discArticles);
+  _discLatestSeen = _discArticles[0]?.published_at || _discLatestSeen;
+  _discPendingNew = [];
+  document.getElementById('discNewPill').style.display = 'none';
+  _discRender();
+  document.getElementById('discFeed').scrollTop = 0;
+}
+
+function _discRender() {
+  const feed = document.getElementById('discFeed');
+  if (!feed) return;
+  if (!_discArticles.length) {
+    feed.innerHTML = '<div class="disc-empty">No articles match these filters.</div>';
+    return;
+  }
+  feed.innerHTML = _discArticles.map(_discRenderCard).join('');
+}
+
+function _discRenderCard(a) {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  const thumb = a.image_url
+    ? `<img class="disc-card-thumb" src="${esc(a.image_url)}" loading="lazy" onerror="this.style.display='none'">`
+    : '<div class="disc-card-thumb disc-card-thumb-placeholder">📰</div>';
+  const sentBadge = a.sentiment
+    ? `<span class="disc-sentiment-${a.sentiment}">${a.sentiment[0].toUpperCase()}${a.sentiment.slice(1)}</span>`
+    : '';
+  const tickers = Array.isArray(a.tickers) ? a.tickers : [];
+  const tickerChips = tickers.slice(0, 6).map(t =>
+    `<span class="disc-ticker-chip" onclick="event.stopPropagation();exploreSymbol('${esc(t)}')">${esc(t)}</span>`
+  ).join('');
+  const url = a.url || '#';
+  return `<article class="disc-card" onclick="window.open('${esc(url)}','_blank','noopener')">
+    ${thumb}
+    <div class="disc-card-body">
+      <h3 class="disc-card-headline">${esc(a.title)}</h3>
+      ${a.teaser ? `<p class="disc-card-teaser">${esc(a.teaser)}</p>` : ''}
+      <div class="disc-card-footer">
+        <span class="disc-card-source">${esc(a.source || 'Unknown')}</span>
+        <span class="disc-card-time">${esc(timeAgo(a.published_at))}</span>
+        ${sentBadge}
+        <span class="disc-card-tickers">${tickerChips}</span>
+        <button class="disc-bookmark-btn ${a.is_saved ? 'is-saved' : ''}"
+                onclick="event.stopPropagation();discToggleSave('${esc(a.article_id)}',this)"
+                title="${a.is_saved ? 'Remove from saved' : 'Save for later'}">${a.is_saved ? '★' : '☆'}</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+async function discLoadSources() {
+  try {
+    const data = await api('/api/news/sources', 10000);
+    const sel = document.getElementById('discSource');
+    if (!sel) return;
+    const current = sel.value;
+    const _escSrc = s => String(s ?? '').replace(/[&<>"']/g, ch =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+    sel.innerHTML = '<option value="">All sources</option>' +
+      (data.sources || []).map(s => {
+        const name  = _escSrc(s.source);
+        const count = Number(s.article_count) || 0;
+        return `<option value="${name}">${name} (${count})</option>`;
+      }).join('');
+    if (current) sel.value = current;
+  } catch {}
+}
+
+async function discLoadStats() {
+  try {
+    const data = await api('/api/news/stats', 5000);
+    const el = document.getElementById('discStats');
+    if (el) el.textContent = `· ${data.last_24h || 0} articles in last 24h`;
+  } catch {}
+}
+
+function discStartPolling() {
+  if (_discPollInterval) return;
+  _discPollInterval = setInterval(_discPollNew, 60_000);
+}
+
+function discStopPolling() {
+  if (_discPollInterval) { clearInterval(_discPollInterval); _discPollInterval = null; }
+}
+
+async function discToggleSave(articleId, btnEl) {
+  const isSaved = btnEl.classList.contains('is-saved');
+  try {
+    if (isSaved) {
+      await api('/api/news/save/' + encodeURIComponent(articleId), 8000, 'DELETE');
+      btnEl.classList.remove('is-saved');
+      btnEl.textContent = '☆';
+      btnEl.title = 'Save for later';
+      if (_discFilters.saved) {
+        const card = btnEl.closest('.disc-card');
+        if (card) card.remove();
+      }
+    } else {
+      await api('/api/news/save', 8000, 'POST', { article_id: articleId });
+      btnEl.classList.add('is-saved');
+      btnEl.textContent = '★';
+      btnEl.title = 'Remove from saved';
+    }
+    const art = _discArticles.find(a => a.article_id === articleId);
+    if (art) art.is_saved = !isSaved;
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
+}
+
+async function discLoadChannels() {
+  try {
+    const data = await api('/api/news/channels', 10000);
+    const row = document.getElementById('discChipRow');
+    if (!row) return;
+    const channels = data?.channels || [];
+    const _esc = s => String(s ?? '').replace(/[&<>"']/g, ch =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[ch]));
+    row.innerHTML = channels.map(c => {
+      const isActive = c.channel === _discFilters.channel;
+      return `<button class="disc-chip${isActive ? ' active' : ''}"
+                onclick="discToggleChannel(${JSON.stringify(c.channel)})">${_esc(c.channel)} <span class="disc-chip-count">${Number(c.article_count) || 0}</span></button>`;
+    }).join('');
+  } catch {}
+}
+
+function discToggleChannel(channel) {
+  _discFilters.channel = (_discFilters.channel === channel) ? '' : channel;
+  discLoadChannels();
+  discReload(true);
+}
+
+function discOnShow() {
+  discReload(true);
+  discLoadSources();
+  discLoadChannels();
+  discStartPolling();
+}
+
+function discOnHide() {
+  discStopPolling();
+}
 
 // ── Signal Center ─────────────────────────────────────────────────────────────
 async function scSeedGraph() {
@@ -10059,14 +10615,16 @@ async function loadSignalCenter() {
   if (seedBtn) seedBtn.style.display = _currentUser?.role === 'admin' ? 'flex' : 'none';
 
   const days   = document.getElementById('sc-days')?.value || '7';
-  const listEl = document.getElementById('sc-earnings-list');
   const metaEl = document.getElementById('sc-meta');
-  if (listEl) listEl.innerHTML = '<div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">Loading…</div>';
 
   // Auto-boot graph on first load
   if (!_scGraphLoaded) loadNetworkGraph();
   // Load EOD setups in parallel (non-blocking)
   loadEodSetups(false);
+  // Load earnings widgets (non-blocking, cached after first fetch)
+  loadEarningsCalendar();
+  loadEarningsPreview();
+  loadEarningsReaction(_erCurrentSym || 'NVDA');
 
   try {
     const [cascadeRes, premarketRes] = await Promise.allSettled([
@@ -10083,29 +10641,17 @@ async function loadSignalCenter() {
       metaEl.textContent = cascade.skipped ? '⚠️ Neo4j offline' : `Updated ${now}`;
     }
 
-    // ── Earnings list ─────────────────────────────────────────────────
-    if (!listEl) return;
-    const alerts = cascade.alerts || [];
-    if (alerts.length === 0) {
-      listEl.innerHTML = `<div style="padding:20px 16px;color:#8b949e;font-size:0.83rem;text-align:center">No graph-tracked earnings in the next ${days} days.</div>`;
-    } else {
-      listEl.innerHTML = alerts.map(a => {
-        const dayBadge = a.daysUntil === 0
-          ? '<span style="background:#f85149;color:#fff;font-size:0.68rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:5px">TODAY</span>'
-          : a.daysUntil === 1
-          ? '<span style="background:#e3b341;color:#000;font-size:0.68rem;font-weight:700;padding:1px 6px;border-radius:4px;margin-left:5px">TMR</span>'
-          : `<span style="background:#21262d;color:#8b949e;font-size:0.68rem;padding:1px 6px;border-radius:4px;margin-left:5px">+${a.daysUntil}d</span>`;
-        const sympathyCount = a.sympathy?.length || 0;
-        return `<div class="sc-ticker-row" data-ticker="${a.ticker}" onclick="scSelectNode('${a.ticker}')"
-          style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer;border-bottom:1px solid #21262d;transition:background 0.13s"
-          onmouseover="this.style.background='#21262d'" onmouseout="if(this.dataset.active!='1')this.style.background=''">
-          <div>
-            <span style="font-weight:700;font-size:0.88rem;color:#58a6ff">${a.ticker}</span>${dayBadge}
-            <div style="font-size:0.73rem;color:#8b949e;margin-top:2px">${a.date}${sympathyCount ? ` · ${sympathyCount} linked` : ''}</div>
-          </div>
-          <span style="color:#8b949e;font-size:0.78rem">›</span>
-        </div>`;
-      }).join('');
+    // ── Fetch conviction for graph tickers → inject chips into Calendar + Preview ──
+    const graphSyms = [...new Set((cascade.alerts || []).map(a => a.ticker))].slice(0, 50);
+    if (graphSyms.length) {
+      api(`/api/uw/conviction?symbols=${graphSyms.join(',')}`, 8_000)
+        .then(cv => {
+          if (!cv) return;
+          _ecalConvMap = cv;
+          renderEarningsCalendar();
+          if (_epData) renderEarningsPreview(_epData);
+        })
+        .catch(() => {});
     }
 
     // ── Pre-market panel ──────────────────────────────────────────────
@@ -10118,13 +10664,17 @@ async function loadSignalCenter() {
         const dir  = a.mover.change_pct > 0 ? '#3fb950' : '#f85149';
         const sign = a.mover.change_pct > 0 ? '+' : '';
         return `<div style="padding:10px 0;border-bottom:1px solid #21262d">
-          <div style="font-weight:700;color:${dir};margin-bottom:4px">${a.mover.ticker} <span style="font-size:0.85rem">${sign}${a.mover.change_pct}% pre-market</span></div>
+          <div style="font-weight:700;color:${dir};margin-bottom:4px">
+            <span onclick="exploreSymbol('${a.mover.ticker}')" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px">${a.mover.ticker}</span>
+            <span style="font-size:0.85rem">${sign}${a.mover.change_pct}% pre-market</span>
+          </div>
           <div style="font-size:0.8rem;color:#8b949e;white-space:pre-line">${a.message.replace(/^.*\n━+\n/, '')}</div>
         </div>`;
       }).join('');
     }
   } catch (e) {
-    if (listEl) listEl.innerHTML = `<div style="padding:16px;color:#f85149;font-size:0.83rem">Error: ${e.message}</div>`;
+    const metaErrEl = document.getElementById('sc-meta');
+    if (metaErrEl) metaErrEl.textContent = `Error: ${e.message}`;
   }
 }
 
@@ -10156,6 +10706,14 @@ async function loadEodSetups(force) {
       return;
     }
 
+    // Batch-fetch conviction (best-effort)
+    let _eodConvMap = {};
+    try {
+      const syms = [...new Set(setups.map(s => s.symbol))].slice(0, 50).join(',');
+      const cv = await api(`/api/uw/conviction?symbols=${syms}`, 8_000);
+      if (cv) _eodConvMap = cv;
+    } catch (_) {}
+
     // Group by type
     const groups = {};
     for (const s of setups) {
@@ -10175,13 +10733,15 @@ async function loadEodSetups(force) {
       for (const s of list) {
         const accentCol = _EOD_TYPE_COLORS[s.type] || '#58a6ff';
         const confBar   = `<div style="height:3px;border-radius:2px;background:#21262d;margin-top:8px"><div style="height:3px;border-radius:2px;background:${conf_col(s.confidence)};width:${s.confidence}%"></div></div>`;
-        html += `<div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;cursor:pointer;transition:border-color 0.15s" onmouseover="this.style.borderColor='${accentCol}55'" onmouseout="this.style.borderColor='#30363d'" onclick="openExplorer('${s.symbol}')">
+        const convChip  = renderConvictionChip(_eodConvMap[s.symbol] || null);
+        html += `<div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;cursor:pointer;transition:border-color 0.15s" onmouseover="this.style.borderColor='${accentCol}55'" onmouseout="this.style.borderColor='#30363d'" onclick="exploreSymbol('${s.symbol}')">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px">
-            <div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <span style="font-weight:700;font-size:1rem;color:#e6edf3">${s.symbol}</span>
-              <span style="background:${accentCol}22;color:${accentCol};font-size:0.68rem;font-weight:600;padding:2px 7px;border-radius:10px;margin-left:6px">${s.type_label}</span>
+              <span style="background:${accentCol}22;color:${accentCol};font-size:0.68rem;font-weight:600;padding:2px 7px;border-radius:10px">${s.type_label}</span>
+              ${convChip}
             </div>
-            <span style="font-size:0.82rem;font-weight:700;color:${conf_col(s.confidence)}">${s.confidence}%</span>
+            <span style="font-size:0.82rem;font-weight:700;color:${conf_col(s.confidence)};flex-shrink:0;margin-left:6px">${s.confidence}%</span>
           </div>
           ${s.company && s.company !== s.symbol ? `<div style="font-size:0.75rem;color:#8b949e;margin-bottom:8px">${s.company}</div>` : ''}
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;text-align:center;margin-bottom:8px">
@@ -10220,6 +10780,7 @@ let _scGraphData   = null;
 let _scGraphLoaded = false;
 let _scPendingNode = null;
 let _scHistory     = [];
+let _scGraphNodesDS = null;
 
 const _SC_HIST_COLORS = [
   '#58a6ff','#3fb950','#f85149','#f7c948','#bc8cff',
@@ -10319,7 +10880,7 @@ async function loadNetworkGraph() {
       INVESTED_IN:      '#f7c948',
     };
 
-    const nodes = new vis.DataSet(data.nodes.map(n => ({
+    _scGraphNodesDS = new vis.DataSet(data.nodes.map(n => ({
       id:    n.ticker,
       label: n.ticker,
       title: `<b>${n.name || n.ticker}</b><br>${n.sector || ''}`,
@@ -10358,7 +10919,7 @@ async function loadNetworkGraph() {
 
     if (loadingEl) loadingEl.style.display = 'none';
     if (_scNetwork) { _scNetwork.destroy(); _scNetwork = null; }
-    _scNetwork = new vis.Network(canvas, { nodes, edges }, options);
+    _scNetwork = new vis.Network(canvas, { nodes: _scGraphNodesDS, edges }, options);
 
     _scNetwork.on('click', params => {
       if (params.nodes.length) scSelectNode(params.nodes[0]);
@@ -10366,6 +10927,7 @@ async function loadNetworkGraph() {
     _scNetwork.on('stabilizationIterationsDone', () => {
       _scNetwork.setOptions({ physics: { enabled: false } });
       _scNetwork.fit({ animation: { duration: 600, easingFunction: 'easeInOutQuad' } });
+      _updateGraphNodeConvictionBorders();
     });
 
     _scGraphLoaded = true;
@@ -10378,6 +10940,28 @@ async function loadNetworkGraph() {
   } catch (e) {
     if (loadingEl) loadingEl.innerHTML = `<span style="color:#f85149">Error: ${e.message}</span>`;
   }
+}
+
+async function _updateGraphNodeConvictionBorders() {
+  if (!_scGraphData || !_scGraphNodesDS) return;
+  try {
+    const tickers = _scGraphData.nodes.map(n => n.ticker);
+    if (!tickers.length) return;
+    const cv = await api(`/api/uw/conviction?symbols=${tickers.slice(0,50).join(',')}`, 8_000);
+    if (!cv) return;
+    const updates = tickers.map(ticker => {
+      const c = cv[ticker];
+      const borderCol = c?.composite?.label
+        ? (_UW_CHIP_COLORS[c.composite.label]?.border ?? '#30363d')
+        : '#30363d';
+      const label = c?.composite?.label && c.composite.label !== 'no_data'
+        ? ` · UW: ${c.composite.label.replace(/_/g,' ')}`
+        : '';
+      const node = _scGraphData.nodes.find(n => n.ticker === ticker);
+      return { id: ticker, color: { border: borderCol }, title: `<b>${node?.name || ticker}</b><br>${node?.sector || ''}${label}` };
+    });
+    _scGraphNodesDS.update(updates);
+  } catch (_) {}
 }
 
 function scShowGraphDetail(ticker) {
@@ -10418,6 +11002,17 @@ function scShowGraphDetail(ticker) {
     _scNetwork.selectNodes([ticker]);
     _scNetwork.fit({ animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
   }
+
+  // Append conviction chip (async, non-blocking)
+  api(`/api/uw/conviction/${ticker}`, 6_000).then(cv => {
+    const chip = renderConvictionChip(cv);
+    if (chip && detailEl) {
+      const d = document.createElement('div');
+      d.style.cssText = 'padding:8px 0;border-top:1px solid #21262d;margin-top:8px';
+      d.innerHTML = chip;
+      detailEl.appendChild(d);
+    }
+  }).catch(() => {});
 
   loadNodeImpact(ticker);
 }
@@ -15676,6 +16271,7 @@ function exploreSymbol(sym) {
     <button id="exTabPortfolio" onclick="switchExplorerTab('portfolio')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">🏢 Company</button>
     <button id="exTabAiChat" onclick="switchExplorerTab('aichat')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">🤖 AI Chat</button>
     <button id="exTabEtfs"   onclick="switchExplorerTab('etfs')"  style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">📊 ETFs</button>
+    <button id="exTabOptions" onclick="switchExplorerTab('options')" style="flex:1;padding:8px 0;font-size:0.78rem;font-weight:600;border:none;cursor:pointer;background:transparent;color:var(--text2);border-bottom:2px solid transparent">📊 Options</button>
   </div>
 
   <!-- Scrollable body -->
@@ -15749,7 +16345,32 @@ function exploreSymbol(sym) {
           <button class="crb-btn" data-range="2Y" onclick="setChartRange('2Y')">2Y</button>
           <button class="crb-btn" data-range="3Y" onclick="setChartRange('3Y')">3Y</button>
         </div>
-        <div id="explorerTVChart" style="height:400px;width:100%;overflow:hidden;position:relative"></div>
+        <div id="explorerTVChart" style="height:400px;width:100%;overflow:hidden;position:relative">
+        </div>
+        <!-- ── Chart marker legend ── -->
+        <div id="exChartLegend" class="ex-chart-legend">
+          <span class="ex-leg-group">
+            <span class="ex-leg-dot" style="background:#3fb950"></span>A
+            <span class="ex-leg-dot" style="background:#58a6ff"></span>B
+            <span class="ex-leg-dot" style="background:#e3b341"></span>C
+            <span class="ex-leg-dot" style="background:#f85149"></span>F
+            <span class="ex-leg-label">conviction</span>
+          </span>
+          <span class="ex-leg-sep">|</span>
+          <span class="ex-leg-group">
+            <span class="ex-leg-sq" style="background:#10b981">E▲</span>
+            <span class="ex-leg-sq" style="background:#f85149">E▼</span>
+            <span class="ex-leg-sq" style="background:#f0883e">E</span>
+            <span class="ex-leg-label">earnings</span>
+          </span>
+          <span class="ex-leg-sep">|</span>
+          <span class="ex-leg-group">
+            <span style="color:#10b981;font-size:10px">▲</span>
+            <span style="color:#8b949e;font-size:10px">●</span>
+            <span style="color:#f85149;font-size:10px">▼</span>
+            <span class="ex-leg-label">📰 news sentiment</span>
+          </span>
+        </div>
         <!-- ── Drag grip (free resize) ── -->
         <div class="chart-rh-grip" id="chartRhGrip" title="Drag to resize chart height">⠿ ⠿ ⠿</div>
       </div>
@@ -15925,14 +16546,40 @@ function exploreSymbol(sym) {
       <div id="exEtfsLoading" style="color:var(--text2);font-size:0.82rem;padding:24px 0;text-align:center">Search a symbol first.</div>
       <div id="exEtfsContent" style="display:none"></div>
     </div>
+
+    <!-- ── OPTIONS VIEW ── -->
+    <div id="exViewOptions" style="display:none;padding:12px">
+      <div class="ex-opts-panel">
+        <div class="ex-opts-panel-title">🎯 ATM Chain</div>
+        <div id="ex-opts-atm" class="ex-opts-loading">Search a symbol first.</div>
+      </div>
+      <div class="ex-opts-panel">
+        <div class="ex-opts-panel-title">📅 Volume by Expiry</div>
+        <div id="ex-opts-expbreakdown" class="ex-opts-loading">Search a symbol first.</div>
+      </div>
+      <div class="ex-opts-panel">
+        <div class="ex-opts-panel-title">📊 Dealer Gamma Exposure
+          <div class="ex-opts-subtitle">Positive gamma → dealers buy dips, sell rallies (price magnet). Negative gamma → dealers chase moves (price acceleration).</div>
+        </div>
+        <div id="ex-opts-gex" class="ex-opts-loading">Search a symbol first.</div>
+      </div>
+      <div class="ex-opts-panel">
+        <div class="ex-opts-panel-title">💎 Max Pain by Expiry</div>
+        <div id="ex-opts-maxpain" class="ex-opts-loading">Search a symbol first.</div>
+      </div>
+      <div class="ex-opts-panel">
+        <div class="ex-opts-panel-title">💵 Premium Flow (30d)</div>
+        <div id="ex-opts-premflow" class="ex-opts-loading">Search a symbol first.</div>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
 // ── Explorer tab switching ─────────────────────────────────────────────────
 function switchExplorerTab(tab) {
-  const views = { chart: 'exViewChart', browse: 'exViewBrowse', portfolio: 'exViewPortfolio', aichat: 'exViewAiChat', etfs: 'exViewEtfs' };
-  const btns  = { chart: 'exTabChart',  browse: 'exTabBrowse',  portfolio: 'exTabPortfolio',  aichat: 'exTabAiChat',  etfs: 'exTabEtfs'  };
+  const views = { chart: 'exViewChart', browse: 'exViewBrowse', portfolio: 'exViewPortfolio', aichat: 'exViewAiChat', etfs: 'exViewEtfs', options: 'exViewOptions' };
+  const btns  = { chart: 'exTabChart',  browse: 'exTabBrowse',  portfolio: 'exTabPortfolio',  aichat: 'exTabAiChat',  etfs: 'exTabEtfs',  options: 'exTabOptions'  };
   Object.keys(views).forEach(t => {
     const v = document.getElementById(views[t]);
     const b = document.getElementById(btns[t]);
@@ -15946,6 +16593,7 @@ function switchExplorerTab(tab) {
   if (tab === 'browse')    loadExplorerUniverse();
   if (tab === 'aichat')    exAiUpdateBanner();
   if (tab === 'etfs')      loadExplorerEtfs();
+  if (tab === 'options')   loadExplorerOptions((document.getElementById('explorerSymbol')?.value||'').trim().toUpperCase());
 }
 
 // ─── ETFs Tab ────────────────────────────────────────────────────────────────
@@ -16192,6 +16840,253 @@ async function loadExplorerEtfs() {
   contEl.innerHTML  = html;
   loadEl.style.display = 'none';
   contEl.style.display = '';
+}
+
+// ─── Options Tab ─────────────────────────────────────────────────────────────
+let _uwGexChart  = null;
+let _uwPremChart = null;
+
+async function loadExplorerOptions(symbol) {
+  const panelIds = ['ex-opts-atm','ex-opts-expbreakdown','ex-opts-gex','ex-opts-maxpain','ex-opts-premflow'];
+  if (_uwGexChart)  { try { _uwGexChart.remove();  } catch(e){} _uwGexChart  = null; }
+  if (_uwPremChart) { try { _uwPremChart.remove(); } catch(e){} _uwPremChart = null; }
+  panelIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<div class="ex-opts-loading">Loading…</div>';
+  });
+  if (!symbol) {
+    panelIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<div class="ex-opts-empty">Search a symbol first.</div>';
+    });
+    return;
+  }
+  const [atmR, expR, gexR, mpR, pfR] = await Promise.allSettled([
+    api(`/api/uw/atm-chain/${symbol}`,       10000),
+    api(`/api/uw/expiry-breakdown/${symbol}`,10000),
+    api(`/api/uw/gex/${symbol}`,             10000),
+    api(`/api/uw/max-pain/${symbol}`,        10000),
+    api(`/api/uw/options-volume/${symbol}`,  10000),
+  ]);
+  renderAtmChain(        document.getElementById('ex-opts-atm'),          atmR);
+  renderExpiryBreakdown( document.getElementById('ex-opts-expbreakdown'), expR);
+  renderGex(             document.getElementById('ex-opts-gex'),          gexR);
+  renderMaxPain(         document.getElementById('ex-opts-maxpain'),      mpR);
+  renderPremiumFlow(     document.getElementById('ex-opts-premflow'),     pfR);
+}
+
+function _uwExtractCP(optSym) {
+  const m = (optSym||'').match(/^[A-Z]+(\d{6})([CP])/);
+  return m ? m[2] : '?';
+}
+
+function _uwFmtNum(n) {
+  if (n == null || isNaN(+n)) return '—';
+  const v = +n;
+  if (Math.abs(v) >= 1e6) return (v/1e6).toFixed(1)+'M';
+  if (Math.abs(v) >= 1e3) return (v/1e3).toFixed(1)+'K';
+  return v.toFixed(0);
+}
+
+function _uwErrMsg(r) {
+  return r.reason instanceof Error ? r.reason.message : String(r.reason||'Unknown error');
+}
+
+function renderAtmChain(el, r) {
+  if (!el) return;
+  if (r.status === 'rejected') { el.innerHTML = `<div class="ex-opts-error">Error loading ATM chain: ${_uwErrMsg(r)}</div>`; return; }
+  const chain = r.value?.chain || [];
+  if (!chain.length) { el.innerHTML = '<div class="ex-opts-empty">No ATM chain data available.</div>'; return; }
+
+  const sorted = [...chain].sort((a,b) => {
+    const d = (a.expiry||a.date||'').localeCompare(b.expiry||b.date||'');
+    return d || parseFloat(a.strike||0) - parseFloat(b.strike||0);
+  });
+
+  let html = `<div style="overflow-x:auto"><table class="ex-opts-table">
+    <thead><tr><th>Type</th><th>Strike</th><th>Expiry</th><th>Bid</th><th>Ask</th><th>IV%</th><th>Volume</th><th>OI</th></tr></thead>
+    <tbody>`;
+  for (const c of sorted) {
+    const cp = _uwExtractCP(c.option_symbol);
+    const badge = cp === 'C'
+      ? '<span style="background:#1a4a2e;color:#3fb950;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700">C</span>'
+      : cp === 'P'
+      ? '<span style="background:#3d1e1e;color:#f85149;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700">P</span>'
+      : '<span style="color:#8b949e">?</span>';
+    const iv  = c.iv != null ? (parseFloat(c.iv)*100).toFixed(1)+'%' : '—';
+    const sym = (c.option_symbol||'').replace(/['"\\]/g,'');
+    html += `<tr class="ex-opts-tr" onclick="window._uwSelectedContract='${sym}';alert('Phase 3 will open contract detail for ${sym}')">
+      <td>${badge}</td>
+      <td>$${parseFloat(c.strike||0).toFixed(2)}</td>
+      <td>${c.expiry||c.date||'—'}</td>
+      <td>${c.bid!=null?'$'+parseFloat(c.bid).toFixed(2):'—'}</td>
+      <td>${c.ask!=null?'$'+parseFloat(c.ask).toFixed(2):'—'}</td>
+      <td>${iv}</td>
+      <td>${_uwFmtNum(c.volume)}</td>
+      <td>${_uwFmtNum(c.open_interest)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+}
+
+function renderExpiryBreakdown(el, r) {
+  if (!el) return;
+  if (r.status === 'rejected') { el.innerHTML = `<div class="ex-opts-error">Error loading expiry breakdown: ${_uwErrMsg(r)}</div>`; return; }
+  const exps = r.value?.expiries || [];
+  if (!exps.length) { el.innerHTML = '<div class="ex-opts-empty">No expiry breakdown data available.</div>'; return; }
+
+  const sorted = [...exps].sort((a,b) => (a.expires||'').localeCompare(b.expires||''));
+  const maxVol = Math.max(...sorted.map(e => +(e.volume||0)), 1);
+
+  const rowHtml = e => {
+    const vol  = +(e.volume||0);
+    const oi   = +(e.open_interest||0);
+    const fillW = Math.round((vol/maxVol)*100);
+    const oiW   = vol > 0 ? Math.min(Math.round((oi/vol)*100), 100) : 0;
+    return `<div class="ex-opts-bar-row">
+      <div class="ex-opts-bar-label">${e.expires||'—'}</div>
+      <div class="ex-opts-bar-track">
+        <div class="ex-opts-bar-fill" style="width:${fillW}%">
+          <div class="ex-opts-bar-oi" style="width:${oiW}%"></div>
+        </div>
+        <span class="ex-opts-bar-val">${_uwFmtNum(vol)} vol / ${_uwFmtNum(oi)} OI</span>
+      </div>
+    </div>`;
+  };
+
+  const top10 = sorted.slice(0, 10);
+  const rest  = sorted.slice(10);
+  let html = top10.map(rowHtml).join('');
+  if (rest.length) {
+    html += `<div id="exOptsExpRest" style="display:none">${rest.map(rowHtml).join('')}</div>
+    <button class="ex-opts-more-btn" id="exOptsExpBtn" onclick="(function(){var d=document.getElementById('exOptsExpRest'),b=document.getElementById('exOptsExpBtn');d.style.display===''?(d.style.display='none',b.textContent='+ ${rest.length} more (click to expand)'):(d.style.display='',b.textContent='▴ Collapse')})()">+ ${rest.length} more (click to expand)</button>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderGex(el, r) {
+  if (!el) return;
+  if (r.status === 'rejected') { el.innerHTML = `<div class="ex-opts-error">Error loading GEX: ${_uwErrMsg(r)}</div>`; return; }
+  const gex = r.value?.gex || [];
+  if (!gex.length) { el.innerHTML = '<div class="ex-opts-empty">No GEX data available.</div>'; return; }
+  if (!window.LightweightCharts) { el.innerHTML = '<div class="ex-opts-error">Chart library not loaded.</div>'; return; }
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90);
+  const rows = [...gex]
+    .filter(d => d.date && new Date(d.date) >= cutoff)
+    .sort((a,b) => a.date.localeCompare(b.date));
+  if (!rows.length) { el.innerHTML = '<div class="ex-opts-empty">No GEX data in last 90 days.</div>'; return; }
+
+  el.innerHTML = `<div id="ex-opts-gex-chart" style="height:220px;position:relative"></div>`;
+  const box = document.getElementById('ex-opts-gex-chart');
+  const chart = LightweightCharts.createChart(box, {
+    width: box.clientWidth || 480, height: 220,
+    layout: { background: { color: '#0d1117' }, textColor: '#6e7681', fontSize: 10 },
+    grid:   { vertLines: { color: '#161b22' }, horzLines: { color: '#161b22' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#21262d' },
+    timeScale: { borderColor: '#21262d', timeVisible: false },
+    handleScroll: true, handleScale: true,
+  });
+  _uwGexChart = chart;
+
+  const callS = chart.addLineSeries({ color: '#3fb950', lineWidth: 2, title: 'Call γ' });
+  const putS  = chart.addLineSeries({ color: '#f85149', lineWidth: 2, title: 'Put γ'  });
+  callS.setData(rows.map(d => ({ time: d.date, value: parseFloat(d.call_gamma)||0 })));
+  putS.setData( rows.map(d => ({ time: d.date, value: Math.abs(parseFloat(d.put_gamma)||0) })));
+  chart.timeScale().fitContent();
+
+  const tip = document.createElement('div');
+  tip.className = 'ex-opts-tooltip';
+  box.appendChild(tip);
+  const fmtG = v => Math.abs(v)>=1e6 ? (v/1e6).toFixed(1)+'M' : Math.abs(v)>=1e3 ? (v/1e3).toFixed(1)+'K' : (+v).toFixed(2);
+  chart.subscribeCrosshairMove(p => {
+    if (!p.time || !p.seriesData) { tip.style.display = 'none'; return; }
+    const cv = p.seriesData.get(callS), pv = p.seriesData.get(putS);
+    if (!cv && !pv) { tip.style.display = 'none'; return; }
+    tip.innerHTML = `<span style="color:#6e7681">${p.time}</span><br><span style="color:#3fb950">${fmtG(cv?.value??0)} call γ</span> / <span style="color:#f85149">${fmtG(pv?.value??0)} put γ</span>`;
+    tip.style.display = 'block';
+    tip.style.left = ((p.point?.x??0) + 12) + 'px';
+    tip.style.top  = ((p.point?.y??0) - 20) + 'px';
+  });
+}
+
+function renderMaxPain(el, r) {
+  if (!el) return;
+  if (r.status === 'rejected') { el.innerHTML = `<div class="ex-opts-error">Error loading max pain: ${_uwErrMsg(r)}</div>`; return; }
+  const exps = r.value?.expiries || [];
+  if (!exps.length) { el.innerHTML = '<div class="ex-opts-empty">No max pain data available.</div>'; return; }
+
+  const rowHtml = e => {
+    const spot  = parseFloat(e.close||e.spot||0);
+    const mp    = parseFloat(e.max_pain||0);
+    const delta = spot - mp;
+    const sign  = delta >= 0 ? '+' : '';
+    const pct   = mp ? (delta/mp*100).toFixed(1) : '0.0';
+    const bg    = delta >= 0 ? '#1a4a2e' : '#3d1e1e';
+    const fg    = delta >= 0 ? '#3fb950' : '#f85149';
+    return `<tr>
+      <td>${e.expiry||'—'}</td>
+      <td>$${mp.toFixed(2)}</td>
+      <td>$${spot.toFixed(2)}</td>
+      <td style="background:${bg};color:${fg}">${sign}$${Math.abs(delta).toFixed(2)} (${sign}${pct}%)</td>
+      <td>${e.next_lower_strike!=null?'$'+parseFloat(e.next_lower_strike).toFixed(2):'—'}</td>
+      <td>${e.next_upper_strike!=null?'$'+parseFloat(e.next_upper_strike).toFixed(2):'—'}</td>
+    </tr>`;
+  };
+
+  const top10 = exps.slice(0, 10);
+  const rest  = exps.slice(10);
+  let html = `<div style="overflow-x:auto"><table class="ex-opts-table">
+    <thead><tr><th>Expiry</th><th>Max Pain</th><th>Spot</th><th>Δ vs Spot</th><th>Lower</th><th>Upper</th></tr></thead>
+    <tbody>${top10.map(rowHtml).join('')}</tbody></table>`;
+  if (rest.length) {
+    html += `<div id="exOptsMpRest" style="display:none"><table class="ex-opts-table"><tbody>${rest.map(rowHtml).join('')}</tbody></table></div>
+    <button class="ex-opts-more-btn" id="exOptsMpBtn" onclick="(function(){var d=document.getElementById('exOptsMpRest'),b=document.getElementById('exOptsMpBtn');d.style.display===''?(d.style.display='none',b.textContent='+ ${rest.length} more (click to expand)'):(d.style.display='',b.textContent='▴ Collapse')})()">+ ${rest.length} more (click to expand)</button>`;
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderPremiumFlow(el, r) {
+  if (!el) return;
+  if (r.status === 'rejected') { el.innerHTML = `<div class="ex-opts-error">Error loading premium flow: ${_uwErrMsg(r)}</div>`; return; }
+  const days = r.value?.days || [];
+  if (!days.length) { el.innerHTML = '<div class="ex-opts-empty">No premium flow data available.</div>'; return; }
+  if (!window.LightweightCharts) { el.innerHTML = '<div class="ex-opts-error">Chart library not loaded.</div>'; return; }
+
+  const sorted = [...days].sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  let bull = 0, bear = 0;
+  sorted.forEach(d => { bull += +(d.bullish_premium||0); bear += +(d.bearish_premium||0); });
+  const net  = bull - bear;
+  const toM  = v => (+(v||0)) / 1e6;
+
+  el.innerHTML = `<div id="ex-opts-prem-chart" style="height:200px"></div>
+    <div class="ex-opts-prem-summary">
+      <span>Total bullish: <strong style="color:#3fb950">$${(bull/1e6).toFixed(1)}M</strong></span>
+      <span>Total bearish: <strong style="color:#f85149">$${(bear/1e6).toFixed(1)}M</strong></span>
+      <span>Net: <strong style="color:${net>=0?'#3fb950':'#f85149'}">${net>=0?'+':''}$${(net/1e6).toFixed(1)}M</strong></span>
+    </div>`;
+
+  const box = document.getElementById('ex-opts-prem-chart');
+  const chart = LightweightCharts.createChart(box, {
+    width: box.clientWidth || 480, height: 200,
+    layout: { background: { color: '#0d1117' }, textColor: '#6e7681', fontSize: 10 },
+    grid:   { vertLines: { color: '#161b22' }, horzLines: { color: '#161b22' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#21262d' },
+    timeScale: { borderColor: '#21262d', timeVisible: false },
+    handleScroll: true, handleScale: true,
+  });
+  _uwPremChart = chart;
+
+  const bullS = chart.addHistogramSeries({ color: '#3fb950', priceFormat: { type: 'price', precision: 1, minMove: 0.1 } });
+  const bearS = chart.addHistogramSeries({ color: '#f85149', priceFormat: { type: 'price', precision: 1, minMove: 0.1 } });
+  bullS.setData(sorted.map(d => ({ time: d.date, value:  toM(d.bullish_premium) })));
+  bearS.setData(sorted.map(d => ({ time: d.date, value: -toM(d.bearish_premium) })));
+  chart.timeScale().fitContent();
 }
 
 // ─── Market Pulse Strip ───────────────────────────────────────────────────────
@@ -16687,11 +17582,17 @@ async function loadBzDividends() {
 
 // ── Floating Explorer controls ─────────────────────────────────────────────
 let _explorerOpenAt = 0;
-// Called when a user clicks any earnings chip or row — opens Stock Explorer + filters Reaction Analysis
+// Called when a user clicks any earnings chip or row in the Earnings Calendar (Signal Center).
+// Graph-tracked tickers load the cascade; others open Stock Explorer.
 function calEarningClick(symbol) {
-  explorerSelect(symbol);   // set symbol + load chart data
-  openFloatExplorer();      // open floating panel
-  erQuickSelect(symbol);    // filter Earnings Reaction Analysis (Forecast Lab)
+  const graphTickers = new Set((_scData?.alerts || []).map(a => a.ticker));
+  showPage('signal-center', document.getElementById('tab-signal-center'));
+  erQuickSelect(symbol);
+  if (graphTickers.has(symbol)) {
+    scSelectNode(symbol);
+  } else {
+    exploreSymbol(symbol);
+  }
 }
 
 function openFloatExplorer() {
@@ -20067,8 +20968,9 @@ async function loadUWFlow() {
       const sentColor = (f.sentiment||'').toLowerCase()==='bearish' ? '#f78166' : '#3fb950';
       const premRaw = parseFloat(f.total_premium ?? f.premium ?? 0);
       const premFmt = premRaw ? '$' + (premRaw/1e6).toFixed(2) + 'M' : '—';
+      const sym = f.ticker || f.symbol || '';
       return `<tr>
-        <td style="font-weight:700;color:#58a6ff">${f.ticker||f.symbol||'—'}</td>
+        <td style="font-weight:700;color:#58a6ff;cursor:pointer" onclick="exploreSymbol('${sym}')">${sym||'—'}</td>
         <td style="color:${(f.type||'').toLowerCase()==='call'?'#3fb950':'#f78166'}">${(f.type||'').toUpperCase()}</td>
         <td>${f.strike != null ? '$'+f.strike : '—'}</td>
         <td>${f.expiry||f.exp||'—'}</td>
@@ -20111,8 +21013,9 @@ async function loadUWInsider() {
       const txColor = (t.side||'').toLowerCase() === 'sell' ? '#f78166' : '#3fb950';
       const amtFmt = t.amount != null ? '$' + Math.abs(t.amount/1e6).toFixed(2) + 'M' : '—';
       const roleLabel = t.is_director ? 'Director' : t.is_officer ? 'Officer' : '—';
+      const sym = t.ticker || '';
       return `<tr>
-        <td style="font-weight:700;color:#58a6ff">${t.ticker||'—'}</td>
+        <td style="font-weight:700;color:#58a6ff;cursor:pointer" onclick="exploreSymbol('${sym}')">${sym||'—'}</td>
         <td>${t.owner_name||'—'}</td>
         <td style="color:#8b949e;font-size:0.8rem">${roleLabel}</td>
         <td style="color:${txColor};font-weight:700">${(t.side||'—').toUpperCase()}</td>
@@ -20151,8 +21054,9 @@ async function loadUWCongress() {
       const txn = (t.transaction_type||'').toLowerCase();
       const txColor = (txn.includes('sell') || txn.includes('sale')) ? '#f78166' : '#3fb950';
       const partyColor = (t.party||'').toLowerCase()==='democrat' ? '#58a6ff' : (t.party||'').toLowerCase()==='republican' ? '#f78166' : '#8b949e';
+      const sym = t.ticker || '';
       return `<tr>
-        <td style="font-weight:700;color:#58a6ff">${t.ticker||'—'}</td>
+        <td style="font-weight:700;color:#58a6ff;cursor:pointer" onclick="exploreSymbol('${sym}')">${sym||'—'}</td>
         <td>${t.member_name||'—'}</td>
         <td style="color:${partyColor};font-weight:700;font-size:0.8rem">${t.party||'—'}</td>
         <td style="color:#8b949e;font-size:0.8rem">${t.chamber||'—'}</td>
@@ -20196,9 +21100,10 @@ async function loadFlowAlertsHistory() {
     const rows = alerts.map(a => {
       const sentColor = (a.sentiment||'').toLowerCase()==='bearish' ? '#f78166' : '#3fb950';
       const premFmt = a.premium ? '$'+(Number(a.premium)/1e6).toFixed(2)+'M' : '—';
+      const sym = a.ticker || '';
       return `<tr>
         <td style="color:#8b949e;font-size:0.78rem">${a.alerted_at ? new Date(a.alerted_at).toLocaleString() : '—'}</td>
-        <td style="font-weight:700;color:#58a6ff">${_escHtml(a.ticker||'—')}</td>
+        <td style="font-weight:700;color:#58a6ff;cursor:pointer" onclick="exploreSymbol('${sym}')">${_escHtml(sym||'—')}</td>
         <td style="color:${(a.side||'').toLowerCase()==='call'?'#3fb950':'#f78166'}">${_escHtml((a.side||'').toUpperCase()||'—')}</td>
         <td>${a.strike != null && a.strike != -1 ? '$'+a.strike : '—'}</td>
         <td>${a.expiry && a.expiry !== '1900-01-01' ? a.expiry : '—'}</td>
@@ -20377,8 +21282,9 @@ async function loadUWCorrelations() {
       const c90 = c.correlation_90d ?? null;
       const barW = Math.abs(c30 ?? 0) * 100;
       const barColor = (c30 ?? 0) > 0 ? '#3fb950' : '#f78166';
+      const sym = c.symbol || '';
       return `<tr>
-        <td style="font-weight:700;color:#e6edf3">${_escHtml(c.symbol||'—')}</td>
+        <td style="font-weight:700;color:#e6edf3;cursor:pointer" onclick="exploreSymbol('${sym}')">${_escHtml(sym||'—')}</td>
         <td>
           <div style="display:flex;align-items:center;gap:6px">
             <div style="width:80px;height:8px;background:#21262d;border-radius:4px;overflow:hidden">
@@ -20402,6 +21308,17 @@ async function loadUWCorrelations() {
 }
 
 </script>
+
+<!-- UW Conviction detail modal — top-level so position:fixed always works -->
+<div id="uwConvictionModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:600px;margin:0 auto;padding:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 id="uwConvictionModalTitle" style="margin:0;color:#e6edf3">UW Conviction — —</h3>
+      <button onclick="document.getElementById('uwConvictionModal').style.display='none'" style="background:none;border:none;color:#8b949e;font-size:1.4rem;cursor:pointer">×</button>
+    </div>
+    <div id="uwConvictionModalBody" style="color:#c9d1d9;font-size:0.85rem"></div>
+  </div>
+</div>
 
 </body>
 </html>

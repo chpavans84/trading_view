@@ -4,7 +4,8 @@
  * All functions return null (never throw) so callers can use Promise.allSettled.
  */
 
-const BASE = 'https://api.benzinga.com/api';
+const BASE      = 'https://api.benzinga.com/api';   // legacy — calendar/options endpoints (plan-gated)
+const BASE_NEWS = 'https://api.massive.com';          // Newsfeed v2 — real-time for paid tiers, ~1h delay on trial
 const key  = () => process.env.BENZINGA_API;
 const HDR  = { Accept: 'application/json' };
 
@@ -33,23 +34,28 @@ export function isBenzingaConfigured() { return !!process.env.BENZINGA_API; }
 
 // ─── News ─────────────────────────────────────────────────────────────────────
 // Returns articles with sentiment tag per stock.
+// api.massive.com = Benzinga Newsfeed v2; real-time on paid plans, ~1h lag on trial.
 export async function getBzNews({ symbol, limit = 10 } = {}) {
   if (!key()) return null;
-  const sym = symbol ? `&tickers=${encodeURIComponent(symbol.toUpperCase())}` : '';
+  const sym = symbol ? `&ticker=${encodeURIComponent(symbol.toUpperCase())}` : '';
   return _cached(`bz:news:${symbol || 'market'}:${limit}`, 5 * 60_000, async () => {
-    const data = await _get(`${BASE}/v2/news?token=${key()}${sym}&pageSize=${limit}&displayOutput=full`);
-    const articles = (Array.isArray(data) ? data : []).map(a => ({
+    const data = await _get(`${BASE_NEWS}/v2/reference/news?apiKey=${key()}${sym}&limit=${limit}`);
+    const articles = (data?.results || []).map(a => ({
       id:           a.id,
       title:        a.title,
-      teaser:       a.teaser,
-      url:          a.url,
-      source:       'Benzinga',
-      published_at: a.created,
-      updated_at:   a.updated,
+      teaser:       a.description,
+      url:          a.article_url,
+      source:       a.publisher?.name || 'Benzinga',
+      published_at: a.published_utc,
+      updated_at:   a.published_utc,
       author:       a.author,
-      channels:     (a.channels || []).map(c => c.name),
-      tickers:      (a.stocks  || []).map(s => s.name),
-      sentiment:    (a.stocks  || []).find(s => s.name === symbol?.toUpperCase())?.sentiment ?? null,
+      image_url:    a.image_url || null,
+      channels:     a.keywords  || [],
+      tickers:      a.tickers   || [],
+      sentiment:    (symbol
+        ? a.insights?.find(i => i.ticker === symbol.toUpperCase())?.sentiment
+        : a.insights?.[0]?.sentiment
+      )?.toLowerCase() ?? null,
     }));
     return { articles, total: articles.length };
   });

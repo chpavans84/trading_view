@@ -62,6 +62,7 @@ import { auditUWSchemas } from '../core/uw-schema-linter.js';
 import { purgeOldUwRows } from '../core/uw-retention.js';
 import { getUwConvictionForSymbol, getUwConvictionForSymbols } from '../core/uw-conviction.js';
 import { dailyDataQualityReport } from '../core/uw-data-quality.js';
+import { ingestNews, getIngesterStatus, startNewsIngesterCrons } from '../core/news-ingester.js';
 import { alert as sysAlert } from '../core/system-alerts.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
 import { checkUnusualOptions } from '../core/options-scanner.js';
@@ -206,12 +207,12 @@ async function migrateUsersToDb() {
 
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
-const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk'];
+const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover'];
 const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
 
 const DEFAULT_PERMISSIONS = {
   admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
+  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
 };
 
 function getPermissions(user) {
@@ -5752,6 +5753,7 @@ async function refreshStockPrices(symbol) {
                 `?interval=1d&period1=${toUnix(fromDate)}&period2=${toUnix(today) + 86400}`;
     const resp = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+      signal: AbortSignal.timeout(8000),
     });
     if (!resp.ok) return;
 
@@ -6258,6 +6260,198 @@ app.get('/api/benzinga/dividends', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('[benzinga/dividends]', e.message);
     res.status(500).json({ error: 'Dividends data unavailable' });
+  }
+});
+
+// ─── News Feed (DB-backed, Discover tab) ─────────────────────────────────────
+
+app.get('/api/news/feed', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    const where = [];
+    const params = [];
+    // Composite cursor: stable even when multiple articles share the same published_at.
+    if (req.query.before_ts && req.query.before_id) {
+      params.push(req.query.before_ts);
+      const tsParam = `$${params.length}`;
+      params.push(req.query.before_id);
+      const idParam = `$${params.length}`;
+      where.push(`(published_at < ${tsParam}
+                    OR (published_at = ${tsParam} AND article_id < ${idParam}))`);
+    }
+    if (req.query.since) {
+      params.push(req.query.since);
+      where.push(`published_at > $${params.length}`);
+    }
+    if (req.query.ticker) {
+      params.push(JSON.stringify([req.query.ticker.toUpperCase()]));
+      where.push(`tickers @> $${params.length}::jsonb`);
+    }
+    if (req.query.sentiment && ['positive','negative','neutral'].includes(req.query.sentiment)) {
+      params.push(req.query.sentiment);
+      where.push(`sentiment = $${params.length}`);
+    }
+    if (req.query.source) {
+      params.push(req.query.source);
+      where.push(`source = $${params.length}`);
+    }
+    if (req.query.q) {
+      params.push(req.query.q);
+      where.push(`to_tsvector('english', coalesce(title,'') || ' ' || coalesce(teaser,''))
+                  @@ plainto_tsquery('english', $${params.length})`);
+    }
+    if (req.query.channel) {
+      params.push(JSON.stringify([req.query.channel]));
+      where.push(`channels @> $${params.length}::jsonb`);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    params.push(limit);
+    const sql = `
+      SELECT article_id, title, teaser, url, source, author, image_url,
+             channels, tickers, sentiment, published_at, updated_at, ingested_at
+      FROM benzinga_news
+      ${whereSql}
+      ORDER BY published_at DESC, article_id DESC
+      LIMIT $${params.length}
+    `;
+    const { rows } = await query(sql, params);
+    const next_before_ts = rows.length === limit ? rows[rows.length - 1].published_at : null;
+    const next_before_id = rows.length === limit ? rows[rows.length - 1].article_id   : null;
+    // Flag saved articles for the current user
+    const username = req.session?.username;
+    let savedSet = new Set();
+    if (username && rows.length) {
+      const ids = rows.map(r => r.article_id);
+      const { rows: savedRows } = await query(
+        `SELECT article_id FROM news_saved WHERE username = $1 AND article_id = ANY($2)`,
+        [username, ids]
+      );
+      savedSet = new Set(savedRows.map(r => r.article_id));
+    }
+    for (const r of rows) r.is_saved = savedSet.has(r.article_id);
+    res.json({ articles: rows, count: rows.length, next_before_ts, next_before_id });
+  } catch (e) {
+    console.error('[news/feed]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/news/sources', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const { rows } = await query(
+      `SELECT source, COUNT(*) AS article_count
+       FROM benzinga_news
+       WHERE source IS NOT NULL AND published_at > NOW() - INTERVAL '7 days'
+       GROUP BY source
+       ORDER BY article_count DESC
+       LIMIT 50`
+    );
+    res.json({ sources: rows });
+  } catch (e) {
+    console.error('[news/sources]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/news/stats', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const { rows } = await query(`
+      SELECT
+        (SELECT COUNT(*) FROM benzinga_news) AS total,
+        (SELECT COUNT(*) FROM benzinga_news WHERE published_at > NOW() - INTERVAL '24 hours') AS last_24h,
+        (SELECT COUNT(*) FROM benzinga_news WHERE ingested_at > NOW() - INTERVAL '15 minutes') AS recent_ingest,
+        (SELECT MAX(published_at) FROM benzinga_news) AS latest_published,
+        (SELECT MAX(ingested_at) FROM benzinga_news) AS latest_ingested
+    `);
+    res.json({ ...rows[0], ingester: getIngesterStatus() });
+  } catch (e) {
+    console.error('[news/stats]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/news/save', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  const username = req.session?.username;
+  const articleId = String(req.body?.article_id || '').trim();
+  if (!username || !articleId) return res.status(400).json({ error: 'article_id required' });
+  try {
+    await query(
+      `INSERT INTO news_saved (username, article_id)
+       VALUES ($1, $2)
+       ON CONFLICT (username, article_id) DO NOTHING`,
+      [username, articleId]
+    );
+    res.json({ ok: true, article_id: articleId });
+  } catch (e) {
+    console.error('[news/save]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/news/save/:article_id', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  const username = req.session?.username;
+  const articleId = String(req.params.article_id || '').trim();
+  if (!username || !articleId) return res.status(400).json({ error: 'article_id required' });
+  try {
+    await query(
+      `DELETE FROM news_saved WHERE username = $1 AND article_id = $2`,
+      [username, articleId]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[news/save delete]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/news/saved', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  const username = req.session?.username;
+  if (!username) return res.status(401).json({ error: 'auth required' });
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+  try {
+    const { rows } = await query(
+      `SELECT bn.article_id, bn.title, bn.teaser, bn.url, bn.source, bn.author,
+              bn.image_url, bn.channels, bn.tickers, bn.sentiment,
+              bn.published_at, bn.updated_at, ns.saved_at
+       FROM news_saved ns
+       JOIN benzinga_news bn ON bn.article_id = ns.article_id
+       WHERE ns.username = $1
+       ORDER BY ns.saved_at DESC
+       LIMIT $2`,
+      [username, limit]
+    );
+    // Mark all as saved (they come from the saved list)
+    for (const r of rows) r.is_saved = true;
+    res.json({ articles: rows, count: rows.length });
+  } catch (e) {
+    console.error('[news/saved]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/news/channels', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const { rows } = await query(
+      `SELECT ch.value AS channel, COUNT(*) AS article_count
+       FROM benzinga_news bn,
+            LATERAL jsonb_array_elements_text(bn.channels) AS ch(value)
+       WHERE bn.published_at > NOW() - INTERVAL '7 days'
+         AND ch.value <> ''
+       GROUP BY ch.value
+       ORDER BY article_count DESC
+       LIMIT 20`
+    );
+    res.json({ channels: rows });
+  } catch (e) {
+    console.error('[news/channels]', e);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -7530,6 +7724,9 @@ wss.on('connection', (ws) => {
   });
   ws.on('close', () => { try { term.kill(); } catch {} });
 });
+
+// ─── News Ingester Crons ──────────────────────────────────────────────────────
+startNewsIngesterCrons();
 
 // ─── Trade Reconciliation Cron ────────────────────────────────────────────────
 // Sync Alpaca bracket exits → DB every 5 min during market hours (9:30–4 PM ET)
