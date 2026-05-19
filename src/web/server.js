@@ -2237,9 +2237,12 @@ async function generateWeekPredictions(weekStart) {
             has_earnings: !!earningsDate, earnings_date: earningsDate,
             adjusted_change_pct: adjChangePct,
             confidence: cal?.confidence ?? null,
-            uw_modifier_delta:  cal?._uw_modifier?.delta  ?? null,
-            uw_modifier_reason: cal?._uw_modifier?.reason ?? null,
-            uw_modifier_label:  cal?._uw_modifier?.uw_label ?? null,
+            uw_modifier_delta:   cal?._uw_modifier?.delta    ?? null,
+            uw_modifier_reason:  cal?._uw_modifier?.reason   ?? null,
+            uw_modifier_label:   cal?._uw_modifier?.uw_label ?? null,
+            news_modifier_delta:  cal?._news_modifier?.delta      ?? null,
+            news_modifier_reason: cal?._news_modifier?.reason     ?? null,
+            news_modifier_label:  cal?._news_modifier?.news_label ?? null,
           });
         }
         done++;
@@ -6526,6 +6529,21 @@ app.get('/api/news/spikes', requireAuth, async (req, res) => {
     });
   } catch (e) {
     console.error('[news/spikes]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── News Sentiment Modifier Inspection ──────────────────────────────────────
+
+app.get('/api/news/sentiment/:symbol', requireAuth, async (req, res) => {
+  try {
+    const { getNewsSentimentForSymbol } = await import('../core/news-sentiment-modifier.js');
+    const sym = String(req.params.symbol || '').toUpperCase();
+    if (!/^[A-Z]{1,8}$/.test(sym)) return res.status(400).json({ error: 'invalid ticker' });
+    const result = await getNewsSentimentForSymbol(sym);
+    res.json(result);
+  } catch (e) {
+    console.error('[news/sentiment]', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

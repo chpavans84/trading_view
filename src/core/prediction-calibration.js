@@ -15,6 +15,38 @@
  */
 
 import { query, isDbAvailable } from './db.js';
+import { getUwConvictionForSymbol } from './uw-conviction.js';
+import { getNewsSentimentForSymbol, computeNewsModifier } from './news-sentiment-modifier.js';
+
+// ─── UW Conviction Modifier ───────────────────────────────────────────────────
+// Bounded: max +15 (aligned), max -20 (conflicting). Hardcoded.
+export function computeUwModifier(adjustedChangePct, conviction) {
+  const label = conviction?.composite?.label;
+  const score = conviction?.composite?.score;
+
+  if (!label || label === 'no_data' || score == null || label === 'neutral') {
+    return { delta: 0, reason: 'no_uw_data', uw_label: null };
+  }
+  // Forecast has no direction — UW signal can't align or conflict
+  if (adjustedChangePct === 0) {
+    return { delta: 0, reason: 'flat_forecast', uw_label: label };
+  }
+
+  const magnitude = Math.abs(score); // 0–1
+  const isBullishPred = adjustedChangePct > 0;
+  const isBearishPred = adjustedChangePct < 0;
+  const isBullishUw   = label === 'bullish' || label === 'strong_bullish';
+  const isBearishUw   = label === 'bearish' || label === 'strong_bearish';
+
+  if ((isBullishPred && isBullishUw) || (isBearishPred && isBearishUw)) {
+    return { delta: Math.min(15, Math.round(15 * magnitude)), reason: 'uw_aligned', uw_label: label };
+  }
+  if ((isBullishPred && isBearishUw) || (isBearishPred && isBullishUw)) {
+    return { delta: -Math.min(20, Math.round(20 * magnitude)), reason: 'uw_conflicting', uw_label: label };
+  }
+
+  return { delta: 0, reason: 'no_uw_data', uw_label: null };
+}
 
 // ─── Train calibration from all available actuals ────────────────────────────
 
@@ -212,16 +244,36 @@ export async function applyCalibration(symbol, rawPredictedChangePct, rSquared) 
   const sampleBonus = symCal.bias ? Math.min(20, symCal.bias.n * 2) : 0;
   const confidence  = Math.round(errorScore * 0.5 + dirScore * 0.4 + sampleBonus * 0.1);
 
+  const [conviction, sentiment] = await Promise.all([
+    getUwConvictionForSymbol(symbol).catch(() => null),
+    getNewsSentimentForSymbol(symbol).catch(() => null),
+  ]);
+  const uwMod   = computeUwModifier(adjusted, conviction);
+  const newsMod = computeNewsModifier(adjusted, sentiment);
+  const finalConf = Math.max(0, Math.min(100, (confidence ?? 50) + uwMod.delta + newsMod.delta));
+
   return {
     adjusted_change_pct:  +adjusted.toFixed(4),
     raw_change_pct:        rawPredictedChangePct,
-    confidence,            // 0–100 — how reliable this prediction is
+    confidence:            finalConf,
     expected_error_pct:   +expectedError.toFixed(2),
     notes,
-    // Internal factors — used by server.js to apply the same correction to all forecast days
     _bias_correction:      biasCorrection,
     _reversal_applied:     reversalApplied,
     _reversal_factor:      reversalFactor,
+    _uw_modifier: {
+      delta:    uwMod.delta,
+      reason:   uwMod.reason,
+      uw_label: uwMod.uw_label ?? null,
+      uw_score: conviction?.composite?.score ?? null,
+    },
+    _news_modifier: {
+      delta:         newsMod.delta,
+      reason:        newsMod.reason,
+      news_label:    newsMod.news_label ?? null,
+      article_count: sentiment?.article_count ?? 0,
+      avg_sentiment: sentiment?.avg_sentiment ?? null,
+    },
   };
 }
 
@@ -244,6 +296,8 @@ function _noCalibration(raw) {
     _bias_correction:    0,
     _reversal_applied:   false,
     _reversal_factor:    1.0,
+    _uw_modifier:        null,
+    _news_modifier:      null,
   };
 }
 
@@ -254,7 +308,7 @@ export async function getFailureAnalysis({ limit = 6 } = {}) {
 
   const limitN = Math.max(1, Math.min(50, parseInt(limit, 10) || 6));
 
-  const [symErrors, r2Stats, dirStats, global, totalRow] = await Promise.all([
+  const [symErrors, r2Stats, dirStats, global, totalRow, uwModStats] = await Promise.all([
     // Per-symbol error ranking
     query(`
       SELECT symbol,
@@ -293,14 +347,44 @@ export async function getFailureAnalysis({ limit = 6 } = {}) {
 
     // Total sample count
     query('SELECT COUNT(*) AS n FROM prediction_errors'),
+
+    // UW modifier effectiveness: dir_acc and avg error grouped by modifier reason
+    query(`
+      SELECT sp.uw_modifier_reason AS reason,
+             COUNT(*) AS n,
+             ROUND(AVG(CASE WHEN
+               (sp.predicted_change_pct > 0 AND sp.actual_change_pct > 0) OR
+               (sp.predicted_change_pct < 0 AND sp.actual_change_pct < 0)
+             THEN 1.0 ELSE 0.0 END * 100)::numeric,1) AS dir_acc,
+             ROUND(AVG(ABS(sp.error_pct))::numeric,2)  AS avg_abs_error
+      FROM stock_predictions sp
+      WHERE sp.uw_modifier_reason IS NOT NULL
+        AND sp.uw_modifier_reason <> 'pre_migration'
+        AND sp.actual_price IS NOT NULL
+        AND sp.error_pct IS NOT NULL
+      GROUP BY sp.uw_modifier_reason
+      ORDER BY n DESC`),
   ]);
 
   const globMap = Object.fromEntries(global.rows.map(r => [r.feature, +r.value]));
 
+  // Pivot rows into { aligned, conflicting, no_data } keyed object
+  const uwStats = {};
+  for (const r of uwModStats.rows) {
+    const key = r.reason === 'uw_aligned' ? 'aligned'
+              : r.reason === 'uw_conflicting' ? 'conflicting'
+              : 'no_data';
+    if (!uwStats[key]) uwStats[key] = { count: 0, dir_acc: null, avg_abs_error: null };
+    uwStats[key].count       += +r.n;
+    if (uwStats[key].dir_acc       == null && r.dir_acc       != null) uwStats[key].dir_acc       = +r.dir_acc;
+    if (uwStats[key].avg_abs_error == null && r.avg_abs_error != null) uwStats[key].avg_abs_error = +r.avg_abs_error;
+  }
+
   return {
-    worst_symbols:   symErrors.rows,
-    r2_bucket_stats: r2Stats.rows,
-    direction_stats: dirStats.rows,
+    worst_symbols:     symErrors.rows,
+    r2_bucket_stats:   r2Stats.rows,
+    direction_stats:   dirStats.rows,
+    uw_modifier_stats: Object.keys(uwStats).length ? uwStats : null,
     global: {
       model_bullish_bias:  globMap.model_bullish_bias,
       actual_bullish_rate: globMap.actual_bullish_rate,

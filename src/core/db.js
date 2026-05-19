@@ -468,6 +468,10 @@ ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS confidence          INTEG
 ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS uw_modifier_delta   INTEGER;
 ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS uw_modifier_reason  VARCHAR(50);
 ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS uw_modifier_label   VARCHAR(30);
+-- News sentiment modifier columns (parallel to UW modifier, independent)
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS news_modifier_delta  INTEGER;
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS news_modifier_reason TEXT;
+ALTER TABLE stock_predictions ADD COLUMN IF NOT EXISTS news_modifier_label  TEXT;
 
 CREATE TABLE IF NOT EXISTS prediction_calibration (
   symbol       VARCHAR(20) NOT NULL,
@@ -2146,8 +2150,9 @@ export async function upsertPrediction(row) {
     `INSERT INTO stock_predictions
        (symbol, week_start, target_date, predicted_price, predicted_change_pct,
         base_price, algorithm_signal, slope_per_day, r_squared, has_earnings, earnings_date,
-        adjusted_change_pct, confidence, uw_modifier_delta, uw_modifier_reason, uw_modifier_label)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        adjusted_change_pct, confidence, uw_modifier_delta, uw_modifier_reason, uw_modifier_label,
+        news_modifier_delta, news_modifier_reason, news_modifier_label)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      ON CONFLICT (symbol, week_start, target_date) DO UPDATE SET
        predicted_price      = EXCLUDED.predicted_price,
        predicted_change_pct = EXCLUDED.predicted_change_pct,
@@ -2162,12 +2167,16 @@ export async function upsertPrediction(row) {
        uw_modifier_delta    = EXCLUDED.uw_modifier_delta,
        uw_modifier_reason   = EXCLUDED.uw_modifier_reason,
        uw_modifier_label    = EXCLUDED.uw_modifier_label,
+       news_modifier_delta  = EXCLUDED.news_modifier_delta,
+       news_modifier_reason = EXCLUDED.news_modifier_reason,
+       news_modifier_label  = EXCLUDED.news_modifier_label,
        updated_at           = NOW()`,
     [row.symbol, row.week_start, row.target_date, row.predicted_price,
      row.predicted_change_pct, row.base_price, row.algorithm_signal,
      row.slope_per_day, row.r_squared, row.has_earnings, row.earnings_date ?? null,
      row.adjusted_change_pct ?? null, row.confidence ?? null,
-     row.uw_modifier_delta ?? null, row.uw_modifier_reason ?? null, row.uw_modifier_label ?? null]
+     row.uw_modifier_delta ?? null, row.uw_modifier_reason ?? null, row.uw_modifier_label ?? null,
+     row.news_modifier_delta ?? null, row.news_modifier_reason ?? null, row.news_modifier_label ?? null]
   );
 }
 
