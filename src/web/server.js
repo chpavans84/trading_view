@@ -63,6 +63,7 @@ import { purgeOldUwRows } from '../core/uw-retention.js';
 import { getUwConvictionForSymbol, getUwConvictionForSymbols } from '../core/uw-conviction.js';
 import { dailyDataQualityReport } from '../core/uw-data-quality.js';
 import { ingestNews, getIngesterStatus, startNewsIngesterCrons } from '../core/news-ingester.js';
+import { runPreMarketScan } from '../core/premarket-news-scanner.js';
 import { alert as sysAlert } from '../core/system-alerts.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
 import { checkUnusualOptions } from '../core/options-scanner.js';
@@ -7728,6 +7729,15 @@ wss.on('connection', (ws) => {
 // ─── News Ingester Crons ──────────────────────────────────────────────────────
 startNewsIngesterCrons();
 
+// ─── Pre-market News Scanner — 4:00 AM ET Mon–Fri ────────────────────────────
+cron.schedule('0 4 * * 1-5', async () => {
+  try {
+    await runPreMarketScan();
+  } catch (err) {
+    console.error('[premarket-news] cron error:', err.message);
+  }
+}, { timezone: 'America/New_York' });
+
 // ─── Trade Reconciliation Cron ────────────────────────────────────────────────
 // Sync Alpaca bracket exits → DB every 5 min during market hours (9:30–4 PM ET)
 
@@ -7890,6 +7900,17 @@ app.post('/api/sentinel/run', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[sentinel] manual run error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/premarket-news/run — manually trigger pre-market scan (admin only)
+app.post('/api/premarket-news/run', requireAdmin, async (req, res) => {
+  try {
+    const result = await runPreMarketScan({ manual: true });
+    res.json(result);
+  } catch (e) {
+    console.error('[premarket-news/run]', e);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
