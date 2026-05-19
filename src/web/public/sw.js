@@ -6,7 +6,7 @@
 // - Trade POSTs: background-sync queue while offline
 // - Push notifications + notificationclick deep-link (Phase 5)
 
-const CACHE = 'trading-v6';
+const CACHE = 'trading-v8';
 
 const STATIC_PRECACHE = [
   '/mobile.html',
@@ -60,7 +60,13 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Cache-first for static assets (HTML, manifest, icons)
+  // Network-first for main HTML — always fetch fresh so JS/CSS updates land immediately
+  if (url.pathname === '/' || url.pathname === '/index.html') {
+    e.respondWith(_networkFirst(request, 5000));
+    return;
+  }
+
+  // Cache-first for other static assets (manifest, icons, CSS, JS)
   e.respondWith(_cacheFirst(request));
 });
 

@@ -3884,3 +3884,20 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   font-size: 0.7rem; font-weight: 600;
 }
 .disc-chip.active .disc-chip-count { background: rgba(255,255,255,0.2); }
+
+/* Discover — freshness indicator + staleness banner */
+.disc-fresh-dot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; margin-right: 5px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.05);
+}
+.disc-fresh-banner {
+  margin-top: 10px;
+  padding: 8px 14px;
+  background: rgba(227, 179, 65, 0.08);
+  border: 1px solid rgba(227, 179, 65, 0.3);
+  border-radius: 6px;
+  color: #e3b341;
+  font-size: 0.82rem;
+}

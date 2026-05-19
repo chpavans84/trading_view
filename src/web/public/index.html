@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260519p">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260519q">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -726,6 +726,7 @@
     </div>
     <div id="discChipRow" class="disc-chip-row"></div>
     <div id="discNewPill" class="disc-new-pill" style="display:none" onclick="discApplyNewArticles()"></div>
+    <div id="discFreshBanner" class="disc-fresh-banner" style="display:none"></div>
   </div>
   <div id="discFeed" class="disc-feed">
     <div class="disc-empty">Loading…</div>
@@ -10529,14 +10530,58 @@ async function discLoadSources() {
 async function discLoadStats() {
   try {
     const data = await api('/api/news/stats', 5000);
-    const el = document.getElementById('discStats');
-    if (el) el.textContent = `· ${data.last_24h || 0} articles in last 24h`;
-  } catch {}
+    const el     = document.getElementById('discStats');
+    const banner = document.getElementById('discFreshBanner');
+
+    const last24h      = Number(data?.last_24h) || 0;
+    const lastIngestMs = data?.latest_ingested ? new Date(data.latest_ingested).getTime() : null;
+    const lastPublishMs = data?.latest_published ? new Date(data.latest_published).getTime() : null;
+    const now = Date.now();
+
+    const ingestAgeSec  = lastIngestMs  ? Math.max(0, Math.floor((now - lastIngestMs)  / 1000)) : null;
+    const publishAgeMin = lastPublishMs ? Math.floor((now - lastPublishMs) / 60000) : null;
+
+    const dotColor = ingestAgeSec == null   ? '#6e7681'
+                   : ingestAgeSec < 90      ? '#3fb950'
+                   : ingestAgeSec < 5 * 60  ? '#e3b341'
+                   : '#f85149';
+
+    const fmtAge = sec => {
+      if (sec == null) return '—';
+      if (sec < 60)    return `${sec}s ago`;
+      if (sec < 3600)  return `${Math.floor(sec / 60)}m ago`;
+      if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+      return `${Math.floor(sec / 86400)}d ago`;
+    };
+
+    if (el) {
+      el.innerHTML =
+        `· ${last24h} articles in last 24h ` +
+        `· <span class="disc-fresh-dot" style="background:${dotColor}"></span>` +
+        `Refreshed ${fmtAge(ingestAgeSec)}`;
+    }
+
+    if (banner) {
+      const ingestFresh  = ingestAgeSec  != null && ingestAgeSec  < 2 * 60;
+      const publishStale = publishAgeMin != null && publishAgeMin > 30;
+      if (ingestFresh && publishStale) {
+        banner.style.display = '';
+        banner.textContent = `📭 Feed quiet — no new Benzinga articles in the last ${publishAgeMin} min. We're still polling every minute.`;
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+  } catch {
+    // Non-fatal — leave whatever was there
+  }
 }
 
 function discStartPolling() {
   if (_discPollInterval) return;
-  _discPollInterval = setInterval(_discPollNew, 60_000);
+  _discPollInterval = setInterval(() => {
+    _discPollNew();
+    discLoadStats();
+  }, 60_000);
 }
 
 function discStopPolling() {
