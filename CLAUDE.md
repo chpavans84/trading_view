@@ -547,3 +547,194 @@ FROM sentinel_runs WHERE as_of > NOW() - INTERVAL '7 days' GROUP BY mode;
 ### Test invocation
 
 `npm test` runs: e2e + pine_analyze + sentinel + unusual-whales + uw-schema-linter + uw-retention + uw-null-unique + system-alerts. Uses `--experimental-test-module-mocks` flag (Node 22+ required). `NODE_ENV=test` allows `ACTION_SIGNING_SECRET` + `PUBLIC_URL` to use test defaults.
+
+---
+
+## UW Conviction + Mobile Redesign (May 2026 — Phase 2 of build arc)
+
+This section captures the second half of the May 2026 work arc: cross-cutting UW signal layer that feeds Signal Center + Forecast Lab, plus a full mobile PWA redesign. Read this before changing conviction logic, predictor calibration, or mobile.html.
+
+### UW Conviction Signal (`src/core/uw-conviction.js`)
+
+**Purpose:** ONE helper that quantifies UW smart-money positioning per symbol. Reused by Signal Center (visual chip) and Forecast Lab (confidence modifier). Data sourced from existing `uw_flow_alerts` and `uw_insider_trades` tables — NO new ingestion crons added.
+
+**Exports:**
+- `getUwConvictionForSymbol(symbol)` — single ticker, returns conviction shape
+- `getUwConvictionForSymbols([symbols])` — batched via `WHERE ticker = ANY($1)`, returns `Map<symbol, conviction>`
+
+**Conviction shape:**
+```js
+{
+  symbol,
+  options_flow_24h: { bullish_premium, bearish_premium, total_premium, bias, confidence, alert_count } | null,
+  insider_7d:       { buy_value, sell_value, net_value, bias, transaction_count } | null,
+  composite: {
+    score: -1..+1,                          // null if no_data
+    label: 'strong_bullish'|'bullish'|'neutral'|'bearish'|'strong_bearish'|'no_data',
+  },
+  fetched_at,
+}
+```
+
+**Composite math (DO NOT change without re-validating):**
+- Weights: `options_flow: 0.65`, `insider: 0.35`
+- Insider contribution: `Math.sign(net_value) * min(abs(net_value) / 5_000_000, 1)` (capped at $5M)
+- Options skipped entirely if `total_premium < $100k` (too thin to signal)
+- Insider buy threshold: `net_value > $250k` → bullish. Sell threshold: `< -$1M` → bearish (asymmetric — sells noisier than buys)
+
+**Caching:** in-memory Map, 5-min TTL per symbol. Batched function consults cache first.
+
+**Failure mode:** never throws. On DB error → `alert({ key: 'uw-conviction/query-failed', severity: 'warn' })` and returns no_data shape.
+
+**Routes:**
+- `GET /api/uw/conviction/:symbol` — auth-gated, single ticker
+- `GET /api/uw/conviction?symbols=AAPL,NVDA,...` — auth-gated, batched, max 50 symbols
+
+**UI consumers:**
+- Signal Center cards (Catalyst Scan, EOD Setups, Earnings Cascade nodes, Tomorrow's Catalysts) — render `renderConvictionChip()` colored chip
+- Earnings Cascade graph node borders colored by `composite.label`
+- Mobile PWA Markets tab (Phase 2) and Whale tab (Phase 2)
+
+### Forecast Lab UW Modifier (`src/core/prediction-calibration.js`)
+
+**Purpose:** Apply UW conviction as a calibration modifier on prediction confidence. 5-algo predictor stays untouched — modifier is post-calibration only.
+
+**Bounds (NON-NEGOTIABLE):**
+- Aligned (same direction) → max `+15` confidence boost. Linear in magnitude: `+15 * abs(composite.score)`.
+- Conflicting (opposite direction) → max `-20` damper. Asymmetric because conflicting signals are stronger evidence than confirming.
+- UW can NEVER single-handedly flip a prediction. Bounds hardcoded; tune via env later if needed.
+
+**`_uw_modifier` block** added to every calibrated prediction:
+```js
+{ delta: <int>, reason: 'uw_aligned'|'uw_conflicting'|'no_uw_data'|'flat_forecast'|'pre_migration', uw_label, uw_score }
+```
+
+**Persistence (additive columns on `stock_predictions`):**
+- `uw_modifier_delta INTEGER`
+- `uw_modifier_reason VARCHAR(50)`
+- `uw_modifier_label VARCHAR(30)`
+- Pre-migration rows have NULL — backfill with `'pre_migration'` to keep failure-analysis bucketing clean
+
+**Backfill pattern (run once after migration):**
+```sql
+UPDATE stock_predictions
+SET uw_modifier_reason = 'pre_migration'
+WHERE uw_modifier_reason IS NULL
+  AND created_at < (
+    SELECT MIN(created_at) FROM stock_predictions
+    WHERE uw_modifier_reason IS NOT NULL AND uw_modifier_reason <> 'pre_migration'
+  );
+```
+Use **MIN()** not MAX() — MAX() returns NULL on cold-start deploys and silently no-ops the UPDATE. MIN() defines "first real UW row exists at time T; everything before T is pre-migration".
+
+**Failure analysis exclusion:** `getFailureAnalysis()` MUST exclude `'pre_migration'` from `uw_modifier_stats` aggregation. Use allow-list pattern (`WHERE uw_modifier_reason IN ('uw_aligned','uw_conflicting','no_uw_data','flat_forecast')`) for future-proofing against new buckets accidentally leaking into dir_acc averages.
+
+**UI:** 🐋+N badge (blue, aligned) / 🐋-N badge (purple, conflicting) on Forecast Lab table cells next to confidence. Invisible when delta=0. Failure analysis page shows "UW Conviction Modifier Impact" panel above worst-symbols table.
+
+**AI tool:** `get_stock_prediction` response includes `pred.calibration.uw_modifier` — Claude sees UW context when answering forecast questions.
+
+### Mobile PWA Redesign (`src/web/public/mobile.html`)
+
+**Decision: PWA, not React Native.** TradingBotApp (existing React Native + Expo Go project) frozen/archived. Reasoning: UW personal-use license forbids public distribution → no need for App Store presence → Add-to-Home-Screen PWA is the right shape. If store presence ever needed later, escape hatch is Capacitor wrap (Level 2), NOT React Native rewrite (Level 3).
+
+**5-tab architecture (bottom navigation):**
+1. 🏠 **Home** — Portfolio P&L + open positions + catalysts on held stocks + recent critical alert + sentinel summary + market pulse
+2. 📊 **Markets** — segmented control: Catalysts / Forecast / Signals / Watchlist / Calendar (with conviction chips + modifier badges)
+3. 🐋 **Whale** — segmented: Flow / Insider / Congress / Correlations / Movers (showcases UW $315/mo subscription)
+4. 🤖 **AI** — full-screen Akshaya chat with voice input (Web Speech API), suggested prompts, tool icons
+5. 🚨 **Alerts** — 3 stacked sections: Critical / Sentinel / Warnings+Info; critical-count badge on tab icon
+
+**Plus:** FAB ⚡ Quick Trade (bottom-right), ☰ overflow menu (top-right) for settings/account/brokers.
+
+**6-phase delivery (one commit per phase):**
+1. Shell + nav + Home tab (~600 LOC) ✅
+2. Markets + Whale tabs (~700 LOC) ✅
+3. AI + Alerts tabs (~500 LOC) ✅
+4. Bottom sheets + FAB + gestures (~600 LOC) — biggest UX delta
+5. Push (VAPID) + biometric (WebAuthn) + haptic + optimistic UI (~400 LOC)
+6. Accessibility + perf + tests + docs (~200 LOC)
+Total target: ~3000 LOC. Bundle budget ≤200 KB.
+
+**Backup:** `mobile-v1.html` retained for emergency rollback. Server route falls back if `mobile.html` missing.
+
+**Non-negotiable rules for mobile.html work:**
+- 60fps animations only — transform + opacity, NOT top/height
+- Touch targets ≥44×44pt
+- Safe-area-inset-bottom on nav and FAB
+- Bottom sheets > modals (swipe-to-dismiss)
+- Skeleton loaders > spinners
+- Pull-to-refresh with haptic on threshold cross
+- Long-press: 500ms wait, cancel if finger moves >10px (it's a scroll)
+- Quick-trade: 2-step confirm (Review → Place); never single-tap order
+- All async paths wrapped in try/catch with `alert()` on failure
+- All routes auth-gated
+- Reduced motion respected (no waveform animations etc.)
+
+**Innovations enabled in Phase 5:**
+- Web Push for CRITICAL alerts (VAPID keys, `push_subscriptions` table)
+- WebAuthn for biometric login (`webauthn_credentials` table)
+- Haptics via Vibration API (10ms tap, 30/50/30 double-pulse on order, 200ms critical alert)
+- Optimistic UI: position appears immediately on Buy, reconciles after server confirm
+- Screenshot mode: long-press account value → all $ values hidden
+- System dark/light mode with manual override
+
+**Env vars added:**
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` — for web push (generate: `npx web-push generate-vapid-keys`)
+
+**Routes added by mobile work:**
+- `POST /api/push/subscribe`, `DELETE /api/push/unsubscribe`
+- `POST /api/webauthn/register/{begin,finish}`, `POST /api/webauthn/authenticate/{begin,finish}`
+- `POST /api/system-alerts/:id/read` (optional — fallback to localStorage)
+
+### Three levels of "real mobile" (decision framework)
+
+If asked "should we switch to native?", the answer is almost always NO. Use this framework:
+
+| Level | What you get | When right |
+|---|---|---|
+| **1. PWA + Add to Home Screen** (current) | Icon, full-screen, push, biometric, haptics, offline | Personal use, UW license constraints — 90% of users |
+| **2. PWA wrapped with Capacitor** | All of #1 + App Store icon, TestFlight/Play Internal | If you want store icon specifically. 1-day add, no rewrite. |
+| **3. React Native rewrite** | All of #2 + iOS Widgets, Live Activities, Watch, CarPlay | Only if genuinely need native-only features. 3-6 weeks. |
+
+For this project: stay at Level 1. Level 2 is the escape hatch. Level 3 is incompatible with UW personal-use license anyway.
+
+### User preferences (additions to durable list)
+
+8. **PWA over native.** Mobile app is `mobile.html` PWA. Don't reintroduce React Native unless explicitly asked. TradingBotApp is frozen.
+
+9. **Phases ship independently.** Each phase = one commit. Don't bundle phases. Each phase has its own smoke test that must pass before next.
+
+10. **Conviction signal is ONE helper.** All consumers (Signal Center chips, Forecast Lab modifier, mobile Markets, mobile Whale) use `getUwConvictionForSymbol` / `getUwConvictionForSymbols`. Don't duplicate the logic anywhere.
+
+11. **Backfill old DB rows when adding new analytics columns.** Use sentinel values like `'pre_migration'` and exclude them from aggregations with allow-list filters, not deny-lists.
+
+12. **Modifier bounds are hardcoded.** Forecast UW modifier capped at +15 / −20 confidence delta. Never let any single signal flip a prediction.
+
+### DB tables / columns added in this sub-arc
+
+- `stock_predictions.uw_modifier_delta` (INT), `.uw_modifier_reason` (VARCHAR(50)), `.uw_modifier_label` (VARCHAR(30)) — additive ALTER TABLE
+- `push_subscriptions` (user_id, endpoint, p256dh, auth, created_at) — Phase 5 mobile
+- `webauthn_credentials` (user_id, credential_id, public_key, counter, created_at) — Phase 5 mobile
+
+### Verification queries
+
+```sql
+-- UW conviction signal distribution last 7d (across all predictions)
+SELECT uw_modifier_reason, COUNT(*) AS n,
+       ROUND(AVG(uw_modifier_delta)::numeric, 1) AS avg_delta,
+       MIN(uw_modifier_delta) AS min, MAX(uw_modifier_delta) AS max
+FROM stock_predictions
+WHERE created_at > NOW() - INTERVAL '7 days'
+  AND uw_modifier_reason IS NOT NULL
+GROUP BY uw_modifier_reason;
+
+-- The real test: does the modifier actually improve direction accuracy?
+-- aligned.dir_acc should be > conflicting.dir_acc after ≥30 aligned samples
+SELECT uw_modifier_reason, COUNT(*) FILTER (WHERE actual_price IS NOT NULL) AS filled,
+       ROUND(100.0 * SUM(CASE WHEN SIGN(actual_change_pct) = SIGN(adjusted_change_pct) THEN 1 ELSE 0 END)
+                  / NULLIF(COUNT(*) FILTER (WHERE actual_price IS NOT NULL), 0), 1) AS dir_acc
+FROM stock_predictions
+WHERE uw_modifier_reason IN ('uw_aligned','uw_conflicting','no_uw_data')
+  AND created_at > NOW() - INTERVAL '30 days'
+GROUP BY uw_modifier_reason;
+```
