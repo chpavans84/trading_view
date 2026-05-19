@@ -6456,6 +6456,80 @@ app.get('/api/news/channels', requireAuth, async (req, res) => {
   }
 });
 
+// ─── News Volume Spikes ──────────────────────────────────────────────────────
+
+/**
+ * GET /api/news/spikes
+ *   ?window_minutes=60   — current window for "recent" count (default 60, max 360)
+ *   ?baseline_days=14    — baseline period (default 14, max 60)
+ *   ?threshold=3.0       — minimum spike ratio (default 3.0, min 1.5)
+ *   ?min_articles=3      — minimum articles in window (default 3)
+ *   ?limit=20            — max spikes to return (max 50)
+ */
+app.get('/api/news/spikes', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const windowMin    = Math.min(Math.max(parseInt(req.query.window_minutes, 10) || 60, 5), 360);
+    const baselineDays = Math.min(Math.max(parseInt(req.query.baseline_days,  10) || 14, 3), 60);
+    const threshold    = Math.max(parseFloat(req.query.threshold)     || 3.0, 1.5);
+    const minArticles  = Math.min(Math.max(parseInt(req.query.min_articles,   10) || 3, 2), 50);
+    const limit        = Math.min(Math.max(parseInt(req.query.limit,           10) || 20, 1), 50);
+
+    const sql = `
+      WITH baseline AS (
+        SELECT ticker,
+               COUNT(*)::float / ($2::float * 24.0) AS avg_per_hour
+        FROM benzinga_news bn,
+             jsonb_array_elements_text(bn.tickers) AS ticker
+        WHERE bn.published_at > NOW() - ($2 || ' days')::interval
+        GROUP BY ticker
+        HAVING COUNT(*) >= 7
+      ),
+      recent AS (
+        SELECT ticker,
+               COUNT(*) AS recent_count,
+               (ARRAY_AGG(
+                  jsonb_build_object(
+                    'article_id', bn.article_id,
+                    'title',      bn.title,
+                    'sentiment',  bn.sentiment,
+                    'url',        bn.url,
+                    'published_at', bn.published_at,
+                    'source',     bn.source
+                  )
+                  ORDER BY bn.published_at DESC
+               ))[1:5] AS sample_articles
+        FROM benzinga_news bn,
+             jsonb_array_elements_text(bn.tickers) AS ticker
+        WHERE bn.published_at > NOW() - ($1 || ' minutes')::interval
+        GROUP BY ticker
+      )
+      SELECT r.ticker,
+             r.recent_count,
+             ROUND(b.avg_per_hour::numeric, 2)                                                                AS baseline_per_hour,
+             ROUND((((r.recent_count * 60.0) / $1::float) / NULLIF(b.avg_per_hour, 0))::numeric, 1)          AS spike_ratio,
+             r.sample_articles
+      FROM recent r
+      JOIN baseline b USING (ticker)
+      WHERE r.recent_count >= $4
+        AND ((r.recent_count * 60.0) / $1::float) / NULLIF(b.avg_per_hour, 0) >= $3
+      ORDER BY spike_ratio DESC, r.recent_count DESC
+      LIMIT $5
+    `;
+
+    const { rows } = await query(sql, [windowMin, baselineDays, threshold, minArticles, limit]);
+    res.json({
+      spikes: rows,
+      window_minutes: windowMin,
+      threshold,
+      baseline_days: baselineDays,
+    });
+  } catch (e) {
+    console.error('[news/spikes]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // ─── Unusual Whales ───────────────────────────────────────────────────────────
 
 /**
