@@ -164,13 +164,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 #fab:active{transform:scale(.93);box-shadow:0 2px 8px rgba(88,166,255,.3)}
 
 /* ── Skeleton Loader ─────────────────────────────────────────────────── */
-@keyframes shimmer{
-  0%{background-position:-400px 0}100%{background-position:400px 0}
+/* Hardware-accelerated shimmer via transform (not background-position) */
+.skel{background:var(--surface2);border-radius:6px;position:relative;overflow:hidden}
+.skel::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.06) 50%,transparent 100%);
+  transform:translateX(-100%);
+  animation:shimmer 1.4s ease-in-out infinite
 }
-.skel{
-  background:linear-gradient(90deg,var(--surface2) 25%,var(--border2) 50%,var(--surface2) 75%);
-  background-size:800px 100%;animation:shimmer 1.4s infinite;border-radius:6px
-}
+@keyframes shimmer{to{transform:translateX(200%)}}
 .skel-line{height:14px;margin-bottom:8px}
 .skel-line.wide{width:100%}.skel-line.med{width:65%}.skel-line.short{width:35%}
 .skel-card{height:90px;border-radius:12px;margin-bottom:10px}
@@ -768,9 +770,135 @@ html,body{height:100%;background:var(--bg);color:var(--text);
   border-radius:8px;-webkit-tap-highlight-color:transparent
 }
 .lp-pop-item:active{background:var(--border2)}
+
+/* ── Overflow Menu Drawer ────────────────────────────────────────────── */
+#menu-backdrop{
+  position:fixed;inset:0;z-index:700;background:rgba(0,0,0,0);
+  pointer-events:none;transition:background .28s ease
+}
+#menu-backdrop.open{background:rgba(0,0,0,.62);pointer-events:all}
+#menu-drawer{
+  position:fixed;top:0;right:0;bottom:0;z-index:701;
+  width:85%;max-width:380px;
+  background:var(--surface);
+  display:none;flex-direction:column;
+  transform:translateX(100%);
+  transition:transform .28s cubic-bezier(.4,0,.2,1);
+  overflow-y:auto;-webkit-overflow-scrolling:touch
+}
+#menu-drawer.open{transform:translateX(0)}
+#menu-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:calc(var(--safe-t) + 14px) 18px 10px;
+  border-bottom:1px solid var(--border2);flex-shrink:0
+}
+#menu-close{
+  background:var(--surface2);border:none;width:30px;height:30px;border-radius:50%;
+  color:var(--text2);font-size:.85rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;flex-shrink:0
+}
+.menu-section{border-bottom:1px solid var(--border2);padding:14px 18px}
+.menu-section:last-child{border-bottom:none;padding-bottom:calc(14px + var(--safe-b))}
+.menu-section-title{
+  font-size:.62rem;font-weight:800;color:var(--text3);
+  text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px
+}
+.menu-acct-row{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.menu-avatar{
+  width:42px;height:42px;border-radius:50%;background:var(--accent);
+  color:#000;font-size:1.1rem;font-weight:800;display:flex;align-items:center;justify-content:center;
+  flex-shrink:0
+}
+.menu-username{font-size:.9rem;font-weight:800}
+.menu-role-badge{
+  display:inline-block;font-size:.6rem;font-weight:800;padding:2px 7px;
+  background:rgba(88,166,255,.15);color:var(--accent);border-radius:10px;margin-top:2px
+}
+.menu-broker-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 0;border-bottom:1px solid var(--border2)
+}
+.menu-broker-row:last-child{border-bottom:none}
+.menu-broker-name{font-size:.8rem;font-weight:700}
+.menu-broker-status.connected{color:var(--green);font-size:.72rem}
+.menu-broker-status.disconnected{color:var(--text3);font-size:.72rem}
+.menu-bal-row{display:flex;gap:12px;margin-top:12px}
+.menu-bal-item{flex:1;background:var(--surface2);border-radius:10px;padding:10px 12px}
+.menu-bal-lbl{font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em}
+.menu-bal-val{font-size:.92rem;font-weight:800;margin-top:2px}
+.menu-tool-btn{
+  display:flex;align-items:center;gap:12px;width:100%;
+  padding:12px 0;background:none;border:none;border-bottom:1px solid var(--border2);
+  color:var(--text);font-size:.85rem;font-weight:600;cursor:pointer;text-align:left;
+  -webkit-tap-highlight-color:transparent
+}
+.menu-tool-btn:last-child{border-bottom:none}
+.menu-tool-btn:active{opacity:.65}
+.menu-tool-icon{font-size:1.1rem;width:24px;text-align:center;flex-shrink:0}
+.menu-tool-arrow{margin-left:auto;color:var(--text3);font-size:.9rem}
+.menu-setting-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:11px 0;border-bottom:1px solid var(--border2)
+}
+.menu-setting-row:last-child{border-bottom:none}
+.menu-setting-label{font-size:.84rem;font-weight:600}
+.menu-toggle{
+  width:44px;height:26px;border-radius:13px;background:var(--border2);
+  border:none;cursor:pointer;position:relative;flex-shrink:0;
+  transition:background .2s;-webkit-tap-highlight-color:transparent
+}
+.menu-toggle::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:20px;height:20px;border-radius:50%;background:#fff;
+  transition:transform .2s
+}
+.menu-toggle.on{background:var(--accent)}
+.menu-toggle.on::after{transform:translateX(18px)}
+.menu-signout-btn{
+  width:100%;margin-top:10px;padding:13px;border-radius:12px;
+  background:rgba(248,81,73,.12);color:var(--red);
+  border:1px solid rgba(248,81,73,.25);font-size:.88rem;font-weight:700;
+  cursor:pointer;-webkit-tap-highlight-color:transparent
+}
+.menu-signout-btn:active{opacity:.7}
+.menu-footer{
+  font-size:.68rem;color:var(--text3);text-align:center;
+  padding-top:14px;line-height:1.8
+}
+.menu-footer a{color:var(--accent);text-decoration:none;cursor:pointer}
+
+/* ── Offline Banner ──────────────────────────────────────────────────── */
+#offline-banner{
+  position:fixed;top:0;left:0;right:0;z-index:250;
+  background:var(--yellow);color:#000;font-size:.75rem;font-weight:700;
+  text-align:center;padding:5px 10px;
+  transform:translateY(-100%);transition:transform .25s ease;pointer-events:none
+}
+#offline-banner.show{transform:translateY(0);pointer-events:auto}
+
+/* ── Focus rings (keyboard navigation) ──────────────────────────────── */
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ── Reduced motion overrides ────────────────────────────────────────── */
+@media(prefers-reduced-motion:reduce){
+  #menu-drawer{transition:opacity .2s ease}
+  #menu-drawer.open{opacity:1}
+  #offline-banner{transition:none}
+  .skel::after{animation:none}
+  .chat-mic-btn.listening{animation:none}
+  #market-dot.open{animation:none}
+  #ptr{transition:none}
+}
 </style>
 </head>
 <body>
+
+<!-- ── Offline Banner ──────────────────────────────────────────────── -->
+<div id="offline-banner" role="alert">⚠️ Offline — showing last sync</div>
+
+<!-- ── Screen-reader live region (assertive, for critical alerts) ──── -->
+<div id="sr-live" aria-live="assertive" aria-atomic="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"></div>
 
 <!-- ── Top Bar ─────────────────────────────────────────────────────── -->
 <div id="topbar">
@@ -1001,6 +1129,68 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 
 <!-- ── Long-press popover ─────────────────────────────────────────────── -->
 <div id="lp-pop" role="menu" aria-label="Quick actions"></div>
+
+<!-- ── Overflow Menu Drawer ───────────────────────────────────────────── -->
+<div id="menu-backdrop" onclick="closeMenu()"></div>
+<aside id="menu-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+  <div id="menu-hdr">
+    <span id="menu-title" style="font-size:.7rem;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.1em">Menu</span>
+    <button id="menu-close" onclick="closeMenu()" aria-label="Close menu">✕</button>
+  </div>
+
+  <!-- Account section -->
+  <div class="menu-section">
+    <div class="menu-section-title">Account</div>
+    <div id="menu-account-body">
+      <div class="skel" style="height:52px;border-radius:10px;margin-bottom:10px"></div>
+    </div>
+  </div>
+
+  <!-- Tools section -->
+  <div class="menu-section">
+    <div class="menu-section-title">Tools</div>
+    <button class="menu-tool-btn" onclick="openMenuTool('notes')" aria-label="Open notes">
+      <span class="menu-tool-icon">📝</span>Notes<span class="menu-tool-arrow">›</span>
+    </button>
+    <button class="menu-tool-btn" onclick="openMenuTool('reminders')" aria-label="Open reminders">
+      <span class="menu-tool-icon">⏰</span>Reminders<span class="menu-tool-arrow">›</span>
+    </button>
+    <button class="menu-tool-btn" onclick="openMenuTool('botconfig')" aria-label="Open bot config">
+      <span class="menu-tool-icon">🤖</span>Bot Config<span class="menu-tool-arrow">›</span>
+    </button>
+    <button class="menu-tool-btn" onclick="openMenuTool('stats')" aria-label="Open stats">
+      <span class="menu-tool-icon">📊</span>Stats<span class="menu-tool-arrow">›</span>
+    </button>
+  </div>
+
+  <!-- Settings section -->
+  <div class="menu-section">
+    <div class="menu-section-title">Settings</div>
+    <div class="menu-setting-row">
+      <span class="menu-setting-label">Dark Mode</span>
+      <button class="menu-toggle on" id="menu-toggle-dark" onclick="menuToggleDark(this)" aria-pressed="true" aria-label="Toggle dark mode"></button>
+    </div>
+    <div class="menu-setting-row">
+      <span class="menu-setting-label">Push Alerts</span>
+      <button class="menu-toggle" id="menu-toggle-push" onclick="menuTogglePush(this)" aria-pressed="false" aria-label="Toggle push notifications"></button>
+    </div>
+    <div class="menu-setting-row">
+      <span class="menu-setting-label">Biometric</span>
+      <button class="menu-toggle" id="menu-toggle-bio" onclick="menuToggleBio(this)" aria-pressed="false" aria-label="Toggle biometric login"></button>
+    </div>
+    <div class="menu-setting-row">
+      <span class="menu-setting-label">Privacy Mode</span>
+      <button class="menu-toggle" id="menu-toggle-privacy" onclick="menuTogglePrivacy(this)" aria-pressed="false" aria-label="Toggle privacy mode"></button>
+    </div>
+    <button class="menu-signout-btn" onclick="menuSignOut()">Sign Out</button>
+    <div class="menu-footer">
+      v6.0 ·
+      <a onclick="closeMenu();showTab('alerts')" aria-label="Go to alerts">Alerts</a> ·
+      <a href="#" onclick="closeMenu()" aria-label="Dismiss menu">Dismiss</a><br>
+      Add to Home Screen for the best experience
+    </div>
+  </div>
+</aside>
 
 <!-- ── Bottom Nav ───────────────────────────────────────────────────── -->
 <nav id="bottomnav" role="navigation" aria-label="Main navigation">
@@ -1247,6 +1437,8 @@ function showTab(id) {
   if (screen) screen.classList.add('active');
   _activeTab = id;
   if (!_loaded[id]) { _loaded[id] = true; loadTab(id); }
+  const label = { home:'Home', markets:'Markets', whale:'Whale Flow', ai:'AI Chat', alerts:'Alerts' }[id] || id;
+  announce('Switched to ' + label + ' tab');
 }
 
 function loadTab(id) {
@@ -1575,7 +1767,11 @@ async function pollAlertBadge() {
     const badge = document.getElementById('alerts-badge');
     const bell = document.getElementById('bell-badge');
     const n = alerts.length;
-    if (n > _prevCritCount) haptic(200);
+    if (n > _prevCritCount) {
+      haptic(200);
+      const newest = alerts[0];
+      if (newest?.title) announce('Critical alert: ' + newest.title);
+    }
     _prevCritCount = n;
     badge.textContent = n || '';
     badge.style.display = n ? '' : 'none';
@@ -1630,14 +1826,16 @@ document.getElementById('fab').addEventListener('click', () => {
   openQuickTrade('', 'buy');
 });
 
-/* ── Menu + notif stubs ──────────────────────────────────────────────── */
-document.getElementById('menu-btn').addEventListener('click', () => {
-  haptic(10);
-  toast('☰ Menu — coming in Phase 6');
-});
+/* ── Notifications button ────────────────────────────────────────────── */
 document.getElementById('notif-btn').addEventListener('click', () => {
   haptic(10);
   showTab('alerts');
+});
+
+/* ── Menu button ─────────────────────────────────────────────────────── */
+document.getElementById('menu-btn').addEventListener('click', () => {
+  haptic(10);
+  openMenu();
 });
 
 /* openStock is defined in PHASE 4 block below */
@@ -1677,7 +1875,10 @@ function _bsSpring() {
   _bsRaf = requestAnimationFrame(_bsSpring);
 }
 
+let _bsTrigger = null;  // element that opened the sheet (for focus restore)
+
 function openSheet(title, subtitle, html) {
+  _bsTrigger = document.activeElement;
   document.getElementById('bs-title').textContent    = title || '';
   document.getElementById('bs-subtitle').textContent = subtitle || '';
   document.getElementById('bs-body').innerHTML       = html || '';
@@ -1685,14 +1886,30 @@ function openSheet(title, subtitle, html) {
   _bsSheet.style.transform  = 'translateY(100%)';
   _bsBackdrop.classList.add('open');
   document.body.style.overflow = 'hidden';
-  requestAnimationFrame(() => {   // measure after display:flex
-    _bsH   = _bsSheet.getBoundingClientRect().height;
-    _bsCur = _bsH;
-    _bsTgt = 0;
-    _bsOpen = true;
-    cancelAnimationFrame(_bsRaf);
-    _bsRaf = requestAnimationFrame(_bsSpring);
-  });
+  if (mq.matches) {
+    // Reduced motion: skip spring, show immediately
+    _bsH = _bsSheet.getBoundingClientRect().height;
+    _bsApply(0);
+    _bsCur = 0; _bsTgt = 0; _bsOpen = true;
+    _focusFirstInSheet();
+  } else {
+    requestAnimationFrame(() => {
+      _bsH   = _bsSheet.getBoundingClientRect().height;
+      _bsCur = _bsH;
+      _bsTgt = 0;
+      _bsOpen = true;
+      cancelAnimationFrame(_bsRaf);
+      _bsRaf = requestAnimationFrame(_bsSpring);
+      _bsRaf && setTimeout(_focusFirstInSheet, 300);
+    });
+  }
+}
+
+function _focusFirstInSheet() {
+  const first = _bsSheet.querySelector(
+    'button:not([disabled]), [href], input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"])'
+  );
+  if (first) first.focus();
 }
 
 function _bsSetContent(title, subtitle, html) {
@@ -1704,10 +1921,18 @@ function _bsSetContent(title, subtitle, html) {
 function closeSheet() {
   if (!_bsOpen) return;
   haptic(10);
-  _bsH   = _bsSheet.getBoundingClientRect().height;
-  _bsTgt = _bsH;
-  cancelAnimationFrame(_bsRaf);
-  _bsRaf = requestAnimationFrame(_bsSpring);
+  if (mq.matches) {
+    _bsSheet.style.display = 'none';
+    _bsBackdrop.classList.remove('open');
+    document.body.style.overflow = '';
+    _bsOpen = false;
+  } else {
+    _bsH   = _bsSheet.getBoundingClientRect().height;
+    _bsTgt = _bsH;
+    cancelAnimationFrame(_bsRaf);
+    _bsRaf = requestAnimationFrame(_bsSpring);
+  }
+  if (_bsTrigger) { _bsTrigger.focus(); _bsTrigger = null; }
 }
 
 /* Drag handle — RAF-gated touchmove for 60fps */
@@ -2055,6 +2280,7 @@ async function _qtPlace(btn) {
     haptic([30, 50, 30]);
     if (_pendEl) _pendEl.remove();
     toast(`✅ ${_qt.side.toUpperCase()} ${qty} ${_qt.sym} placed · ${src.label}`);
+    announce(`Order placed for ${qty} shares of ${_qt.sym}`);
     closeSheet();
     _loaded['home'] = false;
     if (_activeTab === 'home') loadHome();
@@ -2993,6 +3219,298 @@ async function loadAlerts(force = false) {
   })();
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+   PHASE 6 — Menu Drawer · Accessibility · Offline · Performance
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── Screen-reader announcement helper ───────────────────────────────── */
+function announce(msg) {
+  const el = document.getElementById('sr-live');
+  if (!el) return;
+  el.textContent = '';
+  requestAnimationFrame(() => { el.textContent = msg; });
+}
+
+/* ── Keyboard: ESC closes bottom sheet or menu ───────────────────────── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (_bsOpen) { closeSheet(); return; }
+    if (_menuOpen) { closeMenu(); return; }
+    if (_lpPop && _lpPop.style.display !== 'none') closeLpPop();
+  }
+  // Focus trap inside bottom sheet
+  if (e.key === 'Tab' && _bsOpen) {
+    const focusable = Array.from(_bsSheet.querySelectorAll(
+      'button:not([disabled]),[href],input:not([disabled]),textarea,select,[tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  }
+  // Focus trap inside menu drawer
+  if (e.key === 'Tab' && _menuOpen) {
+    const drawer = document.getElementById('menu-drawer');
+    const focusable = Array.from(drawer.querySelectorAll(
+      'button:not([disabled]),[href],input:not([disabled]),textarea,select,[tabindex]:not([tabindex="-1"])'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  }
+});
+
+/* ── Overflow Menu Drawer ─────────────────────────────────────────────── */
+let _menuOpen = false;
+let _menuTrigger = null;
+
+function openMenu() {
+  _menuTrigger = document.activeElement;
+  const drawer   = document.getElementById('menu-drawer');
+  const backdrop = document.getElementById('menu-backdrop');
+  drawer.style.display   = 'flex';
+  backdrop.style.display = 'block';
+  requestAnimationFrame(() => {
+    drawer.classList.add('open');
+    backdrop.classList.add('open');
+  });
+  _menuOpen = true;
+  _loadMenuAccount();
+  _syncMenuToggles();
+  // Move focus to close button
+  requestAnimationFrame(() => {
+    const btn = document.getElementById('menu-close');
+    if (btn) btn.focus();
+  });
+}
+
+function closeMenu() {
+  const drawer   = document.getElementById('menu-drawer');
+  const backdrop = document.getElementById('menu-backdrop');
+  drawer.classList.remove('open');
+  backdrop.classList.remove('open');
+  _menuOpen = false;
+  setTimeout(() => {
+    drawer.style.display   = 'none';
+    backdrop.style.display = 'none';
+  }, 300);
+  if (_menuTrigger) { _menuTrigger.focus(); _menuTrigger = null; }
+}
+
+// Swipe-right-to-dismiss menu drawer
+(function() {
+  const drawer = document.getElementById('menu-drawer');
+  if (!drawer) return;
+  let startX = 0, startTime = 0;
+  drawer.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startTime = Date.now();
+  }, { passive: true });
+  drawer.addEventListener('touchend', e => {
+    const dx  = e.changedTouches[0].clientX - startX;
+    const dt  = Date.now() - startTime;
+    if (dx > 60 && dt < 350) closeMenu();  // swipe right fast
+  }, { passive: true });
+})();
+
+async function _loadMenuAccount() {
+  const body = document.getElementById('menu-account-body');
+  if (!body) return;
+  try {
+    const data = _dashData || await apiFetch('/api/dashboard?source=' + SOURCE);
+    const u = data?.user || {};
+    const acc = data?.account || {};
+    const username = u.username || 'User';
+    const role     = u.role     || 'user';
+    const val      = acc.portfolio_value ?? acc.equity ?? null;
+    const buying   = acc.buying_power ?? null;
+    const alpacaConn = !!data?.account;
+    const moomooConn = SOURCE === 'moomoo';
+
+    body.innerHTML = `
+      <div class="menu-acct-row">
+        <div class="menu-avatar">${username[0].toUpperCase()}</div>
+        <div>
+          <div class="menu-username">${escapeHtml(username)}</div>
+          <div class="menu-role-badge">${escapeHtml(role)}</div>
+        </div>
+      </div>
+      <div class="menu-broker-row">
+        <span class="menu-broker-name">Alpaca</span>
+        <span class="menu-broker-status ${alpacaConn ? 'connected' : 'disconnected'}">${alpacaConn ? '● Connected' : '○ Not connected'}</span>
+      </div>
+      <div class="menu-broker-row">
+        <span class="menu-broker-name">Moomoo</span>
+        <span class="menu-broker-status ${moomooConn ? 'connected' : 'disconnected'}">${moomooConn ? '● Connected' : '○ Not connected'}</span>
+      </div>
+      ${val != null ? `
+      <div class="menu-bal-row">
+        <div class="menu-bal-item">
+          <div class="menu-bal-lbl">Portfolio</div>
+          <div class="menu-bal-val">${maskVal('$' + fmt2(val))}</div>
+        </div>
+        ${buying != null ? `<div class="menu-bal-item">
+          <div class="menu-bal-lbl">Buying Power</div>
+          <div class="menu-bal-val">${maskVal('$' + fmt2(buying))}</div>
+        </div>` : ''}
+      </div>` : ''}`;
+  } catch (_) {
+    body.innerHTML = '<div class="empty-state" style="padding:8px 0">Could not load account</div>';
+  }
+}
+
+function _syncMenuToggles() {
+  const tDark    = document.getElementById('menu-toggle-dark');
+  const tPush    = document.getElementById('menu-toggle-push');
+  const tPrivacy = document.getElementById('menu-toggle-privacy');
+  if (tDark)    { const on = !document.documentElement.classList.contains('theme-light'); tDark.classList.toggle('on', on); tDark.setAttribute('aria-pressed', String(on)); }
+  if (tPush)    { const on = !!_pushSub; tPush.classList.toggle('on', on); tPush.setAttribute('aria-pressed', String(on)); }
+  if (tPrivacy) { tPrivacy.classList.toggle('on', SCREENSHOT); tPrivacy.setAttribute('aria-pressed', String(SCREENSHOT)); }
+}
+
+async function openMenuTool(tool) {
+  closeMenu();
+  if (tool === 'notes') {
+    openSheet('📝 Notes', 'Personal journal', '<div class="skel skel-card"></div><div class="skel skel-card"></div>');
+    try {
+      const data = await apiFetch('/api/notes');
+      const notes = data?.notes || (Array.isArray(data) ? data : []);
+      const html = notes.length
+        ? notes.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--border2)">
+            <div style="font-size:.84rem;font-weight:700">${escapeHtml(n.title || 'Note')}</div>
+            <div style="font-size:.77rem;color:var(--text2);margin-top:3px;line-height:1.45">${escapeHtml(n.body || '')}</div>
+            <div style="font-size:.65rem;color:var(--text3);margin-top:4px">${timeAgo(n.created_at)}</div>
+          </div>`).join('')
+        : '<div class="empty-state">No notes yet</div>';
+      _bsSetContent('📝 Notes', notes.length + ' note' + (notes.length === 1 ? '' : 's'), html);
+    } catch (e) {
+      _bsSetContent('📝 Notes', 'Error', `<div class="err-state">${e.message}</div>`);
+    }
+  } else if (tool === 'reminders') {
+    openSheet('⏰ Reminders', '', '<div class="skel skel-row"></div><div class="skel skel-row"></div>');
+    try {
+      const data = await apiFetch('/api/reminders');
+      const reminders = data?.reminders || (Array.isArray(data) ? data : []);
+      const html = reminders.length
+        ? reminders.map(r => `<div style="padding:10px 0;border-bottom:1px solid var(--border2)">
+            <div style="font-size:.84rem;font-weight:700">${escapeHtml(r.title || r.message || 'Reminder')}</div>
+            <div style="font-size:.72rem;color:var(--text3);margin-top:2px">${r.remind_at ? new Date(r.remind_at).toLocaleString() : ''}</div>
+          </div>`).join('')
+        : '<div class="empty-state">No reminders</div>';
+      _bsSetContent('⏰ Reminders', reminders.length + ' reminder' + (reminders.length === 1 ? '' : 's'), html);
+    } catch (e) {
+      _bsSetContent('⏰ Reminders', 'Error', `<div class="err-state">${e.message}</div>`);
+    }
+  } else if (tool === 'botconfig') {
+    openSheet('🤖 Bot Config', '', '<div class="skel skel-card"></div>');
+    try {
+      const cfg = await apiFetch('/api/bot/config');
+      const rows = Object.entries(cfg || {}).filter(([k]) => k !== 'error')
+        .map(([k, v]) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border2);font-size:.8rem">
+          <span style="color:var(--text2)">${escapeHtml(k)}</span>
+          <span style="font-weight:700">${escapeHtml(String(v))}</span>
+        </div>`).join('');
+      _bsSetContent('🤖 Bot Config', 'Read-only', rows || '<div class="empty-state">No config</div>');
+    } catch (e) {
+      _bsSetContent('🤖 Bot Config', 'Error', `<div class="err-state">${e.message}</div>`);
+    }
+  } else if (tool === 'stats') {
+    openSheet('📊 Stats', '', '<div class="skel skel-card"></div><div class="skel skel-card"></div>');
+    try {
+      const data = await apiFetch('/api/stats');
+      const today = data?.today_spend_usd ?? data?.today ?? null;
+      const total = data?.total_spend_usd ?? null;
+      const calls = data?.total_api_calls ?? null;
+      const html = `
+        <div style="display:flex;gap:10px;margin-bottom:14px">
+          ${today != null ? `<div style="flex:1;background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Today</div>
+            <div style="font-size:1.1rem;font-weight:800;margin-top:3px">$${Number(today).toFixed(4)}</div>
+          </div>` : ''}
+          ${total != null ? `<div style="flex:1;background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Total</div>
+            <div style="font-size:1.1rem;font-weight:800;margin-top:3px">$${Number(total).toFixed(2)}</div>
+          </div>` : ''}
+          ${calls != null ? `<div style="flex:1;background:var(--surface2);border-radius:10px;padding:12px">
+            <div style="font-size:.6rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">API Calls</div>
+            <div style="font-size:1.1rem;font-weight:800;margin-top:3px">${calls.toLocaleString()}</div>
+          </div>` : ''}
+        </div>`;
+      _bsSetContent('📊 Stats', 'Usage & cost', html || '<div class="empty-state">No stats</div>');
+    } catch (e) {
+      _bsSetContent('📊 Stats', 'Error', `<div class="err-state">${e.message}</div>`);
+    }
+  }
+}
+
+function menuToggleDark(btn) {
+  haptic(10);
+  const on = btn.classList.toggle('on');
+  btn.setAttribute('aria-pressed', String(on));
+  document.documentElement.classList.toggle('theme-light', !on);
+  localStorage.setItem('theme', on ? 'dark' : 'light');
+}
+
+async function menuTogglePush(btn) {
+  haptic(10);
+  if (_pushSub) {
+    await unsubscribePush();
+    btn.classList.remove('on');
+    btn.setAttribute('aria-pressed', 'false');
+  } else {
+    closeMenu();
+    await subscribePush();
+    _syncMenuToggles();
+  }
+}
+
+async function menuToggleBio(btn) {
+  haptic(10);
+  closeMenu();
+  await registerBiometric();
+}
+
+function menuTogglePrivacy(btn) {
+  haptic(10);
+  SCREENSHOT = !SCREENSHOT;
+  btn.classList.toggle('on', SCREENSHOT);
+  btn.setAttribute('aria-pressed', String(SCREENSHOT));
+  document.querySelectorAll('.mask-val').forEach(el => {
+    el.textContent = SCREENSHOT ? '$••••••' : el.dataset.val || el.textContent;
+  });
+  toast(SCREENSHOT ? '🔒 Values hidden' : '🔓 Values visible');
+}
+
+async function menuSignOut() {
+  haptic(10);
+  closeMenu();
+  try {
+    await apiFetch('/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  location.href = '/';
+}
+
+/* ── Offline Detection ────────────────────────────────────────────────── */
+function _updateOfflineBanner() {
+  const banner = document.getElementById('offline-banner');
+  if (!banner) return;
+  if (!navigator.onLine) {
+    banner.classList.add('show');
+    announce('You are offline. Showing last synced data.');
+  } else {
+    banner.classList.remove('show');
+  }
+}
+window.addEventListener('online',  _updateOfflineBanner);
+window.addEventListener('offline', _updateOfflineBanner);
+
 /* ── Nav wiring ──────────────────────────────────────────────────────── */
 document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => showTab(btn.dataset.tab));
@@ -3002,6 +3520,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 window.addEventListener('DOMContentLoaded', () => {
   applyTopPad();
   applyChatHeight();
+  _updateOfflineBanner();
   _loaded['home'] = true;
   loadHome();
   pollAlertBadge();

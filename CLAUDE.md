@@ -365,6 +365,22 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 - `WA_RP_NAME` — Relying Party name shown in biometric prompts (default: `Trading Dashboard`)
 - `PUBLIC_URL` — also used as WebAuthn expected origin (already required by Sentinel)
 
+### Phase 6 — Polish, Menu, Accessibility, Offline (mobile.html)
+**Status: SHIPPED (May 2026, 6 commits)**
+- Bundle size: ~160 KB (under 200 KB hard limit)
+- Test coverage: 15 unit tests in `tests/mobile.test.js` — all pass (`node --test tests/mobile.test.js`)
+- Lighthouse scores: run `npm run lighthouse:mobile` or Chrome DevTools → Lighthouse → Mobile to get current numbers; paste here after first run
+- Backup retained at `src/web/public/mobile-v1.html` for emergency rollback
+
+**Phase 6 features:**
+- **☰ Overflow menu drawer**: slides from right, 85% width max 380px, swipe-right-to-dismiss, ESC key close, focus trap + restore. Three sections: Account (avatar, username/role, broker status, balance), Tools (Notes/Reminders/Bot Config/Stats each open a bottom sheet), Settings (dark/push/biometric/privacy toggles + sign-out)
+- **Accessibility (WCAG AA)**: focus trap inside bottom sheets and menu drawer, ESC closes both, `#sr-live` assertive live region for critical alerts + order placed + tab change announcements, visible `:focus-visible` rings, bottom nav `role="tablist"` + `role="tab"` + `aria-selected`
+- **Performance**: shimmer animation converted to `transform: translateX` via `::after` (hardware-accelerated), reduced-motion skips bottom-sheet spring (instant show/hide), `:focus-visible` CSS-only focus rings
+- **Offline support** (sw.js v6): static shell cache-first, `/api/dashboard`+`/api/forecast`+`/api/uw/flow-alerts` stale-while-revalidate, other `/api/*` network-first with 5 s timeout, background-sync queue for trade POSTs (IndexedDB), `#offline-banner` shown on `navigator.onLine` change
+- **Screen-reader announcements**: tab switch, order placed, critical alert arrival via `announce()` helper + assertive live region
+
+**13. Mobile is shipped. Future mobile changes are additive — don't refactor the 5-tab architecture without explicit ask.**
+
 ### Server ops
 - PM2 processes: `trading-dashboard` (port 3000, production) · `trading-staging` (UAT) · `trading-bot` (cron bot)
 - Restart: `pm2 restart trading-dashboard trading-staging` — **never use pkill**
