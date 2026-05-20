@@ -69,8 +69,17 @@ async function _yfRestoreCookieJar() {
     const { rows } = await query('SELECT value FROM system_kv WHERE key=$1', [_YF_COOKIE_KEY]);
     if (!rows.length) return false;
     const jarData = JSON.parse(rows[0].value);
-    const ExtClass = _yf._opts.cookieJar.constructor;
-    _yf._opts.cookieJar = ExtClass.fromJSON(jarData);
+    const { Cookie } = await import('tough-cookie');
+    const jar = _yf._opts.cookieJar; // keep the ExtendedCookieJar — do NOT replace it
+    for (const c of (jarData.cookies || [])) {
+      try {
+        const cookie = Cookie.fromJSON(c);
+        if (!cookie) continue;
+        const domain = (c.domain || '').replace(/^\./, '');
+        const proto  = c.secure ? 'https' : 'http';
+        await jar.setCookie(cookie, `${proto}://${domain}${c.path || '/'}`, { ignoreError: true });
+      } catch { /* skip bad cookies */ }
+    }
     console.log('[yf] cookie jar restored from DB');
     return true;
   } catch (e) {
