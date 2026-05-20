@@ -7047,6 +7047,20 @@ app.get('/api/uw/contract/:id/volume', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/bot-indicators/:symbol — Phase B-0 inspection route
+app.get('/api/bot-indicators/:symbol', requireAuth, async (req, res) => {
+  try {
+    const { getAllBotIndicators } = await import('../core/bot-indicators.js');
+    const sym = String(req.params.symbol || '').toUpperCase();
+    if (!/^[A-Z]{1,8}$/.test(sym)) return res.status(400).json({ error: 'invalid ticker' });
+    const result = await getAllBotIndicators(sym);
+    res.json(result);
+  } catch (e) {
+    console.error('[bot-indicators]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/sentinel/recent?limit=20 — sentinel run history (Item 6)
 app.get('/api/sentinel/recent', requireAuth, async (req, res) => {
   if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
