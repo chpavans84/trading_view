@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS trades (
   stop_loss_pct        NUMERIC(6,2),
   take_profit_pct      NUMERIC(6,2),
   atr_pct              NUMERIC(6,2),
-  conviction_score     INT,
+  conviction_score     NUMERIC(6,2),
   conviction_grade     VARCHAR(5),
   conviction_breakdown JSONB,
   status               VARCHAR(20) DEFAULT 'open',
@@ -998,6 +998,12 @@ export async function initDb() {
     try {
       const client = await pool.connect();
       await client.query(SCHEMA);
+      // Idempotent column-type migrations (safe to re-run on every boot)
+      try {
+        await client.query(`ALTER TABLE trades ALTER COLUMN conviction_score TYPE NUMERIC(6,2) USING conviction_score::numeric`);
+      } catch (e) {
+        console.warn('[initDb] conviction_score migration skipped:', e.message);
+      }
       client.release();
       dbAvailable = true;
       console.log('✅ Database connected and schema ready');

@@ -7480,8 +7480,8 @@ app.delete('/api/bots/:id', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/bots/reconcile — admin-only: back-fill missing DB rows from broker positions
-app.post('/api/bots/reconcile', requireAdmin, async (req, res) => {
+// POST /api/bots/reconcile — authenticated users: back-fill missing DB rows from broker positions (scoped to caller's bots)
+app.post('/api/bots/reconcile', requireAuth, async (req, res) => {
   try {
     const userId = await _currentUserId(req);
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });

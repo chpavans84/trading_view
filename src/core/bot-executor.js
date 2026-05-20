@@ -294,7 +294,7 @@ async function _tryOpenPosition(bot) {
     stop_loss_pct:     stopPct,
     take_profit_pct:   null,
     atr_pct:           null,
-    conviction_score:  decision.composite_score ? Number(decision.composite_score) : null,
+    conviction_score:  decision.composite_score != null ? Number(decision.composite_score) : null,
     conviction_grade:  null,
     conviction_breakdown: decision.factor_breakdown ?? null,
     username:          null,
