@@ -4165,15 +4165,15 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
 }
 .bots-modal {
   position: fixed;
-  top: 50%;
+  top: 120px;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   z-index: 10011;
   background: #161b22;
   border: 1px solid #30363d;
   border-radius: 14px;
   width: min(540px, calc(100vw - 24px));
-  max-height: calc(100vh - 60px);
+  max-height: calc(100vh - 144px);
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0,0,0,.6);
 }

@@ -129,6 +129,7 @@ import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeek
 import { checkUnusualOptions } from '../core/options-scanner.js';
 import { runBotScanForAllActive, scanBot, startBotEngineCrons } from '../core/bot-engine.js';
 import { runExecutorForAllActive, processBot, startBotExecutorCrons } from '../core/bot-executor.js';
+import { reconcileBotPositions } from '../core/bot-reconciler.js';
 
 // ─── Process-level error handlers ─────────────────────────────────────────────
 process.on('uncaughtException', async (e) => {
@@ -7475,6 +7476,21 @@ app.delete('/api/bots/:id', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('[bots/delete]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/bots/reconcile — admin-only: back-fill missing DB rows from broker positions
+app.post('/api/bots/reconcile', requireAdmin, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const username = req.session.username;
+    const dryRun = req.body.dryRun !== false;
+    const result = await reconcileBotPositions({ userId, username, dryRun });
+    res.json({ ok: true, result });
+  } catch (e) {
+    console.error('[reconcile] error:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

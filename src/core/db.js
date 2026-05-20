@@ -1232,6 +1232,9 @@ export async function recordTrade({
        status, exit_price ?? null, pnl_usd ?? null, pnl_pct ?? null, closedAt,
        slippage_cents ?? null, account_source ?? null]
     );
+    if (!rows.length) {
+      console.warn(`[recordTrade] no row returned — likely ON CONFLICT collision on order_id=${order_id}`);
+    }
     return rows[0]?.id ?? null;
   } catch (err) {
     console.error('recordTrade error:', err.message);

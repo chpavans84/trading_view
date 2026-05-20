@@ -741,6 +741,7 @@ export async function placeQuickTrade({
   trail_price, trail_percent,
   stop_loss, take_profit,
   time_in_force = 'day',
+  extended_hours = false,
 }) {
   const ticker = symbol.toUpperCase().trim();
   const shares = Math.floor(qty);
@@ -792,6 +793,12 @@ export async function placeQuickTrade({
       body.order_class = 'oto';
       body.stop_loss   = { stop_price: +stop_loss };
     }
+  }
+
+  // Extended hours: Alpaca only allows limit orders outside RTH
+  if (extended_hours && order_type === 'limit') {
+    body.extended_hours = true;
+    body.time_in_force  = 'day';  // Alpaca requires TIF=day for extended-hours limit
   }
 
   const order = await alpaca('POST', '/v2/orders', body);

@@ -1225,6 +1225,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
                 confidence:          cal.confidence,
                 expected_error_pct:  cal.expected_error_pct,
                 notes:               cal.notes,
+                uw_modifier:         cal._uw_modifier ?? null,
               };
             }
           }

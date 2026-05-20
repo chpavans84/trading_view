@@ -266,8 +266,13 @@ async function _tryOpenPosition(bot) {
 
   // 5. Place buy
   const rawOrder = await _placeBuyForBot(bot, symbol, qty, sizingCreds);
-  if (rawOrder?.action) return rawOrder;   // early exit: skip_outside_rth, skip_no_quote
+  if (typeof rawOrder?.action === 'string' && rawOrder.action.startsWith('skip_')) return rawOrder;
   const order    = _normalizeOrder(rawOrder, price);
+  if (!order.order_id || !(order.fill_price > 0)) {
+    console.error(`[bot-executor] bot ${bot.id} order normalization failed for ${symbol}:`,
+      JSON.stringify({ raw: rawOrder, normalized: order }).slice(0, 500));
+    return { action: 'error', reason: 'order_normalization_failed', symbol, raw: rawOrder };
+  }
   const fillPrice      = order.fill_price || price;
   const dollarsInvested = +(fillPrice * qty).toFixed(2);
 
@@ -295,9 +300,12 @@ async function _tryOpenPosition(bot) {
     username:          null,
     account_source:    bot.broker,
   });
-  if (tradeId) {
-    await query('UPDATE trades SET bot_id=$1 WHERE id=$2', [bot.id, tradeId]);
+  if (!tradeId) {
+    console.error(`[bot-executor] bot ${bot.id} recordTrade FAILED — order ${order.order_id} placed on broker but no DB row created!`,
+      JSON.stringify({ symbol, order_id: order.order_id, fill_price: fillPrice, qty }).slice(0, 500));
+    return { action: 'error', reason: 'db_write_failed', symbol, broker_order_id: order.order_id };
   }
+  await query('UPDATE trades SET bot_id=$1 WHERE id=$2', [bot.id, tradeId]);
 
   // 8. Link trade to bot
   await query(

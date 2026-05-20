@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260520b">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260520d">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -21923,12 +21923,29 @@ document.getElementById('bots-grid')?.addEventListener('click', e => {
   botsDrilldown(Number(card.dataset.botId));
 });
 
+function _botsPositionModal() {
+  const modal = document.getElementById('bots-modal');
+  if (!modal) return;
+  const nav   = document.querySelector('nav');
+  const t1    = document.getElementById('heroNewsTicker');
+  const t2    = document.getElementById('heroNewsTicker2');
+  const headerBottom = Math.max(
+    t1  ? t1.getBoundingClientRect().bottom  : 0,
+    t2  ? t2.getBoundingClientRect().bottom  : 0,
+    nav ? nav.getBoundingClientRect().bottom : 0
+  );
+  const topPx = headerBottom + 16;
+  modal.style.top       = topPx + 'px';
+  modal.style.maxHeight = (window.innerHeight - topPx - 24) + 'px';
+}
+
 function botsShowCreateModal() {
   _botEditing = null;
   document.getElementById('bots-modal-title').textContent = 'New Bot';
   _botRenderForm(BOT_FORM_DEFAULTS);
   document.getElementById('bots-modal-backdrop').style.display = '';
   document.getElementById('bots-modal').style.display = '';
+  _botsPositionModal();
 }
 
 function botsEdit(id) {
@@ -21959,6 +21976,7 @@ function botsEdit(id) {
   }, bot.current_trade_id != null);
   document.getElementById('bots-modal-backdrop').style.display = '';
   document.getElementById('bots-modal').style.display = '';
+  _botsPositionModal();
 }
 
 function botsCloseModal() {
