@@ -67,6 +67,7 @@ import { runPreMarketScan } from '../core/premarket-news-scanner.js';
 import { alert as sysAlert } from '../core/system-alerts.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
 import { checkUnusualOptions } from '../core/options-scanner.js';
+import { runBotScanForAllActive, scanBot, startBotEngineCrons } from '../core/bot-engine.js';
 
 // ─── Process-level error handlers ─────────────────────────────────────────────
 process.on('uncaughtException', async (e) => {
@@ -7332,6 +7333,24 @@ app.get('/api/bots/:id/postmortems', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/bots/:id/scan — manual trigger, scans one bot immediately (Phase B-2)
+app.post('/api/bots/:id/scan', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { rows } = await query(
+      'SELECT * FROM bots WHERE id=$1 AND user_id=$2',
+      [req.params.id, userId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Bot not found' });
+    const result = await scanBot(rows[0]);
+    res.json({ ok: true, result });
+  } catch (e) {
+    console.error('[bots/scan]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/sentinel/recent?limit=20 — sentinel run history (Item 6)
 app.get('/api/sentinel/recent', requireAuth, async (req, res) => {
   if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
@@ -8105,6 +8124,9 @@ wss.on('connection', (ws) => {
 
 // ─── News Ingester Crons ──────────────────────────────────────────────────────
 startNewsIngesterCrons();
+
+// ─── Bot Engine Crons ─────────────────────────────────────────────────────────
+startBotEngineCrons();
 
 // ─── Pre-market News Scanner — 4:00 AM ET Mon–Fri ────────────────────────────
 cron.schedule('0 4 * * 1-5', async () => {
