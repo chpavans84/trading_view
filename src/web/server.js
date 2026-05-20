@@ -208,12 +208,12 @@ async function migrateUsersToDb() {
 
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
-const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover'];
+const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots'];
 const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
 
 const DEFAULT_PERMISSIONS = {
   admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
+  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
 };
 
 function getPermissions(user) {
@@ -7057,6 +7057,277 @@ app.get('/api/bot-indicators/:symbol', requireAuth, async (req, res) => {
     res.json(result);
   } catch (e) {
     console.error('[bot-indicators]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Bot management (Phase B-1) ───────────────────────────────────────────────
+
+const BOT_DEFAULT_RULES = {
+  entry_filters: {
+    min_composite_score: 60,
+    conviction_grade_min: 'C',
+    sectors_excluded: [],
+    market_cap_min_b: 5,
+    price_min: 5,
+    price_max: 500,
+    min_adv_dollar_vol: 5000000,
+    avoid_earnings_within_days: 3,
+    vix_min: 15,
+    vix_max: 60,
+    vix_aggressive_at: 25,
+    require_uw_label_any: ['bullish', 'strong_bullish'],
+    require_news_sentiment_min: null,
+    skip_during_macro_blackout: true,
+    skip_high_short_interest: false,
+    avoid_premarket_gap_above_pct: 8,
+  },
+  exit_rules: {
+    stop_loss_usd: 50,
+    trail_pct: 30,
+    time_stop_days: 5,
+    exit_on_news_volume_spike_negative: true,
+    exit_on_uw_flipped_bearish: true,
+    exit_before_earnings: true,
+  },
+  sizing: {
+    position_size_pct: 95,
+    vix_aggressive_multiplier: 1.0,
+  },
+  composite_weights: {
+    conviction:   0.10,
+    news:         0.20,
+    uw_options:   0.25,
+    gex:          0.15,
+    insider:      0.15,
+    distance_52w: 0.10,
+    predictor:    0.05,
+  },
+  risk: {
+    max_loss_usd: 100,
+    daily_loss_limit_usd: 100,
+    pause_after_n_losses: 3,
+  },
+};
+
+const BOT_NAME_RE   = /^[\w\s\-]{1,60}$/;
+const BOT_STATUS_OK = new Set(['active', 'paused', 'paused_today', 'stopped']);
+
+function _validateBotRules(rules) {
+  if (!rules || typeof rules !== 'object') return 'rules must be an object';
+  const w = rules.composite_weights;
+  if (w) {
+    const vals = Object.values(w);
+    if (vals.some(v => typeof v !== 'number' || v < 0 || v > 1))
+      return 'composite_weights: each weight must be a number between 0 and 1';
+    const sum = vals.reduce((s, v) => s + v, 0);
+    if (sum < 0.95 || sum > 1.05)
+      return `composite_weights must sum to ~1.0 (got ${sum.toFixed(3)})`;
+  }
+  if (rules.risk?.max_loss_usd !== undefined && rules.risk.max_loss_usd <= 0)
+    return 'risk.max_loss_usd must be > 0';
+  return null;
+}
+
+function _deepMergeRules(defaults, override) {
+  if (!override || typeof override !== 'object') return defaults;
+  const out = {};
+  for (const k of Object.keys(defaults)) {
+    if (defaults[k] && typeof defaults[k] === 'object' && !Array.isArray(defaults[k])) {
+      out[k] = _deepMergeRules(defaults[k], override[k]);
+    } else {
+      out[k] = (override[k] !== undefined) ? override[k] : defaults[k];
+    }
+  }
+  for (const k of Object.keys(override)) {
+    if (!(k in defaults)) out[k] = override[k];
+  }
+  return out;
+}
+
+async function _currentUserId(req) {
+  const username = req.session?.username;
+  if (!username) return null;
+  const u = await getDbUser(username);
+  return u?.id ?? null;
+}
+
+async function _botOwnedBy(botId, userId) {
+  const { rows } = await query('SELECT id FROM bots WHERE id=$1 AND user_id=$2', [botId, userId]);
+  return rows.length > 0;
+}
+
+// GET /api/bots
+app.get('/api/bots', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { rows } = await query(
+      'SELECT * FROM bots WHERE user_id=$1 ORDER BY created_at ASC',
+      [userId]
+    );
+    res.json({ bots: rows });
+  } catch (e) {
+    console.error('[bots/list]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/bots
+app.post('/api/bots', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { rows: countRows } = await query('SELECT COUNT(*) AS n FROM bots WHERE user_id=$1', [userId]);
+    if (parseInt(countRows[0].n) >= 3) return res.status(409).json({ error: 'Bot limit reached (max 3 per user)' });
+
+    const { name, capital_usd, rules, account_type = 'paper', broker = 'alpaca' } = req.body;
+    if (!name || !BOT_NAME_RE.test(name)) return res.status(400).json({ error: 'name: 1-60 chars, alphanumeric + spaces/dashes/underscores' });
+    const cap = parseFloat(capital_usd);
+    if (isNaN(cap) || cap < 100 || cap > 1000000) return res.status(400).json({ error: 'capital_usd: must be between 100 and 1000000' });
+    const { rows: dupRows } = await query('SELECT id FROM bots WHERE user_id=$1 AND lower(name)=lower($2)', [userId, name.trim()]);
+    if (dupRows.length) return res.status(409).json({ error: `A bot named "${name.trim()}" already exists` });
+    const finalRules = _deepMergeRules(BOT_DEFAULT_RULES, rules || {});
+    const rulesErr = _validateBotRules(finalRules);
+    if (rulesErr) return res.status(400).json({ error: rulesErr });
+
+    const { rows } = await query(
+      `INSERT INTO bots (user_id, name, capital_usd, rules, account_type, broker)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [userId, name.trim(), cap, JSON.stringify(finalRules), account_type, broker]
+    );
+    const bot = rows[0];
+    await query(
+      'INSERT INTO bot_rules_versions (bot_id, rules_json, set_by) VALUES ($1,$2,$3)',
+      [bot.id, JSON.stringify(finalRules), 'user']
+    );
+    res.status(201).json({ bot });
+  } catch (e) {
+    console.error('[bots/create]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/bots/:id
+app.get('/api/bots/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { rows } = await query('SELECT * FROM bots WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+    if (!rows.length) return res.status(404).json({ error: 'Bot not found' });
+    res.json({ bot: rows[0] });
+  } catch (e) {
+    console.error('[bots/get]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/bots/:id
+app.patch('/api/bots/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { rows: existing } = await query('SELECT * FROM bots WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+    if (!existing.length) return res.status(404).json({ error: 'Bot not found' });
+    const bot = existing[0];
+
+    const { name, capital_usd, rules, status } = req.body;
+    const hasOpenTrade = bot.current_trade_id != null;
+
+    if (name !== undefined) {
+      if (hasOpenTrade) return res.status(409).json({ error: 'Cannot edit bot while a trade is open' });
+      if (!BOT_NAME_RE.test(name)) return res.status(400).json({ error: 'name: invalid characters or length' });
+    }
+    if (capital_usd !== undefined) {
+      if (hasOpenTrade) return res.status(409).json({ error: 'Cannot edit bot while a trade is open' });
+      const cap = parseFloat(capital_usd);
+      if (isNaN(cap) || cap < 100 || cap > 1000000) return res.status(400).json({ error: 'capital_usd: must be between 100 and 1000000' });
+    }
+    let mergedRules;
+    if (rules !== undefined) {
+      if (hasOpenTrade) return res.status(409).json({ error: 'Cannot edit bot while a trade is open' });
+      const currentRules = bot.rules || BOT_DEFAULT_RULES;
+      mergedRules = _deepMergeRules(currentRules, rules);
+      const rulesErr = _validateBotRules(mergedRules);
+      if (rulesErr) return res.status(400).json({ error: rulesErr });
+    }
+    if (status !== undefined && !BOT_STATUS_OK.has(status))
+      return res.status(400).json({ error: `status must be one of: ${[...BOT_STATUS_OK].join(', ')}` });
+
+    const sets = ['updated_at=NOW()'];
+    const vals = [];
+    let i = 1;
+    if (name        !== undefined) { sets.push(`name=$${i++}`);         vals.push(name.trim()); }
+    if (capital_usd !== undefined) { sets.push(`capital_usd=$${i++}`);  vals.push(parseFloat(capital_usd)); }
+    if (rules       !== undefined) { sets.push(`rules=$${i++}`);        vals.push(JSON.stringify(mergedRules)); }
+    if (status      !== undefined) { sets.push(`status=$${i++}`);       vals.push(status);
+                                     sets.push(`status_changed_at=NOW()`); }
+    vals.push(req.params.id);
+    const { rows: updated } = await query(
+      `UPDATE bots SET ${sets.join(',')} WHERE id=$${i} RETURNING *`,
+      vals
+    );
+    if (rules !== undefined) {
+      await query(
+        'INSERT INTO bot_rules_versions (bot_id, rules_json, set_by) VALUES ($1,$2,$3)',
+        [req.params.id, JSON.stringify(mergedRules), 'user']
+      );
+    }
+    res.json({ bot: updated[0] });
+  } catch (e) {
+    console.error('[bots/patch]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/bots/:id
+app.delete('/api/bots/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { rows } = await query('SELECT * FROM bots WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+    if (!rows.length) return res.status(404).json({ error: 'Bot not found' });
+    if (rows[0].current_trade_id != null) return res.status(409).json({ error: 'Cannot delete bot with an open trade' });
+    await query('DELETE FROM bots WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[bots/delete]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/bots/:id/decisions
+app.get('/api/bots/:id/decisions', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    if (!await _botOwnedBy(req.params.id, userId)) return res.status(404).json({ error: 'Bot not found' });
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const { rows } = await query(
+      'SELECT * FROM bot_decisions WHERE bot_id=$1 ORDER BY scanned_at DESC LIMIT $2',
+      [req.params.id, limit]
+    );
+    res.json({ decisions: rows });
+  } catch (e) {
+    console.error('[bots/decisions]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/bots/:id/postmortems
+app.get('/api/bots/:id/postmortems', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    if (!await _botOwnedBy(req.params.id, userId)) return res.status(404).json({ error: 'Bot not found' });
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const { rows } = await query(
+      'SELECT * FROM trade_postmortems WHERE bot_id=$1 ORDER BY created_at DESC LIMIT $2',
+      [req.params.id, limit]
+    );
+    res.json({ postmortems: rows });
+  } catch (e) {
+    console.error('[bots/postmortems]', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

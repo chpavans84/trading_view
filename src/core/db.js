@@ -876,6 +876,63 @@ CREATE TABLE IF NOT EXISTS news_saved (
   UNIQUE (username, article_id)
 );
 CREATE INDEX IF NOT EXISTS idx_news_saved_user ON news_saved(username, saved_at DESC);
+
+-- ─── Bots ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS bots (
+  id                  BIGSERIAL PRIMARY KEY,
+  user_id             INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name                TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'paused',
+  account_type        TEXT NOT NULL DEFAULT 'paper',
+  broker              TEXT NOT NULL DEFAULT 'alpaca',
+  capital_usd         NUMERIC(12,2) NOT NULL,
+  rules               JSONB NOT NULL,
+  current_trade_id    BIGINT,
+  cumulative_pnl_usd  NUMERIC(12,2) NOT NULL DEFAULT 0,
+  total_trades        INT NOT NULL DEFAULT 0,
+  winning_trades      INT NOT NULL DEFAULT 0,
+  status_message      TEXT,
+  status_changed_at   TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_bots_user_status ON bots(user_id, status);
+
+CREATE TABLE IF NOT EXISTS bot_decisions (
+  id               BIGSERIAL PRIMARY KEY,
+  bot_id           BIGINT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  scanned_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  action           TEXT NOT NULL,
+  symbol           VARCHAR(20),
+  composite_score  NUMERIC(6,2),
+  factor_breakdown JSONB,
+  notes            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_bot_decisions_bot_time ON bot_decisions(bot_id, scanned_at DESC);
+
+CREATE TABLE IF NOT EXISTS trade_postmortems (
+  id              BIGSERIAL PRIMARY KEY,
+  bot_id          BIGINT NOT NULL REFERENCES bots(id),
+  trade_id        BIGINT NOT NULL,
+  pnl_usd         NUMERIC(12,2),
+  entry_snapshot  JSONB,
+  exit_snapshot   JSONB,
+  diff_analysis   JSONB,
+  prose_summary   TEXT,
+  email_sent      BOOLEAN DEFAULT FALSE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_postmortems_bot_time ON trade_postmortems(bot_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS bot_rules_versions (
+  id          BIGSERIAL PRIMARY KEY,
+  bot_id      BIGINT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  rules_json  JSONB NOT NULL,
+  set_by      TEXT NOT NULL,
+  nl_input    TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_bot_rules_bot_time ON bot_rules_versions(bot_id, created_at DESC);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
