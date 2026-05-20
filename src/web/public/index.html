@@ -1684,7 +1684,20 @@
         <div class="bots-page-title">🤖 My Trading Bots</div>
         <div class="bots-page-sub">Automated entry/exit bots — up to 3 per account. No live trading in this phase.</div>
       </div>
+    </div>
+
+    <!-- KPI strip -->
+    <div id="bot-kpi-strip" class="bot-kpi-strip">
+      <div class="bot-kpi-tile"><div class="bot-kpi-label">Loading…</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="bots-toolbar">
       <button class="bots-create-btn" onclick="botsShowCreateModal()">+ New Bot</button>
+      <label class="bots-archive-toggle">
+        <input type="checkbox" id="bots-show-archived" onchange="botsToggleArchived(this.checked)">
+        Show archived
+      </label>
     </div>
 
     <!-- Disclaimer banner -->
@@ -1692,9 +1705,21 @@
       ⚠️ <strong>Paper-mode only.</strong> Bots log decisions and simulate trades. No real orders are placed until execution is wired in a future phase.
     </div>
 
-    <!-- Bot cards grid -->
-    <div id="bots-grid" class="bots-grid">
-      <div class="bots-empty" id="bots-empty">Loading bots…</div>
+    <!-- Main layout: cards + decisions feed -->
+    <div class="bots-main-row">
+      <div id="bots-grid" class="bots-grid">
+        <div class="bots-empty">Loading bots…</div>
+      </div>
+      <!-- Live decisions feed -->
+      <div class="bot-decisions-feed">
+        <div class="bot-decisions-feed-title">
+          <span>⚡ Live Activity</span>
+          <span id="bot-feed-ts" style="font-weight:400;font-size:0.7rem"></span>
+        </div>
+        <div id="bot-decisions-list" class="bot-decisions-list">
+          <div class="bot-decisions-empty">Loading…</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1706,6 +1731,17 @@
       <button class="bots-modal-close" onclick="botsCloseModal()" aria-label="Close">✕</button>
     </div>
     <div id="bots-modal-body" class="bots-modal-body"></div>
+  </div>
+
+  <!-- ── Drilldown modal ── -->
+  <div id="bot-drilldown-backdrop" class="bot-drilldown-backdrop" style="display:none" onclick="if(event.target===this)botsDrilldownClose()">
+    <div class="bot-drilldown-modal" id="bot-drilldown-modal">
+      <div class="bot-drilldown-header">
+        <span id="bot-drilldown-title" class="bot-drilldown-title">Bot Details</span>
+        <button class="bot-drilldown-close" onclick="botsDrilldownClose()" aria-label="Close">✕</button>
+      </div>
+      <div id="bot-drilldown-body" class="bot-drilldown-body">Loading…</div>
+    </div>
   </div>
 </div>
 <!-- ══════════════════════════════════════════════════════════ -->
@@ -8609,6 +8645,7 @@ let _showPageCurrent = null;
 function showPage(name, btn) {
   if (_showPageCurrent === 'discover' && name !== 'discover') discOnHide?.();
   if (_showPageCurrent === 'signal-center' && name !== 'signal-center') scStopSpikePolling?.();
+  if (_showPageCurrent === 'bots' && name !== 'bots') _botStopFeedPoll?.();
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   if (name !== 'trading-desk') _tdClearHeight?.();
@@ -8616,7 +8653,7 @@ function showPage(name, btn) {
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
   _showPageCurrent = name;
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': scOnShow, 'trading-desk': loadTradingDesk, bots: loadBots };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': scOnShow, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); } };
   loaders[name]?.();
 }
 
@@ -10672,7 +10709,8 @@ async function discLoadChannels() {
     row.innerHTML = channels.map(c => {
       const isActive = c.channel === _discFilters.channel;
       return `<button class="disc-chip${isActive ? ' active' : ''}"
-                onclick="discToggleChannel(${JSON.stringify(c.channel)})">${_esc(c.channel)} <span class="disc-chip-count">${Number(c.article_count) || 0}</span></button>`;
+                data-channel="${_esc(c.channel)}"
+                onclick="discToggleChannel(this.dataset.channel)">${_esc(c.channel)} <span class="disc-chip-count">${Number(c.article_count) || 0}</span></button>`;
     }).join('');
   } catch {}
 }
@@ -21788,12 +21826,15 @@ async function loadUWCorrelations() {
 //  BOTS — Phase B-1  (management: list, create, edit, delete)
 // ══════════════════════════════════════════════════════════════
 
-let _botsList   = [];
-let _botEditing = null; // null = create mode, Number = edit bot id
+let _botsList         = [];
+let _botEditing       = null;   // null = create mode, Number = edit bot id
+let _botFeedInterval  = null;
+let _botsShowArchived = localStorage.getItem('bots-show-archived') === 'true';
 
 const BOT_FORM_DEFAULTS = {
   name: '',
   capital_usd: 5000,
+  broker: 'alpaca',
   min_composite_score: 60,
   conviction_grade_min: 'C',
   vix_max: 60,
@@ -21801,25 +21842,33 @@ const BOT_FORM_DEFAULTS = {
   stop_loss_usd: 50,
   trail_pct: 30,
   position_size_pct: 95,
+  order_type: 'auto',
+  allow_outside_rth: true,
+  limit_offset_bps: 30,
 };
 
 async function loadBots() {
   const grid = document.getElementById('bots-grid');
   if (!grid) return;
   grid.innerHTML = '<div class="bots-empty">Loading bots…</div>';
+  // Sync archive checkbox to current state
+  const archiveCb = document.getElementById('bots-show-archived');
+  if (archiveCb) archiveCb.checked = _botsShowArchived;
   try {
-    const r = await fetch('/api/bots', { cache: 'no-store' });
+    const url = '/api/bots' + (_botsShowArchived ? '?include_archived=true' : '');
+    const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     _botsList = data.bots ?? [];
     grid.innerHTML = '';
-    if (!_botsList.length) {
+    const active = _botsList.filter(b => !b.deleted_at);
+    if (!_botsList.length || (!_botsShowArchived && !active.length)) {
       grid.innerHTML = '<div class="bots-empty">No bots yet. Click <strong>+ New Bot</strong> to create one.</div>';
       return;
     }
     _botsList.forEach(b => {
       const card = document.createElement('div');
-      card.className = 'bots-card';
+      card.className = 'bots-card' + (b.deleted_at ? ' bots-card-archived' : '');
       card.dataset.botId = b.id;
       card.innerHTML = _botCard(b);
       grid.appendChild(card);
@@ -21830,44 +21879,51 @@ async function loadBots() {
 }
 
 function _botCard(b) {
+  const archived    = !!b.deleted_at;
   const statusClass = b.status === 'active' ? 'bots-status-run' : b.status === 'paused' ? 'bots-status-pause' : 'bots-status-idle';
   const statusLabel = b.status === 'active' ? '▶ Active' : b.status === 'paused' ? '⏸ Paused' : b.status === 'paused_today' ? '⏸ Paused Today' : '⏹ Stopped';
-  const pnlNum = parseFloat(b.cumulative_pnl_usd ?? 0);
-  const pnl = pnlNum.toFixed(2);
+  const pnlNum  = parseFloat(b.cumulative_pnl_usd ?? 0);
   const pnlColor = pnlNum >= 0 ? '#3fb950' : '#f85149';
-  const trades = Number(b.total_trades ?? 0);
-  const wins   = Number(b.winning_trades ?? 0);
-  const wr     = trades ? Math.round((wins / trades) * 100) : 0;
-  const locked = b.current_trade_id != null;
+  // Prefer lifetime_trades from server if available, else fall back to bots table counters
+  const trades  = Number(b.lifetime_trades ?? b.total_trades ?? 0);
+  const wins    = Number(b.lifetime_wins   ?? b.winning_trades ?? 0);
+  const pnl     = Number(b.lifetime_pnl    ?? b.cumulative_pnl_usd ?? 0);
+  const wr      = trades ? (wins / trades * 100).toFixed(1) : '0.0';
+  const locked  = b.current_trade_id != null;
+  const lifetimeBadge = `${trades} trade${trades!==1?'s':''} · ${wr}% WR · <span style="color:${pnlColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>`;
+  const archivedBadge = archived ? `<span class="bot-badge-archived">ARCHIVED</span>` : '';
+  const actions = archived
+    ? `<button class="bots-action-btn bots-btn-edit" onclick="event.stopPropagation();botsRestore(${b.id})">♻ Restore</button>
+       <button class="bots-action-btn" onclick="event.stopPropagation();botsDrilldown(${b.id})">📋 History</button>`
+    : `${b.status === 'active'
+        ? `<button class="bots-action-btn bots-btn-pause" onclick="event.stopPropagation();botsToggleStatus(${b.id},'paused')">⏸ Pause</button>`
+        : `<button class="bots-action-btn bots-btn-start" onclick="event.stopPropagation();botsToggleStatus(${b.id},'active')">▶ Start</button>`}
+       <button class="bots-action-btn bots-btn-edit"   onclick="event.stopPropagation();botsEdit(${b.id})">✏ Edit</button>
+       <button class="bots-action-btn bots-btn-delete" onclick="event.stopPropagation();botsDelete(${b.id})">🗑 Delete</button>`;
   return `
     <div class="bots-card-top">
       <div>
-        <div class="bots-card-name">${_escHtml(b.name)}</div>
-        <div class="bots-card-capital">$${Number(b.capital_usd).toLocaleString()} capital</div>
+        <div class="bots-card-name">${_escHtml(b.name)}${archivedBadge}</div>
+        <div class="bots-card-capital">$${Number(b.capital_usd).toLocaleString()} capital · ${_escHtml(b.broker ?? 'alpaca')}</div>
       </div>
       <span class="bots-status-badge ${statusClass}">${statusLabel}</span>
     </div>
     <div class="bots-card-stats">
       <div class="bots-stat"><span class="bots-stat-label">Trades</span><span class="bots-stat-val">${trades}</span></div>
       <div class="bots-stat"><span class="bots-stat-label">Win %</span><span class="bots-stat-val">${wr}%</span></div>
-      <div class="bots-stat"><span class="bots-stat-label">P&amp;L</span><span class="bots-stat-val" style="color:${pnlColor}">$${pnl}</span></div>
+      <div class="bots-stat"><span class="bots-stat-label">P&amp;L</span><span class="bots-stat-val" style="color:${pnlColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span></div>
     </div>
-    ${locked ? '<div class="bots-lock-note">🔒 Fields locked — trade in progress</div>' : ''}
-    <div class="bots-card-actions">
-      ${b.status === 'active'
-        ? `<button class="bots-action-btn bots-btn-pause"  onclick="botsToggleStatus(${b.id},'paused')">⏸ Pause</button>`
-        : `<button class="bots-action-btn bots-btn-start"  onclick="botsToggleStatus(${b.id},'active')">▶ Start</button>`}
-      <button class="bots-action-btn bots-btn-edit"   onclick="botsEdit(${b.id})">✏ Edit</button>
-      <button class="bots-action-btn bots-btn-delete" onclick="botsDelete(${b.id})">🗑 Delete</button>
-    </div>`;
+    <div style="font-size:0.72rem;color:#8b949e;padding:4px 0 6px">${lifetimeBadge}</div>
+    ${locked && !archived ? '<div class="bots-lock-note">🔒 Fields locked — trade in progress</div>' : ''}
+    <div class="bots-card-actions">${actions}</div>`;
 }
 
-// delegated click on grid (card body → open edit if not a button)
+// delegated click on grid (card body → drilldown; buttons handle themselves)
 document.getElementById('bots-grid')?.addEventListener('click', e => {
   if (e.target.closest('button')) return;
   const card = e.target.closest('.bots-card');
   if (!card) return;
-  botsEdit(Number(card.dataset.botId));
+  botsDrilldown(Number(card.dataset.botId));
 });
 
 function botsShowCreateModal() {
@@ -21888,9 +21944,11 @@ function botsEdit(id) {
   const er    = rules.exit_rules    ?? {};
   const sz    = rules.sizing        ?? {};
   const ri    = rules.risk          ?? {};
+  const ex    = rules.execution     ?? {};
   _botRenderForm({
     name: bot.name,
     capital_usd: bot.capital_usd,
+    broker: bot.broker ?? 'alpaca',
     min_composite_score: ef.min_composite_score ?? 60,
     conviction_grade_min: ef.conviction_grade_min ?? 'C',
     vix_max: ef.vix_max ?? 60,
@@ -21898,6 +21956,9 @@ function botsEdit(id) {
     stop_loss_usd: er.stop_loss_usd ?? 50,
     trail_pct: er.trail_pct ?? 30,
     position_size_pct: sz.position_size_pct ?? 95,
+    order_type:        ex.order_type        ?? 'auto',
+    allow_outside_rth: ex.allow_outside_rth ?? true,
+    limit_offset_bps:  ex.limit_offset_bps  ?? 30,
   }, bot.current_trade_id != null);
   document.getElementById('bots-modal-backdrop').style.display = '';
   document.getElementById('bots-modal').style.display = '';
@@ -21916,8 +21977,20 @@ document.addEventListener('keydown', e => {
 function _botRenderForm(vals, locked) {
   const body  = document.getElementById('bots-modal-body');
   const gradeOpts = ['A','B','C','D','F'].map(g => `<option value="${g}"${vals.conviction_grade_min===g?' selected':''}>${g}</option>`).join('');
+
+  const hasAlpacaPaper = !!_currentUser?.sources?.alpaca_paper;
+  const hasTigerDemo   = !!_currentUser?.sources?.tiger_demo;
+  const noBroker       = !hasAlpacaPaper && !hasTigerDemo;
+
+  const defaultBroker = (vals.broker === 'alpaca'     && hasAlpacaPaper) ? 'alpaca'
+                      : (vals.broker === 'tiger_demo' && hasTigerDemo)   ? 'tiger_demo'
+                      : hasAlpacaPaper ? 'alpaca'
+                      : hasTigerDemo   ? 'tiger_demo'
+                      : '';
+
   body.innerHTML = `
     <form id="bots-form" onsubmit="botsSubmit(event)">
+      ${noBroker ? `<div class="bots-lock-note" style="margin-bottom:10px;color:#f78166">Connect a paper broker (Alpaca Paper or Tiger Demo) in Account Settings → Sources before creating a bot.</div>` : ''}
       <div class="bots-field-group">
         <label class="bots-label">Bot Name</label>
         <input class="bots-input" id="bf-name" value="${_escHtml(String(vals.name))}" maxlength="60" required ${locked?'disabled':''}>
@@ -21925,6 +21998,16 @@ function _botRenderForm(vals, locked) {
       <div class="bots-field-group">
         <label class="bots-label">Capital (USD)</label>
         <input class="bots-input" id="bf-capital" type="number" min="100" max="1000000" step="100" value="${vals.capital_usd}" required ${locked?'disabled':''}>
+      </div>
+      <div class="bots-field-group">
+        <label class="bots-label">Broker</label>
+        <select class="bots-input" id="bf-broker" ${locked||noBroker?'disabled':''}>
+          <option value="alpaca"     ${!hasAlpacaPaper?'disabled':''}>📄 Alpaca Paper${!hasAlpacaPaper?' — not connected':''}</option>
+          <option value="tiger_demo" ${!hasTigerDemo  ?'disabled':''}>🐯 Tiger Demo${!hasTigerDemo  ?' — not connected':''}</option>
+          <option value="alpaca_live" disabled>🔴 Alpaca Live (B-6)</option>
+          <option value="tiger"       disabled>🐯 Tiger Live (B-6)</option>
+          <option value="moomoo"      disabled>💰 Moomoo (B-6)</option>
+        </select>
       </div>
       <div class="bots-field-row">
         <div class="bots-field-group">
@@ -21960,34 +22043,64 @@ function _botRenderForm(vals, locked) {
         <label class="bots-label">Max Loss per Trade ($)</label>
         <input class="bots-input" id="bf-maxloss" type="number" min="1" value="${vals.max_loss_usd}" ${locked?'disabled':''}>
       </div>
+      <div style="font-size:0.72rem;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">Execution</div>
+      <div class="bots-field-row">
+        <div class="bots-field-group">
+          <label class="bots-label">Order Type</label>
+          <select class="bots-input" id="bf-order-type" ${locked?'disabled':''}>
+            <option value="auto" ${vals.order_type==='auto'?'selected':''}>Auto (MKT in RTH, LMT outside)</option>
+            <option value="mkt"  ${vals.order_type==='mkt' ?'selected':''}>MKT always</option>
+            <option value="lmt"  ${vals.order_type==='lmt' ?'selected':''}>LMT always</option>
+          </select>
+        </div>
+        <div class="bots-field-group">
+          <label class="bots-label">Limit Offset (bps)</label>
+          <input class="bots-input" id="bf-limit-bps" type="number" min="0" max="200" step="5" value="${vals.limit_offset_bps}" ${locked?'disabled':''}>
+        </div>
+      </div>
+      <div class="bots-field-group">
+        <label class="bots-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="bf-allow-out-rth" ${vals.allow_outside_rth?'checked':''} ${locked?'disabled':''}>
+          Allow trading outside RTH (pre/after-hours)
+        </label>
+      </div>
       ${locked ? '<div class="bots-lock-note" style="margin-bottom:8px">🔒 Core fields locked while a trade is open</div>' : ''}
       <div class="bots-modal-footer">
         <button type="button" class="bots-action-btn" onclick="botsCloseModal()">Cancel</button>
-        <button type="submit" class="bots-action-btn bots-btn-start">${_botEditing ? 'Save Changes' : 'Create Bot'}</button>
+        <button type="submit" id="bf-submit" class="bots-action-btn bots-btn-start" ${noBroker?'disabled':''}>
+          ${_botEditing ? 'Save Changes' : 'Create Bot'}
+        </button>
       </div>
     </form>`;
+
+  if (defaultBroker) document.getElementById('bf-broker').value = defaultBroker;
 }
 
 async function botsSubmit(e) {
   e.preventDefault();
-  const name         = document.getElementById('bf-name').value.trim();
-  const capital_usd  = Number(document.getElementById('bf-capital').value);
-  const score        = Number(document.getElementById('bf-score').value);
-  const grade        = document.getElementById('bf-grade').value;
-  const vix_max      = Number(document.getElementById('bf-vix').value);
-  const pos_pct      = Number(document.getElementById('bf-size').value);
-  const stop_loss    = Number(document.getElementById('bf-stop').value);
-  const trail_pct    = Number(document.getElementById('bf-trail').value);
-  const max_loss     = Number(document.getElementById('bf-maxloss').value);
+  const name             = document.getElementById('bf-name').value.trim();
+  const capital_usd      = Number(document.getElementById('bf-capital').value);
+  const broker           = document.getElementById('bf-broker').value;
+  const score            = Number(document.getElementById('bf-score').value);
+  const grade            = document.getElementById('bf-grade').value;
+  const vix_max          = Number(document.getElementById('bf-vix').value);
+  const pos_pct          = Number(document.getElementById('bf-size').value);
+  const stop_loss        = Number(document.getElementById('bf-stop').value);
+  const trail_pct        = Number(document.getElementById('bf-trail').value);
+  const max_loss         = Number(document.getElementById('bf-maxloss').value);
+  const order_type       = document.getElementById('bf-order-type').value;
+  const allow_outside_rth = document.getElementById('bf-allow-out-rth').checked;
+  const limit_offset_bps = Number(document.getElementById('bf-limit-bps').value);
 
   const rules = {
     entry_filters: { min_composite_score: score, conviction_grade_min: grade, vix_max },
     exit_rules:    { stop_loss_usd: stop_loss, trail_pct },
     sizing:        { position_size_pct: pos_pct },
     risk:          { max_loss_usd: max_loss },
+    execution:     { order_type, allow_outside_rth, limit_offset_bps },
   };
 
-  const body    = _botEditing ? { rules, capital_usd, name } : { name, capital_usd, rules };
+  const body    = _botEditing ? { rules, capital_usd, name, broker } : { name, capital_usd, rules, broker };
   const url     = _botEditing ? `/api/bots/${_botEditing}` : '/api/bots';
   const method  = _botEditing ? 'PATCH' : 'POST';
 
@@ -22012,13 +22125,263 @@ async function botsToggleStatus(id, newStatus) {
 
 async function botsDelete(id) {
   const bot = _botsList.find(b => Number(b.id) === Number(id));
-  if (!confirm(`Delete bot "${bot?.name ?? id}"? This cannot be undone.`)) return;
+  if (!confirm(`Archive bot "${bot?.name ?? id}"? It will be hidden but history is preserved. Use "Show archived" to restore it.`)) return;
   try {
     const r = await fetch(`/api/bots/${id}`, { method: 'DELETE' });
     if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? `HTTP ${r.status}`); }
     loadBots();
   } catch (err) { alert(`Error: ${err.message}`); }
 }
+
+async function botsRestore(id) {
+  try {
+    const r = await fetch(`/api/bots/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleted_at: null }),
+    });
+    if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? `HTTP ${r.status}`); }
+    loadBots();
+  } catch (err) { alert(`Error restoring bot: ${err.message}`); }
+}
+
+function botsToggleArchived(checked) {
+  _botsShowArchived = checked;
+  localStorage.setItem('bots-show-archived', checked ? 'true' : 'false');
+  loadBots();
+}
+
+// ── KPI Strip ─────────────────────────────────────────────────────────────────
+
+async function _botRenderKpiStrip() {
+  const strip = document.getElementById('bot-kpi-strip');
+  if (!strip) return;
+  try {
+    const r = await fetch('/api/bots/stats', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { kpis } = await r.json();
+    const pnlNum   = Number(kpis.total_pnl_usd) || 0;
+    const pnlColor = pnlNum >= 0 ? '#3fb950' : '#f85149';
+    const pnlStr   = (pnlNum >= 0 ? '+' : '') + '$' + Math.abs(pnlNum).toFixed(2);
+    const wrStr    = kpis.overall_wr != null ? kpis.overall_wr.toFixed(1) + '%' : '—';
+    const bestName = kpis.best_bot  ? _escHtml(kpis.best_bot.name)  : '—';
+    const bestPnl  = kpis.best_bot  ? ((kpis.best_bot.pnl  >= 0 ? '+' : '') + '$' + Math.abs(Number(kpis.best_bot.pnl )).toFixed(2)) : '';
+    const noTrades = !kpis.total_trades;
+
+    if (noTrades && !kpis.active_count && !kpis.archived_count) {
+      strip.innerHTML = `<div class="bot-kpi-empty">No bots yet — create one to see KPIs here.</div>`;
+      return;
+    }
+    strip.innerHTML = `
+      <div class="bot-kpi-tile">
+        <div class="bot-kpi-label">Total P&L</div>
+        <div class="bot-kpi-value" style="color:${noTrades?'#8b949e':pnlColor}">${noTrades?'—':pnlStr}</div>
+        ${noTrades?'<div class="bot-kpi-sub">No closed trades yet</div>':''}
+      </div>
+      <div class="bot-kpi-tile">
+        <div class="bot-kpi-label">Total Trades</div>
+        <div class="bot-kpi-value">${kpis.total_trades}</div>
+      </div>
+      <div class="bot-kpi-tile">
+        <div class="bot-kpi-label">Overall WR</div>
+        <div class="bot-kpi-value">${wrStr}</div>
+        ${kpis.total_trades?`<div class="bot-kpi-sub">${kpis.winning_trades??0}W / ${(kpis.total_trades??0)-(kpis.winning_trades??0)}L</div>`:''}
+      </div>
+      <div class="bot-kpi-tile">
+        <div class="bot-kpi-label">Bots</div>
+        <div class="bot-kpi-value">${kpis.active_count} active</div>
+        <div class="bot-kpi-sub">${kpis.archived_count} archived</div>
+      </div>
+      <div class="bot-kpi-tile${kpis.best_bot?' clickable':''}" ${kpis.best_bot?`onclick="botsDrilldown(${kpis.best_bot.id})"`:''}>
+        <div class="bot-kpi-label">Best Bot</div>
+        <div class="bot-kpi-value" style="font-size:0.9rem">${bestName}</div>
+        ${kpis.best_bot?`<div class="bot-kpi-sub" style="color:#3fb950">${bestPnl}</div>`:'<div class="bot-kpi-sub">—</div>'}
+      </div>`;
+  } catch (e) {
+    if (strip) strip.innerHTML = `<div class="bot-kpi-empty" style="color:#f85149">KPI load failed: ${_escHtml(e.message)}</div>`;
+  }
+}
+
+// ── Decisions Feed ────────────────────────────────────────────────────────────
+
+async function _botLoadDecisionsFeed() {
+  if (document.hidden) return;
+  const list = document.getElementById('bot-decisions-list');
+  if (!list) return;
+  try {
+    const r = await fetch('/api/bot-decisions/recent?limit=20', { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { decisions } = await r.json();
+    const ts = document.getElementById('bot-feed-ts');
+    if (ts) ts.textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!decisions.length) {
+      list.innerHTML = '<div class="bot-decisions-empty">No decisions yet.</div>';
+      return;
+    }
+    list.innerHTML = decisions.map(d => {
+      const t   = new Date(d.scanned_at);
+      const tStr = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const score = d.composite_score != null ? (+d.composite_score).toFixed(1) : '—';
+      const isBuy  = d.action === 'buy';
+      const isErr  = d.action === 'error';
+      const cls    = isBuy ? 'bot-decision-buy' : isErr ? 'bot-decision-error' : 'bot-decision-skip';
+      const icon   = isBuy ? '✅' : isErr ? '❌' : '⏸';
+      const sym    = d.symbol ? `<span class="bot-decision-symbol">${_escHtml(d.symbol)}</span> · ` : '';
+      return `<div class="bot-decision-row" onclick="botsDrilldown(${d.bot_id})">
+        <div><span class="bot-decision-time">${tStr}</span> <span class="bot-decision-name">${_escHtml(d.bot_name)}</span></div>
+        <div>${sym}<span class="bot-decision-score">score ${score}</span> <span class="${cls}">${icon} ${_escHtml(d.action)}${d.notes?` — ${_escHtml(d.notes.slice(0,40))}`  :''}</span></div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    const list2 = document.getElementById('bot-decisions-list');
+    if (list2) list2.innerHTML = `<div class="bot-decisions-empty" style="color:#f85149">Load failed</div>`;
+  }
+}
+
+function _botStartFeedPoll() {
+  _botLoadDecisionsFeed();
+  if (_botFeedInterval) return;
+  _botFeedInterval = setInterval(() => _botLoadDecisionsFeed(), 30_000);
+  document.addEventListener('visibilitychange', _botFeedVisibility);
+}
+
+function _botStopFeedPoll() {
+  if (_botFeedInterval) { clearInterval(_botFeedInterval); _botFeedInterval = null; }
+  document.removeEventListener('visibilitychange', _botFeedVisibility);
+}
+
+function _botFeedVisibility() {
+  if (!document.hidden) _botLoadDecisionsFeed();
+}
+
+// ── Drilldown modal ───────────────────────────────────────────────────────────
+
+async function botsDrilldown(id) {
+  const bot = _botsList.find(b => Number(b.id) === Number(id));
+  const backdrop = document.getElementById('bot-drilldown-backdrop');
+  const body     = document.getElementById('bot-drilldown-body');
+  const title    = document.getElementById('bot-drilldown-title');
+  if (!backdrop || !body) return;
+  if (title) title.textContent = bot ? `📊 ${bot.name}` : 'Bot Details';
+  backdrop.style.display = 'flex';
+  body.innerHTML = '<div style="padding:24px;color:#8b949e;text-align:center">Loading…</div>';
+  try {
+    const [tradesR, decsR] = await Promise.all([
+      fetch(`/api/bots/${id}/trades?limit=50`,     { cache: 'no-store' }),
+      fetch(`/api/bots/${id}/decisions?limit=10`,  { cache: 'no-store' }),
+    ]);
+    const tradesData = tradesR.ok  ? await tradesR.json()  : { trades: [] };
+    const decsData   = decsR.ok    ? await decsR.json()    : { decisions: [] };
+    const trades     = tradesData.trades    ?? [];
+    const decisions  = decsData.decisions   ?? [];
+    const archived   = bot?.deleted_at;
+
+    // Compute lifetime stats from trades array
+    const closed   = trades.filter(t => t.status === 'closed');
+    const totalPnl = closed.reduce((s, t) => s + Number(t.pnl_usd ?? 0), 0);
+    const wins     = closed.filter(t => Number(t.pnl_usd) > 0).length;
+    const wr       = closed.length ? (wins / closed.length * 100).toFixed(1) : '—';
+    const pnlVals  = closed.map(t => Number(t.pnl_usd));
+    const best     = pnlVals.length ? Math.max(...pnlVals)  : null;
+    const worst    = pnlVals.length ? Math.min(...pnlVals)  : null;
+    const durations = closed.filter(t => t.opened_at && t.closed_at).map(t =>
+      (new Date(t.closed_at) - new Date(t.opened_at)) / 60000);
+    const avgHoldMin = durations.length ? (durations.reduce((a,b)=>a+b,0)/durations.length) : null;
+    const fmtHold = m => m == null ? '—' : m < 60 ? `${Math.round(m)}m` : `${(m/60).toFixed(1)}h`;
+    const fmtPnl  = v => v == null ? '—' : (v >= 0 ? '+' : '') + '$' + Math.abs(v).toFixed(2);
+    const pnlColor = totalPnl >= 0 ? '#3fb950' : '#f85149';
+
+    const tradesHtml = trades.length ? `
+      <div class="bot-section-title">Trade History (last ${trades.length})</div>
+      <div style="overflow-x:auto">
+        <table class="bot-trade-history-table">
+          <thead><tr>
+            <th>Opened</th><th>Symbol</th><th>Qty</th>
+            <th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Status</th><th>Hold</th>
+          </tr></thead>
+          <tbody>
+            ${trades.map(t => {
+              const p = Number(t.pnl_usd);
+              const pCls = t.status==='closed' ? (p>=0?'bot-trade-pnl-pos':'bot-trade-pnl-neg') : '';
+              const hold = (t.opened_at && t.closed_at)
+                ? fmtHold((new Date(t.closed_at)-new Date(t.opened_at))/60000) : '—';
+              return `<tr>
+                <td>${new Date(t.opened_at).toLocaleDateString()}</td>
+                <td style="font-weight:700;color:#58a6ff">${_escHtml(t.symbol)}</td>
+                <td>${Number(t.qty).toFixed(0)}</td>
+                <td>$${Number(t.entry_price).toFixed(2)}</td>
+                <td>${t.exit_price ? '$'+Number(t.exit_price).toFixed(2) : '—'}</td>
+                <td class="${pCls}">${t.status==='closed'?fmtPnl(p):'open'}</td>
+                <td>${_escHtml(t.status)}</td>
+                <td>${hold}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>` : '<div class="bot-section-title">Trade History</div><div style="color:#8b949e;font-size:0.82rem">No trades yet.</div>';
+
+    const recentDecsHtml = decisions.length ? `
+      <div class="bot-section-title" style="margin-top:18px">Recent Decisions (last ${decisions.length})</div>
+      <div style="font-size:0.78rem">
+        ${decisions.map(d => {
+          const tStr = new Date(d.scanned_at).toLocaleString([], { month:'short',day:'numeric',hour:'2-digit',minute:'2-digit' });
+          const isBuy = d.action === 'buy';
+          const cls   = isBuy ? 'bot-decision-buy' : 'bot-decision-skip';
+          const score = d.composite_score != null ? (+d.composite_score).toFixed(1) : '—';
+          return `<div style="padding:5px 0;border-bottom:1px solid #21262d;display:flex;gap:8px;align-items:baseline">
+            <span style="color:#8b949e;min-width:110px">${tStr}</span>
+            <span style="color:#58a6ff;font-weight:700">${_escHtml(d.symbol??'—')}</span>
+            <span style="color:#8b949e">score ${score}</span>
+            <span class="${cls}">${isBuy?'✅':'⏸'} ${_escHtml(d.action)}</span>
+            ${d.notes?`<span style="color:#6e7681">${_escHtml(d.notes.slice(0,50))}</span>`:''}
+          </div>`;
+        }).join('')}
+      </div>` : '';
+
+    const activeActions = !archived ? `
+      <div class="bot-drilldown-actions">
+        <button class="bots-action-btn bots-btn-edit" onclick="botsDrilldownClose();botsEdit(${id})">✏ Edit Rules</button>
+        ${bot?.status==='active'
+          ? `<button class="bots-action-btn bots-btn-pause" onclick="botsDrilldownClose();botsToggleStatus(${id},'paused')">⏸ Pause</button>`
+          : `<button class="bots-action-btn bots-btn-start" onclick="botsDrilldownClose();botsToggleStatus(${id},'active')">▶ Start</button>`}
+        <button class="bots-action-btn bots-btn-delete" onclick="botsDrilldownClose();botsDelete(${id})">🗑 Archive</button>
+      </div>` : `
+      <div class="bot-drilldown-actions">
+        <button class="bots-action-btn bots-btn-start" onclick="botsDrilldownClose();botsRestore(${id})">♻ Restore Bot</button>
+      </div>`;
+
+    body.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <span style="font-size:0.82rem;color:#8b949e">${_escHtml(bot?.broker??'')}</span>
+        <span style="font-size:0.82rem;color:#8b949e">·</span>
+        <span style="font-size:0.82rem;color:#8b949e">$${Number(bot?.capital_usd??0).toLocaleString()} capital</span>
+        ${archived?'<span class="bot-badge-archived" style="margin-left:4px">ARCHIVED</span>':''}
+      </div>
+      <div class="bot-drilldown-stats-grid">
+        <div class="bot-drilldown-stat"><div class="bot-drilldown-stat-label">Total Trades</div><div class="bot-drilldown-stat-value">${closed.length}</div></div>
+        <div class="bot-drilldown-stat"><div class="bot-drilldown-stat-label">Win Rate</div><div class="bot-drilldown-stat-value">${wr}${wr!=='—'?'%':''}</div></div>
+        <div class="bot-drilldown-stat"><div class="bot-drilldown-stat-label">Total P&amp;L</div><div class="bot-drilldown-stat-value" style="color:${pnlColor}">${fmtPnl(totalPnl)}</div></div>
+        <div class="bot-drilldown-stat"><div class="bot-drilldown-stat-label">Avg Hold</div><div class="bot-drilldown-stat-value">${fmtHold(avgHoldMin)}</div></div>
+        <div class="bot-drilldown-stat"><div class="bot-drilldown-stat-label">Best Trade</div><div class="bot-drilldown-stat-value" style="color:#3fb950">${fmtPnl(best)}</div></div>
+        <div class="bot-drilldown-stat"><div class="bot-drilldown-stat-label">Worst Trade</div><div class="bot-drilldown-stat-value" style="color:#f85149">${fmtPnl(worst)}</div></div>
+      </div>
+      ${tradesHtml}
+      ${recentDecsHtml}
+      ${activeActions}`;
+  } catch (e) {
+    body.innerHTML = `<div style="color:#f85149;padding:16px">Failed to load bot details: ${_escHtml(e.message)}</div>`;
+  }
+}
+
+function botsDrilldownClose() {
+  const backdrop = document.getElementById('bot-drilldown-backdrop');
+  if (backdrop) backdrop.style.display = 'none';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('bot-drilldown-backdrop')?.style.display !== 'none')
+    botsDrilldownClose();
+});
 
 </script>
 

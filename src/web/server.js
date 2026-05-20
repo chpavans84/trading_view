@@ -24,7 +24,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 import { initDb, query, isDbAvailable, getTrades, getDailyPnlHistory, getUsageStats, getApiCallStats, recordApiCall, upsertUsageStats, getTodaySpend, recordDocQuery, getDocQueries, markDocQueryNotified, logActivity, getActivity, upsertDailyPnl, getDbUser, getDbUserByEmail, createDbUser, upsertDbUser, updateDbUserLogin, deductCredit, addCredits, listDbUsers, updateDbUserPermissions, deleteDbUser, createOtpToken, verifyOtpToken, cleanupOtpTokens, saveUserAlpaca, clearUserAlpaca, clearUserLiveAlpaca, saveUserMoomoo, clearUserMoomoo, saveUserTiger, clearUserTiger, suspendUser, unsuspendUser, setUserCredits, setUserRole, getUserBotConfig, setUserBotConfig, BOT_CONFIG_DEFAULTS, createBugReport, getBugReports, updateBugReport, getScannerState, setScannerState, saveDailyBriefing, getDailyBriefing, upsertPositionMonitoring, getPositionMonitoring, getAllPositionMonitoring, deletePositionMonitoring, getRecentLosses, getRejections, recordTrade, closeTrade, getOpenTrade, saveLesson, getRecentLessons, getPerformancePatterns, upsertPerformancePattern, loadConversationHistory, saveDailyPick, getDailyPicks, invalidateFactorWeightsCache, upsertPrediction, fillActualPrice, getPredictionsForWeek, getPredictionHistory, setDisabledSources, upsertAccountSnapshot, getAccountSnapshots, getUserWatchlistSymbols, addUserWatchlistSymbol, removeUserWatchlistSymbol, logClientError, logServerError, getErrorLog, resolveError,
-  insertSentinelRun, insertPendingAction, getPendingAction, updatePendingAction } from '../core/db.js';
+  insertSentinelRun, insertPendingAction, getPendingAction, updatePendingAction,
+  listBots, softDeleteBot, getBotKpis, getRecentBotDecisions, getBotTrades } from '../core/db.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { localAI, isOllamaAvailable } from '../core/ollama.js';
 import { runReflection } from '../core/reflection.js';
@@ -68,6 +69,7 @@ import { alert as sysAlert } from '../core/system-alerts.js';
 import { checkEarningsRisk, checkAfterHoursMove, checkPreMarketHoldings, runWeekendScan } from '../core/position-guardian.js';
 import { checkUnusualOptions } from '../core/options-scanner.js';
 import { runBotScanForAllActive, scanBot, startBotEngineCrons } from '../core/bot-engine.js';
+import { runExecutorForAllActive, processBot, startBotExecutorCrons } from '../core/bot-executor.js';
 
 // ─── Process-level error handlers ─────────────────────────────────────────────
 process.on('uncaughtException', async (e) => {
@@ -7143,6 +7145,11 @@ const BOT_DEFAULT_RULES = {
     daily_loss_limit_usd: 100,
     pause_after_n_losses: 3,
   },
+  execution: {
+    order_type:        'auto',
+    allow_outside_rth: true,
+    limit_offset_bps:  30,
+  },
 };
 
 const BOT_NAME_RE   = /^[\w\s\-]{1,60}$/;
@@ -7197,11 +7204,30 @@ app.get('/api/bots', requireAuth, async (req, res) => {
   try {
     const userId = await _currentUserId(req);
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
-    const { rows } = await query(
-      'SELECT * FROM bots WHERE user_id=$1 ORDER BY created_at ASC',
-      [userId]
-    );
-    res.json({ bots: rows });
+    const includeArchived = req.query.include_archived === 'true';
+    const bots = await listBots(userId, { includeArchived });
+    // Attach lifetime trade stats per bot
+    if (bots.length) {
+      const botIds = bots.map(b => b.id);
+      const { rows: stats } = await query(`
+        SELECT bot_id,
+               COUNT(*)                                   AS lifetime_trades,
+               COUNT(*) FILTER (WHERE pnl_usd > 0)       AS lifetime_wins,
+               COALESCE(SUM(pnl_usd), 0)                 AS lifetime_pnl,
+               MAX(closed_at)                             AS last_trade_at
+        FROM trades
+        WHERE bot_id = ANY($1) AND status = 'closed'
+        GROUP BY bot_id`, [botIds]);
+      const statsMap = Object.fromEntries(stats.map(s => [s.bot_id, s]));
+      for (const b of bots) {
+        const s = statsMap[b.id];
+        b.lifetime_trades   = s ? Number(s.lifetime_trades) : 0;
+        b.lifetime_wins     = s ? Number(s.lifetime_wins)   : 0;
+        b.lifetime_pnl      = s ? Number(s.lifetime_pnl)    : 0;
+        b.last_trade_at     = s?.last_trade_at ?? null;
+      }
+    }
+    res.json({ bots });
   } catch (e) {
     console.error('[bots/list]', e);
     res.status(500).json({ error: 'Internal server error' });
@@ -7213,13 +7239,26 @@ app.post('/api/bots', requireAuth, async (req, res) => {
   try {
     const userId = await _currentUserId(req);
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
-    const { rows: countRows } = await query('SELECT COUNT(*) AS n FROM bots WHERE user_id=$1', [userId]);
+    const { rows: countRows } = await query('SELECT COUNT(*) AS n FROM bots WHERE user_id=$1 AND deleted_at IS NULL', [userId]);
     if (parseInt(countRows[0].n) >= 3) return res.status(409).json({ error: 'Bot limit reached (max 3 per user)' });
 
     const { name, capital_usd, rules, account_type = 'paper', broker = 'alpaca' } = req.body;
     if (!name || !BOT_NAME_RE.test(name)) return res.status(400).json({ error: 'name: 1-60 chars, alphanumeric + spaces/dashes/underscores' });
     const cap = parseFloat(capital_usd);
     if (isNaN(cap) || cap < 100 || cap > 1000000) return res.status(400).json({ error: 'capital_usd: must be between 100 and 1000000' });
+
+    // B-3: only paper-tier brokers allowed
+    const B3_BROKERS = ['alpaca', 'tiger_demo'];
+    if (!B3_BROKERS.includes(broker)) return res.status(400).json({ error: `broker must be one of: ${B3_BROKERS.join(', ')} (live brokers gated until B-6)` });
+    const dbUserBroker = await getDbUser(req.session.username);
+    const isAdminCreate = dbUserBroker?.role === 'admin';
+    if (broker === 'alpaca' && !isAdminCreate && !(dbUserBroker?.alpaca_api_key && dbUserBroker?.alpaca_secret_key)) {
+      return res.status(400).json({ error: 'Alpaca paper credentials not configured. Connect Alpaca in broker settings first.' });
+    }
+    if (broker === 'tiger_demo' && !(dbUserBroker?.tiger_demo_id && dbUserBroker?.tiger_demo_account && dbUserBroker?.tiger_demo_private_key)) {
+      return res.status(400).json({ error: 'Tiger Demo credentials not configured. Connect Tiger Demo in broker settings first.' });
+    }
+
     const { rows: dupRows } = await query('SELECT id FROM bots WHERE user_id=$1 AND lower(name)=lower($2)', [userId, name.trim()]);
     if (dupRows.length) return res.status(409).json({ error: `A bot named "${name.trim()}" already exists` });
     const finalRules = _deepMergeRules(BOT_DEFAULT_RULES, rules || {});
@@ -7239,6 +7278,33 @@ app.post('/api/bots', requireAuth, async (req, res) => {
     res.status(201).json({ bot });
   } catch (e) {
     console.error('[bots/create]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/bots/stats — aggregate KPIs for the current user's bots
+app.get('/api/bots/stats', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const kpis = await getBotKpis(userId);
+    res.json({ ok: true, kpis });
+  } catch (e) {
+    console.error('[bots/stats]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/bot-decisions/recent — last N decisions across all user's bots
+app.get('/api/bot-decisions/recent', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const decisions = await getRecentBotDecisions(userId, limit);
+    res.json({ ok: true, decisions });
+  } catch (e) {
+    console.error('[bots/decisions/recent]', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -7266,8 +7332,17 @@ app.patch('/api/bots/:id', requireAuth, async (req, res) => {
     if (!existing.length) return res.status(404).json({ error: 'Bot not found' });
     const bot = existing[0];
 
-    const { name, capital_usd, rules, status } = req.body;
+    const { name, capital_usd, rules, status, broker, deleted_at } = req.body;
     const hasOpenTrade = bot.current_trade_id != null;
+
+    // Restore from archive: PATCH { deleted_at: null }
+    if (deleted_at === null && Object.keys(req.body).length === 1) {
+      const { rows: restored } = await query(
+        `UPDATE bots SET deleted_at=NULL, updated_at=NOW() WHERE id=$1 RETURNING *`,
+        [req.params.id]
+      );
+      return res.json({ bot: restored[0] });
+    }
 
     if (name !== undefined) {
       if (hasOpenTrade) return res.status(409).json({ error: 'Cannot edit bot while a trade is open' });
@@ -7288,6 +7363,19 @@ app.patch('/api/bots/:id', requireAuth, async (req, res) => {
     }
     if (status !== undefined && !BOT_STATUS_OK.has(status))
       return res.status(400).json({ error: `status must be one of: ${[...BOT_STATUS_OK].join(', ')}` });
+    if (broker !== undefined && broker !== bot.broker) {
+      if (hasOpenTrade) return res.status(409).json({ error: 'Cannot change broker while a trade is open' });
+      const B3_BROKERS = ['alpaca', 'tiger_demo'];
+      if (!B3_BROKERS.includes(broker)) return res.status(400).json({ error: `broker must be one of: ${B3_BROKERS.join(', ')} (live brokers gated until B-6)` });
+      const dbUserBrokerPatch = await getDbUser(req.session.username);
+      const isAdminPatch = dbUserBrokerPatch?.role === 'admin';
+      if (broker === 'alpaca' && !isAdminPatch && !(dbUserBrokerPatch?.alpaca_api_key && dbUserBrokerPatch?.alpaca_secret_key)) {
+        return res.status(400).json({ error: 'Alpaca paper credentials not configured. Connect Alpaca in broker settings first.' });
+      }
+      if (broker === 'tiger_demo' && !(dbUserBrokerPatch?.tiger_demo_id && dbUserBrokerPatch?.tiger_demo_account && dbUserBrokerPatch?.tiger_demo_private_key)) {
+        return res.status(400).json({ error: 'Tiger Demo credentials not configured. Connect Tiger Demo in broker settings first.' });
+      }
+    }
 
     const sets = ['updated_at=NOW()'];
     const vals = [];
@@ -7297,6 +7385,7 @@ app.patch('/api/bots/:id', requireAuth, async (req, res) => {
     if (rules       !== undefined) { sets.push(`rules=$${i++}`);        vals.push(JSON.stringify(mergedRules)); }
     if (status      !== undefined) { sets.push(`status=$${i++}`);       vals.push(status);
                                      sets.push(`status_changed_at=NOW()`); }
+    if (broker      !== undefined && broker !== bot.broker) { sets.push(`broker=$${i++}`); vals.push(broker); }
     vals.push(req.params.id);
     const { rows: updated } = await query(
       `UPDATE bots SET ${sets.join(',')} WHERE id=$${i} RETURNING *`,
@@ -7315,7 +7404,7 @@ app.patch('/api/bots/:id', requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/bots/:id
+// DELETE /api/bots/:id — soft-delete (sets deleted_at, preserves history)
 app.delete('/api/bots/:id', requireAuth, async (req, res) => {
   try {
     const userId = await _currentUserId(req);
@@ -7323,10 +7412,25 @@ app.delete('/api/bots/:id', requireAuth, async (req, res) => {
     const { rows } = await query('SELECT * FROM bots WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
     if (!rows.length) return res.status(404).json({ error: 'Bot not found' });
     if (rows[0].current_trade_id != null) return res.status(409).json({ error: 'Cannot delete bot with an open trade' });
-    await query('DELETE FROM bots WHERE id=$1', [req.params.id]);
+    await softDeleteBot(req.params.id, userId);
     res.json({ ok: true });
   } catch (e) {
     console.error('[bots/delete]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/bots/:id/trades
+app.get('/api/bots/:id/trades', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const trades = await getBotTrades(req.params.id, userId, limit);
+    if (trades === null) return res.status(404).json({ error: 'Bot not found' });
+    res.json({ ok: true, trades });
+  } catch (e) {
+    console.error('[bots/trades]', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -7381,6 +7485,24 @@ app.post('/api/bots/:id/scan', requireAuth, async (req, res) => {
     res.json({ ok: true, result });
   } catch (e) {
     console.error('[bots/scan]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/bots/:id/execute — manual trigger, runs executor for one bot immediately (B-3)
+app.post('/api/bots/:id/execute', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+    const { rows } = await query(
+      'SELECT * FROM bots WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL',
+      [req.params.id, userId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Bot not found' });
+    const result = await processBot(rows[0]);
+    res.json({ ok: true, result });
+  } catch (e) {
+    console.error('[bots/execute]', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -8161,6 +8283,9 @@ startNewsIngesterCrons();
 
 // ─── Bot Engine Crons ─────────────────────────────────────────────────────────
 startBotEngineCrons();
+
+// ─── Bot Executor Crons (B-3) ─────────────────────────────────────────────────
+startBotExecutorCrons();
 
 // ─── Pre-market News Scanner — 4:00 AM ET Mon–Fri ────────────────────────────
 cron.schedule('0 4 * * 1-5', async () => {

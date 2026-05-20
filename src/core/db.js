@@ -536,6 +536,11 @@ DO $$ BEGIN
 END $$;
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS slippage_cents NUMERIC(8,2);
 ALTER TABLE trades ADD COLUMN IF NOT EXISTS account_source VARCHAR(20);
+DO $$ BEGIN
+  ALTER TABLE trades ADD COLUMN IF NOT EXISTS bot_id       BIGINT;
+  ALTER TABLE trades ADD COLUMN IF NOT EXISTS peak_pnl_usd NUMERIC(12,2) DEFAULT 0;
+EXCEPTION WHEN others THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_trades_bot_id ON trades(bot_id);
 
 CREATE TABLE IF NOT EXISTS catalyst_performance (
   id           SERIAL PRIMARY KEY,
@@ -953,6 +958,9 @@ CREATE TABLE IF NOT EXISTS bot_rules_versions (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_bot_rules_bot_time ON bot_rules_versions(bot_id, created_at DESC);
+
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_bots_deleted_at ON bots(deleted_at);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────
@@ -2554,6 +2562,123 @@ export async function getSentinelRecipients() {
     return rows; // [{ username, email }, ...]
   } catch (err) {
     console.error('getSentinelRecipients error:', err.message);
+    return [];
+  }
+}
+
+// ─── Bot helpers ──────────────────────────────────────────────────────────────
+
+export async function listBots(userId, { includeArchived = false } = {}) {
+  if (!isDbAvailable()) return [];
+  try {
+    const where = includeArchived
+      ? 'WHERE user_id=$1'
+      : 'WHERE user_id=$1 AND deleted_at IS NULL';
+    const { rows } = await query(
+      `SELECT * FROM bots ${where} ORDER BY created_at DESC`,
+      [userId]
+    );
+    return rows;
+  } catch (err) {
+    logger.error('[db] listBots error:', err.message);
+    return [];
+  }
+}
+
+export async function softDeleteBot(botId, userId) {
+  if (!isDbAvailable()) return;
+  try {
+    await query(
+      `UPDATE bots SET deleted_at=NOW() WHERE id=$1 AND user_id=$2`,
+      [botId, userId]
+    );
+  } catch (err) {
+    logger.error('[db] softDeleteBot error:', err.message);
+  }
+}
+
+export async function getBotKpis(userId) {
+  if (!isDbAvailable()) return { total_pnl_usd: 0, total_trades: 0, winning_trades: 0, overall_wr: null, active_count: 0, archived_count: 0, best_bot: null, worst_bot: null };
+  try {
+  const [{ rows: totals }, { rows: counts }, { rows: bestRows }, { rows: worstRows }] =
+    await Promise.all([
+      query(`
+        SELECT COALESCE(SUM(t.pnl_usd), 0)                              AS total_pnl_usd,
+               COUNT(t.id)                                               AS total_trades,
+               COUNT(t.id) FILTER (WHERE t.pnl_usd > 0)                 AS winning_trades
+        FROM trades t
+        JOIN bots b ON t.bot_id = b.id
+        WHERE b.user_id = $1 AND t.status = 'closed'`, [userId]),
+      query(`
+        SELECT COUNT(*) FILTER (WHERE deleted_at IS NULL)  AS active_count,
+               COUNT(*) FILTER (WHERE deleted_at IS NOT NULL) AS archived_count
+        FROM bots WHERE user_id = $1`, [userId]),
+      query(`
+        SELECT id, name, cumulative_pnl_usd AS pnl
+        FROM bots WHERE user_id=$1 AND deleted_at IS NULL
+        ORDER BY cumulative_pnl_usd DESC LIMIT 1`, [userId]),
+      query(`
+        SELECT id, name, cumulative_pnl_usd AS pnl
+        FROM bots WHERE user_id=$1 AND deleted_at IS NULL
+        ORDER BY cumulative_pnl_usd ASC LIMIT 1`, [userId]),
+    ]);
+  const t = totals[0];
+  const c = counts[0];
+  const totalTrades   = Number(t.total_trades)   || 0;
+  const winningTrades = Number(t.winning_trades) || 0;
+  return {
+    total_pnl_usd:  Number(t.total_pnl_usd) || 0,
+    total_trades:   totalTrades,
+    winning_trades: winningTrades,
+    overall_wr:     totalTrades > 0 ? +(winningTrades / totalTrades * 100).toFixed(1) : null,
+    active_count:   Number(c.active_count)   || 0,
+    archived_count: Number(c.archived_count) || 0,
+    best_bot:  bestRows[0]  ? { id: bestRows[0].id,  name: bestRows[0].name,  pnl: Number(bestRows[0].pnl)  } : null,
+    worst_bot: worstRows[0] ? { id: worstRows[0].id, name: worstRows[0].name, pnl: Number(worstRows[0].pnl) } : null,
+  };
+  } catch (err) {
+    console.error('[db] getBotKpis error:', err.message);
+    return { total_pnl_usd: 0, total_trades: 0, winning_trades: 0, overall_wr: null, active_count: 0, archived_count: 0, best_bot: null, worst_bot: null };
+  }
+}
+
+export async function getRecentBotDecisions(userId, limit = 20) {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows } = await query(`
+      SELECT bd.id AS decision_id, bd.bot_id, b.name AS bot_name,
+             bd.scanned_at, bd.action, bd.symbol, bd.composite_score, bd.notes
+      FROM bot_decisions bd
+      JOIN bots b ON b.id = bd.bot_id
+      WHERE b.user_id = $1
+      ORDER BY bd.scanned_at DESC
+      LIMIT $2`, [userId, limit]);
+    return rows;
+  } catch (err) {
+    console.error('[db] getRecentBotDecisions error:', err.message);
+    return [];
+  }
+}
+
+export async function getBotTrades(botId, userId, limit = 50) {
+  if (!isDbAvailable()) return [];
+  try {
+    const { rows: botRows } = await query(
+      'SELECT id FROM bots WHERE id=$1 AND user_id=$2',
+      [botId, userId]
+    );
+    if (!botRows.length) return null;
+    const { rows } = await query(`
+      SELECT id, symbol, qty, entry_price, exit_price, pnl_usd,
+             status, opened_at, closed_at, stop_loss,
+             conviction_score, conviction_grade, account_source
+      FROM trades
+      WHERE bot_id = $1
+      ORDER BY opened_at DESC
+      LIMIT $2`, [botId, limit]);
+    return rows;
+  } catch (err) {
+    console.error('[db] getBotTrades error:', err.message);
     return [];
   }
 }
