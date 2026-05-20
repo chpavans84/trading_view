@@ -563,29 +563,35 @@ app.get('/auth/check', async (req, res) => {
   const isAdmin   = user.role === 'admin';
   const hasAlpaca = isAdmin || !!(dbUser?.alpaca_api_key && dbUser?.alpaca_secret_key);
   const hasMoomoo = isAdmin ? !!(process.env.MOOMOO_OPEND_HOST) : !!(dbUser?.moomoo_acc_id && process.env.MOOMOO_OPEND_HOST);
-  const hasTiger  = !!(dbUser?.tiger_id && dbUser?.tiger_account && dbUser?.tiger_private_key);
+  const hasTigerLive = !!(dbUser?.tiger_id && dbUser?.tiger_account && dbUser?.tiger_private_key);
+  const hasTigerDemo = !!(dbUser?.tiger_demo_id && dbUser?.tiger_demo_account && dbUser?.tiger_demo_private_key);
+  const hasTiger     = hasTigerLive || hasTigerDemo;
   const perms = getPermissions(user);
   if (hasMoomoo && !perms.widgets.includes('moomoo')) perms.widgets.push('moomoo');
   if (hasTiger  && !perms.widgets.includes('tiger'))  perms.widgets.push('tiger');
   const disabledSources = Array.isArray(dbUser?.disabled_sources) ? dbUser.disabled_sources : [];
   res.json({
-    authenticated:    true,
-    username:         req.session.username,
-    role:             user.role || 'viewer',
-    plan:             user.plan || 'free',
-    credits:          user.credits,
-    permissions:      perms,
-    has_alpaca:       hasAlpaca,
-    has_moomoo:       hasMoomoo,
-    has_tiger:        hasTiger,
-    moomoo_acc_id:    dbUser?.moomoo_acc_id || null,
-    tiger_account:    dbUser?.tiger_account || null,
+    authenticated:      true,
+    username:           req.session.username,
+    role:               user.role || 'viewer',
+    plan:               user.plan || 'free',
+    credits:            user.credits,
+    permissions:        perms,
+    has_alpaca:         hasAlpaca,
+    has_moomoo:         hasMoomoo,
+    has_tiger:          hasTiger,
+    has_tiger_live:     hasTigerLive,
+    has_tiger_demo:     hasTigerDemo,
+    moomoo_acc_id:      dbUser?.moomoo_acc_id      || null,
+    tiger_account:      dbUser?.tiger_account      || null,
+    tiger_demo_account: dbUser?.tiger_demo_account || null,
     disabled_sources: disabledSources,
     sources: {
       alpaca_paper: (isAdmin ? true : !!(dbUser?.alpaca_api_key)) && !disabledSources.includes('alpaca'),
       alpaca_live:  (!!(dbUser?.alpaca_live_api_key) || (isAdmin && hasLiveAccount())) && !disabledSources.includes('alpaca_live'),
-      moomoo:       hasMoomoo && !disabledSources.includes('moomoo'),
-      tiger:        hasTiger  && !disabledSources.includes('tiger'),
+      moomoo:       hasMoomoo    && !disabledSources.includes('moomoo'),
+      tiger:        hasTigerLive && !disabledSources.includes('tiger'),
+      tiger_demo:   hasTigerDemo && !disabledSources.includes('tiger_demo'),
     },
   });
 });
@@ -961,7 +967,22 @@ app.post('/api/users/permissions/reset', requireAdmin, async (req, res) => {
   res.json({ ok: true, username: key, permissions: DEFAULT_PERMISSIONS[role] || DEFAULT_PERMISSIONS.viewer });
 });
 
-const VALID_SOURCES = ['alpaca', 'alpaca_live', 'moomoo', 'tiger'];
+const VALID_SOURCES = ['alpaca', 'alpaca_live', 'moomoo', 'tiger', 'tiger_demo'];
+
+function _tigerCredsForSource(dbUser, source) {
+  if (source === 'tiger_demo') {
+    return {
+      tiger_id:    dbUser?.tiger_demo_id,
+      account:     dbUser?.tiger_demo_account,
+      private_key: dbUser?.tiger_demo_private_key,
+    };
+  }
+  return {
+    tiger_id:    dbUser?.tiger_id,
+    account:     dbUser?.tiger_account,
+    private_key: dbUser?.tiger_private_key,
+  };
+}
 
 app.post('/api/users/sources/disable', requireAdmin, async (req, res) => {
   const { username, disabled_sources } = req.body;
@@ -1142,20 +1163,28 @@ app.post('/api/moomoo/disconnect', requireAuth, async (req, res) => {
 
 // Tiger Brokers per-user connect/disconnect
 app.post('/api/tiger/connect', requireAuth, async (req, res) => {
-  const { tiger_id, account, private_key } = req.body;
-  if (!tiger_id || !account || !private_key) return res.status(400).json({ error: 'tiger_id, account and private_key are required' });
-  const creds = { tiger_id, account, private_key };
-  const valid = await validateTigerCreds(creds);
-  if (!valid) return res.status(401).json({ error: 'Invalid Tiger credentials — check your Tiger ID, account number and private key.' });
-  await saveUserTiger(req.session.username, { tigerId: tiger_id, account, privateKey: private_key });
-  logActivity(req.session.username, 'tiger_connected', `Tiger account ${account} connected`, req.ip);
-  res.json({ ok: true, account });
+  try {
+    const { tiger_id, account, private_key, env } = req.body;
+    if (!tiger_id || !account || !private_key) {
+      return res.status(400).json({ error: 'tiger_id, account and private_key are required' });
+    }
+    const envSafe = env === 'demo' ? 'demo' : 'live';
+    const creds = { tiger_id, account, private_key };
+    const valid = await validateTigerCreds(creds);
+    if (!valid) return res.status(401).json({ error: 'Invalid Tiger credentials — check your Tiger ID, account number and private key.' });
+    await saveUserTiger(req.session.username, { tigerId: tiger_id, account, privateKey: private_key, env: envSafe });
+    logActivity(req.session.username, 'tiger_connected', `Tiger ${envSafe} account ${account} connected`, req.ip);
+    res.json({ ok: true, account, env: envSafe });
+  } catch (e) {
+    console.error('[tiger/connect]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-
 app.post('/api/tiger/disconnect', requireAuth, async (req, res) => {
-  await clearUserTiger(req.session.username);
-  logActivity(req.session.username, 'tiger_disconnected', 'Tiger account disconnected', req.ip);
+  const env = req.body?.env === 'demo' ? 'demo' : req.body?.env === 'live' ? 'live' : null;
+  await clearUserTiger(req.session.username, env);
+  logActivity(req.session.username, 'tiger_disconnected', `Tiger ${env || 'all'} disconnected`, req.ip);
   res.json({ ok: true });
 });
 
@@ -1170,7 +1199,7 @@ async function getAccountData(source, username) {
     if (disabled.includes(source)) return { account: null, positions: [], source_disabled: true };
   }
   // Non-admin users use their own Alpaca credentials, matched to the requested source
-  if (source !== 'moomoo' && source !== 'alpaca_live' && source !== 'tiger') {
+  if (source !== 'moomoo' && source !== 'alpaca_live' && source !== 'tiger' && source !== 'tiger_demo') {
     const sessionUser = await getUser(username);
     if (sessionUser?.role !== 'admin' && isDbAvailable()) {
       const dbUser = await getDbUser(username);
@@ -1246,11 +1275,12 @@ async function getAccountData(source, username) {
     }
     return { account: null, positions: [], needs_live_setup: true };
   }
-  // Tiger Brokers
-  if (source === 'tiger') {
+  // Tiger Brokers (Live and Demo)
+  if (source === 'tiger' || source === 'tiger_demo') {
     const dbUser = isDbAvailable() ? await getDbUser(username) : null;
-    if (!dbUser?.tiger_id) return { account: null, positions: [], needs_tiger_setup: true };
-    const creds = { tiger_id: dbUser.tiger_id, account: dbUser.tiger_account, private_key: dbUser.tiger_private_key };
+    const tc = _tigerCredsForSource(dbUser, source);
+    if (!tc.tiger_id) return { account: null, positions: [], needs_tiger_setup: true };
+    const creds = { tiger_id: tc.tiger_id, account: tc.account, private_key: tc.private_key };
     const [funds, pos, ordersRes] = await Promise.allSettled([
       getTigerFunds(creds),
       getTigerPositions(creds),
@@ -1313,8 +1343,8 @@ async function getAccountData(source, username) {
     }).filter(pos => pos.symbol);
 
     const account = f ? {
-      source:          'tiger',
-      account_number:  dbUser.tiger_account,
+      source:          source,
+      account_number:  tc.account,
       portfolio_value: f.net_liquidation_value ?? f.gross_position_value,
       buying_power:    f.buying_power,
       cash:            f.cash,
@@ -2426,7 +2456,7 @@ function triggerSyncIfDue() {
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     const rawSource = req.query.source;
-    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
+    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger_demo' ? 'tiger_demo' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
     const sessionUser = await getUser(req.session.username);
     const isAdmin     = sessionUser?.role === 'admin';
     const dbUser      = isDbAvailable() ? await getDbUser(req.session.username) : null;
@@ -2468,11 +2498,12 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 
     // Recent trades — scoped to the logged-in user's own account
     let trades = [];
-    if (source === 'tiger') {
+    if (source === 'tiger' || source === 'tiger_demo') {
       try {
         const dbUser2 = isDbAvailable() ? await getDbUser(req.session.username) : null;
-        if (dbUser2?.tiger_id) {
-          const creds = { tiger_id: dbUser2.tiger_id, account: dbUser2.tiger_account, private_key: dbUser2.tiger_private_key };
+        const tc2 = _tigerCredsForSource(dbUser2, source);
+        if (tc2.tiger_id) {
+          const creds = { tiger_id: tc2.tiger_id, account: tc2.account, private_key: tc2.private_key };
           const orders = await getTigerOrders(creds, { days: 30 });
           trades = orders.slice(0, 10).map(o => ({
             symbol:      o.symbol,
@@ -2578,7 +2609,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 app.get('/api/trades', requireAuth, async (req, res) => {
   try {
     const rawSource = req.query.source || 'alpaca';
-    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
+    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger_demo' ? 'tiger_demo' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
     const status = req.query.status || null;
     const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
     const tradesUser = await getUser(req.session.username);
@@ -2651,10 +2682,11 @@ app.get('/api/trades', requireAuth, async (req, res) => {
     }
 
     // Tiger source — fetch user's Tiger orders
-    if (source === 'tiger') {
+    if (source === 'tiger' || source === 'tiger_demo') {
       const dbUserT = isDbAvailable() ? await getDbUser(req.session.username) : null;
-      if (!dbUserT?.tiger_id) return res.json({ source: 'tiger', trades: [] });
-      const creds = { tiger_id: dbUserT.tiger_id, account: dbUserT.tiger_account, private_key: dbUserT.tiger_private_key };
+      const tcT = _tigerCredsForSource(dbUserT, source);
+      if (!tcT.tiger_id) return res.json({ source, trades: [] });
+      const creds = { tiger_id: tcT.tiger_id, account: tcT.account, private_key: tcT.private_key };
       const normaliseTigerStatus = s => {
         const u = (s || '').toUpperCase();
         if (u === 'FILLED')                         return 'closed';
@@ -3577,7 +3609,7 @@ app.get('/api/options/unusual/:ticker', requireAuth, async (req, res) => {
 app.get('/api/positions', requireAuth, async (req, res) => {
   try {
     const rawSource = req.query.source;
-    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
+    const source = rawSource === 'moomoo' ? 'moomoo' : rawSource === 'alpaca_live' ? 'alpaca_live' : rawSource === 'tiger_demo' ? 'tiger_demo' : rawSource === 'tiger' ? 'tiger' : 'alpaca';
     const { positions } = await getAccountData(source, req.session.username);
     res.json({ source, positions });
   } catch (err) {
@@ -3782,14 +3814,15 @@ app.post('/api/trade/close', requireAuth, async (req, res, next) => {
     const isAdmin     = sessionUser.role === 'admin';
     const dbU         = isDbAvailable() ? await getDbUser(req.session.username) : null;
     const userCfg     = dbU ? (await getUserBotConfig(req.session.username)) : {};
-    const VALID_SRC   = ['paper', 'alpaca_live', 'moomoo', 'tiger'];
+    const VALID_SRC   = ['paper', 'alpaca_live', 'moomoo', 'tiger', 'tiger_demo'];
     const reqSource   = VALID_SRC.includes(req.body.source) ? req.body.source : null;
     const broker      = reqSource || (isAdmin ? 'paper' : (userCfg?.trade_source ?? 'paper'));
 
     // ── Tiger close ───────────────────────────────────────────────────────────
-    if (broker === 'tiger') {
-      if (!dbU?.tiger_id) return res.status(400).json({ error: 'Tiger credentials not configured.' });
-      const creds = { tiger_id: dbU.tiger_id, account: dbU.tiger_account, private_key: dbU.tiger_private_key };
+    if (broker === 'tiger' || broker === 'tiger_demo') {
+      const tcU = _tigerCredsForSource(dbU, broker);
+      if (!tcU.tiger_id) return res.status(400).json({ error: 'Tiger credentials not configured.' });
+      const creds = { tiger_id: tcU.tiger_id, account: tcU.account, private_key: tcU.private_key };
       const tigerPositions = await getTigerPositions(creds).catch(() => []);
       const pos = tigerPositions.find(p => (p.symbol ?? p.contract?.symbol ?? '').toUpperCase() === ticker2);
       if (!pos) return res.status(403).json({ error: `You do not have an open Tiger position in ${ticker2}` });
@@ -3873,8 +3906,8 @@ app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
     const dbU    = isDbAvailable() ? await getDbUser(req.session.username) : null;
     const userCfg = dbU ? (await getUserBotConfig(req.session.username)) : {};
     const broker = userCfg?.trade_source ?? 'paper';
-    if (broker === 'tiger' || broker === 'moomoo') {
-      return res.json({ ok: false, message: `Move-stop-to-breakeven is not supported for ${broker} via API. Adjust your stop manually in the ${broker === 'tiger' ? 'Tiger' : 'Moomoo'} app.` });
+    if (broker === 'tiger' || broker === 'tiger_demo' || broker === 'moomoo') {
+      return res.json({ ok: false, message: `Move-stop-to-breakeven is not supported for ${broker} via API. Adjust your stop manually in the ${broker.startsWith('tiger') ? 'Tiger' : 'Moomoo'} app.` });
     }
     const result = await moveStopToBreakeven(ticker);
     logActivity(req.session.username, 'stop_moved', `${ticker} stop → BE $${result.new_stop}`, req.ip);
@@ -4415,7 +4448,7 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
     // Determine user's configured broker (client-sent source takes priority)
     const dbUser   = isDbAvailable() ? await getDbUser(req.session.username) : null;
     const userCfg  = dbUser ? (await getUserBotConfig(req.session.username)) : {};
-    const _VSRC    = ['paper', 'alpaca_live', 'moomoo', 'tiger'];
+    const _VSRC    = ['paper', 'alpaca_live', 'moomoo', 'tiger', 'tiger_demo'];
     const broker   = (_VSRC.includes(req.body.source) ? req.body.source : null) || (userCfg?.trade_source ?? 'paper');
 
     // ── Moomoo path ───────────────────────────────────────────────────────────
@@ -4439,9 +4472,10 @@ app.post('/api/trade/quick', requireAuth, async (req, res) => {
     }
 
     // ── Tiger path ────────────────────────────────────────────────────────────
-    if (broker === 'tiger') {
-      if (!dbUser?.tiger_id) return res.status(400).json({ error: 'Tiger credentials not configured. Go to Settings → Tiger Brokers to connect.' });
-      const creds = { tiger_id: dbUser.tiger_id, account: dbUser.tiger_account, private_key: dbUser.tiger_private_key };
+    if (broker === 'tiger' || broker === 'tiger_demo') {
+      const tcQ = _tigerCredsForSource(dbUser, broker);
+      if (!tcQ.tiger_id) return res.status(400).json({ error: 'Tiger credentials not configured. Go to Settings → Tiger Brokers to connect.' });
+      const creds = { tiger_id: tcQ.tiger_id, account: tcQ.account, private_key: tcQ.private_key };
 
       // Resolve limit price from request (explicit limit/stop_limit orders)
       let tigerLimitPrice  = (order_type === 'limit' || order_type === 'stop_limit') ? (limit_price ? +limit_price : null) : null;

@@ -5,7 +5,11 @@ import path from 'path';
 
 const TIGER_ID  = process.env.TIGER_ID;
 const KEY_PATH  = process.env.TIGER_PRIVATE_KEY;
-const BASE_URL  = 'https://openapi.tigerfintech.com/gateway';
+const LIVE_URL    = 'https://openapi.tigerfintech.com/gateway';
+const SANDBOX_URL = 'https://openapi-sandbox.tigerfintech.com/gateway';
+function _baseUrl(env) {
+  return env === 'demo_api' ? SANDBOX_URL : LIVE_URL;
+}
 
 // Load private key once at startup
 let _privateKey = null;
@@ -41,7 +45,7 @@ function buildSign(params) {
 }
 
 // Generic Tiger API request
-async function tigerRequest(method, bizContent) {
+async function tigerRequest(method, bizContent, env = 'live') {
   if (!TIGER_ID || !getPrivateKey()) return null;
   const params = {
     tiger_id:    TIGER_ID,
@@ -55,7 +59,7 @@ async function tigerRequest(method, bizContent) {
   };
   params.sign = buildSign(params);
   try {
-    const res = await fetch(BASE_URL, {
+    const res = await fetch(_baseUrl(env), {
       method:  'POST',
       headers: { 'Content-Type': 'application/json; charset=UTF-8' },
       body:    JSON.stringify(params),

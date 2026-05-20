@@ -222,6 +222,26 @@ DO $$ BEGIN
     ALTER TABLE users ADD COLUMN tiger_private_key TEXT;
   END IF;
 END $$;
+-- Tiger ID and tiger_account were VARCHAR(64) but encrypted values exceed 64 chars — migrate to TEXT
+DO $$ BEGIN
+  ALTER TABLE users ALTER COLUMN tiger_id      TYPE TEXT;
+  ALTER TABLE users ALTER COLUMN tiger_account TYPE TEXT;
+EXCEPTION WHEN others THEN NULL; END $$;
+-- Tiger multi-env: Live / Demo / Demo API (legacy columns — kept but no longer written)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='tiger_account_live') THEN
+    ALTER TABLE users ADD COLUMN tiger_account_live     TEXT;
+    ALTER TABLE users ADD COLUMN tiger_account_demo     TEXT;
+    ALTER TABLE users ADD COLUMN tiger_account_demo_api TEXT;
+    ALTER TABLE users ADD COLUMN tiger_active_env       VARCHAR(15) DEFAULT 'live';
+  END IF;
+END $$;
+-- Tiger Demo credential set (mirrors Alpaca paper/live split)
+DO $$ BEGIN
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS tiger_demo_id          TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS tiger_demo_private_key TEXT;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS tiger_demo_account     TEXT;
+EXCEPTION WHEN others THEN NULL; END $$;
 -- Admin-controlled per-user broker source locks (JSONB array of disabled source strings)
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='disabled_sources') THEN
@@ -1558,9 +1578,12 @@ function _decryptUserCreds(row) {
     alpaca_live_api_key:    decryptCredential(row.alpaca_live_api_key),
     alpaca_live_secret_key: decryptCredential(row.alpaca_live_secret_key),
     moomoo_acc_id:          decryptCredential(row.moomoo_acc_id),
-    tiger_id:               decryptCredential(row.tiger_id),
-    tiger_account:          decryptCredential(row.tiger_account),
+    tiger_id:               decryptCredential(row.tiger_id)      || null,
+    tiger_account:          decryptCredential(row.tiger_account) || null,
     tiger_private_key:      decryptCredential(row.tiger_private_key),
+    tiger_demo_id:          row.tiger_demo_id      || null,
+    tiger_demo_account:     row.tiger_demo_account || null,
+    tiger_demo_private_key: decryptCredential(row.tiger_demo_private_key),
   };
 }
 
@@ -1764,20 +1787,46 @@ export async function clearUserMoomoo(username) {
   await query(`UPDATE users SET moomoo_acc_id=NULL WHERE username=$1`, [username.toLowerCase()]);
 }
 
-export async function saveUserTiger(username, { tigerId, account, privateKey }) {
+export async function saveUserTiger(username, { tigerId, account, privateKey, env = 'live' }) {
   if (!dbAvailable) throw new Error('Database not available');
-  await query(
-    `UPDATE users SET tiger_id=$2, tiger_account=$3, tiger_private_key=$4 WHERE username=$1`,
-    [username.toLowerCase(), encryptCredential(tigerId), encryptCredential(account), encryptCredential(privateKey)]
-  );
+  const encKey = encryptCredential(privateKey);
+  if (env === 'demo') {
+    await query(
+      `UPDATE users
+       SET tiger_demo_id=$2, tiger_demo_private_key=$3, tiger_demo_account=$4
+       WHERE username=$1`,
+      [username.toLowerCase(), tigerId, encKey, account]
+    );
+  } else {
+    await query(
+      `UPDATE users
+       SET tiger_id=$2, tiger_private_key=$3, tiger_account=$4
+       WHERE username=$1`,
+      [username.toLowerCase(), tigerId, encKey, account]
+    );
+  }
 }
 
-export async function clearUserTiger(username) {
+export async function clearUserTiger(username, env = null) {
   if (!dbAvailable) return;
-  await query(
-    `UPDATE users SET tiger_id=NULL, tiger_account=NULL, tiger_private_key=NULL WHERE username=$1`,
-    [username.toLowerCase()]
-  );
+  if (env === 'demo') {
+    await query(
+      `UPDATE users SET tiger_demo_id=NULL, tiger_demo_private_key=NULL, tiger_demo_account=NULL WHERE username=$1`,
+      [username.toLowerCase()]
+    );
+  } else if (env === 'live') {
+    await query(
+      `UPDATE users SET tiger_id=NULL, tiger_private_key=NULL, tiger_account=NULL WHERE username=$1`,
+      [username.toLowerCase()]
+    );
+  } else {
+    await query(
+      `UPDATE users SET tiger_id=NULL, tiger_private_key=NULL, tiger_account=NULL,
+                        tiger_demo_id=NULL, tiger_demo_private_key=NULL, tiger_demo_account=NULL
+       WHERE username=$1`,
+      [username.toLowerCase()]
+    );
+  }
 }
 
 // ─── Backtest Factor Weights ──────────────────────────────────────────────────

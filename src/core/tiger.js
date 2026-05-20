@@ -1,7 +1,11 @@
 import crypto from 'crypto';
 
-const BASE_URL = 'https://openapi.tigerfintech.com';
-const ENDPOINT = '/gateway';
+const LIVE_URL    = 'https://openapi.tigerfintech.com';
+const SANDBOX_URL = 'https://openapi-sandbox.tigerfintech.com';
+const ENDPOINT    = '/gateway';
+function _baseUrl(env) {
+  return env === 'demo_api' ? SANDBOX_URL : LIVE_URL;
+}
 
 function timestamp() {
   const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -43,7 +47,7 @@ function compactJson(obj) {
 }
 
 async function request(creds, method, bizExtra = {}) {
-  const { tiger_id, private_key, account } = creds;
+  const { tiger_id, private_key, account, env = 'live' } = creds;
   const biz_content = compactJson({ account, ...bizExtra });
 
   const params = {
@@ -58,7 +62,7 @@ async function request(creds, method, bizExtra = {}) {
 
   params.sign = signData(private_key, buildSignStr(params));
 
-  const res = await fetch(`${BASE_URL}${ENDPOINT}`, {
+  const res = await fetch(`${_baseUrl(env)}${ENDPOINT}`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json;charset=UTF-8' },
     body:    JSON.stringify(params),

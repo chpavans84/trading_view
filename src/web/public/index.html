@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260520v">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260520z">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -4790,6 +4790,27 @@ const TAB_PAGE_MAP = {
   bots:          'bots',
 };
 
+function _rebuildSourceDropdown() {
+  const widgets   = _currentUser?.permissions?.widgets || [];
+  const _disabled = Array.isArray(_currentUser?.disabled_sources) ? _currentUser.disabled_sources : [];
+  const sel = document.getElementById('sourceSelect');
+  if (!sel) return;
+  sel.innerHTML = '';
+  if (!_disabled.includes('alpaca'))      sel.innerHTML += '<option value="alpaca">📄 Paper</option>';
+  if (!_disabled.includes('alpaca_live')) sel.innerHTML += '<option value="alpaca_live">🔴 Live</option>';
+  if (_currentUser?.sources?.tiger      && !_disabled.includes('tiger'))
+    sel.innerHTML += '<option value="tiger">🐯 Tiger Live</option>';
+  if (_currentUser?.sources?.tiger_demo && !_disabled.includes('tiger_demo'))
+    sel.innerHTML += '<option value="tiger_demo">🐯 Tiger Demo</option>';
+  if (widgets.includes('moomoo') && !_disabled.includes('moomoo')) sel.innerHTML += '<option value="moomoo">💰 Moomoo</option>';
+  const preferred  = localStorage.getItem(_srcKey(_currentUser?.username)) || currentSource;
+  const firstAvail = sel.options[0]?.value || 'alpaca';
+  sel.value = [...sel.options].find(o => o.value === preferred) ? preferred : firstAvail;
+  if (_disabled.includes(currentSource) || !sel.querySelector(`option[value="${currentSource}"]`)) {
+    setSource(firstAvail);
+  }
+}
+
 function applyPermissions(perms) {
   const tabs    = perms?.tabs    || [];
   const widgets = perms?.widgets || [];
@@ -4810,22 +4831,7 @@ function applyPermissions(perms) {
   }
 
   // Rebuild source dropdown — gated by widget permissions AND admin-imposed source locks
-  const _disabled = Array.isArray(_currentUser?.disabled_sources) ? _currentUser.disabled_sources : [];
-  const sel = document.getElementById('sourceSelect');
-  if (sel) {
-    sel.innerHTML = '';
-    if (!_disabled.includes('alpaca'))      sel.innerHTML += '<option value="alpaca">📄 Paper</option>';
-    if (!_disabled.includes('alpaca_live')) sel.innerHTML += '<option value="alpaca_live">🔴 Live</option>';
-    if (widgets.includes('tiger')  && !_disabled.includes('tiger'))  sel.innerHTML += '<option value="tiger">🐯 Tiger</option>';
-    if (widgets.includes('moomoo') && !_disabled.includes('moomoo')) sel.innerHTML += '<option value="moomoo">💰 Moomoo</option>';
-    const preferred = localStorage.getItem(_srcKey(_currentUser?.username)) || currentSource;
-    const firstAvail = sel.options[0]?.value || 'alpaca';
-    sel.value = [...sel.options].find(o => o.value === preferred) ? preferred : firstAvail;
-    // Force away from any now-disabled source
-    if (_disabled.includes(currentSource) || !sel.querySelector(`option[value="${currentSource}"]`)) {
-      setSource(firstAvail);
-    }
-  }
+  _rebuildSourceDropdown();
 
   // Force Trade button
   document.querySelectorAll('.force-btn').forEach(b => {
@@ -8179,7 +8185,7 @@ function setSource(src) {
   const sel = document.getElementById('sourceSelect');
   if (sel) {
     sel.value = src;
-    sel.className = 'source-select ' + (src === 'alpaca' ? 'src-alpaca' : src === 'alpaca_live' ? 'src-live' : 'src-moomoo');
+    sel.className = 'source-select ' + (src === 'alpaca' ? 'src-alpaca' : src === 'alpaca_live' ? 'src-live' : (src === 'tiger' || src === 'tiger_demo') ? 'src-tiger' : 'src-moomoo');
   }
   // Force Trade only works on paper
   document.querySelector('.force-btn').style.display = src === 'alpaca' ? '' : 'none';
@@ -8692,20 +8698,23 @@ async function loadDashboard() {
   if (!d) return;
   if (d.needs_tiger_setup) { showTigerSetup(); return; }
 
-  const isMoomoo  = currentSource === 'moomoo';
-  const isTiger   = currentSource === 'tiger';
-  const isRealAcct = isMoomoo || isTiger;
+  const isMoomoo    = currentSource === 'moomoo';
+  const isTigerLive = currentSource === 'tiger';
+  const isTigerDemo = currentSource === 'tiger_demo';
+  const isTiger     = isTigerLive || isTigerDemo;
+  const isRealAcct  = isMoomoo || isTiger;
   const pnl = d.pnl;
   const pnlPct = pnl ? Math.min(100, Math.max(0, (pnl.pnl / 150) * 100)) : 0;
   const pnlColor = pnl?.pnl >= 0 ? '#3fb950' : '#f85149';
   const portfolioValue = d.account?.portfolio_value;
   const buyingPower    = d.account?.buying_power;
   const unrealizedPL   = d.account?.unrealized_pl;
-  const accountLabel   = isTiger ? '🐯 Real account (Tiger)' : isMoomoo ? '💰 Real account (Moomoo)' : '📄 Paper account (Alpaca)';
+  const tigerAccNum  = isTigerLive ? (_currentUser?.tiger_account || '') : (_currentUser?.tiger_demo_account || '');
+  const tigerLabel   = isTigerDemo ? '🐯 Tiger Demo' : '🐯 Tiger Live';
+  const accountLabel = isTiger ? `${tigerLabel} account` : isMoomoo ? '💰 Real account (Moomoo)' : '📄 Paper account (Alpaca)';
 
   const lbl = document.getElementById('dashSourceLabel');
-  const tigerAccNum = _currentUser?.tiger_account || '';
-  if (lbl) lbl.textContent = isTiger ? `🐯 Tiger${tigerAccNum ? ' - ' + tigerAccNum : ''}` : isMoomoo ? '💰 Moomoo Real Account' : '📄 Alpaca Paper Trading';
+  if (lbl) lbl.textContent = isTiger ? `${tigerLabel}${tigerAccNum ? ' - ' + tigerAccNum : ''}` : isMoomoo ? '💰 Moomoo Real Account' : '📄 Alpaca Paper Trading';
 
   // ── Build skeleton once (or when source changes) ──────────────────────────
   if (_dashSource !== currentSource) {
@@ -8807,11 +8816,13 @@ async function loadDashboard() {
   const totalUnrPL = d.account?.unrealized_pl;
   const srcBadge = document.getElementById('pos-source-badge');
   if (srcBadge) {
-    srcBadge.innerHTML = isTiger
-      ? '<span style="color:#e3a403">● Tiger Real</span>'
-      : isMoomoo
-        ? '<span style="color:#3fb950">● Moomoo Real</span>'
-        : '<span style="color:#1f6feb">● Alpaca Paper</span>';
+    srcBadge.innerHTML = isTigerLive
+      ? '<span style="color:#e3a403">● Tiger Live</span>'
+      : isTigerDemo
+        ? '<span style="color:#e3a403">● Tiger Demo</span>'
+        : isMoomoo
+          ? '<span style="color:#3fb950">● Moomoo Real</span>'
+          : '<span style="color:#1f6feb">● Alpaca Paper</span>';
   }
   const totalEl = document.getElementById('pos-total-pl');
   if (totalEl && isRealAcct && totalUnrPL != null) {
@@ -12267,9 +12278,11 @@ async function refreshPositions() {
     const d = await api('/api/positions?source=' + currentSource);
     _posRefreshPending = false;
     if (!d) return;
-    const isMoomooR   = currentSource === 'moomoo';
-    const isTigerR    = currentSource === 'tiger';
-    const isRealAcctR = isMoomooR || isTigerR;
+    const isMoomooR    = currentSource === 'moomoo';
+    const isTigerLiveR = currentSource === 'tiger';
+    const isTigerDemoR = currentSource === 'tiger_demo';
+    const isTigerR     = isTigerLiveR || isTigerDemoR;
+    const isRealAcctR  = isMoomooR || isTigerR;
     const positions   = d.positions ?? [];
 
     // ── Totals row (non-destructive) ────────────────────────────────────────
@@ -12279,10 +12292,12 @@ async function refreshPositions() {
       return s + (p.qty && ap ? p.qty * ap : 0);
     }, 0);
     const srcBadgeR = document.getElementById('pos-source-badge');
-    if (srcBadgeR) srcBadgeR.innerHTML = isTigerR
-      ? '<span style="color:#e3a403">● Tiger Real</span>'
-      : isMoomooR ? '<span style="color:#3fb950">● Moomoo Real</span>'
-      : '<span style="color:#1f6feb">● Alpaca Paper</span>';
+    if (srcBadgeR) srcBadgeR.innerHTML = isTigerLiveR
+      ? '<span style="color:#e3a403">● Tiger Live</span>'
+      : isTigerDemoR
+        ? '<span style="color:#e3a403">● Tiger Demo</span>'
+        : isMoomooR ? '<span style="color:#3fb950">● Moomoo Real</span>'
+        : '<span style="color:#1f6feb">● Alpaca Paper</span>';
     const investedElR = document.getElementById('pos-total-invested');
     if (investedElR) investedElR.innerHTML = totalInvested > 0
       ? `Invested: <strong style="color:#e6edf3">${fmtDollar(totalInvested)}</strong>` : '';
@@ -15973,6 +15988,16 @@ function setTermStatus(msg, color) {
       </div>
     </div>
 
+    <label style="display:block;font-size:0.83rem;color:#8b949e;margin-bottom:5px">Environment</label>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;cursor:pointer;font-size:0.85rem;color:#e6edf3">
+        <input type="radio" name="tigerEnv" value="live" checked> 🐯 Live
+      </label>
+      <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;cursor:pointer;font-size:0.85rem;color:#e6edf3">
+        <input type="radio" name="tigerEnv" value="demo"> 📋 Demo
+      </label>
+    </div>
+
     <label style="display:block;font-size:0.83rem;color:#8b949e;margin-bottom:5px">Tiger ID</label>
     <input id="tigerIdInput" type="text" placeholder="Your developer Tiger ID"
       style="width:100%;padding:9px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:0.92rem;margin-bottom:14px;outline:none;font-family:monospace;box-sizing:border-box">
@@ -16099,11 +16124,18 @@ function openBrokerSettings() {
   document.getElementById('liveAccountStatus').style.color = hasLive ? '#3fb950' : '#6e7681';
   document.getElementById('liveConnectBtn').style.display  = hasLive ? 'none' : '';
   document.getElementById('liveDisconnectBtn').style.display = hasLive ? '' : 'none';
-  const hasTiger = sources.tiger;
-  const tigerAcc = _currentUser?.tiger_account;
-  document.getElementById('tigerAccountStatus').textContent = hasTiger ? `✓ Account ${tigerAcc}` : 'Not configured';
+  const hasTigerLive = sources.tiger;
+  const hasTigerDemo = sources.tiger_demo;
+  const hasTiger     = hasTigerLive || hasTigerDemo;
+  const liveAcc  = _currentUser?.tiger_account;
+  const demoAcc  = _currentUser?.tiger_demo_account;
+  const acctParts = [];
+  if (hasTigerLive) acctParts.push(`Live: ${liveAcc}`);
+  if (hasTigerDemo) acctParts.push(`Demo: ${demoAcc}`);
+  document.getElementById('tigerAccountStatus').textContent = hasTiger ? `✓ ${acctParts.join(' | ')}` : 'Not configured';
   document.getElementById('tigerAccountStatus').style.color = hasTiger ? '#3fb950' : '#6e7681';
-  document.getElementById('tigerConnectBtn').style.display    = hasTiger ? 'none' : '';
+  document.getElementById('tigerConnectBtn').textContent      = hasTiger ? '+ Add Account' : 'Connect';
+  document.getElementById('tigerConnectBtn').style.display    = '';
   document.getElementById('tigerDisconnectBtn').style.display = hasTiger ? '' : 'none';
   const moomooAccId = _currentUser?.moomoo_acc_id;
   document.getElementById('moomooAccountStatus').textContent = hasMoomoo ? `✓ Account ${moomooAccId}` : 'Not configured';
@@ -16176,9 +16208,10 @@ function hideTigerSetup() {
 }
 
 async function connectTiger() {
-  const tiger_id   = document.getElementById('tigerIdInput').value.trim();
-  const account    = document.getElementById('tigerAccountInput').value.trim();
+  const tiger_id    = document.getElementById('tigerIdInput').value.trim();
+  const account     = document.getElementById('tigerAccountInput').value.trim();
   const private_key = document.getElementById('tigerKeyInput').value.trim();
+  const env         = document.querySelector('input[name="tigerEnv"]:checked')?.value || 'live';
   const err = document.getElementById('tigerErr');
   const ok  = document.getElementById('tigerOk');
   err.style.display = 'none'; ok.style.display = 'none';
@@ -16190,10 +16223,11 @@ async function connectTiger() {
   try {
     const r = await fetch('/api/tiger/connect', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ tiger_id, account, private_key })
+      body: JSON.stringify({ tiger_id, account, private_key, env })
     }).then(r => r.json());
     if (r.ok) {
-      ok.textContent = `Connected — Tiger account ${account} linked.`; ok.style.display = '';
+      const envLabel = env === 'demo' ? 'Demo (Paper)' : 'Live';
+      ok.textContent = `Connected — Tiger ${envLabel} account ${account} linked.`; ok.style.display = '';
       setTimeout(() => { hideTigerSetup(); window.location.reload(); }, 1200);
     } else {
       err.textContent = r.error || 'Connection failed'; err.style.display = '';
