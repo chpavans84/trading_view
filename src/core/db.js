@@ -961,6 +961,12 @@ CREATE INDEX IF NOT EXISTS idx_bot_rules_bot_time ON bot_rules_versions(bot_id, 
 
 ALTER TABLE bots ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_bots_deleted_at ON bots(deleted_at);
+
+CREATE TABLE IF NOT EXISTS system_kv (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────

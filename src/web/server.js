@@ -51,6 +51,56 @@ import { getImpactAnalysis } from '../core/graph-impact.js';
 import { getStockPrediction } from '../core/predictor.js';
 import YahooFinance from 'yahoo-finance2';
 const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+
+// Persist Yahoo Finance cookie jar (crumb) to DB so it survives restarts
+const _YF_COOKIE_KEY = 'yf_cookie_jar';
+async function _yfSaveCookieJar() {
+  try {
+    const jar = JSON.stringify(_yf._opts.cookieJar.toJSON());
+    await query(
+      `INSERT INTO system_kv(key, value, updated_at) VALUES($1, $2, NOW())
+       ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+      [_YF_COOKIE_KEY, jar]
+    );
+  } catch { /* non-critical */ }
+}
+async function _yfRestoreCookieJar() {
+  try {
+    const { rows } = await query('SELECT value FROM system_kv WHERE key=$1', [_YF_COOKIE_KEY]);
+    if (!rows.length) return false;
+    const jarData = JSON.parse(rows[0].value);
+    const ExtClass = _yf._opts.cookieJar.constructor;
+    _yf._opts.cookieJar = ExtClass.fromJSON(jarData);
+    console.log('[yf] cookie jar restored from DB');
+    return true;
+  } catch (e) {
+    console.warn('[yf] cookie jar restore failed:', e.message);
+    return false;
+  }
+}
+// On startup: restore crumb from DB, then warm up with retry backoff on 429
+async function _yfWarmup() {
+  await _yfRestoreCookieJar();
+  for (let i = 0; i < 6; i++) {
+    try {
+      await _yf.quoteSummary('AAPL', { modules: ['price'] });
+      await _yfSaveCookieJar();
+      console.log('[yf] crumb ready');
+      return;
+    } catch (e) {
+      if (e.message?.includes('429')) {
+        const delay = Math.min((i + 1) * 30_000, 180_000);
+        console.warn(`[yf] crumb 429 — retry in ${delay / 1000}s (attempt ${i + 1}/6)`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        console.warn('[yf] crumb warmup error:', e.message);
+        return;
+      }
+    }
+  }
+}
+// Re-persist cookie jar every hour to keep it fresh across long uptimes
+setInterval(() => _yfSaveCookieJar(), 60 * 60 * 1000);
 import { adminChat, clearAdminHistory } from '../core/admin-ai.js';
 import { getConvictionScore } from '../core/scoring.js';
 import { getMarketContext } from '../core/market-context.js';
@@ -9913,6 +9963,9 @@ seedKnowledge()
   .catch(e => console.error('[knowledge] seed error:', e.message));
 await pgStore._ensureTable();
 await migrateUsersToDb();
+
+// Restore + warm up Yahoo Finance crumb — runs in background so it never blocks startup
+_yfWarmup().catch(e => console.warn('[yf] warmup uncaught:', e.message));
 
 // Boot alert — fire after DB is ready
 sysAlert({ key: 'system/boot', severity: 'info', title: 'trading-dashboard booted', detail: { hostname: os.hostname(), pid: process.pid, node: process.version }, dedup_window_minutes: 5 }).catch(() => {});
