@@ -667,7 +667,7 @@ export async function getMaxPain(ticker) {
 export async function getContractHistory(contractId) {
   if (!contractId) return null;
   const json = await uw(`/option-contract/${encodeURIComponent(contractId)}/historic`, {}, 'contract_history');
-  return json?.data ?? null;
+  return json?.chains ?? json?.data ?? null;
 }
 
 /**

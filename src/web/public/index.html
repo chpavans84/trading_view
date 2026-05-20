@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260519q">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260519s">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -16327,6 +16327,7 @@ function exploreSymbol(sym) {
     <button id="qtToggleBtn" onclick="exOpenTrade()" title="Quick Trade" style="background:#FF4D00;border:none;border-radius:6px;padding:6px 14px;color:#fff;cursor:pointer;font-size:0.82rem;font-weight:700;white-space:nowrap;flex-shrink:0;letter-spacing:0.04em">Trade</button>
     <button id="feExpandBtn" onclick="cycleExplorerWidth()" title="Expand panel" style="background:none;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#8b949e;cursor:pointer;font-size:1rem;line-height:1;flex-shrink:0;transition:all 0.15s" onmouseover="this.style.color='#e6edf3';this.style.borderColor='#58a6ff'" onmouseout="this.style.color='#8b949e';this.style.borderColor='#30363d'">⊞</button>
     <button onclick="openExplorerNote()" title="Add note for this stock" style="background:none;border:1px solid #30363d;border-radius:6px;padding:5px 9px;color:#8b949e;cursor:pointer;font-size:1rem;line-height:1;flex-shrink:0;transition:all 0.15s" onmouseover="this.style.color='#e6edf3';this.style.borderColor='#58a6ff'" onmouseout="this.style.color='#8b949e';this.style.borderColor='#30363d'">📝</button>
+    <button onclick="showExplorerHelp()" id="exHelpBtn" title="Help — about this tab" style="background:none;border:1px solid #30363d;border-radius:6px;padding:5px 10px;color:#8b949e;cursor:pointer;font-size:0.88rem;font-weight:700;line-height:1;flex-shrink:0;transition:all 0.15s" onmouseover="this.style.color='#e6edf3';this.style.borderColor='#58a6ff'" onmouseout="this.style.color='#8b949e';this.style.borderColor='#30363d'">?</button>
     <button class="float-explorer-close" onclick="closeFloatExplorer()" title="Close">✕</button>
   </div>
 
@@ -16752,6 +16753,7 @@ function exploreSymbol(sym) {
 <script>
 // ── Explorer tab switching ─────────────────────────────────────────────────
 function switchExplorerTab(tab) {
+  window._exCurrentTab = tab;
   const views = { chart: 'exViewChart', browse: 'exViewBrowse', portfolio: 'exViewPortfolio', aichat: 'exViewAiChat', etfs: 'exViewEtfs', options: 'exViewOptions' };
   const btns  = { chart: 'exTabChart',  browse: 'exTabBrowse',  portfolio: 'exTabPortfolio',  aichat: 'exTabAiChat',  etfs: 'exTabEtfs',  options: 'exTabOptions'  };
   Object.keys(views).forEach(t => {
@@ -16769,6 +16771,98 @@ function switchExplorerTab(tab) {
   if (tab === 'etfs')      loadExplorerEtfs();
   if (tab === 'options')   loadExplorerOptions((document.getElementById('explorerSymbol')?.value||'').trim().toUpperCase());
 }
+
+// ─── Explorer contextual help ─────────────────────────────────────────────────
+const _EX_HELP = {
+  chart: {
+    title: '📈 Chart Tab',
+    items: [
+      ['Price Chart', 'Interactive OHLCV candlestick chart. Each candle = one trading day: the body spans the open→close price; the top wick = intraday high; the bottom wick = intraday low. Green candle = closed higher than open. Red = closed lower. Scroll to zoom, drag to pan, hover for exact OHLCV values.'],
+      ['Conviction Score (0–100)', 'Composite multi-factor signal. Inputs and their weights: RSI trend (up to +10 / −15), MACD cross (+10 / −10), EMA 9/20/50 alignment (+15 / −15), Bollinger Band position (+8 / −8), Relative Volume (+10 / −5), VIX market regime (−15 in fear spikes), ML backtest grade (+8 A / +3 B / −2 C / −9 F), news sentiment (+8 aligned / −10 conflicting). Score ≥ 70 = strong long setup. ≤ 30 = avoid or short.'],
+      ['RSI — Relative Strength Index', 'Momentum oscillator 0–100 based on the average of up-closes vs down-closes over 14 days. Above 70 = overbought (stock extended, may pull back). Below 30 = oversold (potential bounce). The sweet spot for a new long entry is RSI 50–65: trending up without being stretched.'],
+      ['MACD — Moving Avg Convergence Divergence', 'Calculated from the difference between EMA-12 and EMA-26, smoothed by a 9-day signal line. MACD line crossing <b>above</b> signal = bullish momentum shift (buy signal). Crossing <b>below</b> = bearish. The histogram bars show the gap between them — widening histogram = momentum accelerating in that direction.'],
+      ['EMAs — Exponential Moving Averages', 'EMA-9, EMA-20, and EMA-50 weight recent prices more than older ones. Bullish alignment = EMA-9 > EMA-20 > EMA-50 and price is above all three. EMA-20 acts as dynamic support on pullbacks in an uptrend. When price drops below EMA-50, the conviction score is penalised — trend has likely reversed.'],
+      ['Bollinger Bands', 'EMA-20 as the middle band, ±2 standard deviations as the upper/lower bands. Price touching the upper band = stock is extended by 2σ above the 20-day trend, often mean-reverts. Lower band touch = compressed, potential bounce. Band width reflects volatility: a "squeeze" (bands converging) often precedes a sharp directional breakout.'],
+      ['RVOL — Relative Volume', 'Today\'s traded volume ÷ 20-day average volume. RVOL > 1.5 means unusually heavy activity — often driven by news, earnings surprises, or institutional accumulation. RVOL < 0.5 = low-conviction session; price moves are easier to reverse. Watch for RVOL spikes alongside price breakouts for confirmation.'],
+      ['UW Flow Alerts', 'Real-time unusual options activity from Unusual Whales. Large single-strike premium sweeps ($100K+) above the ask price signal aggressive institutional buying. Bullish flow = large calls bought. Bearish flow = large puts bought. Repeat flow at the same strike over multiple days = sustained conviction.'],
+      ['Trade Button (orange)', 'Opens the Quick Trade panel inline. Select: Broker (Alpaca paper or Moomoo), Order type (Market / Limit / Stop-Limit), Number of shares, Limit/Stop price if applicable, Time-in-Force (Day / GTC / MOO pre-market open / MOC market-on-close). Shows estimated cost before you confirm.'],
+    ]
+  },
+  browse: {
+    title: '📋 Browse Tab',
+    items: [
+      ['Universe', 'Every S&P 500 and NASDAQ 100 stock (~600 symbols), shown 50 per page. Updated with live conviction scores and ML grades each time you open the tab.'],
+      ['Conviction Score', 'Same 0–100 composite algorithm as the Chart tab. Sort descending to surface today\'s strongest setups across the full universe without searching symbol by symbol.'],
+      ['ML Grade (A / B / C / F)', 'Logistic regression model trained on 3 years of daily S&P 500 / NASDAQ 100 price data. Predicts whether the stock will gain >0.5% over the next trading week. Grade A = top quartile probability, historically the strongest forward returns. Grade F = bottom quartile or negative edge. Model accuracy (AUC) ~0.63–0.68.'],
+      ['Sector Column', 'GICS sector classification. Use it to spot rotations — if Technology is getting all the A/B grades today, the market may be rotating into growth.'],
+      ['Load Symbol', 'Click any row to load that ticker into the Explorer, run the full analysis (chart, score, fundamentals, news), and jump to the Chart tab.'],
+    ]
+  },
+  portfolio: {
+    title: '🏢 Company Tab',
+    items: [
+      ['Revenue (Quarterly)', 'Top-line sales for the last 4 reported quarters from SEC 10-Q / 10-K filings. Look for consistent quarter-over-quarter growth. One strong quarter can be noise — two or more confirms a durable trend. Revenue deceleration before EPS deceleration is an early warning sign.'],
+      ['EPS — Earnings Per Share', 'Net income ÷ diluted share count. This is the number analysts estimate in advance. Actual EPS vs estimate = the "surprise" that drives the post-earnings gap. A beat of >5% tends to sustain upward momentum for 1–2 weeks. Miss = gap down, often with elevated put buying.'],
+      ['Net Income', 'Bottom-line profit after all costs, interest, and taxes. Compare growth rate to revenue: if revenue is growing but net income is shrinking, margins are compressing — a red flag for high-multiple stocks.'],
+      ['Analyst Price Target', '12-month consensus from sell-side analysts via Unusual Whales. Shows mean target, high, low, and buy/hold/sell count. Upside % = (mean target − current price) ÷ current price. High buy count + recent target raises = institutional tailwind.'],
+      ['Insider Trades — Form 4', 'SEC-mandated filings whenever an officer, director, or >10% shareholder buys or sells company stock (must disclose within 2 business days). Insider <b>buys</b> are a strong bullish signal — executives rarely put personal money in unless they expect the price to rise. Cluster buying (multiple insiders simultaneously) = especially significant. Insider sells are less meaningful (often for tax/diversification reasons).'],
+      ['Congressional Trades — STOCK Act', 'US senators and representatives must disclose personal stock trades within 45 days under the STOCK Act. Congressional portfolios have historically outperformed the market — they often have early visibility into upcoming legislation, government contracts, and regulatory decisions. Large buys ahead of policy announcements are worth tracking.'],
+      ['IV Rank (0–100)', 'Where the current Implied Volatility sits relative to its own 52-week range. IVR 80 = IV is near its yearly high — options premiums are inflated, sellers are favoured (consider covered calls or credit spreads). IVR 20 = IV is at its yearly low — premiums are cheap, buyers are favoured (consider buying calls or debit spreads). IVR has no predictive direction bias — it only tells you if options are expensive or cheap.'],
+    ]
+  },
+  aichat: {
+    title: '🤖 AI Chat Tab',
+    items: [
+      ['What context AI has', 'Before every answer, Akshaya AI is automatically loaded with: the current symbol\'s live price and daily change, conviction score breakdown, 5-day forecast, any open position size and average cost, last 5 Benzinga news headlines with sentiment, and active UW flow alerts. You never need to paste this manually.'],
+      ['Analysis questions', '"Why is the conviction score 42 for NVDA?" · "What do the Bollinger Bands say?" · "Summarise today\'s news and whether it\'s bullish or bearish."'],
+      ['Trade questions', '"If I buy 50 shares of TSLA at market, what\'s my max loss to the EMA-50?" · "Show my last 3 trades for AAPL." · "Should I add to my position here or wait for a pullback?"'],
+      ['One-click Trade Proposals', 'The AI can generate signed trade proposals that appear as approve/ignore buttons in the chat. Each proposal has a fixed expiry (30 min). It never sends an order without your click — you are always the final decision-maker.'],
+      ['Limits', 'Chat does not load real-time options chain data — for IV, GEX, and ATM chain analysis use the Options tab. Context resets when you switch to a new symbol. The AI uses Claude Sonnet and does not retain memory between sessions.'],
+    ]
+  },
+  etfs: {
+    title: '📊 ETFs Tab',
+    items: [
+      ['2× / 3× Bull (Leveraged)', 'Daily-reset ETFs designed to deliver 2× or 3× the <b>daily</b> return of the underlying stock. Example: NVDA +2% → NVDL targets ~+4% that day. Due to daily compounding (volatility drag), they underperform over multi-week holds in choppy markets. Best used for short-term directional bets, not buy-and-hold.'],
+      ['1× / 2× Bear (Inverse)', 'Inverse ETFs that move in the <b>opposite</b> direction each day. If NVDA falls 3%, a 1× bear aims for ~+3%. Useful to hedge a long position without shorting shares (no borrow fee). Same volatility-decay risk applies for holds beyond a few days.'],
+      ['Income / YieldMax ETFs', 'Covered-call strategy ETFs (e.g. NVDY, TSLY). The fund holds the stock (or synthetic exposure) and sells weekly or monthly call options against it, collecting premium paid out as distributions. Trade-off: you receive regular income but cap your upside — if the stock rockets, the ETF underperforms. Best in sideways or mildly bullish markets.'],
+      ['Live Prices', 'Real-time last price, bid, and ask for each ETF pulled from the same quote feed as the main chart. Click any row to load that ETF in the Explorer — you can then view its own chart, conviction score, and options data.'],
+    ]
+  },
+  options: {
+    title: '📊 Options Tab — Full Reference',
+    items: [
+      ['What is an option?', 'A contract giving the buyer the <b>right but not the obligation</b> to buy (call) or sell (put) 100 shares at a fixed price (the strike) before a fixed date (expiry). 1 contract always = 100 shares. The buyer pays a premium upfront. If the option is not exercised or sold before expiry, it expires worthless and the buyer loses only the premium paid.'],
+      ['ATM Chain — what it shows', 'The "at-the-money" chain lists contracts whose strike price is closest to the current stock price. These are the most actively traded and most liquid contracts — they have the highest time value (extrinsic value) and the tightest bid/ask spreads. The table sorts by expiry date first, then by strike price within each expiry.'],
+      ['Type — Call (C) vs Put (P)', '<b>Call (C):</b> right to <b>buy</b> 100 shares at the strike price any time before expiry. You profit when the stock rises above Strike + Premium. Bullish position.<br><b>Put (P):</b> right to <b>sell</b> 100 shares at the strike price any time before expiry. You profit when the stock falls below Strike − Premium. Used bearishly or as portfolio insurance on a long stock position.'],
+      ['Strike Price', 'The fixed buy/sell price locked in by the contract. <b>ATM</b> (at-the-money) = strike ≈ current stock price. <b>ITM</b> (in-the-money) = for calls, strike is below current price (already has intrinsic value). <b>OTM</b> (out-of-the-money) = for calls, strike is above current price (pure time value). ATM options have the highest gamma — they move the most in dollar terms for each $1 the stock moves.'],
+      ['Bid / Ask / Spread', '<b>Bid:</b> the highest price a market maker will pay to buy this contract from you right now.<br><b>Ask:</b> the lowest price they will sell it to you.<br>You always buy at the ask and sell at the bid (unless you use limit orders). <b>Spread = Ask − Bid.</b> Narrow spread ($0.01–$0.10) = liquid, easy to enter/exit. Wide spread ($0.50+) = illiquid, slippage will cost you. Always use limit orders at the midpoint for illiquid contracts.'],
+      ['IV% — Implied Volatility', 'The annualised expected price-swing percentage that is mathematically "implied" by the option\'s current market price, derived using the Black-Scholes model. <b>Example:</b> NVDA at $900 with IV 55% implies the market expects ±$495 over the next year, or roughly ±$31/day on a 1σ basis. <b>High IV</b> = options are expensive — premiums are inflated relative to historical norms (sellers favoured). <b>Low IV</b> = options are cheap — good time to buy options. IV typically spikes into earnings and collapses after ("IV crush"). Compare against IV Rank on the Company tab to judge whether IV is historically high or low.'],
+      ['Volume', 'Number of option contracts traded today. Each contract = 100 shares. <b>High volume relative to OI</b> signals new money entering — not just rolls from one expiry to another. A single-strike sweep 5× above open interest is an institutional signal. Look for volume clustering at a specific strike + expiry as a directional hint.'],
+      ['OI — Open Interest', 'The total number of outstanding contracts for this strike/expiry that have not yet been closed, exercised, or expired. OI grows when traders open new positions and shrinks when they close or roll them. <b>High OI at a strike</b> (50K+ contracts) = a major gravitational level — stock often "pins" to high-OI strikes going into expiry (gamma pinning), because dealers must hedge by trading the stock. The strike with the highest total OI across all expiries is often the most important technical level.'],
+      ['Contract Drilldown — click any row', 'Opens a detail modal for that exact contract showing:<br>① <b>Price &amp; Volume history</b> (blue line = contract\'s closing price; dark bars = daily volume — spikes show when the contract was most actively traded).<br>② <b>IV% history</b> (amber line — watch for IV building ahead of events, then "IV crush" the day after earnings).<br>③ <b>Volume by Price Level</b> (horizontal bars — <span style="color:#3fb950">green</span> = ask-dominant, buyers paid the ask aggressively = bullish. <span style="color:#f85149">Red</span> = bid-dominant, sellers hit the bid = bearish). The widest bar = the price level where the most contracts traded.'],
+      ['Volume by Expiry', 'All options volume grouped by expiration date, sorted nearest-first. The horizontal fill bar shows each expiry\'s share of total volume. <b>Near-term concentration</b> = short-term speculation or event hedging (e.g. earnings next week). <b>Far-term concentration</b> (6–18 months out = LEAPS) = institutional long-term positioning, covered-call writing programs, or big hedges. Also shows open interest per expiry — compare volume to OI to gauge if positions are new or being rolled.'],
+      ['Dealer GEX — Gamma Exposure', 'Gamma (Γ) measures how much an option\'s delta changes per $1 move in the stock. Dealers always take the <b>opposite side</b> of retail trades, so they must continuously hedge by buying/selling the stock as it moves.<br><b>Positive GEX</b> (green): dealers are net long gamma → when stock falls, their delta drops so they <b>buy</b> stock to rebalance; when stock rises, they <b>sell</b>. Net effect: price is stabilised and dampened = "pinned." Positive GEX = low volatility environment.<br><b>Negative GEX</b> (red): dealers are net short gamma → when stock falls, their delta rises so they must <b>sell</b> stock to hedge = amplifies the move. GEX flipping negative often precedes sharp breakouts or breakdowns with high volatility.'],
+      ['Max Pain', 'The strike price at which the total dollar value of all expiring call and put options is <b>minimised</b> — i.e. where the most options expire worthless. Since option sellers (often market makers) profit when options expire worthless, the theory is that dealer hedging activity naturally drifts the underlying price toward max pain as expiry approaches. Useful as a <b>short-term magnet</b> in the final 3–5 days before expiry. The table also shows the delta between current spot and max pain so you can see which direction price needs to drift.'],
+      ['Premium Flow (30 days)', 'Daily breakdown of money spent on bullish options (buying calls / selling puts) vs bearish options (buying puts / selling calls), going back 30 days.<br><b>Green bars</b> = net bullish premium that day. <b>Red bars</b> = net bearish. The summary line shows total bullish, total bearish, and net over the full period.<br><b>How to read it:</b> sustained green bars over 5+ days = smart money accumulating calls = institutional bullish bias. A sudden bearish spike ($5M+) after a run-up = large hedge being put on, possible near-term top. Divergence between price and flow (price going up but flow turning bearish) = distribution warning.'],
+    ]
+  },
+};
+
+function showExplorerHelp() {
+  const tab  = window._exCurrentTab || 'chart';
+  const help = _EX_HELP[tab] || _EX_HELP.chart;
+  document.getElementById('ex-help-title').textContent = help.title;
+  document.getElementById('ex-help-body').innerHTML = help.items.map(([label, desc]) =>
+    `<div class="ex-help-row"><span class="ex-help-label">${label}</span><span class="ex-help-desc">${desc}</span></div>`
+  ).join('');
+  document.getElementById('ex-help-modal').style.display = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('ex-help-modal')?.style.display !== 'none')
+    document.getElementById('ex-help-modal').style.display = 'none';
+});
 
 // ─── ETFs Tab ────────────────────────────────────────────────────────────────
 // Direct single-stock ETFs (leveraged, inverse, income) — verified via Yahoo Finance
@@ -17088,8 +17182,8 @@ function renderAtmChain(el, r) {
       ? '<span style="background:#3d1e1e;color:#f85149;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700">P</span>'
       : '<span style="color:#8b949e">?</span>';
     const iv  = c.iv != null ? (parseFloat(c.iv)*100).toFixed(1)+'%' : '—';
-    const sym = (c.option_symbol||'').replace(/['"\\]/g,'');
-    html += `<tr class="ex-opts-tr" onclick="window._uwSelectedContract='${sym}';alert('Phase 3 will open contract detail for ${sym}')">
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    html += `<tr class="ex-opts-tr" data-sym="${esc(c.option_symbol||'')}">
       <td>${badge}</td>
       <td>$${parseFloat(c.strike||0).toFixed(2)}</td>
       <td>${c.expiry||c.date||'—'}</td>
@@ -17102,6 +17196,144 @@ function renderAtmChain(el, r) {
   }
   html += '</tbody></table></div>';
   el.innerHTML = html;
+  el.querySelectorAll('tr[data-sym]').forEach(row => {
+    row.addEventListener('click', () => {
+      const sym = row.dataset.sym;
+      if (!sym) return;
+      window._uwSelectedContract = sym;
+      openContractDrilldown(sym);
+    });
+  });
+}
+
+// ─── Contract Drilldown Modal (Phase 3) ──────────────────────────────────────
+let _cdCharts = [];
+
+function _cdCleanup() {
+  _cdCharts.forEach(c => { try { c.remove(); } catch(e) {} });
+  _cdCharts = [];
+}
+
+function openContractDrilldown(sym) {
+  if (!sym) return;
+  const modal = document.getElementById('cd-modal');
+  if (!modal) return;
+  _cdCleanup();
+  const m = sym.match(/^([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
+  document.getElementById('cd-title').textContent = sym;
+  if (m) {
+    const strike = (parseInt(m[6], 10) / 1000).toFixed(2);
+    const expiry = `20${m[2]}-${m[3]}-${m[4]}`;
+    document.getElementById('cd-subtitle').textContent = `${m[1]} · ${m[5]==='C'?'Call':'Put'} $${strike} · Exp ${expiry}`;
+  } else {
+    document.getElementById('cd-subtitle').textContent = '';
+  }
+  document.getElementById('cd-loading').style.display = '';
+  document.getElementById('cd-content').style.display = 'none';
+  document.getElementById('cd-error').style.display = 'none';
+  modal.style.display = '';
+  Promise.all([
+    fetch(`/api/uw/contract/${encodeURIComponent(sym)}/history`).then(r => { if (!r.ok) throw new Error(`History ${r.status}`); return r.json(); }),
+    fetch(`/api/uw/contract/${encodeURIComponent(sym)}/volume`).then(r => { if (!r.ok) throw new Error(`Volume ${r.status}`); return r.json(); }),
+  ]).then(([histJson, volJson]) => {
+    document.getElementById('cd-loading').style.display = 'none';
+    if (histJson.error && volJson.error) {
+      document.getElementById('cd-error').textContent = histJson.error;
+      document.getElementById('cd-error').style.display = '';
+      return;
+    }
+    document.getElementById('cd-content').style.display = '';
+    _renderContractHistory(document.getElementById('cd-chart-wrap'), histJson.history || []);
+    _renderContractVolumeProfile(document.getElementById('cd-volprof-wrap'), volJson.profile || []);
+  }).catch(err => {
+    document.getElementById('cd-loading').style.display = 'none';
+    document.getElementById('cd-error').textContent = 'Network error: ' + err.message;
+    document.getElementById('cd-error').style.display = '';
+  });
+}
+
+function closeContractDrilldown() {
+  _cdCleanup();
+  const modal = document.getElementById('cd-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('cd-modal')?.style.display !== 'none') closeContractDrilldown();
+});
+
+function _renderContractHistory(container, rows) {
+  container.innerHTML = '';
+  if (!rows.length) { container.innerHTML = '<div class="cd-empty">No price history available.</div>'; return; }
+  if (!window.LightweightCharts) { container.innerHTML = '<div class="cd-empty">Chart library not loaded.</div>'; return; }
+  const sorted = [...rows].sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  container.innerHTML = `<div id="cd-price-chart" style="height:200px;position:relative"></div>
+    <div class="cd-section-label" style="margin-top:14px;margin-bottom:6px">Implied Volatility</div>
+    <div id="cd-iv-chart" style="height:90px;position:relative"></div>`;
+  const priceBox = document.getElementById('cd-price-chart');
+  const chart = LightweightCharts.createChart(priceBox, {
+    width: priceBox.clientWidth || 540, height: 200,
+    layout: { background: { color: '#0d1117' }, textColor: '#6e7681', fontSize: 10 },
+    grid:   { vertLines: { color: '#161b22' }, horzLines: { color: '#161b22' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#21262d' },
+    timeScale: { borderColor: '#21262d', timeVisible: false },
+    handleScroll: true, handleScale: true,
+  });
+  _cdCharts.push(chart);
+  const priceSeries = chart.addLineSeries({ color: '#58a6ff', lineWidth: 2, title: 'Price' });
+  const volSeries   = chart.addHistogramSeries({ color: '#1f3c5a', priceScaleId: 'vol', priceFormat: { type: 'volume' } });
+  chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  const priceData = sorted.filter(d => d.date && d.close != null).map(d => ({ time: d.date, value: parseFloat(d.close) }));
+  const volData   = sorted.filter(d => d.date && d.volume != null).map(d => ({ time: d.date, value: parseFloat(d.volume) }));
+  if (priceData.length) priceSeries.setData(priceData);
+  if (volData.length)   volSeries.setData(volData);
+  chart.timeScale().fitContent();
+  const ivBox = document.getElementById('cd-iv-chart');
+  const ivChart = LightweightCharts.createChart(ivBox, {
+    width: ivBox.clientWidth || 540, height: 90,
+    layout: { background: { color: '#0d1117' }, textColor: '#6e7681', fontSize: 9 },
+    grid:   { vertLines: { color: '#161b22' }, horzLines: { color: '#161b22' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#21262d' },
+    timeScale: { borderColor: '#21262d', timeVisible: false },
+    handleScroll: true, handleScale: true,
+  });
+  _cdCharts.push(ivChart);
+  const ivSeries = ivChart.addLineSeries({ color: '#e3b341', lineWidth: 1.5, title: 'IV' });
+  const ivData = sorted.filter(d => d.date && d.implied_volatility != null).map(d => ({ time: d.date, value: parseFloat(d.implied_volatility) * 100 }));
+  if (ivData.length) ivSeries.setData(ivData);
+  ivChart.timeScale().fitContent();
+}
+
+function _renderContractVolumeProfile(container, rows) {
+  container.innerHTML = '';
+  if (!rows.length) { container.innerHTML = '<div class="cd-empty">No volume profile available.</div>'; return; }
+  const byPrice = new Map();
+  for (const r of rows) {
+    const px = parseFloat(r.price ?? r.strike_price ?? 0).toFixed(2);
+    const e = byPrice.get(px) || { price: px, vol: 0, ask: 0, bid: 0 };
+    e.vol += +(r.volume || r.total_volume || 0);
+    e.ask += +(r.ask_volume || r.ask_vol || 0);
+    e.bid += +(r.bid_volume || r.bid_vol || 0);
+    byPrice.set(px, e);
+  }
+  const levels = [...byPrice.values()].sort((a,b) => parseFloat(b.price) - parseFloat(a.price)).slice(0, 30);
+  const maxVol = Math.max(...levels.map(l => l.vol), 1);
+  let html = '<div class="cd-volprof">';
+  for (const l of levels) {
+    const barPct = Math.round((l.vol / maxVol) * 100);
+    const isBull = l.vol > 0 ? (l.ask / l.vol) >= 0.5 : false;
+    const barBg  = isBull ? '#1a4a2e' : '#3d1e1e';
+    const volStr = l.vol >= 1e6 ? (l.vol/1e6).toFixed(1)+'M' : l.vol >= 1e3 ? Math.round(l.vol/1e3)+'K' : String(l.vol);
+    html += `<div class="cd-volprof-row">
+      <span class="cd-volprof-px">$${l.price}</span>
+      <div class="cd-volprof-bar-wrap"><div class="cd-volprof-bar" style="width:${barPct}%;background:${barBg}"></div></div>
+      <span class="cd-volprof-vol">${volStr}</span>
+    </div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
 }
 
 function renderExpiryBreakdown(el, r) {
@@ -21484,6 +21716,38 @@ async function loadUWCorrelations() {
 </script>
 
 <!-- UW Conviction detail modal — top-level so position:fixed always works -->
+<!-- ── Explorer contextual help modal ── -->
+<div id="ex-help-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10002;overflow:auto;padding:32px 16px" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:580px;margin:0 auto;padding:24px;display:flex;flex-direction:column;max-height:calc(100vh - 64px)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-shrink:0">
+      <h3 id="ex-help-title" style="margin:0;color:#e6edf3;font-size:1rem"></h3>
+      <button onclick="document.getElementById('ex-help-modal').style.display='none'" style="background:none;border:none;color:#8b949e;font-size:1.5rem;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div id="ex-help-body" style="display:flex;flex-direction:column;gap:14px;overflow-y:auto;padding-right:4px"></div>
+  </div>
+</div>
+
+<!-- ── Contract Drilldown Modal (Phase 3) ── -->
+<div id="cd-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:10001;overflow:auto;padding:32px 16px" role="dialog" aria-modal="true" onclick="if(event.target===this)closeContractDrilldown()">
+  <div class="cd-panel">
+    <div class="cd-panel-header">
+      <div>
+        <div class="cd-panel-title" id="cd-title">—</div>
+        <div class="cd-panel-subtitle" id="cd-subtitle"></div>
+      </div>
+      <button class="cd-close-btn" onclick="closeContractDrilldown()" aria-label="Close">×</button>
+    </div>
+    <div id="cd-loading" style="text-align:center;padding:40px;color:#8b949e">Loading contract data…</div>
+    <div id="cd-content" style="display:none">
+      <div class="cd-section-label" style="margin-bottom:8px">Price &amp; Volume</div>
+      <div id="cd-chart-wrap"></div>
+      <div class="cd-section-label" style="margin-top:18px;margin-bottom:8px">Volume by Price Level</div>
+      <div id="cd-volprof-wrap"></div>
+    </div>
+    <div id="cd-error" style="display:none;color:#f85149;padding:20px;text-align:center"></div>
+  </div>
+</div>
+
 <div id="uwConvictionModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px" onclick="if(event.target===this)this.style.display='none'">
   <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:600px;margin:0 auto;padding:24px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">

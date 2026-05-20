@@ -3901,3 +3901,110 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   color: #e3b341;
   font-size: 0.82rem;
 }
+
+/* ── Contract Drilldown Modal (Phase 3) ── */
+.cd-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.cd-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+.cd-panel-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #e6edf3;
+  font-family: 'Share Tech Mono', monospace;
+  word-break: break-all;
+}
+.cd-panel-subtitle {
+  font-size: 0.78rem;
+  color: #8b949e;
+  margin-top: 4px;
+}
+.cd-close-btn {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 1.6rem;
+  cursor: pointer;
+  padding: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cd-close-btn:hover { color: #e6edf3; }
+.cd-section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #6e7681;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.cd-empty {
+  color: #6e7681;
+  font-size: 0.82rem;
+  padding: 16px 0;
+  text-align: center;
+}
+.cd-volprof { display: flex; flex-direction: column; gap: 3px; }
+.cd-volprof-row {
+  display: grid;
+  grid-template-columns: 58px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+}
+.cd-volprof-px {
+  font-size: 0.7rem;
+  color: #8b949e;
+  text-align: right;
+  font-family: monospace;
+}
+.cd-volprof-bar-wrap {
+  height: 11px;
+  background: #0d1117;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.cd-volprof-bar {
+  height: 100%;
+  border-radius: 2px;
+}
+.cd-volprof-vol {
+  font-size: 0.68rem;
+  color: #6e7681;
+  text-align: right;
+  font-family: monospace;
+}
+
+/* ── Explorer contextual help modal ── */
+.ex-help-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #21262d;
+}
+.ex-help-row:last-child { border-bottom: none; padding-bottom: 0; }
+.ex-help-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #e6edf3;
+}
+.ex-help-desc {
+  font-size: 0.79rem;
+  color: #8b949e;
+  line-height: 1.6;
+}
+.ex-help-desc b { color: #c9d1d9; font-weight: 600; }
