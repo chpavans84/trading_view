@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260520d">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260520e">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -10756,6 +10756,13 @@ async function scSeedGraph() {
 }
 
 function showScHelp() {
+  const scModal = document.getElementById('sc-help-modal');
+  if (scModal) {
+    const topPx = _getHeaderBottom() + 16;
+    scModal.style.top       = topPx + 'px';
+    scModal.style.transform = 'translateX(-50%)';
+    scModal.style.maxHeight = (window.innerHeight - topPx - 24) + 'px';
+  }
   document.getElementById('sc-help-overlay').style.display = 'block';
   document.getElementById('sc-help-modal').style.display = 'block';
   document.body.style.overflow = 'hidden';
@@ -20128,9 +20135,9 @@ function toggleNotesDrawer() {
   if (!drawer) return;
   _notesDrawerOpen = !_notesDrawerOpen;
   if (_notesDrawerOpen) {
-    // Reset to centered before opening
+    // Position below header (overrides any previous drag position)
     drawer.style.left = '';
-    drawer.style.top = '';
+    drawer.style.top = _getHeaderBottom() + 16 + 'px';
     drawer.style.transform = '';
   }
   drawer.classList.toggle('open', _notesDrawerOpen);
@@ -21923,18 +21930,21 @@ document.getElementById('bots-grid')?.addEventListener('click', e => {
   botsDrilldown(Number(card.dataset.botId));
 });
 
-function _botsPositionModal() {
-  const modal = document.getElementById('bots-modal');
-  if (!modal) return;
-  const nav   = document.querySelector('nav');
-  const t1    = document.getElementById('heroNewsTicker');
-  const t2    = document.getElementById('heroNewsTicker2');
-  const headerBottom = Math.max(
+function _getHeaderBottom() {
+  const t1  = document.getElementById('heroNewsTicker');
+  const t2  = document.getElementById('heroNewsTicker2');
+  const nav = document.querySelector('nav');
+  return Math.max(
     t1  ? t1.getBoundingClientRect().bottom  : 0,
     t2  ? t2.getBoundingClientRect().bottom  : 0,
     nav ? nav.getBoundingClientRect().bottom : 0
   );
-  const topPx = headerBottom + 16;
+}
+
+function _botsPositionModal() {
+  const modal = document.getElementById('bots-modal');
+  if (!modal) return;
+  const topPx = _getHeaderBottom() + 16;
   modal.style.top       = topPx + 'px';
   modal.style.maxHeight = (window.innerHeight - topPx - 24) + 'px';
 }
@@ -22278,6 +22288,7 @@ async function botsDrilldown(id) {
   const title    = document.getElementById('bot-drilldown-title');
   if (!backdrop || !body) return;
   if (title) title.textContent = bot ? `📊 ${bot.name}` : 'Bot Details';
+  backdrop.style.paddingTop = _getHeaderBottom() + 16 + 'px';
   backdrop.style.display = 'flex';
   body.innerHTML = '<div style="padding:24px;color:#8b949e;text-align:center">Loading…</div>';
   try {

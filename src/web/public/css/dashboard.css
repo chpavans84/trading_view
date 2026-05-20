@@ -2945,8 +2945,8 @@
 }
 #notesDrawerBackdrop.open { display: block; }
 #notesDrawer {
-  position: fixed; top: 50%; left: 50%;
-  transform: translate(-50%, -50%) scale(0.95);
+  position: fixed; top: 120px; left: 50%;
+  transform: translateX(-50%) scale(0.95);
   width: 460px; max-width: 96vw; max-height: 82vh;
   background: var(--bg, #0d1117);
   border: 1px solid var(--border, rgba(255,255,255,0.15));
@@ -2958,7 +2958,7 @@
 }
 #notesDrawer.open {
   opacity: 1; visibility: visible; pointer-events: all;
-  transform: translate(-50%, -50%) scale(1);
+  transform: translateX(-50%) scale(1);
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 #notesDrawer .nd-header { cursor: grab; user-select: none; }
@@ -4399,8 +4399,9 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 32px 16px;
+  padding: 120px 16px 16px;
   overflow-y: auto;
+  box-sizing: border-box;
 }
 .bot-drilldown-modal {
   background: #161b22;
