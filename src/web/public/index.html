@@ -1700,10 +1700,8 @@
       </label>
     </div>
 
-    <!-- Disclaimer banner -->
-    <div class="bots-disclaimer">
-      ⚠️ <strong>Paper-mode only.</strong> Bots log decisions and simulate trades. No real orders are placed until execution is wired in a future phase.
-    </div>
+    <!-- Disclaimer -->
+    <div style="font-size:0.72rem;color:#8b949e;margin-bottom:12px">⚠ Paper simulation only — no real orders placed in this phase</div>
 
     <!-- Main layout: cards + decisions feed -->
     <div class="bots-main-row">
@@ -21913,7 +21911,6 @@ function _botCard(b) {
       <div class="bots-stat"><span class="bots-stat-label">Win %</span><span class="bots-stat-val">${wr}%</span></div>
       <div class="bots-stat"><span class="bots-stat-label">P&amp;L</span><span class="bots-stat-val" style="color:${pnlColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span></div>
     </div>
-    <div style="font-size:0.72rem;color:#8b949e;padding:4px 0 6px">${lifetimeBadge}</div>
     ${locked && !archived ? '<div class="bots-lock-note">🔒 Fields locked — trade in progress</div>' : ''}
     <div class="bots-card-actions">${actions}</div>`;
 }

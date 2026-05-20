@@ -4049,16 +4049,6 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
 }
 .bots-create-btn:hover { background: #2ea043; }
 
-.bots-disclaimer {
-  background: #161b22;
-  border: 1px solid #d29922;
-  border-left: 4px solid #d29922;
-  border-radius: 8px;
-  padding: 10px 14px;
-  font-size: 0.8rem;
-  color: #d29922;
-  margin-bottom: 18px;
-}
 
 /* ── Cards grid ── */
 .bots-grid {
