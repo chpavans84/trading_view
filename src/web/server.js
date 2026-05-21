@@ -414,13 +414,23 @@ app.get('/', (req, res, next) => {
   next();
 });
 
+// Bypass CDN/proxy cache for service worker + manifest — these files
+// bootstrap all other caching, so they must always be fresh.
+app.use(['/sw.js', '/manifest.json'], (req, res, next) => {
+  res.set('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');  // CDN-specific bypass header
+  next();
+});
+
 app.use(express.static(join(__dirname, 'public'), {
   setHeaders(res, filePath) {
     if (filePath.endsWith('.html')) {
       // HTML: always revalidate so deploys are picked up immediately
       res.setHeader('Cache-Control', 'no-store');
-    } else if (/\.(css|js)$/.test(filePath)) {
-      // CSS/JS: cache 1 day — short enough to pick up updates, long enough to help repeat visits
+    } else if (/\.(css|js)$/.test(filePath) && !filePath.endsWith('sw.js') && !filePath.endsWith('manifest.json')) {
+      // CSS/JS: cache 1 day — sw.js/manifest.json excluded (handled by no-cache middleware above)
       res.setHeader('Cache-Control', 'public, max-age=86400');
     } else if (/\.(png|jpg|jpeg|gif|svg|webp|ico|woff2?)$/.test(filePath)) {
       // Static assets: cache 1 week
