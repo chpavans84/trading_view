@@ -5146,7 +5146,7 @@ fetch('/auth/check').then(r => r.json()).then(d => {
   if (dropName) dropName.textContent = uname;
   if (dropRole) { dropRole.textContent = d.role || 'user'; dropRole.style.color = d.role === 'admin' ? '#f0883e' : '#58a6ff'; }
   // Boot real-time price feed once authenticated
-  startLiveFeed();
+  startLiveFeed?.();
 });
 
 function updateBrandPnl(value) {
@@ -9075,7 +9075,7 @@ async function loadDashboard() {
       _LIVE_SYMBOLS.add(p.symbol);
     }
   });
-  _subscribeWatchSymbols();
+  _subscribeWatchSymbols?.();
 
   // Cache for the 3s refreshPositions() to use without a full reload
   _cachedOpenOrders = d.open_orders ?? [];
@@ -9087,11 +9087,24 @@ async function loadDashboard() {
 
   document.getElementById('trades-body').innerHTML = d.recent_trades.length === 0
     ? '<div class="empty">No trades yet</div>'
-    : `<table><tr><th>Symbol</th><th>Side</th><th>Type</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Time</th></tr>
+    : `<table><tr>
+        <th>Symbol</th>
+        <th>Side</th>
+        <th>Type</th>
+        <th>Bot</th>
+        <th>Setup</th>
+        <th>Entry</th>
+        <th>Stop</th>
+        <th>Target</th>
+        <th>Status</th>
+        <th>Time</th>
+      </tr>
       ${d.recent_trades.map(t => `<tr>
         ${symCell(t.symbol, t.name)}
         <td>${t.side === 'buy' ? '📈' : '📉'} ${t.side}</td>
         <td style="font-size:0.75rem;color:${t.source==='quick'?'#8b949e':'#58a6ff'}">${t.source === 'quick' ? 'Quick' : 'Force'}</td>
+        <td style="font-size:0.78rem">${t.bot_name ? `<span style="color:#a5d6ff">${escHtml(t.bot_name)}</span>` : '<span style="color:#484f58">—</span>'}</td>
+        <td>${t.setup_type ? `<span class="setup-badge setup-${escHtml(t.setup_type)}">${escHtml(String(t.setup_type).replace(/_/g,' '))}</span>` : '<span style="color:#484f58">—</span>'}</td>
         <td>${t.entry_price ? fmtDollar(t.entry_price) : '—'}</td>
         <td class="neg">${fmtDollar(t.stop_loss)}</td>
         <td class="pos">${fmtDollar(t.take_profit)}</td>

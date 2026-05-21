@@ -48,6 +48,7 @@
     "express-rate-limit": "^8.4.0",
     "express-session": "^1.19.0",
     "helmet": "^8.1.0",
+    "marked": "^18.0.4",
     "moomoo-api": "^10.5.6508",
     "neo4j-driver": "^6.0.1",
     "node-cron": "^4.2.1",

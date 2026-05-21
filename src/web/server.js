@@ -2987,6 +2987,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         .filter(o => !o.parent_id && !dbOrderIds.has(o.id) && o.status !== 'canceled')
         .slice(0, 15)
         .map(o => ({
+          order_id:    o.id,
           symbol:      o.symbol,
           side:        o.side,
           qty:         parseFloat(o.qty || 0),
@@ -2997,7 +2998,34 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
           opened_at:   o.created_at,
           source:      'quick',
         }));
-      trades = [...dbTrades, ...qtTrades]
+      // Most-recent closed DB trade per symbol — used to enrich Alpaca SELL legs with bot context.
+      // If rapid buy-sell-buy-sell cycles produce multiple closes, we use the latest.
+      const closingDbBySymbol = new Map();
+      for (const t of dbTrades) {
+        if (t.status !== 'closed' || !t.symbol) continue;
+        const sym = t.symbol.toUpperCase();
+        const existing = closingDbBySymbol.get(sym);
+        if (!existing || new Date(t.closed_at || 0) > new Date(existing.closed_at || 0)) {
+          closingDbBySymbol.set(sym, t);
+        }
+      }
+      const enrichedQt = qtTrades.map(qt => {
+        if (qt.side !== 'sell' || !qt.symbol) return qt;
+        const match = closingDbBySymbol.get(qt.symbol.toUpperCase());
+        if (!match) return qt;
+        return {
+          ...qt,
+          bot_id:                 match.bot_id ?? null,
+          bot_name:               match.bot_name ?? null,
+          setup_type:             match.setup_type ?? null,
+          thesis:                 match.thesis ?? null,
+          expected_hold_days_min: match.expected_hold_days_min ?? null,
+          expected_hold_days_max: match.expected_hold_days_max ?? null,
+          stop_loss:              match.stop_loss ?? null,
+          take_profit:            match.take_profit ?? null,
+        };
+      });
+      trades = [...dbTrades, ...enrichedQt]
         .sort((a, b) => new Date(b.opened_at) - new Date(a.opened_at))
         .slice(0, 20);
     } else if (userCreds && isPaperUrl(userCreds.baseUrl)) {
@@ -3013,6 +3041,39 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         `SELECT COUNT(*) as cnt FROM conviction_scores WHERE scored_at >= CURRENT_DATE`
       );
       scoresCount = parseInt(rows[0]?.cnt ?? 0);
+    }
+
+    // Enrich Alpaca orders with bot_name + setup_type from DB where order_id matches
+    if (trades?.length && isDbAvailable()) {
+      const getOrderId = t => t?.order_id ?? t?.id ?? null;
+      const orderIds = [...new Set(trades.map(getOrderId).filter(Boolean).map(String))];
+      if (orderIds.length) {
+        try {
+          const { rows: dbMatches } = await query(
+            `SELECT t.order_id, t.setup_type, t.thesis, t.expected_hold_days_min,
+                    t.expected_hold_days_max, b.name AS bot_name, b.id AS bot_id
+             FROM trades t
+             LEFT JOIN bots b ON b.id = t.bot_id
+             WHERE t.order_id = ANY($1::text[])`,
+            [orderIds]
+          );
+          const byOrderId = new Map(dbMatches.map(r => [String(r.order_id), r]));
+          trades = trades.map(t => {
+            const match = byOrderId.get(String(getOrderId(t)));
+            return match ? {
+              ...t,
+              bot_id:                 match.bot_id,
+              bot_name:               match.bot_name,
+              setup_type:             match.setup_type,
+              thesis:                 match.thesis,
+              expected_hold_days_min: match.expected_hold_days_min,
+              expected_hold_days_max: match.expected_hold_days_max,
+            } : t;
+          });
+        } catch (e) {
+          console.warn('[dashboard] recent_trades enrichment skipped:', e.message);
+        }
+      }
     }
 
     res.json({
@@ -3089,6 +3150,7 @@ app.get('/api/trades', requireAuth, async (req, res) => {
       const qtFromAlpaca = ao
         .filter(o => !o.parent_id && !dbIds.has(o.id) && o.status !== 'canceled')
         .map(o => ({
+          order_id:         o.id,
           symbol:           o.symbol,
           side:             o.side,
           qty:              parseFloat(o.qty || 0),
@@ -3100,7 +3162,33 @@ app.get('/api/trades', requireAuth, async (req, res) => {
           source:           'quick',
         }))
         .filter(qt => !status || qt.status === status);
-      const merged = [...db.map(t => ({ ...t, source: 'force' })), ...qtFromAlpaca]
+      // Most-recent closed DB trade per symbol — enrich Alpaca SELL legs with bot context.
+      const closingBySymbol = new Map();
+      for (const t of db) {
+        if (t.status !== 'closed' || !t.symbol) continue;
+        const sym = t.symbol.toUpperCase();
+        const existing = closingBySymbol.get(sym);
+        if (!existing || new Date(t.closed_at || 0) > new Date(existing.closed_at || 0)) {
+          closingBySymbol.set(sym, t);
+        }
+      }
+      const qtFromAlpacaEnriched = qtFromAlpaca.map(qt => {
+        if (qt.side !== 'sell' || !qt.symbol) return qt;
+        const match = closingBySymbol.get(qt.symbol.toUpperCase());
+        if (!match) return qt;
+        return {
+          ...qt,
+          bot_id:                 match.bot_id ?? null,
+          bot_name:               match.bot_name ?? null,
+          setup_type:             match.setup_type ?? null,
+          thesis:                 match.thesis ?? null,
+          expected_hold_days_min: match.expected_hold_days_min ?? null,
+          expected_hold_days_max: match.expected_hold_days_max ?? null,
+          stop_loss:              match.stop_loss ?? null,
+          take_profit:            match.take_profit ?? null,
+        };
+      });
+      const merged = [...db.map(t => ({ ...t, source: 'force' })), ...qtFromAlpacaEnriched]
         .sort((a, b) => new Date(b.opened_at) - new Date(a.opened_at))
         .slice(0, limit);
       return res.json({ source: 'db', trades: merged });
