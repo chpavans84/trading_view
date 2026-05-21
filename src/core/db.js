@@ -1328,14 +1328,14 @@ export async function getTrades({ status, username, account_source, limit = 50 }
   try {
     const where = [];
     const params = [];
-    if (status)         { where.push(`status = $${params.length + 1}`);         params.push(status); }
-    if (username)       { where.push(`username = $${params.length + 1}`);       params.push(username); }
+    if (status)         { where.push(`t.status = $${params.length + 1}`);       params.push(status); }
+    if (username)       { where.push(`t.username = $${params.length + 1}`);     params.push(username); }
     if (account_source) {
       if (account_source === 'alpaca_paper') {
         // Accept both canonical 'alpaca_paper' and legacy 'alpaca' tag from bot-executor
-        where.push(`(account_source IN ('alpaca_paper', 'alpaca') OR account_source IS NULL)`);
+        where.push(`(t.account_source IN ('alpaca_paper', 'alpaca') OR t.account_source IS NULL)`);
       } else {
-        where.push(`(account_source = $${params.length + 1} OR account_source IS NULL)`);
+        where.push(`(t.account_source = $${params.length + 1} OR t.account_source IS NULL)`);
         params.push(account_source);
       }
     }
