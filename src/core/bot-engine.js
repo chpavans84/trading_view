@@ -323,24 +323,22 @@ async function _scoreCandidate(symbol, bot) {
     getFundamentalsGrowth(symbol).catch(() => null),
   ]);
 
-  const setup = await classifySetup({
-    signals,
-    indicators: { ...ind, symbol },
-    rsi: rsi14,
-    fundamentals,
-    last5dReturn,
-  }).catch(() => null);
+  // require_setup_classification defaults true; set false per-bot to bypass for measurement
+  const enforceSetup = bot.rules?.entry_filters?.require_setup_classification !== false;
+  const setup = enforceSetup
+    ? await classifySetup({ signals, indicators: { ...ind, symbol }, rsi: rsi14, fundamentals, last5dReturn }).catch(() => null)
+    : null;
 
-  // Reject unclassifiable — setup discipline gate
-  if (!setup) return null;
+  // Reject unclassifiable — setup discipline gate (skipped when enforceSetup=false)
+  if (enforceSetup && !setup) return null;
 
   return {
     symbol,
     composite: +composite.toFixed(2),
-    setup_type: setup.setup_type,
-    thesis:     setup.thesis,
-    expected_hold_days_min: setup.expected_hold_days_min,
-    expected_hold_days_max: setup.expected_hold_days_max,
+    setup_type: setup?.setup_type ?? null,
+    thesis:     setup?.thesis ?? null,
+    expected_hold_days_min: setup?.expected_hold_days_min ?? null,
+    expected_hold_days_max: setup?.expected_hold_days_max ?? null,
     breakdown: {
       vix,
       signals,
