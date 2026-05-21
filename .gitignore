@@ -16,6 +16,10 @@ discovery-log.json
 .bot-stats.json
 .bot-history.json
 
+# Regime-bot runtime (CSV staging for Markov subprocess + alert log)
+tmp/
+data/regime-bot/
+
 # macOS
 .DS_Store
 .DS_Store?
