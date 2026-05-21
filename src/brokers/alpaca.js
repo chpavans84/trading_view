@@ -115,3 +115,10 @@ export async function getOrders({ status = 'active' } = {}) {
     orders: mapped,
   };
 }
+
+// Returns all active US equity assets from Alpaca — used by universe-sync.
+// The /v2/assets endpoint returns the full list in one response (no cursor pagination).
+export async function getAlpacaAssets() {
+  return alpacaFetch('/v2/assets?status=active&asset_class=us_equity');
+}
+

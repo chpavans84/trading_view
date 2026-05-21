@@ -967,6 +967,26 @@ CREATE TABLE IF NOT EXISTS system_kv (
   value      TEXT NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ─── Tradable Universe ────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS tradable_universe (
+  symbol          VARCHAR(20) PRIMARY KEY,
+  exchange        VARCHAR(10),
+  asset_class     VARCHAR(20),
+  fractionable    BOOLEAN,
+  marginable      BOOLEAN,
+  shortable       BOOLEAN,
+  easy_to_borrow  BOOLEAN,
+  market_cap_usd  NUMERIC(20,2),
+  avg_volume_30d  NUMERIC(20,2),
+  adv_dollar_30d  NUMERIC(20,2),
+  last_price      NUMERIC(12,4),
+  sector          VARCHAR(60),
+  last_synced_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tradable_universe_filters
+  ON tradable_universe (market_cap_usd, adv_dollar_30d)
+  WHERE market_cap_usd IS NOT NULL AND adv_dollar_30d IS NOT NULL;
 `;
 
 // ─── Pool ─────────────────────────────────────────────────────────────────────

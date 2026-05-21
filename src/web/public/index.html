@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260520e">
+<link rel="stylesheet" href="/css/dashboard.css?v=20260520f">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -1684,6 +1684,7 @@
         <div class="bots-page-title">🤖 My Trading Bots</div>
         <div class="bots-page-sub">Automated entry/exit bots — up to 3 per account. No live trading in this phase.</div>
       </div>
+      <button onclick="showBotsHelp()" style="background:#21262d;border:1px solid #30363d;border-radius:20px;padding:5px 14px;color:#8b949e;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap" title="How Bots Work">❓ How it works</button>
     </div>
 
     <!-- KPI strip -->
@@ -1729,6 +1730,196 @@
       <button class="bots-modal-close" onclick="botsCloseModal()" aria-label="Close">✕</button>
     </div>
     <div id="bots-modal-body" class="bots-modal-body"></div>
+  </div>
+
+  <!-- ── Bot Help modal ── -->
+  <div id="bots-help-overlay" onclick="hideBotsHelp()" aria-label="Modal backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9000;overflow-y:auto;padding:40px 16px"></div>
+  <div id="bots-help-modal" role="dialog" aria-modal="true" aria-labelledby="bots-help-title" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9001;width:min(780px,95vw);max-height:85vh;overflow-y:auto;background:#161b22;border:1px solid #30363d;border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid #21262d;position:sticky;top:0;background:#161b22;z-index:1">
+      <div id="bots-help-title" style="font-size:1.05rem;font-weight:700;color:#e6edf3">🤖 My Trading Bots — Complete Guide</div>
+      <button onclick="hideBotsHelp()" style="background:none;border:none;color:#8b949e;font-size:1.3rem;cursor:pointer;padding:0 4px;line-height:1" title="Close">✕</button>
+    </div>
+    <div style="padding:24px;font-size:0.88rem;color:#c9d1d9;line-height:1.7">
+
+      <!-- OVERVIEW -->
+      <div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:16px 18px;margin-bottom:20px">
+        <div style="font-weight:700;color:#58a6ff;margin-bottom:8px;font-size:0.95rem">📌 What Are Bots?</div>
+        <p style="margin:0 0 8px 0">Each bot is a fully automated trading agent that scans the market every <strong>5 minutes</strong> during market hours, finds the best stock to trade based on your rules, enters a position, and exits when its stop-loss or trailing stop fires — without any manual action from you.</p>
+        <p style="margin:0">All bots currently run in <strong>paper simulation only</strong> — no real orders are placed. Brokers supported: <strong>Alpaca</strong> (paper) and <strong>Tiger Demo</strong>. Live trading will be enabled in a future phase.</p>
+      </div>
+
+      <!-- SCAN SCHEDULE -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">⏰ When Does the Bot Run?</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <tr style="background:#161b22"><th style="text-align:left;padding:8px 12px;color:#8b949e;font-weight:600;border-bottom:1px solid #21262d">Window</th><th style="text-align:left;padding:8px 12px;color:#8b949e;font-weight:600;border-bottom:1px solid #21262d">Schedule</th></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">9:30–9:59 AM ET</td><td style="padding:8px 12px">Scans every 5 minutes starting at :30</td></tr>
+          <tr><td style="padding:8px 12px">10:00 AM–3:59 PM ET</td><td style="padding:8px 12px">Scans every 5 minutes</td></tr>
+        </table>
+        <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">Bots only run Monday–Friday. The scanner engine (B-2) writes a decision, then the executor (B-3) reads it within 6 minutes and places the order. Decisions older than 6 minutes are discarded.</div>
+      </div>
+
+      <!-- CANDIDATE UNIVERSE -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">🔭 Where Does It Find Stocks? (Candidate Universe)</div>
+        <p style="margin:0 0 10px 0">Every scan builds a fresh list of candidate symbols from three sources simultaneously:</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
+            <div style="color:#3fb950;font-weight:700;margin-bottom:4px">📋 Your Watchlist</div>
+            <div style="color:#8b949e;font-size:0.82rem">All symbols you've starred in your personal watchlist.</div>
+          </div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
+            <div style="color:#f0883e;font-weight:700;margin-bottom:4px">🐋 UW Flow Alerts</div>
+            <div style="color:#8b949e;font-size:0.82rem">Tickers with unusual options flow &gt;$100k premium in the last 6 hours (up to 30 symbols).</div>
+          </div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
+            <div style="color:#58a6ff;font-weight:700;margin-bottom:4px">📰 News Momentum</div>
+            <div style="color:#8b949e;font-size:0.82rem">Tickers with 3+ positive Benzinga news items in the last 1 hour (up to 20 symbols).</div>
+          </div>
+        </div>
+        <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">Symbols already held by your other bots are removed. Up to 30 candidates are scored per scan cycle.</div>
+      </div>
+
+      <!-- HARD GATES -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #f85149;padding-left:10px">🚫 Hard Gates — When a Stock Is Automatically Rejected</div>
+        <p style="margin:0 0 10px 0">Before any scoring happens, each candidate is checked against these hard filters. If any gate fails, the stock is skipped entirely:</p>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <tr style="background:#161b22"><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Gate</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Default</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">What It Checks</th></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">Earnings proximity</td><td style="padding:8px 12px;color:#f0883e">configurable</td><td style="padding:8px 12px;color:#8b949e">Skip stocks within N days of earnings (avoids binary event risk)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">Liquidity (ADV)</td><td style="padding:8px 12px;color:#f0883e">configurable</td><td style="padding:8px 12px;color:#8b949e">Minimum average daily dollar volume over 30 days</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">Macro blackout</td><td style="padding:8px 12px;color:#f0883e">configurable</td><td style="padding:8px 12px;color:#8b949e">Skip all trades during Fed announcements, CPI releases, etc.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">Premarket gap</td><td style="padding:8px 12px;color:#f0883e">configurable</td><td style="padding:8px 12px;color:#8b949e">Skip stocks that gapped up/down more than N% before open</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">High short interest</td><td style="padding:8px 12px;color:#f0883e">configurable</td><td style="padding:8px 12px;color:#8b949e">Skip if short % of float &gt; 30% (squeeze/volatility risk)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">Price range</td><td style="padding:8px 12px;color:#f0883e">configurable</td><td style="padding:8px 12px;color:#8b949e">Skip if current price is below min or above max price filter</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">VIX range</td><td style="padding:8px 12px;color:#f0883e">VIX max 60</td><td style="padding:8px 12px;color:#8b949e">Skip trades when VIX is outside your acceptable volatility range</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px">Conviction grade</td><td style="padding:8px 12px;color:#f0883e">min grade C</td><td style="padding:8px 12px;color:#8b949e">Skip stocks with conviction grade below your minimum (A/B/C/F)</td></tr>
+          <tr><td style="padding:8px 12px">UW label filter</td><td style="padding:8px 12px;color:#f0883e">configurable</td><td style="padding:8px 12px;color:#8b949e">Require specific UW options flow label (e.g. bullish, strong_bullish)</td></tr>
+        </table>
+      </div>
+
+      <!-- SCORING -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">📊 Scoring — How the Bot Picks the Best Stock</div>
+        <p style="margin:0 0 10px 0">Each candidate that passes the hard gates is scored on <strong>7 signals</strong>. Each signal returns a value from −100 to +100. The composite score is a weighted sum, also −100 to +100. The stock with the highest composite score wins — but only if it's above the <strong>minimum composite score</strong> (default: 60).</p>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <tr style="background:#161b22"><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Signal</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">What It Measures</th><th style="text-align:right;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Default Weight</th></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Conviction</strong></td><td style="padding:8px 12px;color:#8b949e">Internal conviction score (0–100, centred to −100..+100). Grade A/B/C/F</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.30 (30%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>News</strong></td><td style="padding:8px 12px;color:#8b949e">Benzinga sentiment × confidence (article count / 10, capped at 1)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.20 (20%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>UW Options</strong></td><td style="padding:8px 12px;color:#8b949e">Unusual Whales options flow label (bullish = +score, bearish = −score)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.20 (20%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>GEX</strong></td><td style="padding:8px 12px;color:#8b949e">Net gamma exposure (call gamma − put gamma) as % of total gamma</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.10 (10%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Insider</strong></td><td style="padding:8px 12px;color:#8b949e">Net insider buy/sell value in last 30 days as % of total insider activity</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.10 (10%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Distance 52w</strong></td><td style="padding:8px 12px;color:#8b949e">Position relative to 52-week high. Sweet spot: 20–40% off the high (+80)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.05 (5%)</td></tr>
+          <tr><td style="padding:8px 12px"><strong>Predictor</strong></td><td style="padding:8px 12px;color:#8b949e">AI price-change forecast × confidence (47% historical accuracy)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.05 (5%)</td></tr>
+        </table>
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;margin-top:10px;color:#8b949e;font-size:0.82rem">
+          <strong style="color:#e6edf3">52-Week High scoring breakdown:</strong> Within 5% of high → −40 (extended); 5–20% off → +30; 20–40% off → +80 (sweet spot); &gt;40% off → −60 (distressed)
+        </div>
+      </div>
+
+      <!-- ENTRY -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #3fb950;padding-left:10px">✅ Entry — How a Trade Is Opened</div>
+        <p style="margin:0 0 10px 0">Once a winning stock is selected, the executor runs (within 6 minutes) and follows this exact sequence:</p>
+        <ol style="margin:0 0 10px 0;padding-left:20px">
+          <li style="margin-bottom:6px"><strong>Freshness check</strong> — the buy decision must be less than 6 minutes old. Stale decisions are discarded.</li>
+          <li style="margin-bottom:6px"><strong>Duplicate guard</strong> — skip if this bot already holds an open trade for this symbol.</li>
+          <li style="margin-bottom:6px"><strong>Get live price</strong> — fetch the current ask price from Alpaca market data.</li>
+          <li style="margin-bottom:6px"><strong>Size the position</strong> — qty = floor(capital × position_size_pct% ÷ price). Default: 95% of capital. Skip if qty &lt; 1.</li>
+          <li style="margin-bottom:6px"><strong>Place the order</strong> — market or limit order based on your Order Type setting (see table below).</li>
+          <li style="margin-bottom:6px"><strong>Record the trade</strong> — bot logs entry price, qty, dollars invested, stop-loss price, and conviction score to the database.</li>
+          <li style="margin-bottom:0"><strong>Lock the bot</strong> — bot's <code>current_trade_id</code> is set. Scanner skips this bot until the trade closes.</li>
+        </ol>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:4px">
+          <tr style="background:#161b22"><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Order Type</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">During Market Hours (RTH)</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Outside Hours</th></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>auto</strong> (default)</td><td style="padding:8px 12px;color:#8b949e">Market order</td><td style="padding:8px 12px;color:#8b949e">Limit order at ask + offset</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>mkt</strong></td><td style="padding:8px 12px;color:#8b949e">Market order</td><td style="padding:8px 12px;color:#8b949e">Forced to limit (exchange rule)</td></tr>
+          <tr><td style="padding:8px 12px"><strong>lmt</strong></td><td style="padding:8px 12px;color:#8b949e">Limit at ask × (1 + offset_bps)</td><td style="padding:8px 12px;color:#8b949e">Limit at ask × (1 + offset_bps)</td></tr>
+        </table>
+        <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">Limit offset default: <strong>30 bps (0.30%)</strong> above ask on entry. Allow Outside RTH: defaults <strong>on</strong>.</div>
+      </div>
+
+      <!-- POSITION MANAGEMENT / EXIT -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #f85149;padding-left:10px">🚪 Exit — When and How a Trade Is Closed</div>
+        <p style="margin:0 0 10px 0">While a trade is open, the bot checks exit conditions every <strong>5 minutes</strong> during market hours. Two conditions can trigger a close:</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div style="background:#1a1f2e;border:1px solid #30363d;border-radius:8px;padding:14px">
+            <div style="color:#f85149;font-weight:700;margin-bottom:6px">🛑 Hard Stop-Loss</div>
+            <div style="color:#c9d1d9;font-size:0.85rem">Closes the trade immediately if current P&amp;L ≤ −stop_loss_usd.</div>
+            <div style="color:#8b949e;font-size:0.82rem;margin-top:6px">Default: $50. Stop-loss price = fill price × (1 − stop_pct). Calculated at entry from dollars_invested.</div>
+          </div>
+          <div style="background:#1a1f2e;border:1px solid #30363d;border-radius:8px;padding:14px">
+            <div style="color:#f0883e;font-weight:700;margin-bottom:6px">📉 Trailing Stop</div>
+            <div style="color:#c9d1d9;font-size:0.85rem">Fires when P&amp;L drops more than trail_pct% below the trade's peak P&amp;L.</div>
+            <div style="color:#8b949e;font-size:0.82rem;margin-top:6px">Default: 30%. Only activates after the trade reaches a profit (peak P&amp;L &gt; $0). Locks in gains as the trade runs up.</div>
+          </div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;font-size:0.82rem">
+          <strong style="color:#e6edf3">Exit example with defaults:</strong> You buy AAPL at $180 with $4,750 invested. Stop-loss = $50 → stop price ≈ $178.10. If AAPL rises to $182 (peak P&amp;L = +$52.78), the trailing stop activates. If price then falls back to where P&amp;L = 52.78 × (1 − 0.30) = $36.95, the trade closes automatically.
+        </div>
+        <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">All exits use a market order. Sell limit offset: exit price × (1 − offset_bps).</div>
+      </div>
+
+      <!-- CIRCUIT BREAKER -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #f85149;padding-left:10px">⚡ Circuit Breaker — Protecting Your Capital</div>
+        <div style="background:#1a0e0e;border:1px solid #4a1f1f;border-radius:8px;padding:14px">
+          <p style="margin:0 0 8px 0">If the bot's <strong>cumulative P&amp;L across all trades reaches −max_loss_usd</strong>, the bot automatically stops itself and sets status to <strong>"stopped"</strong>. No more trades will be opened until you manually restart it.</p>
+          <p style="margin:0;color:#8b949e;font-size:0.85rem">Default max_loss_usd: <strong>$100</strong>. This is a lifetime guard — it accumulates across every trade the bot has ever taken, not just the current session.</p>
+        </div>
+      </div>
+
+      <!-- PARAMETERS REFERENCE -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">⚙️ All Parameters — What Each Setting Does</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+          <tr style="background:#161b22"><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Parameter</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Default</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Description</th></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Bot Name</strong></td><td style="padding:8px 12px;color:#8b949e">—</td><td style="padding:8px 12px;color:#8b949e">Label shown on the card. Choose something memorable.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Capital ($)</strong></td><td style="padding:8px 12px;color:#3fb950">$5,000</td><td style="padding:8px 12px;color:#8b949e">Total dollar budget this bot uses. Position size is calculated as a % of this amount.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Broker</strong></td><td style="padding:8px 12px;color:#3fb950">Alpaca</td><td style="padding:8px 12px;color:#8b949e">Alpaca (paper) or Tiger Demo. Both are paper accounts — no real money.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Min Composite Score</strong></td><td style="padding:8px 12px;color:#3fb950">60</td><td style="padding:8px 12px;color:#8b949e">Minimum score (0–100) required to enter a trade. Higher = pickier bot.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Min Conviction Grade</strong></td><td style="padding:8px 12px;color:#3fb950">C</td><td style="padding:8px 12px;color:#8b949e">Skip stocks with a conviction grade below this. A = best, F = worst.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Max VIX</strong></td><td style="padding:8px 12px;color:#3fb950">60</td><td style="padding:8px 12px;color:#8b949e">Skip all trades if VIX is above this value. Lower = more conservative in volatile markets.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Max Loss ($)</strong></td><td style="padding:8px 12px;color:#f85149">$100</td><td style="padding:8px 12px;color:#8b949e">Circuit breaker. Bot stops permanently when cumulative losses hit this amount.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Stop-Loss ($)</strong></td><td style="padding:8px 12px;color:#f85149">$50</td><td style="padding:8px 12px;color:#8b949e">Per-trade stop. Exit when this trade loses $50 or more.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Trailing Stop (%)</strong></td><td style="padding:8px 12px;color:#f0883e">30%</td><td style="padding:8px 12px;color:#8b949e">Exit when P&amp;L falls 30% below the peak P&amp;L ever reached. Protects profits.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Position Size (%)</strong></td><td style="padding:8px 12px;color:#3fb950">95%</td><td style="padding:8px 12px;color:#8b949e">How much of the capital budget to use per trade. 95% of $5,000 = $4,750 per trade.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Order Type</strong></td><td style="padding:8px 12px;color:#3fb950">auto</td><td style="padding:8px 12px;color:#8b949e">auto = market during RTH, limit outside. mkt = always market. lmt = always limit.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Allow Outside RTH</strong></td><td style="padding:8px 12px;color:#3fb950">Yes</td><td style="padding:8px 12px;color:#8b949e">Allow entries during pre-market and after-hours if a signal fires before 9:30 AM or after 4 PM.</td></tr>
+          <tr><td style="padding:8px 12px"><strong>Limit Offset (bps)</strong></td><td style="padding:8px 12px;color:#3fb950">30 bps</td><td style="padding:8px 12px;color:#8b949e">Buffer added to ask price on limit buy orders. 30 bps = 0.30% above ask to improve fill rate.</td></tr>
+        </table>
+      </div>
+
+      <!-- BOT STATES -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">🔄 Bot States</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="display:flex;gap:10px;align-items:flex-start;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px"><span style="color:#3fb950;font-size:1.2rem;margin-top:2px">▶</span><div><div style="color:#3fb950;font-weight:600">Active</div><div style="color:#8b949e;font-size:0.82rem">Bot is scanning every 5 min. Will open trades when a signal qualifies.</div></div></div>
+          <div style="display:flex;gap:10px;align-items:flex-start;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px"><span style="color:#f0883e;font-size:1.2rem;margin-top:2px">⏸</span><div><div style="color:#f0883e;font-weight:600">Paused</div><div style="color:#8b949e;font-size:0.82rem">Bot is not scanning. Any open trade is still managed and will still exit.</div></div></div>
+          <div style="display:flex;gap:10px;align-items:flex-start;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px"><span style="color:#8b949e;font-size:1.2rem;margin-top:2px">⏸</span><div><div style="color:#8b949e;font-weight:600">Paused Today</div><div style="color:#8b949e;font-size:0.82rem">Bot skips scanning for today only. Resumes automatically next market day.</div></div></div>
+          <div style="display:flex;gap:10px;align-items:flex-start;background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px"><span style="color:#f85149;font-size:1.2rem;margin-top:2px">⏹</span><div><div style="color:#f85149;font-weight:600">Stopped</div><div style="color:#8b949e;font-size:0.82rem">Circuit breaker triggered. Bot hit max_loss_usd. Restart manually when ready.</div></div></div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;margin-top:10px;color:#8b949e;font-size:0.82rem">
+          🔒 <strong style="color:#e6edf3">Locked</strong> — When a bot has an open trade, most fields are locked for editing. You can still pause or stop the bot, but changes to capital, stop-loss, and sizing only take effect on the next trade.
+        </div>
+      </div>
+
+      <!-- LIVE ACTIVITY -->
+      <div style="margin-bottom:8px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">⚡ Live Activity Feed — What the Actions Mean</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <tr style="background:#161b22"><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Action</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Meaning</th></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><span style="color:#3fb950;font-weight:600">buy</span></td><td style="padding:8px 12px;color:#8b949e">A stock passed all filters, scored above the threshold, and a buy order was placed.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><span style="color:#f0883e;font-weight:600">hold</span></td><td style="padding:8px 12px;color:#8b949e">Bot is in an open trade. Scanner deferred — exits are managed by the executor.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><span style="color:#8b949e;font-weight:600">skip_no_candidate</span></td><td style="padding:8px 12px;color:#8b949e">No stock in the universe scored above the minimum composite score this cycle.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><span style="color:#8b949e;font-weight:600">skip_filtered</span></td><td style="padding:8px 12px;color:#8b949e">Candidates were found but all failed the hard gates (earnings, liquidity, VIX, etc.).</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><span style="color:#f85149;font-weight:600">skip_circuit_breaker</span></td><td style="padding:8px 12px;color:#8b949e">Cumulative loss has hit max_loss_usd. Bot is stopped.</td></tr>
+          <tr><td style="padding:8px 12px"><span style="color:#8b949e;font-weight:600">skip_inflight</span></td><td style="padding:8px 12px;color:#8b949e">Previous scan for this bot was still running — this scan was skipped to prevent overlap.</td></tr>
+        </table>
+      </div>
+
+    </div>
   </div>
 
   <!-- ── Drilldown modal ── -->
@@ -10772,6 +10963,33 @@ function hideScHelp() {
   document.getElementById('sc-help-modal').style.display = 'none';
   document.body.style.overflow = '';
 }
+
+let _botsHelpPrevFocus = null;
+function showBotsHelp() {
+  _botsHelpPrevFocus = document.activeElement;
+  const modal = document.getElementById('bots-help-modal');
+  if (modal) {
+    const topPx = _getHeaderBottom() + 16;
+    modal.style.top       = topPx + 'px';
+    modal.style.transform = 'translateX(-50%)';
+    modal.style.maxHeight = (window.innerHeight - topPx - 24) + 'px';
+  }
+  document.getElementById('bots-help-overlay').style.display = 'block';
+  document.getElementById('bots-help-modal').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  // Move focus into the modal close button
+  const closeBtn = modal?.querySelector('button[title="Close"]');
+  if (closeBtn) closeBtn.focus();
+}
+function hideBotsHelp() {
+  document.getElementById('bots-help-overlay').style.display = 'none';
+  document.getElementById('bots-help-modal').style.display = 'none';
+  document.body.style.overflow = '';
+  if (_botsHelpPrevFocus) { _botsHelpPrevFocus.focus(); _botsHelpPrevFocus = null; }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('bots-help-modal')?.style.display !== 'none') hideBotsHelp();
+});
 
 let _scData = null;
 

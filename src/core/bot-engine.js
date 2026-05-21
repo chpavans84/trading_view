@@ -85,9 +85,9 @@ export async function scanBot(bot) {
         `all ${universe.length} candidates already held by other bots`);
     }
 
-    // 3. Score each candidate (cap at 30 per scan)
+    // 3. Score each candidate (cap at 50 per scan)
     const scored = [];
-    for (const symbol of filtered.slice(0, 30)) {
+    for (const symbol of filtered.slice(0, 50)) {
       try {
         const result = await _scoreCandidate(symbol, bot);
         if (result) scored.push(result);
@@ -125,46 +125,71 @@ export async function scanBot(bot) {
 // ─── Candidate universe ───────────────────────────────────────────────────────
 
 async function _buildCandidateUniverse(bot) {
-  const set = new Set();
+  const universe = new Map();
+  const bump = (sym, w) => {
+    const s = String(sym || '').toUpperCase();
+    if (!s) return;
+    universe.set(s, (universe.get(s) || 0) + w);
+  };
 
-  // Source A: bot owner's watchlist
-  const ownerUsername = await _usernameForUserId(bot.user_id);
-  if (ownerUsername) {
-    const { rows: wl } = await query(
-      `SELECT symbol FROM user_watchlist WHERE username=$1`,
-      [ownerUsername]
+  // Source 1: UW flow alerts — institutional money flow (HIGHEST priority)
+  try {
+    const { rows: flow } = await query(
+      `SELECT ticker, premium FROM uw_flow_alerts
+       WHERE alerted_at > NOW() - INTERVAL '6 hours' AND premium >= 100000
+       ORDER BY premium DESC LIMIT 50`
     );
-    wl.forEach(r => set.add(r.symbol.toUpperCase()));
-  }
+    flow.forEach(r => bump(r.ticker, 10 + Math.min(5, Math.log10(Number(r.premium) || 1) - 5)));
+  } catch (e) { console.warn('[bot-engine] uw_flow query failed:', e.message); }
 
-  // Source B: recent UW flow alerts (last 6 h, premium > $100k)
-  const { rows: flow } = await query(
-    `SELECT DISTINCT ticker FROM uw_flow_alerts
-     WHERE alerted_at > NOW() - INTERVAL '6 hours'
-       AND premium >= 100000
-     LIMIT 30`
-  );
-  flow.forEach(r => set.add(r.ticker.toUpperCase()));
+  // Source 2: Benzinga positive news catalysts (HIGH priority)
+  try {
+    const { rows: news } = await query(
+      `SELECT t.ticker, COUNT(*)::int AS n
+       FROM benzinga_news bn, jsonb_array_elements_text(bn.tickers) AS t(ticker)
+       WHERE bn.published_at > NOW() - INTERVAL '1 hour' AND bn.sentiment = 'positive'
+       GROUP BY t.ticker HAVING COUNT(*) >= 3 LIMIT 50`
+    );
+    news.forEach(r => bump(r.ticker, 8 + Math.min(4, r.n - 3)));
+  } catch (e) { console.warn('[bot-engine] news query failed:', e.message); }
 
-  // Source C: tickers with ≥3 positive news items in the last hour
-  const { rows: news } = await query(
-    `SELECT DISTINCT t.ticker
-     FROM benzinga_news bn,
-          jsonb_array_elements_text(bn.tickers) AS t(ticker)
-     WHERE bn.published_at > NOW() - INTERVAL '1 hour'
-       AND bn.sentiment = 'positive'
-     GROUP BY t.ticker
-     HAVING COUNT(*) >= 3
-     LIMIT 20`
-  );
-  news.forEach(r => set.add(r.ticker.toUpperCase()));
+  // Source 3: UW top movers — price action catalysts (MEDIUM priority)
+  try {
+    const { rows: movers } = await query(
+      `SELECT DISTINCT ticker FROM uw_top_movers
+       WHERE captured_at > NOW() - INTERVAL '1 hour' LIMIT 100`
+    );
+    movers.forEach(r => bump(r.ticker, 5));
+  } catch (e) { console.warn('[bot-engine] movers query failed:', e.message); }
 
-  return [...set];
-}
+  // Source 4: Filtered tradable universe — large-cap liquid base (BASELINE priority)
+  const filters      = bot.rules?.entry_filters ?? {};
+  const minMktCapB   = filters.market_cap_min_b  ?? 5;
+  const minAdvDollar = filters.min_adv_dollar_vol ?? 5_000_000;
+  const minPrice     = filters.price_min ?? 5;
+  const maxPrice     = filters.price_max ?? 500;
+  try {
+    const { rows: base } = await query(
+      `SELECT symbol FROM tradable_universe
+       WHERE market_cap_usd >= $1
+         AND adv_dollar_30d  >= $2
+         AND last_price BETWEEN $3 AND $4
+         AND fractionable = TRUE
+       ORDER BY adv_dollar_30d DESC
+       LIMIT 800`,
+      [minMktCapB * 1_000_000_000, minAdvDollar, minPrice, maxPrice]
+    );
+    base.forEach(r => bump(r.symbol, 1));
+  } catch (e) { console.warn('[bot-engine] tradable_universe query failed:', e.message); }
 
-async function _usernameForUserId(userId) {
-  const { rows } = await query(`SELECT username FROM users WHERE id=$1`, [userId]);
-  return rows[0]?.username ?? null;
+  // Sort by priority desc, cap at 200
+  const ranked = [...universe.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 200)
+    .map(([sym]) => sym);
+
+  console.log(`[bot-engine] universe built: ${ranked.length} candidates (top 5: ${ranked.slice(0, 5).join(', ')})`);
+  return ranked;
 }
 
 async function _getHeldSymbolsForUser(userId, excludeBotId) {

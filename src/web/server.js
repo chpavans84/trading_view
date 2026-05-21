@@ -130,6 +130,7 @@ import { checkUnusualOptions } from '../core/options-scanner.js';
 import { runBotScanForAllActive, scanBot, startBotEngineCrons } from '../core/bot-engine.js';
 import { runExecutorForAllActive, processBot, startBotExecutorCrons } from '../core/bot-executor.js';
 import { reconcileBotPositions } from '../core/bot-reconciler.js';
+import { syncTradableUniverse } from '../core/universe-sync.js';
 
 // ─── Process-level error handlers ─────────────────────────────────────────────
 process.on('uncaughtException', async (e) => {
@@ -7495,6 +7496,18 @@ app.post('/api/bots/reconcile', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/admin/universe-sync — trigger tradable universe sync manually (idempotent, admin only)
+app.post('/api/admin/universe-sync', requireAdmin, async (req, res) => {
+  try {
+    const force = req.query.force === 'true' || req.body?.force === true;
+    const result = await syncTradableUniverse({ force });
+    res.json({ ok: true, result });
+  } catch (e) {
+    console.error('[universe-sync] route error:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/bots/:id/trades
 app.get('/api/bots/:id/trades', requireAuth, async (req, res) => {
   try {
@@ -8361,6 +8374,9 @@ startBotEngineCrons();
 
 // ─── Bot Executor Crons (B-3) ─────────────────────────────────────────────────
 startBotExecutorCrons();
+
+// ─── Tradable Universe Sync — 8:00 AM ET Mon–Fri ─────────────────────────────
+cron.schedule('0 8 * * 1-5', () => syncTradableUniverse(), { timezone: 'America/New_York' });
 
 // ─── Pre-market News Scanner — 4:00 AM ET Mon–Fri ────────────────────────────
 cron.schedule('0 4 * * 1-5', async () => {
