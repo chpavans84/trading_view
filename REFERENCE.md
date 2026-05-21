@@ -1072,7 +1072,6 @@ The regime bot is its own PM2 process (`trading-regime-bot`). Its crons are regi
 
 ---
 
-<a name="part-7"></a>
 # Part VII — The Regime Bot (Markov-Gated Experiment)
 
 This part describes a separate, isolated bot that runs alongside the main bot system but shares no state with it. If you skipped Part III, that is fine — Part VII is self-contained. If you read Part III, the most important thing to remember is that the regime bot is a different bot, in a different directory, with different tables, on a different schedule. It exists to answer one specific research question, and once that question is answered we will decide whether to fold its strategy into the main bot or retire it entirely.
