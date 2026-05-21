@@ -799,6 +799,9 @@ app.get('/docs', requireAuth, async (req, res) => {
     const mdPath = join(__dirname, '../..', 'REFERENCE.md');
     const md = fs.readFileSync(mdPath, 'utf8');
     const body = marked.parse(md);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!DOCTYPE html>
 <html lang="en">
