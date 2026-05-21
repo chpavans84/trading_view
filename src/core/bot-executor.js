@@ -21,6 +21,15 @@ import { getUwConvictionForSymbol } from './uw-conviction.js';
 import { getNewsSentimentForSymbol } from './news-sentiment-modifier.js';
 import { getEarningsProximity } from './bot-indicators.js';
 
+// ─── Broker → account_source normalizer ──────────────────────────────────────
+// DB convention: Alpaca paper trades stored as 'alpaca_paper'.
+// bot.broker is 'alpaca' (the broker key), not the DB source tag.
+function _normalizeAccountSource(broker) {
+  if (broker === 'alpaca')     return 'alpaca_paper';
+  if (broker === 'tiger_demo') return 'tiger_demo';
+  return broker;
+}
+
 // ─── Per-setup exit rules (B-3.7) ─────────────────────────────────────────────
 
 const EXIT_RULES_BY_SETUP = {
@@ -329,7 +338,7 @@ async function _tryOpenPosition(bot) {
     conviction_grade:  null,
     conviction_breakdown: decision.factor_breakdown ?? null,
     username:          null,
-    account_source:    bot.broker,
+    account_source:    _normalizeAccountSource(bot.broker),
     setup_type:        decision.setup_type ?? null,
     thesis:            decision.thesis ?? null,
     expected_hold_days_min: decision.factor_breakdown?.setup_classification?.expected_hold_days_min ?? null,

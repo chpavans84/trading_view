@@ -6,7 +6,7 @@
 // - Trade POSTs: background-sync queue while offline
 // - Push notifications + notificationclick deep-link (Phase 5)
 
-const CACHE = 'trading-v23';
+const CACHE = 'trading-v25';
 
 const STATIC_PRECACHE = [
   '/mobile.html',

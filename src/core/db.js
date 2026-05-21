@@ -1330,7 +1330,15 @@ export async function getTrades({ status, username, account_source, limit = 50 }
     const params = [];
     if (status)         { where.push(`status = $${params.length + 1}`);         params.push(status); }
     if (username)       { where.push(`username = $${params.length + 1}`);       params.push(username); }
-    if (account_source) { where.push(`(account_source = $${params.length + 1} OR account_source IS NULL)`); params.push(account_source); }
+    if (account_source) {
+      if (account_source === 'alpaca_paper') {
+        // Accept both canonical 'alpaca_paper' and legacy 'alpaca' tag from bot-executor
+        where.push(`(account_source IN ('alpaca_paper', 'alpaca') OR account_source IS NULL)`);
+      } else {
+        where.push(`(account_source = $${params.length + 1} OR account_source IS NULL)`);
+        params.push(account_source);
+      }
+    }
     params.push(limit);
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const { rows } = await query(
