@@ -182,7 +182,7 @@
     <button class="nav-notif-btn" id="navNotifBtn" onclick="toggleNotifPanel()" title="AI Notifications">
       🔔<span id="notifBadge"></span>
     </button>
-    <button class="nav-analyst-btn" onclick="toggleChat()" title="AI Trading Analyst">🤖 AKSHAYA AI</button>
+    <button class="nav-analyst-btn" onclick="toggleChat()" title="AI Trading Analyst">🤖 DLPInnovations AI</button>
   </div>
 </nav>
 
@@ -17048,7 +17048,7 @@ function exploreSymbol(sym) {
     <!-- ── AI CHAT VIEW ── -->
     <div id="exViewAiChat" style="display:none;flex-direction:column;height:100%">
       <div id="exAiSymbolBanner" style="padding:6px 12px;font-size:0.75rem;color:var(--text2);background:var(--card-bg);border-bottom:1px solid var(--border);flex-shrink:0">
-        Ask Akshaya AI about a stock — search a symbol first or type your question freely.
+        Ask DLPInnovations AI about a stock — search a symbol first or type your question freely.
       </div>
       <!-- Chat messages -->
       <div id="exAiMessages" style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-height:200px">
@@ -17164,7 +17164,7 @@ const _EX_HELP = {
   aichat: {
     title: '🤖 AI Chat Tab',
     items: [
-      ['What context AI has', 'Before every answer, Akshaya AI is automatically loaded with: the current symbol\'s live price and daily change, conviction score breakdown, 5-day forecast, any open position size and average cost, last 5 Benzinga news headlines with sentiment, and active UW flow alerts. You never need to paste this manually.'],
+      ['What context AI has', 'Before every answer, DLPInnovations AI is automatically loaded with: the current symbol\'s live price and daily change, conviction score breakdown, 5-day forecast, any open position size and average cost, last 5 Benzinga news headlines with sentiment, and active UW flow alerts. You never need to paste this manually.'],
       ['Analysis questions', '"Why is the conviction score 42 for NVDA?" · "What do the Bollinger Bands say?" · "Summarise today\'s news and whether it\'s bullish or bearish."'],
       ['Trade questions', '"If I buy 50 shares of TSLA at market, what\'s my max loss to the EMA-50?" · "Show my last 3 trades for AAPL." · "Should I add to my position here or wait for a pullback?"'],
       ['One-click Trade Proposals', 'The AI can generate signed trade proposals that appear as approve/ignore buttons in the chat. Each proposal has a fixed expiry (30 min). It never sends an order without your click — you are always the final decision-maker.'],
@@ -20681,7 +20681,7 @@ function exAiUpdateBanner() {
   const banner = document.getElementById('exAiSymbolBanner');
   if (banner) banner.textContent = sym
     ? `Asking about: ${sym} — or type any question.`
-    : 'Ask Akshaya AI about a stock — search a symbol first or type your question freely.';
+    : 'Ask DLPInnovations AI about a stock — search a symbol first or type your question freely.';
 }
 
 async function exAiSend() {

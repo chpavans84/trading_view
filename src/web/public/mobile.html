@@ -1077,7 +1077,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);
       <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="Chat messages"></div>
       <div class="chat-input-bar">
         <button class="chat-icon-btn chat-mic-btn" id="chat-mic" onclick="toggleMic()" aria-label="Voice input">🎙️</button>
-        <textarea class="chat-input" id="chat-input" placeholder="Ask Akshaya…" rows="1" aria-label="Message input"></textarea>
+        <textarea class="chat-input" id="chat-input" placeholder="Ask DLPInnovations…" rows="1" aria-label="Message input"></textarea>
         <button class="chat-icon-btn chat-send-btn" id="chat-send" onclick="sendChat()" aria-label="Send">⬆️</button>
       </div>
     </div>
@@ -2906,7 +2906,7 @@ async function loadAI() {
     if (!msgs.length) {
       container.innerHTML = `<div class="empty-state" style="padding:40px 0">
         <div style="font-size:2.5rem;margin-bottom:10px">🤖</div>
-        <div style="font-weight:700;color:var(--text2);font-size:.95rem">Akshaya AI</div>
+        <div style="font-weight:700;color:var(--text2);font-size:.95rem">DLPInnovations AI</div>
         <div style="font-size:.78rem;margin-top:6px;color:var(--text3)">Your personal trading assistant</div>
         <div style="font-size:.72rem;margin-top:4px;color:var(--text3)">Tap a prompt above or type below</div>
       </div>`;
@@ -3053,7 +3053,7 @@ async function clearChat() {
     const container = document.getElementById('chat-messages');
     container.innerHTML = `<div class="empty-state" style="padding:40px 0">
       <div style="font-size:2.5rem;margin-bottom:10px">🤖</div>
-      <div style="font-weight:700;color:var(--text2)">Akshaya AI</div>
+      <div style="font-weight:700;color:var(--text2)">DLPInnovations AI</div>
       <div style="font-size:.78rem;margin-top:6px;color:var(--text3)">Chat cleared</div>
     </div>`;
     toast('Chat cleared');

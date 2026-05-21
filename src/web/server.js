@@ -781,7 +781,13 @@ app.get('/cert', (req, res) => {
 });
 
 // ─── /docs — Reference book ───────────────────────────────────────────────────
+// Production-only. Staging (DASHBOARD_PORT=3001 in .env.staging) returns 404.
+// Single source of truth: REFERENCE.md is read fresh on every request — no
+// caching, no UAT-vs-prod copies to keep in sync.
 app.get('/docs', requireAuth, async (req, res) => {
+  if (process.env.DASHBOARD_PORT) {
+    return res.status(404).send('Documentation is available on production only.');
+  }
   try {
     const mdPath = join(__dirname, '../..', 'REFERENCE.md');
     const md = fs.readFileSync(mdPath, 'utf8');
@@ -792,7 +798,7 @@ app.get('/docs', requireAuth, async (req, res) => {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Akshaya Platform — Reference</title>
+<title>DLPInnovations Platform — Reference</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -1035,7 +1041,7 @@ app.get('/docs', requireAuth, async (req, res) => {
 </head>
 <body>
 <header>
-  <div class="logo">Akshaya <span>/ Reference</span></div>
+  <div class="logo">DLPInnovations <span>/ Reference</span></div>
   <div class="search-box">
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#6e7681" stroke-width="1.5"/><path d="M11 11l3 3" stroke="#6e7681" stroke-width="1.5" stroke-linecap="round"/></svg>
     <input type="text" id="toc-search" placeholder="Search chapters…" autocomplete="off">

@@ -1,4 +1,4 @@
-# Akshaya Trading Platform — The Complete Reference
+# DLPInnovations Trading Platform — The Complete Reference
 
 > **Last updated:** 2026-05-21  
 > **How to keep this current:** When you add a table, route, feature, or module, find the right chapter and update it. This document is the single source of truth — written to be read, not just searched.
@@ -40,7 +40,7 @@
 <a name="preface"></a>
 ## Preface — What This Book Is
 
-This document is a reference book for the Akshaya Trading Platform. It is written to be *read* — to help you understand how the system thinks, why it was designed the way it was, and what each piece does before you have to look up a specific field name or route path.
+This document is a reference book for the DLPInnovations Trading Platform. It is written to be *read* — to help you understand how the system thinks, why it was designed the way it was, and what each piece does before you have to look up a specific field name or route path.
 
 The technical tables and route lists are here — but they are the *last* thing in each section, not the first. Before every reference table you will find an explanation of what it represents, why it exists, and how it connects to the rest of the system.
 
@@ -57,7 +57,7 @@ Most retail traders operate with a fundamental disadvantage: the tools available
 
 This platform was built to close that gap.
 
-At its core, Akshaya is an AI-powered trading intelligence system. It connects to your real brokerage accounts — Alpaca (paper and live), Tiger Brokers, and Moomoo — and gives you a unified view of your positions and P&L. But beyond portfolio management, it does something more ambitious: it continuously analyzes the market to find high-conviction trade opportunities, and it can act on those opportunities automatically through a configurable bot system.
+At its core, DLPInnovations is an AI-powered trading intelligence system. It connects to your real brokerage accounts — Alpaca (paper and live), Tiger Brokers, and Moomoo — and gives you a unified view of your positions and P&L. But beyond portfolio management, it does something more ambitious: it continuously analyzes the market to find high-conviction trade opportunities, and it can act on those opportunities automatically through a configurable bot system.
 
 The platform does several things in parallel, all day, every market day:
 
@@ -532,7 +532,7 @@ The cache is versioned (`trading-v25` as of this writing). Increment the version
 
 `src/web/public/mobile.html` is the mobile PWA, deployed as a separate experience from the desktop dashboard. It is a fully independent 5-tab application optimized for touch interaction on iPhone and iPad, designed to be installed as a home screen app.
 
-The five tabs are: Home (positions and quick actions), Trade (order placement), Bots (bot status and control), Portfolio (P&L history and charts), and AI (the Akshaya AI chat interface).
+The five tabs are: Home (positions and quick actions), Trade (order placement), Bots (bot status and control), Portfolio (P&L history and charts), and AI (the DLPInnovations AI chat interface).
 
 The mobile app uses the same backend API as the desktop. There is no separate server — it is the same Express instance, the same authentication, the same data. The difference is purely in the frontend: simpler layout, larger touch targets, bottom navigation, bottom sheet modals instead of overlays.
 
@@ -818,7 +818,7 @@ All routes are served by `src/web/server.js`. Auth levels: **Public** (no auth),
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/chat` | Auth | SSE streaming chat (Akshaya AI) |
+| POST | `/api/chat` | Auth | SSE streaming chat (DLPInnovations AI) |
 | GET | `/api/chat/history` | Auth | Last 20 messages for a chatId |
 | POST | `/api/knowledge/add` | Admin | Add knowledge chunk |
 | GET | `/api/knowledge/search` | Auth | Search knowledge base |

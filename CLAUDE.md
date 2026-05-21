@@ -317,7 +317,7 @@ Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ Trading
 | sentinel_runs | 📨 Sentinel Activity — last 20 sentinel runs with risk/proposal counts. Click row for full JSON detail. Auto-refresh 5min. |
 
 ### Floating / overlay widgets
-- **Chat widget** (Akshaya AI) — draggable, touch-enabled, saves position. FAB button + nav button. Logo: `GARUDA_SEARCH.PNG`.
+- **Chat widget** (DLPInnovations AI) — draggable, touch-enabled, saves position. FAB button + nav button. Logo: `GARUDA_SEARCH.PNG`.
 - **Stock Explorer** — left-side floating panel, touch resize on iPad, overlay mode on tablet (backdrop).
 - **News Drawer** — right-side sliding drawer.
 - **Notifications panel** — top-right overlay.
