@@ -4507,3 +4507,20 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   border-top: 1px solid #21262d;
   flex-wrap: wrap;
 }
+
+/* ── B-3.7 Setup Type Badges ─────────────────────────────────────── */
+.setup-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  line-height: 1.5;
+}
+.setup-catalyst        { background: rgba(240,136, 62,0.18); color: #f0883e; border: 1px solid rgba(240,136, 62,0.35); }
+.setup-breakout        { background: rgba( 63,185, 80,0.15); color: #3fb950; border: 1px solid rgba( 63,185, 80,0.30); }
+.setup-momentum        { background: rgba( 88,166,255,0.15); color: #58a6ff; border: 1px solid rgba( 88,166,255,0.30); }
+.setup-value_contrarian{ background: rgba(188,140,255,0.15); color: #bc8cff; border: 1px solid rgba(188,140,255,0.30); }
+.setup-mean_reversion  { background: rgba(255,197, 61,0.15); color: #ffc53d; border: 1px solid rgba(255,197, 61,0.30); }

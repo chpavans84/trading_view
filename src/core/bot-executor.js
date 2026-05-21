@@ -17,6 +17,30 @@ import { query, isDbAvailable, recordTrade, closeTrade } from './db.js';
 import { decryptCredential } from './crypto.js';
 import { placeTigerOrder, closeTigerPosition, getTigerQuote } from './tiger.js';
 import { placeQuickTrade, closePosition, getLatestPrice } from './trader.js';
+import { getUwConvictionForSymbol } from './uw-conviction.js';
+import { getNewsSentimentForSymbol } from './news-sentiment-modifier.js';
+import { getEarningsProximity } from './bot-indicators.js';
+
+// ─── Per-setup exit rules (B-3.7) ─────────────────────────────────────────────
+
+const EXIT_RULES_BY_SETUP = {
+  catalyst:         { hard_sl_pct: 0.03, trail_pct: 25, time_stop_days:  3,
+                      exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
+  breakout:         { hard_sl_pct: 0.04, trail_pct: 30, time_stop_days: 21,
+                      exit_on_uw_flip: true,  exit_on_news: false, exit_before_earnings: true },
+  momentum:         { hard_sl_pct: 0.03, trail_pct: 30, time_stop_days:  7,
+                      exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
+  value_contrarian: { hard_sl_pct: 0.07, trail_pct: 45, time_stop_days: 30,
+                      exit_on_uw_flip: false, exit_on_news: true,  exit_before_earnings: true },
+  mean_reversion:   { hard_sl_pct: 0.05, trail_pct: 35, time_stop_days: 15,
+                      exit_on_uw_flip: false, exit_on_news: true,  exit_before_earnings: true,
+                      exit_on_ma50_cross: true },
+};
+
+const LEGACY_EXIT_RULES = {
+  hard_sl_pct: 0.03, trail_pct: 30, time_stop_days: 5,
+  exit_on_uw_flip: true, exit_on_news: true, exit_before_earnings: true,
+};
 
 // ─── Quote helpers ────────────────────────────────────────────────────────────
 
@@ -131,18 +155,25 @@ export async function processBot(bot) {
       return { skipped: true, reason: `broker '${bot.broker}' not allowed in B-3` };
     }
 
-    // Circuit breaker — stop bot if cumulative loss exceeds max
-    const maxLoss = bot.rules?.risk?.max_loss_usd ?? 100;
-    const cumPnl  = Number(bot.cumulative_pnl_usd) || 0;
-    if (cumPnl <= -maxLoss && bot.status !== 'stopped') {
+    // Circuit breaker — trip if cumulative loss exceeds max (or 10% of capital as fallback)
+    const capital     = Number(bot.capital_usd) || 0;
+    const maxLoss     = Number(bot.rules?.risk?.max_loss_usd) || (capital * 0.10) || 100;
+    const cumPnl      = Number(bot.cumulative_pnl_usd) || 0;
+    const breakerTrip = cumPnl <= -maxLoss;
+
+    if (breakerTrip && bot.status !== 'stopped') {
       await query(
         `UPDATE bots SET status='stopped', status_message=$1, status_changed_at=NOW(), updated_at=NOW() WHERE id=$2`,
-        [`Cumulative loss reached max ($${maxLoss})`, bot.id]
+        [`Cumulative loss reached max ($${maxLoss.toFixed(2)})`, bot.id]
       );
-      return { skipped: true, reason: 'circuit_breaker_tripped' };
     }
 
+    // Always manage an existing open position (graceful exit even after breaker trip)
     if (bot.current_trade_id) return await _manageOpenPosition(bot);
+
+    // Block new opens if breaker tripped
+    if (breakerTrip) return { skipped: true, reason: 'circuit_breaker_tripped' };
+
     return await _tryOpenPosition(bot);
   } finally {
     _runningBots.delete(bot.id);
@@ -281,7 +312,7 @@ async function _tryOpenPosition(bot) {
   const stopPct     = qty > 0 ? +((stopLossUsd / dollarsInvested) * 100).toFixed(2) : 3;
   const stopPrice   = +(fillPrice * (1 - stopPct / 100)).toFixed(2);
 
-  // 7. Record trade and tag with bot_id
+  // 7. Record trade and tag with bot_id + setup classification
   const tradeId = await recordTrade({
     order_id:    order.order_id,
     symbol,
@@ -299,6 +330,10 @@ async function _tryOpenPosition(bot) {
     conviction_breakdown: decision.factor_breakdown ?? null,
     username:          null,
     account_source:    bot.broker,
+    setup_type:        decision.setup_type ?? null,
+    thesis:            decision.thesis ?? null,
+    expected_hold_days_min: decision.factor_breakdown?.setup_classification?.expected_hold_days_min ?? null,
+    expected_hold_days_max: decision.factor_breakdown?.setup_classification?.expected_hold_days_max ?? null,
   });
   if (!tradeId) {
     console.error(`[bot-executor] bot ${bot.id} recordTrade FAILED — order ${order.order_id} placed on broker but no DB row created!`,
@@ -347,19 +382,77 @@ async function _manageOpenPosition(bot) {
     trade.peak_pnl_usd = peakPnl;
   }
 
-  // Check hard stop-loss (dollar threshold)
-  const stopLossUsd = bot.rules?.exit_rules?.stop_loss_usd ?? 50;
-  if (currentPnl <= -stopLossUsd) {
+  // Per-setup exit rules
+  const exitRules    = EXIT_RULES_BY_SETUP[trade.setup_type] ?? LEGACY_EXIT_RULES;
+  const dollarsInvested = parseFloat(trade.entry_price) * parseFloat(trade.qty);
+  const hardSlUsd    = dollarsInvested * exitRules.hard_sl_pct;
+
+  // Hard stop
+  if (currentPnl <= -hardSlUsd) {
     return await _closeTrade(bot, trade, currentPrice, 'stop_loss');
   }
 
-  // Check trailing stop: once in profit, close if we give back trail_pct% of peak gain
-  const trailPct = bot.rules?.exit_rules?.trail_pct ?? 30;
-  if (peakPnl > 0 && currentPnl < peakPnl * (1 - trailPct / 100)) {
+  // Trailing stop
+  const trailFrac = exitRules.trail_pct / 100;
+  if (peakPnl > 0 && currentPnl < peakPnl * (1 - trailFrac)) {
     return await _closeTrade(bot, trade, currentPrice, 'trailing_stop');
   }
 
-  return { action: 'hold', symbol, current_pnl: currentPnl, peak_pnl: peakPnl };
+  // Time stop
+  const heldDays = (Date.now() - new Date(trade.opened_at).getTime()) / 86_400_000;
+  if (heldDays >= exitRules.time_stop_days) {
+    return await _closeTrade(bot, trade, currentPrice, 'time_stop');
+  }
+
+  // Pre-earnings exit
+  if (exitRules.exit_before_earnings) {
+    try {
+      const eb = await getEarningsProximity(symbol);
+      const buffer = bot.rules?.entry_filters?.avoid_earnings_within_days ?? 3;
+      if (eb?.days_until != null && eb.days_until >= 0 && eb.days_until <= buffer) {
+        return await _closeTrade(bot, trade, currentPrice, 'pre_earnings');
+      }
+    } catch { /* graceful degrade */ }
+  }
+
+  // UW sentiment flip
+  if (exitRules.exit_on_uw_flip) {
+    try {
+      const uw = await getUwConvictionForSymbol(symbol);
+      const lbl = uw?.composite?.label;
+      if (lbl === 'bearish' || lbl === 'strong_bearish') {
+        return await _closeTrade(bot, trade, currentPrice, 'uw_flipped_bearish');
+      }
+    } catch { /* graceful degrade */ }
+  }
+
+  // Negative news spike
+  if (exitRules.exit_on_news) {
+    try {
+      const news = await getNewsSentimentForSymbol(symbol);
+      if (news?.label === 'negative' && (news.article_count ?? 0) >= 3) {
+        return await _closeTrade(bot, trade, currentPrice, 'news_negative_spike');
+      }
+    } catch { /* graceful degrade */ }
+  }
+
+  // MA50 cross (mean_reversion setup only)
+  if (exitRules.exit_on_ma50_cross) {
+    try {
+      const { rows: maRows } = await query(
+        `SELECT AVG(close) AS ma50 FROM backtest_prices
+         WHERE symbol = $1 AND price_date > NOW() - INTERVAL '50 days'`,
+        [symbol.toUpperCase()]
+      );
+      const ma50 = maRows[0]?.ma50 ? Number(maRows[0].ma50) : null;
+      if (ma50 != null && currentPrice > ma50) {
+        return await _closeTrade(bot, trade, currentPrice, 'ma50_cross');
+      }
+    } catch { /* graceful degrade */ }
+  }
+
+  return { action: 'hold', symbol, current_pnl: currentPnl, peak_pnl: peakPnl,
+           setup_type: trade.setup_type, days_held: +heldDays.toFixed(1) };
 }
 
 async function _closeTrade(bot, trade, exitPrice, reason) {

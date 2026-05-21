@@ -9606,10 +9606,12 @@ async function loadTrades() {
     </div>
     ${trades.length === 0 ? '<div class="empty">No trades found</div>' : `
     <table>
-      <tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>ATR%</th><th>Score</th><th>Status</th><th>P&L</th><th>Opened</th></tr>
+      <tr><th>Symbol</th><th>Bot</th><th>Setup</th><th>Side</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>ATR%</th><th>Score</th><th>Status</th><th>P&L</th><th>Opened</th></tr>
       ${trades.map(t => `
         <tr>
           ${symCell(t.symbol, t.name)}
+          <td style="font-size:0.8rem">${t.bot_name ? `<a href="#" onclick="event.stopPropagation();botsDrilldown(${t.bot_id})" style="color:#58a6ff;text-decoration:none">${t.bot_name}</a>` : '—'}</td>
+          <td>${t.setup_type ? `<span class="setup-badge setup-${t.setup_type.toLowerCase()}">${t.setup_type.toUpperCase()}</span>` : '—'}</td>
           <td>${t.side === 'buy' ? '📈' : '📉'} ${t.side}</td>
           <td>${t.qty}</td>
           <td>${fmtDollar(t.entry_price)}</td>
@@ -22136,7 +22138,7 @@ function _botCard(b) {
       <div class="bots-stat"><span class="bots-stat-label">Win %</span><span class="bots-stat-val">${wr}%</span></div>
       <div class="bots-stat"><span class="bots-stat-label">P&amp;L</span><span class="bots-stat-val" style="color:${pnlColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span></div>
     </div>
-    ${locked && !archived ? '<div class="bots-lock-note">🔒 Fields locked — trade in progress</div>' : ''}
+    ${locked && !archived ? `<div class="bots-lock-note">🔒 Fields locked — trade in progress${b.current_setup_type ? ` &nbsp;<span class="setup-badge setup-${b.current_setup_type.toLowerCase()}">${b.current_setup_type.toUpperCase()}</span>` : ''}</div>` : ''}
     <div class="bots-card-actions">${actions}</div>`;
 }
 
@@ -22470,9 +22472,10 @@ async function _botLoadDecisionsFeed() {
       const cls    = isBuy ? 'bot-decision-buy' : isErr ? 'bot-decision-error' : 'bot-decision-skip';
       const icon   = isBuy ? '✅' : isErr ? '❌' : '⏸';
       const sym    = d.symbol ? `<span class="bot-decision-symbol">${_escHtml(d.symbol)}</span> · ` : '';
+      const setupBadge = d.setup_type ? `<span class="setup-badge setup-${d.setup_type.toLowerCase()}">${d.setup_type.toUpperCase()}</span> · ` : '';
       return `<div class="bot-decision-row" onclick="botsDrilldown(${d.bot_id})">
         <div><span class="bot-decision-time">${tStr}</span> <span class="bot-decision-name">${_escHtml(d.bot_name)}</span></div>
-        <div>${sym}<span class="bot-decision-score">score ${score}</span> <span class="${cls}">${icon} ${_escHtml(d.action)}${d.notes?` — ${_escHtml(d.notes.slice(0,40))}`  :''}</span></div>
+        <div>${sym}${setupBadge}<span class="bot-decision-score">score ${score}</span> <span class="${cls}">${icon} ${_escHtml(d.action)}${d.notes?` — ${_escHtml(d.notes.slice(0,40))}`  :''}</span></div>
       </div>`;
     }).join('');
   } catch (e) {
@@ -22535,12 +22538,51 @@ async function botsDrilldown(id) {
     const fmtPnl  = v => v == null ? '—' : (v >= 0 ? '+' : '') + '$' + Math.abs(v).toFixed(2);
     const pnlColor = totalPnl >= 0 ? '#3fb950' : '#f85149';
 
+    // Current Position panel (when bot holds an open trade)
+    const openTrade = trades.find(t => t.status === 'open');
+    const setupBadge = st => st ? `<span class="setup-badge setup-${st.toLowerCase()}">${st.toUpperCase()}</span>` : '';
+    const exitRulesBySetup = {
+      catalyst:         { hard_sl_pct: 0.03, trail_pct: 25, time_stop_days:  5, exit_before_earnings: true, exit_on_uw_flip: true, exit_on_news: true },
+      breakout:         { hard_sl_pct: 0.04, trail_pct: 30, time_stop_days: 21, exit_before_earnings: true, exit_on_uw_flip: true, exit_on_news: false },
+      momentum:         { hard_sl_pct: 0.03, trail_pct: 30, time_stop_days:  7, exit_before_earnings: true, exit_on_uw_flip: true, exit_on_news: true },
+      value_contrarian: { hard_sl_pct: 0.07, trail_pct: 45, time_stop_days: 30, exit_before_earnings: true, exit_on_uw_flip: false, exit_on_news: true },
+      mean_reversion:   { hard_sl_pct: 0.05, trail_pct: 35, time_stop_days: 20, exit_before_earnings: true, exit_on_uw_flip: false, exit_on_news: true },
+    };
+    const currentPositionHtml = openTrade ? (() => {
+      const er = exitRulesBySetup[openTrade.setup_type] ?? { hard_sl_pct: 0.03, trail_pct: 30, time_stop_days: 5, exit_before_earnings: true };
+      const dollarsIn = parseFloat(openTrade.entry_price) * parseFloat(openTrade.qty);
+      const hardSlPct = (er.hard_sl_pct * 100).toFixed(0);
+      const heldMs = Date.now() - new Date(openTrade.opened_at).getTime();
+      const heldDays = (heldMs / 86_400_000).toFixed(1);
+      const thesis = openTrade.thesis?.text ?? openTrade.thesis ?? null;
+      const minDays = openTrade.expected_hold_days_min;
+      const maxDays = openTrade.expected_hold_days_max;
+      const holdRange = (minDays != null && maxDays != null) ? `${minDays}–${maxDays} expected days` : '';
+      return `<div class="bot-current-position-panel">
+        <div class="bot-current-position-header">
+          🎯 Current Position: <strong style="color:#58a6ff">${_escHtml(openTrade.symbol)}</strong>
+          ${openTrade.setup_type ? setupBadge(openTrade.setup_type) : ''}
+        </div>
+        ${holdRange ? `<div style="font-size:0.78rem;color:#8b949e;margin-bottom:8px">Held ${heldDays} of ${holdRange}</div>` : ''}
+        ${thesis ? `<div class="bot-current-thesis">"${_escHtml(thesis)}"</div>` : ''}
+        <div class="bot-current-exit-triggers">
+          <div class="bot-exit-trigger-title">Exit triggers:</div>
+          <div>☐ Hard stop −${hardSlPct}%</div>
+          <div>☐ Trailing ${er.trail_pct}% off peak</div>
+          <div>☐ ${er.time_stop_days}-day time stop</div>
+          ${er.exit_before_earnings ? '<div>☐ Pre-earnings exit</div>' : ''}
+          ${er.exit_on_uw_flip ? '<div>☐ UW sentiment flip to bearish</div>' : ''}
+          ${er.exit_on_news ? '<div>☐ Negative news spike (3+ articles)</div>' : ''}
+        </div>
+      </div>`;
+    })() : '';
+
     const tradesHtml = trades.length ? `
       <div class="bot-section-title">Trade History (last ${trades.length})</div>
       <div style="overflow-x:auto">
         <table class="bot-trade-history-table">
           <thead><tr>
-            <th>Opened</th><th>Symbol</th><th>Qty</th>
+            <th>Opened</th><th>Symbol</th><th>Setup</th><th>Qty</th>
             <th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Status</th><th>Hold</th>
           </tr></thead>
           <tbody>
@@ -22552,6 +22594,7 @@ async function botsDrilldown(id) {
               return `<tr>
                 <td>${new Date(t.opened_at).toLocaleDateString()}</td>
                 <td style="font-weight:700;color:#58a6ff">${_escHtml(t.symbol)}</td>
+                <td>${t.setup_type ? setupBadge(t.setup_type) : '—'}</td>
                 <td>${Number(t.qty).toFixed(0)}</td>
                 <td>$${Number(t.entry_price).toFixed(2)}</td>
                 <td>${t.exit_price ? '$'+Number(t.exit_price).toFixed(2) : '—'}</td>

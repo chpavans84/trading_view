@@ -542,6 +542,18 @@ DO $$ BEGIN
 EXCEPTION WHEN others THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS idx_trades_bot_id ON trades(bot_id);
 
+-- B-3.7: Setup classification columns
+ALTER TABLE bot_decisions ADD COLUMN IF NOT EXISTS setup_type VARCHAR(30);
+ALTER TABLE bot_decisions ADD COLUMN IF NOT EXISTS thesis JSONB;
+CREATE INDEX IF NOT EXISTS idx_bot_decisions_setup ON bot_decisions(setup_type);
+
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS setup_type VARCHAR(30);
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS thesis JSONB;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS expected_hold_days_min INT;
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS expected_hold_days_max INT;
+CREATE INDEX IF NOT EXISTS idx_trades_setup ON trades(setup_type);
+CREATE INDEX IF NOT EXISTS idx_trades_bot_id_status ON trades(bot_id, status);
+
 CREATE TABLE IF NOT EXISTS catalyst_performance (
   id           SERIAL PRIMARY KEY,
   trade_date   DATE NOT NULL,
@@ -1237,6 +1249,8 @@ export async function recordTrade({
   status = 'open', exit_price = null, pnl_usd = null, pnl_pct = null,
   slippage_cents = null,
   account_source = null,
+  setup_type = null, thesis = null,
+  expected_hold_days_min = null, expected_hold_days_max = null,
 }) {
   if (!dbAvailable) return null;
   try {
@@ -1246,8 +1260,9 @@ export async function recordTrade({
          (order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
           dollars_invested, stop_loss_pct, take_profit_pct, atr_pct,
           conviction_score, conviction_grade, conviction_breakdown, username,
-          status, exit_price, pnl_usd, pnl_pct, closed_at, slippage_cents, account_source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+          status, exit_price, pnl_usd, pnl_pct, closed_at, slippage_cents, account_source,
+          setup_type, thesis, expected_hold_days_min, expected_hold_days_max)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
        ON CONFLICT (order_id) DO NOTHING
        RETURNING id`,
       [order_id, symbol, side, qty, entry_price, stop_loss, take_profit,
@@ -1256,7 +1271,9 @@ export async function recordTrade({
        conviction_breakdown ? JSON.stringify(conviction_breakdown) : null,
        username ?? null,
        status, exit_price ?? null, pnl_usd ?? null, pnl_pct ?? null, closedAt,
-       slippage_cents ?? null, account_source ?? null]
+       slippage_cents ?? null, account_source ?? null,
+       setup_type ?? null, thesis ? JSON.stringify(thesis) : null,
+       expected_hold_days_min ?? null, expected_hold_days_max ?? null]
     );
     if (!rows.length) {
       console.warn(`[recordTrade] no row returned — likely ON CONFLICT collision on order_id=${order_id}`);
@@ -1317,7 +1334,10 @@ export async function getTrades({ status, username, account_source, limit = 50 }
     params.push(limit);
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const { rows } = await query(
-      `SELECT * FROM trades ${whereClause} ORDER BY opened_at DESC LIMIT $${params.length}`,
+      `SELECT t.*, b.name AS bot_name
+       FROM trades t
+       LEFT JOIN bots b ON b.id = t.bot_id
+       ${whereClause} ORDER BY t.opened_at DESC LIMIT $${params.length}`,
       params
     );
     return rows;
@@ -2682,7 +2702,8 @@ export async function getRecentBotDecisions(userId, limit = 20) {
   try {
     const { rows } = await query(`
       SELECT bd.id AS decision_id, bd.bot_id, b.name AS bot_name,
-             bd.scanned_at, bd.action, bd.symbol, bd.composite_score, bd.notes
+             bd.scanned_at, bd.action, bd.symbol, bd.composite_score, bd.notes,
+             bd.setup_type, bd.thesis
       FROM bot_decisions bd
       JOIN bots b ON b.id = bd.bot_id
       WHERE b.user_id = $1
@@ -2706,7 +2727,8 @@ export async function getBotTrades(botId, userId, limit = 50) {
     const { rows } = await query(`
       SELECT id, symbol, qty, entry_price, exit_price, pnl_usd,
              status, opened_at, closed_at, stop_loss,
-             conviction_score, conviction_grade, account_source
+             conviction_score, conviction_grade, account_source,
+             setup_type, thesis, expected_hold_days_min, expected_hold_days_max
       FROM trades
       WHERE bot_id = $1
       ORDER BY opened_at DESC

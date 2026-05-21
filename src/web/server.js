@@ -49,6 +49,7 @@ import { runSentinel, signToken, verifyToken } from '../core/sentinel.js';
 import { pageSuccess, pageExpired, pageAlreadyActioned, pagePriceMoved, pageTokenInvalid, pageConfirmExecute, pageConfirmIgnore } from '../core/sentinel-pages.js';
 import { getImpactAnalysis } from '../core/graph-impact.js';
 import { getStockPrediction } from '../core/predictor.js';
+import { marked } from 'marked';
 import YahooFinance from 'yahoo-finance2';
 const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 
@@ -780,6 +781,357 @@ app.get('/cert', (req, res) => {
   res.setHeader('Content-Type', 'application/x-x509-ca-cert');
   res.setHeader('Content-Disposition', 'attachment; filename="tradingbot.crt"');
   res.sendFile(certPath);
+});
+
+// ─── /docs — Reference book ───────────────────────────────────────────────────
+app.get('/docs', requireAuth, async (req, res) => {
+  try {
+    const mdPath = join(__dirname, '../..', 'REFERENCE.md');
+    const md = fs.readFileSync(mdPath, 'utf8');
+    const body = marked.parse(md);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Akshaya Platform — Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --bg-sidebar:#161b22;
+    --bg-card:   #1c2128;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --text-muted:#8b949e;
+    --text-dim:  #6e7681;
+    --accent:    #58a6ff;
+    --accent2:   #3fb950;
+    --accent3:   #d2a8ff;
+    --warn:      #f0883e;
+    --code-bg:   #161b22;
+    --sidebar-w: 280px;
+    --header-h:  52px;
+  }
+
+  html { scroll-behavior: smooth; font-size: 15px; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  /* ── Top bar ── */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: var(--header-h);
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 20px;
+  }
+  header .logo { font-weight: 700; font-size: 1rem; color: var(--accent); letter-spacing: -0.02em; }
+  header .logo span { color: var(--text-muted); font-weight: 400; }
+  header .back-link {
+    margin-left: auto; font-size: 0.82rem; color: var(--text-muted);
+    text-decoration: none; display: flex; align-items: center; gap: 5px;
+    padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
+    transition: border-color .15s, color .15s;
+  }
+  header .back-link:hover { color: var(--text); border-color: #6e7681; }
+  .search-box {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; width: 220px;
+  }
+  .search-box input {
+    background: none; border: none; outline: none;
+    color: var(--text); font-size: 0.82rem; width: 100%;
+    font-family: inherit;
+  }
+  .search-box input::placeholder { color: var(--text-dim); }
+
+  /* ── Layout ── */
+  .layout {
+    display: flex;
+    margin-top: var(--header-h);
+    min-height: calc(100vh - var(--header-h));
+  }
+
+  /* ── Sidebar ── */
+  nav.sidebar {
+    position: fixed; top: var(--header-h); bottom: 0; left: 0;
+    width: var(--sidebar-w);
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px 0 40px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  nav.sidebar::-webkit-scrollbar { width: 4px; }
+  nav.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .sidebar-section { margin-bottom: 4px; }
+  .sidebar-part {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-dim);
+    padding: 10px 18px 4px;
+  }
+  .sidebar a {
+    display: block; padding: 5px 18px; font-size: 0.82rem;
+    color: var(--text-muted); text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: color .12s, border-color .12s, background .12s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sidebar a.h2 { padding-left: 18px; }
+  .sidebar a.h3 { padding-left: 30px; font-size: 0.78rem; color: var(--text-dim); }
+  .sidebar a:hover { color: var(--text); background: rgba(88,166,255,.06); }
+  .sidebar a.active {
+    color: var(--accent); border-left-color: var(--accent);
+    background: rgba(88,166,255,.08);
+  }
+  .sidebar a.hidden { display: none; }
+
+  /* ── Main content ── */
+  main {
+    margin-left: var(--sidebar-w);
+    flex: 1;
+    max-width: 900px;
+    padding: 48px 52px 80px;
+  }
+
+  /* ── Typography ── */
+  main h1 {
+    font-size: 2rem; font-weight: 700; color: var(--text);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px; margin: 56px 0 20px;
+    letter-spacing: -0.03em;
+  }
+  main h1:first-child { margin-top: 0; }
+
+  main h2 {
+    font-size: 1.35rem; font-weight: 600; color: var(--text);
+    margin: 44px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  main h3 {
+    font-size: 1.05rem; font-weight: 600;
+    color: var(--accent3); margin: 30px 0 10px;
+  }
+  main h4 {
+    font-size: 0.92rem; font-weight: 600;
+    color: var(--accent2); margin: 22px 0 8px;
+  }
+
+  main p { line-height: 1.75; color: #cdd9e5; margin-bottom: 14px; }
+  main p:last-child { margin-bottom: 0; }
+
+  main strong { color: var(--text); font-weight: 600; }
+  main em { color: var(--warn); font-style: normal; font-weight: 500; }
+
+  main a { color: var(--accent); text-decoration: none; }
+  main a:hover { text-decoration: underline; }
+
+  main ul, main ol {
+    margin: 10px 0 16px 20px; line-height: 1.8;
+    color: #cdd9e5;
+  }
+  main li { margin-bottom: 4px; }
+
+  main blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 10px 16px;
+    background: rgba(88,166,255,.05);
+    border-radius: 0 6px 6px 0;
+    margin: 16px 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+
+  main hr {
+    border: none; border-top: 1px solid var(--border);
+    margin: 40px 0;
+  }
+
+  /* ── Code ── */
+  main code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82em;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: #f47067;
+  }
+  main pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    margin: 14px 0 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  main pre::-webkit-scrollbar { height: 4px; }
+  main pre::-webkit-scrollbar-thumb { background: var(--border); }
+  main pre code {
+    background: none; border: none; padding: 0;
+    font-size: 0.83rem; color: #adbac7;
+    line-height: 1.6;
+  }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; margin: 14px 0 20px; border-radius: 8px; border: 1px solid var(--border); }
+  main table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  main thead { background: var(--bg-card); }
+  main th {
+    text-align: left; padding: 10px 14px;
+    color: var(--text-muted); font-weight: 600; font-size: 0.78rem;
+    text-transform: uppercase; letter-spacing: .04em;
+    border-bottom: 1px solid var(--border);
+  }
+  main td {
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(48,54,61,.6);
+    color: #cdd9e5; vertical-align: top;
+    line-height: 1.5;
+  }
+  main tr:last-child td { border-bottom: none; }
+  main tr:hover td { background: rgba(88,166,255,.03); }
+  main td code { font-size: 0.78rem; }
+
+  /* Chapter marker */
+  .chapter-label {
+    display: inline-block; font-size: 0.72rem; font-weight: 700;
+    letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-dim); margin-bottom: 6px;
+  }
+
+  /* ── Print ── */
+  @media print {
+    header, nav.sidebar { display: none !important; }
+    main { margin: 0; padding: 20px; max-width: 100%; }
+    main h1, main h2 { break-after: avoid; }
+    main pre, main table { break-inside: avoid; }
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 800px) {
+    nav.sidebar { display: none; }
+    main { margin-left: 0; padding: 24px 20px 60px; }
+    header .search-box { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Akshaya <span>/ Reference</span></div>
+  <div class="search-box">
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="5.5" stroke="#6e7681" stroke-width="1.5"/><path d="M11 11l3 3" stroke="#6e7681" stroke-width="1.5" stroke-linecap="round"/></svg>
+    <input type="text" id="toc-search" placeholder="Search chapters…" autocomplete="off">
+  </div>
+  <a href="/" class="back-link">← Dashboard</a>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar"></nav>
+  <main id="content">${body}</main>
+</div>
+<script>
+  // Wrap all tables in a scrollable div
+  document.querySelectorAll('main table').forEach(t => {
+    const w = document.createElement('div');
+    w.className = 'table-wrap';
+    t.parentNode.insertBefore(w, t);
+    w.appendChild(t);
+  });
+
+  // Build sidebar TOC from headings
+  const sidebar = document.getElementById('sidebar');
+  const headings = document.querySelectorAll('main h1, main h2, main h3');
+  let currentPart = null;
+
+  headings.forEach((h, i) => {
+    // Ensure heading has an id
+    if (!h.id) {
+      h.id = 'h-' + i + '-' + h.textContent.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    }
+    const tag = h.tagName.toLowerCase();
+    const text = h.textContent.trim();
+
+    if (tag === 'h1' && (text.startsWith('Part ') || text === 'Preface — What This Book Is' || text === 'Appendix — Changelog')) {
+      const part = document.createElement('div');
+      part.className = 'sidebar-part';
+      part.textContent = text;
+      sidebar.appendChild(part);
+      currentPart = null;
+      return;
+    }
+
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.textContent = text;
+    a.className = tag;
+    a.dataset.text = text.toLowerCase();
+    sidebar.appendChild(a);
+  });
+
+  // Active section highlight on scroll
+  const allLinks = sidebar.querySelectorAll('a');
+  const allHeadings = Array.from(headings);
+  let ticking = false;
+  window.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const scrollY = window.scrollY + 80;
+      let active = allHeadings[0];
+      for (const h of allHeadings) {
+        if (h.offsetTop <= scrollY) active = h;
+        else break;
+      }
+      allLinks.forEach(a => {
+        a.classList.toggle('active', active && a.getAttribute('href') === '#' + active.id);
+      });
+      // Scroll active link into view in sidebar
+      const activeLink = sidebar.querySelector('a.active');
+      if (activeLink) {
+        const sr = sidebar.getBoundingClientRect();
+        const lr = activeLink.getBoundingClientRect();
+        if (lr.top < sr.top + 40 || lr.bottom > sr.bottom - 40) {
+          activeLink.scrollIntoView({ block: 'nearest' });
+        }
+      }
+      ticking = false;
+    });
+  });
+
+  // Sidebar search
+  document.getElementById('toc-search').addEventListener('input', function() {
+    const q = this.value.trim().toLowerCase();
+    allLinks.forEach(a => {
+      a.classList.toggle('hidden', q.length > 0 && !a.dataset.text.includes(q));
+    });
+  });
+</script>
+</body>
+</html>`);
+  } catch (e) {
+    console.error('[docs] render error:', e);
+    res.status(500).send('Could not load documentation: ' + e.message);
+  }
 });
 
 // ─── Public client-error endpoint (before requireAuth) ───────────────────────
@@ -7181,29 +7533,29 @@ const BOT_DEFAULT_RULES = {
     avoid_premarket_gap_above_pct: 8,
   },
   exit_rules: {
-    stop_loss_usd: 50,
-    trail_pct: 30,
-    time_stop_days: 5,
+    legacy_stop_loss_usd: 50,
+    legacy_trail_pct: 30,
+    legacy_time_stop_days: 5,
     exit_on_news_volume_spike_negative: true,
     exit_on_uw_flipped_bearish: true,
     exit_before_earnings: true,
   },
   sizing: {
-    position_size_pct: 95,
-    vix_aggressive_multiplier: 1.0,
+    position_size_pct: 60,
+    vix_aggressive_multiplier: 1.3,
   },
   composite_weights: {
     conviction:   0.10,
-    news:         0.20,
-    uw_options:   0.25,
+    news:         0.22,
+    uw_options:   0.30,
     gex:          0.15,
     insider:      0.15,
-    distance_52w: 0.10,
-    predictor:    0.05,
+    distance_52w: 0.08,
+    predictor:    0.00,
   },
   risk: {
-    max_loss_usd: 100,
-    daily_loss_limit_usd: 100,
+    max_loss_usd: null,
+    daily_loss_limit_usd: null,
     pause_after_n_losses: 3,
   },
   execution: {
@@ -7227,8 +7579,8 @@ function _validateBotRules(rules) {
     if (sum < 0.95 || sum > 1.05)
       return `composite_weights must sum to ~1.0 (got ${sum.toFixed(3)})`;
   }
-  if (rules.risk?.max_loss_usd !== undefined && rules.risk.max_loss_usd <= 0)
-    return 'risk.max_loss_usd must be > 0';
+  if (rules.risk?.max_loss_usd !== undefined && rules.risk.max_loss_usd !== null && rules.risk.max_loss_usd <= 0)
+    return 'risk.max_loss_usd must be > 0 or null';
   return null;
 }
 
@@ -7286,6 +7638,19 @@ app.get('/api/bots', requireAuth, async (req, res) => {
         b.lifetime_wins     = s ? Number(s.lifetime_wins)   : 0;
         b.lifetime_pnl      = s ? Number(s.lifetime_pnl)    : 0;
         b.last_trade_at     = s?.last_trade_at ?? null;
+      }
+      // Attach setup_type of current open trade for badge display (always present, null when no open trade)
+      for (const b of bots) b.current_setup_type = null;
+      const openTradeIds = bots.filter(b => b.current_trade_id).map(b => b.current_trade_id);
+      if (openTradeIds.length) {
+        const { rows: openTrades } = await query(
+          `SELECT id, setup_type FROM trades WHERE id = ANY($1)`,
+          [openTradeIds]
+        );
+        const openMap = Object.fromEntries(openTrades.map(t => [t.id, t.setup_type]));
+        for (const b of bots) {
+          b.current_setup_type = b.current_trade_id ? (openMap[b.current_trade_id] ?? null) : null;
+        }
       }
     }
     res.json({ bots });

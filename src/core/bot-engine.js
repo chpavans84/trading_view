@@ -14,6 +14,7 @@ import { query, isDbAvailable } from './db.js';
 import { getUwConvictionForSymbol } from './uw-conviction.js';
 import { getNewsSentimentForSymbol } from './news-sentiment-modifier.js';
 import { getAllBotIndicators } from './bot-indicators.js';
+import { classifySetup, computeLast5dReturn, computeRsi14, getFundamentalsGrowth } from './bot-setup-classifier.js';
 
 // ─── Single-flight guard per bot ──────────────────────────────────────────────
 const _runningBots = new Set();
@@ -97,8 +98,8 @@ export async function scanBot(bot) {
     }
 
     if (!scored.length) {
-      return await _log(bot.id, 'skip_filtered', null, null, null,
-        `${filtered.length} candidates evaluated, none passed hard gates`);
+      return await _log(bot.id, filtered.length > 0 ? 'skip_unclassifiable_setup' : 'skip_filtered', null, null, null,
+        `${filtered.length} candidates evaluated, none passed hard gates or setup classification`);
     }
 
     // 4. Pick top scorer
@@ -112,7 +113,8 @@ export async function scanBot(bot) {
 
     // 5. Log WOULD-TRADE decision — no actual trade placed
     return await _log(bot.id, 'buy', top.symbol, top.composite, top.breakdown,
-      `WOULD BUY ${top.symbol} @ composite ${top.composite.toFixed(1)} (B-3 will execute)`);
+      `WOULD BUY ${top.symbol} @ composite ${top.composite.toFixed(1)} setup=${top.setup_type} (B-3 will execute)`,
+      top.setup_type ?? null, top.thesis ?? null);
 
   } catch (e) {
     console.error(`[bot-engine] scanBot(${bot.id}) error:`, e);
@@ -314,15 +316,39 @@ async function _scoreCandidate(symbol, bot) {
     : 1.0;
   const suggested_size_usd = Math.min(capital, baseSize * vixMult);
 
+  // ── Setup classification (B-3.7) ─────────────────────────────────────────
+  const [last5dReturn, rsi14, fundamentals] = await Promise.all([
+    computeLast5dReturn(symbol).catch(() => null),
+    computeRsi14(symbol).catch(() => null),
+    getFundamentalsGrowth(symbol).catch(() => null),
+  ]);
+
+  const setup = await classifySetup({
+    signals,
+    indicators: { ...ind, symbol },
+    rsi: rsi14,
+    fundamentals,
+    last5dReturn,
+  }).catch(() => null);
+
+  // Reject unclassifiable — setup discipline gate
+  if (!setup) return null;
+
   return {
     symbol,
     composite: +composite.toFixed(2),
+    setup_type: setup.setup_type,
+    thesis:     setup.thesis,
+    expected_hold_days_min: setup.expected_hold_days_min,
+    expected_hold_days_max: setup.expected_hold_days_max,
     breakdown: {
       vix,
       signals,
       weights: w,
       suggested_size_usd: +suggested_size_usd.toFixed(2),
       indicators: ind,
+      rsi14, last5dReturn,
+      setup_classification: setup,
     },
   };
 }
@@ -442,19 +468,21 @@ async function _getCurrentVix() {
 
 // ─── Decision logger ──────────────────────────────────────────────────────────
 
-async function _log(botId, action, symbol, composite, factor_breakdown, notes) {
+async function _log(botId, action, symbol, composite, factor_breakdown, notes, setup_type = null, thesis = null) {
   try {
     await query(
       `INSERT INTO bot_decisions
-         (bot_id, action, symbol, composite_score, factor_breakdown, notes)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6)`,
+         (bot_id, action, symbol, composite_score, factor_breakdown, notes, setup_type, thesis)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::jsonb)`,
       [botId, action, symbol, composite,
-       factor_breakdown ? JSON.stringify(factor_breakdown) : null, notes]
+       factor_breakdown ? JSON.stringify(factor_breakdown) : null, notes,
+       setup_type ?? null,
+       thesis ? JSON.stringify(thesis) : null]
     );
   } catch (e) {
     console.error('[bot-engine] log failed:', e.message);
   }
-  return { action, symbol, composite, notes };
+  return { action, symbol, composite, notes, setup_type, thesis };
 }
 
 // ─── Cron registration ────────────────────────────────────────────────────────
