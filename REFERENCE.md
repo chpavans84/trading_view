@@ -31,6 +31,8 @@
   - [Chapter 15 — The Complete API Reference](#chapter-15)
   - [Chapter 16 — Configuration and Environment Variables](#chapter-16)
   - [Chapter 17 — Scheduled Jobs and Cron Timetable](#chapter-17)
+- **Part VII — The Regime Bot (Markov-Gated Experiment)**
+  - [Chapter 18 — The Regime Bot End to End](#chapter-18)
 - [Appendix — Changelog](#changelog)
 
 ---
@@ -1058,12 +1060,398 @@ All crons are registered in `src/web/server.js` using `node-cron`. Times are in 
 | Sat 10 PM ET | ML pipeline (weekly) | Full weekend training run with latest data |
 | Sun 6 PM ET | `runSentinel()` | Sunday evening pre-week risk review |
 
+### Regime Bot crons (Part VII)
+
+The regime bot is its own PM2 process (`trading-regime-bot`). Its crons are registered inside that process and do not run in `trading-dashboard`. See Chapter 18 for the full strategy description.
+
+| Time (ET) | Job | What it does |
+|-----------|-----|--------------|
+| Daily 4:05 PM (Mon–Fri) | `regimeRefreshJob()` | Walks all 116 tickers in the basket, refreshes `regime_cache` with today's Markov output. After-hours so prices are settled. |
+| Daily 9:31 AM (Mon–Fri) | `decisionJob()` → `runScanTick()` | Reads cached regime + computes 50/200 SMA primary signal for every ticker, writes 116 rows to `regime_bot_decisions`, ranks top 10. No orders placed in current phase. |
+| On daemon startup | `regimeRefreshJob()` (boot warm-up) | Ensures the first decision tick after a restart has a warm cache. Skipped if `regime_cache` is already populated for today. |
+
+---
+
+<a name="part-7"></a>
+# Part VII — The Regime Bot (Markov-Gated Experiment)
+
+This part describes a separate, isolated bot that runs alongside the main bot system but shares no state with it. If you skipped Part III, that is fine — Part VII is self-contained. If you read Part III, the most important thing to remember is that the regime bot is a different bot, in a different directory, with different tables, on a different schedule. It exists to answer one specific research question, and once that question is answered we will decide whether to fold its strategy into the main bot or retire it entirely.
+
+<a name="chapter-18"></a>
+## Chapter 18 — The Regime Bot End to End
+
+### 18.1 What is this bot and why does it exist?
+
+The regime bot is an experiment. Specifically, it is an experiment in *gating* — using a market regime model to permit or block trades that another, simpler signal generates.
+
+Here is the question we are trying to answer:
+
+> If a simple, well-understood trading signal (the 50/200 SMA crossover, used by traders for fifty years) tells me to enter a long position, does adding a *regime filter* on top of it — "only enter if the model thinks we are in a Bull regime" — improve the strategy's performance, hurt it, or do nothing?
+
+That is the entire experiment. We are not trying to invent a new alpha. We are not promising the bot will outperform anything. We are running a controlled measurement: same primary signal in all conditions, the only thing that varies is whether the regime gate is permitting trades or blocking them. After enough trading days we look at the numbers and answer "did the gate help, hurt, or do nothing."
+
+If you have been using the main bot from Part III, the differences are important to keep in mind:
+
+| | Main bot (Part III, "B-3.7") | Regime bot (Part VII) |
+|---|---|---|
+| Signal source | Composite of 7+ factors (UW flow, news, options Greeks, insider trades, calibrated predictor, etc.) | Just one: 50/200 SMA crossover |
+| Setup classification | Yes — 5 setup types with bespoke exit rules | No — every entry is treated the same way |
+| Per-user, multi-bot | Up to 3 bots per user | Single shared bot for now |
+| DB tables | `bots`, `bot_decisions`, `trades`, `trade_postmortems`, `bot_rules_versions` | `regime_cache`, `regime_bot_decisions`, `regime_bot_trades` |
+| PM2 process | `trading-dashboard` (runs in the main web server) | `trading-regime-bot` (its own process) |
+| Maturity | Live in production | Phase 4 — logs decisions, does not yet place orders |
+
+The regime bot does not write to any table the main bot uses. The main bot does not know the regime bot exists. They could be uninstalled independently. This isolation is deliberate: if the regime experiment turns out to be useless, we delete one directory and three tables and the main system is unaffected.
+
+### 18.2 The two parts — primary signal and regime gate
+
+The bot has two completely separate pieces that come together at decision time. Think of them like two voices that have to agree before a trade happens.
+
+**Voice 1: the primary signal.** This is a 50-day vs 200-day Simple Moving Average crossover, long-only. For each stock the bot watches, every day it computes the average closing price over the last 50 trading days and over the last 200 trading days. If the 50-day average is *above* the 200-day average, the primary signal says "we are in an uptrend, consider going long." If it is below, the primary signal says "we are in a downtrend, do not be long." A small hysteresis band (0.05% of the slow average) prevents the signal from flipping back and forth on tiny noise around the crossover.
+
+Why this signal in particular? Three reasons:
+
+1. It is the canonical reference for tactical asset allocation. Faber's 2007 paper ("A Quantitative Approach to Tactical Asset Allocation") is the most cited paper in the field, and the 50/200 cross is the textbook example.
+2. It is *boring*. We do not want the primary signal to do anything clever — we want every interesting bit of the experiment to come from the gate. If the primary were also smart, we could not tell which part contributed what.
+3. It triggers infrequently — typically a few times per year per ticker. That means most "decisions" are "no action," which keeps the dataset clean and the audit log readable.
+
+**Voice 2: the regime gate.** This is the Markov regime model — a probabilistic classifier that takes a price history and decides which of three regimes the market is currently in: Bull, Bear, or Sideways. The math behind it (Hidden Markov Models with Chapman-Kolmogorov forward inference) is borrowed from an open-source project; we vendor their Python script and run it as a subprocess. Conceptually it answers the question "given the way the last few months have looked, what kind of market is this?"
+
+**Bringing the voices together: binary AND.** The bot enters a long position only when both voices agree:
+
+- Primary signal must be +1 (50-day SMA above 200-day SMA), AND
+- Regime gate must report `current_regime == "Bull"`
+
+If either voice disagrees, no entry. If we are currently holding a position and either voice flips (primary says exit, OR regime turns non-Bull), we exit. This is intentionally strict — we want the gate to *do something measurable*, so making it strict surfaces its effect quickly.
+
+### 18.3 What does "regime" actually mean?
+
+If you have not used a regime model before, here is the rough intuition.
+
+The Markov model looks at the last several years of daily returns for one stock or ETF and asks: "based on patterns of returns and volatility, can I divide history into a small number of *states* that look different from each other?" It settles on three:
+
+- **Bull** — periods where average returns are high and volatility is moderate. The model is saying "trending up cleanly."
+- **Bear** — periods where average returns are negative and volatility is often elevated. The model is saying "trending down."
+- **Sideways** — periods where returns are mean-reverting around zero. The model is saying "chopping, no clear direction."
+
+For each ticker, the model produces:
+
+- A label of the current regime (one of those three).
+- Probabilities for what the *next* regime is likely to be (e.g., "bull → bear transitions only 2% of the time, bull → sideways 10%, bull → bull 88% — this regime is sticky").
+- A composite "signal" score derived from the regime probabilities, somewhere between -1 and +1.
+- A "persistence diagonal" number — how often the model stays in the same regime from one window to the next. High persistence (around 0.85) means regimes change slowly; low persistence means the market chops.
+- A walk-forward backtest of the model's own performance (informational only — these numbers do not include trading costs, so they are not directly comparable to ours).
+
+The bot uses the regime label to gate, and the signal × persistence product to rank ties among gate-passing tickers. It ignores the next-state probabilities and the walk-forward Sharpe in the live decision (those are stored for audit but do not feed the gate).
+
+**Important caveat:** the model is not magic. The diagonal "stickiness" is partly an artifact of the overlapping 20-day windows used to detect regime. The walk-forward Sharpe is computed without transaction costs. The "Bull / Bear / Sideways" buckets are a useful coarse summary, not a precise market forecast. We are using the regime as a *filter*, not as a source of truth.
+
+### 18.4 The 116-instrument basket
+
+The bot watches a fixed basket of 116 instruments:
+
+**101 large-cap US stocks** — drawn from the S&P 100 (the OEX index, which is the 100 largest companies in the S&P 500 by market capitalization). Seven names that should be in the SP100 (MO, LOW, SLB, MMM, MMC, FDX, UPS) are excluded because they are not currently in our `backtest_prices` historical price table. The bot will trade them once those gaps are backfilled.
+
+**15 ETFs** that exercise the regime model in different ways:
+
+- 4 broad-market index ETFs: SPY (S&P 500), QQQ (Nasdaq 100), IWM (Russell 2000), DIA (Dow Jones)
+- 11 SPDR Select Sector ETFs covering every GICS sector: XLF (financials), XLE (energy), XLU (utilities), XLK (technology), XLV (health care), XLI (industrials), XLB (materials), XLP (consumer staples), XLY (consumer discretionary), XLRE (real estate), XLC (communication services)
+
+Why 116 specifically, and why this mix? Three goals:
+
+1. **Statistical power.** One ticker would not produce enough trade events to tell whether the gate is doing anything. 116 instruments × a few signal events per year = enough samples to compute Sharpe ratios with meaningful confidence intervals.
+2. **Regime diversity.** Different stocks live in different regimes at different times. A tech mega-cap can be in Bull while a defensive utility is in Sideways and an energy ETF is in Bear. Watching all three lets the gate distinguish broad-market state from sector-specific state.
+3. **Coverage of the experiment.** Sector ETFs are the strongest test of regime-driven rotation. If the gate is real, it should work on XLF / XLE / XLU. If it only works on SPY by luck, sector ETFs will expose that.
+
+The basket is defined in `src/regime-bot/config.js` (exports `SP100`, `ETFS`, and the combined `TICKER_BASKET`). All 116 names are verified to exist in the `backtest_prices` table at startup; if you ever see a missing-data error, run `npm run research:download` and `npm run research:download-etfs` to backfill.
+
+### 18.5 How a daily decision is made — the engine flow
+
+Every weekday, the bot does two things on schedule:
+
+**At 4:05 PM ET (after the close)** the bot runs the *regime refresh* job. For each of the 116 tickers it asks the Markov script "what is today's regime for this ticker?" If we already computed today's answer earlier, the cache returns it instantly. If we have not, the bot extracts the ticker's daily close prices from `backtest_prices`, writes them to a temporary CSV file, spawns the vendored Python script via `uv`, parses the JSON output, and stores the result in the `regime_cache` table keyed by `(ticker, today's date)`. The full refresh takes 8–20 minutes on the first run (one Python subprocess per ticker) and a few seconds on subsequent runs (pure cache reads).
+
+**At 9:31 AM ET (one minute after the open)** the bot runs the *decision tick*. For every ticker in the basket:
+
+1. Compute the primary signal from `backtest_prices` (loads enough recent closes to get a 50-day and 200-day moving average).
+2. Read today's regime from `regime_cache` (almost always a cache hit — we refreshed yesterday after close).
+3. Apply the gate logic: primary signal +1 AND regime "Bull" → tentatively enter long. Anything else → block.
+4. If the ticker would have entered, compute a strength score = `|markov_signal| × persistence_diagonal`. This is the tie-breaker that decides which tickers make the top-10 list when more entries qualify than we have slots for.
+5. Write one row to `regime_bot_decisions` recording the full state: primary signal value, regime, all probabilities, gate verdict, action taken, and (for top-10 only) the rank.
+
+After the loop, the bot ranks all gate-passing entries by strength, tags the top 10 with `gate_rank` 1 through 10, prints a summary to its log, and stops. In the current phase it does *not* place orders; it just records what it would have done.
+
+If you trace one ticker through the full pipeline:
+
+```
+backtest_prices (Postgres)
+        │
+        │  daily closes for SPY, 2021-05-21 → 2026-05-20
+        ▼
+price-loader.js (writes CSV)
+        │
+        │  tmp/regime-prices/SPY_20260520.csv
+        ▼
+uv run markov_regime.py --csv ... --json
+        │
+        │  { current_regime: "Sideways", signal: 0.033, ... }
+        ▼
+markov-gate.js (parses JSON, caches to regime_cache)
+        │
+        │  regime_cache row: ticker=SPY, as_of_date=2026-05-21, regime=Sideways
+        ▼
+primary-signal.js                    markov-gate.js
+        │                                    │
+        │ +1 (50 SMA > 200 SMA)               │ blocked: regime_sideways
+        │                                    │
+        └─────────── engine.js ───────────────┘
+                          │
+                          │  action=blocked, gate_passed=false
+                          ▼
+                regime_bot_decisions row
+```
+
+That is the complete daily story for one ticker. Repeat 116 times.
+
+### 18.6 Top-N ranking and position sizing
+
+When the gate passes for many tickers on the same day, the bot needs to decide which subset to actually trade — otherwise capital gets diluted across too many small positions. The strategy uses an Option-A model: **top 10 concurrent positions, $10,000 per position**, configurable in `EXECUTION` in the config file.
+
+How the top 10 are chosen: among all tickers where (primary signal = +1) AND (regime = Bull), each one gets a strength score:
+
+```
+strength = |markov_signal| × persistence_diagonal
+```
+
+The intuition: `markov_signal` measures how confident the model is in the current regime (close to +1 = strongly Bull, close to 0 = uncertain Bull), and `persistence_diagonal` measures how sticky regimes have been recently (close to 1.0 = regimes change slowly, close to 0.3 = they flip often). Their product gives more weight to tickers where the model is both confident and stable.
+
+The top 10 by strength get `gate_rank = 1, 2, …, 10` written to their `regime_bot_decisions` row. Tickers ranked 11+ stay flagged `action_taken = enter_long` (because the gate did pass) but with `gate_rank = NULL`. This is important for the eventual research question: we want to be able to look back at the rows we *didn't* trade and compute what their counterfactual return would have been, to measure whether the top-N filter helps or hurts.
+
+Position sizing is intentionally fixed-dollar rather than percentage-of-account. With a $100K paper account and 10 positions at $10K each, the math is trivial and the bot's positions do not collide with anything else trading in the same Alpaca paper account.
+
+### 18.7 Fail-closed — when things go wrong
+
+Software fails. yfinance has outages. Python scripts crash. Disk fills up. The bot has to behave predictably when those happen.
+
+The chosen policy is **fail-closed**: any error in the Markov subprocess — non-zero exit code, timeout, unparseable JSON, missing dependency, network problem — results in `current_regime = 'unknown'`, which is *not* in the allowed-regimes list, so the gate blocks the trade. Every blocked-by-failure event writes a `regime_bot_decisions` row with `blocked_reason = 'regime_unavailable: <error detail>'`.
+
+The opposite policy (fail-open: "if we cannot evaluate the gate, take the trade anyway") was considered and rejected. The whole point of the bot is to test whether the gate adds discipline. Letting trades through when the gate is broken would defeat that purpose and could cause real losses on real data.
+
+A consecutive-failure threshold catches persistent problems. If the same ticker fails 3 times in a row, the bot writes an `[ALERT]`-tagged line to stderr (visible in `pm2 logs trading-regime-bot`) and appends a JSON line to `data/regime-bot/alerts.jsonl`. This makes it easy to spot a single ticker that has rotted (e.g., delisted, ticker changed) versus a system-wide failure.
+
+### 18.8 The three tables
+
+The bot uses three Postgres tables, all created by the migration at `src/regime-bot/migrations/001_init.sql`. They are append-only logs by design — we do not edit history.
+
+**`regime_cache`** — one row per ticker per market day. Primary key on `(ticker, as_of_date)` enforces "max one Python subprocess call per ticker per day." Columns include `current_regime`, `bull_prob`, `bear_prob`, `sideways_prob`, `signal`, `persistence_diag`, the walk-forward Sharpe (informational), max drawdown (informational), and a `raw_json` blob with the full script output for audit. When the subprocess fails, the bot still writes a row with `current_regime = 'unknown'` so the gate stays fail-closed even if you immediately re-query.
+
+**`regime_bot_decisions`** — one row per ticker per scan tick. This is the daily audit log. Every entry includes the primary signal, the regime snapshot at decision time, the gate verdict, the action taken, the gate rank (1-N or NULL), and the cost-per-trade assumption used. The point of including blocked entries is so we can measure "what did the gate cost us?" — by replaying the blocked entries through the primary signal at exit time, we can compute what the gate refused and whether refusing was worth it.
+
+**`regime_bot_trades`** — one row per paper order placed on Alpaca. **Not yet populated** in the current phase — the schema exists but the bot has not yet been wired to actually place orders. When Phase 5 wires execution, this table will hold the broker-side audit (Alpaca order ID, fill price, exit reason, P&L) and link back to the `regime_bot_decisions(id)` that triggered each trade.
+
+The three tables are fully isolated from the existing bot's tables. The bot has no foreign keys into `trades`, no shared schema with `bots`, and never reads from `bot_decisions`. The two systems could be running on different databases and neither would notice.
+
+### 18.9 Schedule and operation
+
+The bot is its own PM2 process. Once installed, you start it once and forget about it — it stays running, fires its crons on schedule, and recovers gracefully on restart.
+
+| When | What |
+|---|---|
+| Daily 4:05 PM ET (Mon–Fri) | Regime refresh — populate `regime_cache` for all 116 tickers using yesterday's close data. Runs after market close so prices are settled. |
+| Daily 9:31 AM ET (Mon–Fri) | Decision tick — read cache, compute primary signals, log decisions for all 116 tickers, rank top 10. No trades placed in current phase. |
+| On startup | One-shot regime refresh so the first decision tick after boot has fully-warmed cache. |
+
+The bot does not run on weekends. Markets are closed, prices don't move, the cache from Friday is still valid. If you start the bot fresh on a Sunday, it will run the boot refresh once and then wait until Monday 9:31 AM ET for its first decision tick.
+
+You manage the bot via `pm2`:
+
+```
+# First time only — vendor the Python script and verify it works
+npm run regime-bot:install
+
+# Start the daemon (registers crons, stays alive)
+pm2 start "node --env-file=.env src/regime-bot/index.js" --name trading-regime-bot
+pm2 save
+
+# Inspect what it's doing
+pm2 logs trading-regime-bot --lines 50
+pm2 logs trading-regime-bot       # follow live
+
+# Stop / restart
+pm2 stop trading-regime-bot
+pm2 restart trading-regime-bot
+
+# Run a one-shot decision tick without affecting the daemon
+npm run regime-bot:once-decision
+
+# Re-warm the cache manually (useful after a yfinance outage)
+npm run regime-bot:once-refresh
+```
+
+The daemon and the once-* commands are independent. You can run a manual once-decision while the daemon is running — they share the same database, so the manual run will see and update the same `regime_cache` and `regime_bot_decisions` tables.
+
+### 18.10 How to verify the bot is working
+
+Five levels of verification, from "did the install succeed" to "is the daily flow producing useful decisions."
+
+**Level 1 — does it boot?**
+
+```
+pm2 logs trading-regime-bot --lines 20 --nostream
+```
+
+Look for: `[regime-bot] starting daemon`, `[regime-bot] basket: 116 tickers`, `[regime-bot] registering crons`. If you see those without any error stack trace, the bot is up.
+
+**Level 2 — do the tables exist with data?**
+
+```
+psql "$DATABASE_URL" -c "
+  SELECT 'regime_cache' AS table, COUNT(*) AS rows FROM regime_cache
+  UNION ALL
+  SELECT 'regime_bot_decisions', COUNT(*) FROM regime_bot_decisions
+  UNION ALL
+  SELECT 'regime_bot_trades', COUNT(*) FROM regime_bot_trades;
+"
+```
+
+After the first boot refresh, you should see 116 rows in `regime_cache` and 0 rows in `regime_bot_trades` (until Phase 5 wires execution). After the first decision tick, you should see 116 rows in `regime_bot_decisions` for today's date.
+
+**Level 3 — what is today's market state?**
+
+```
+psql "$DATABASE_URL" -c "
+  SELECT current_regime, COUNT(*) AS n
+  FROM regime_cache
+  WHERE as_of_date = CURRENT_DATE
+  GROUP BY current_regime
+  ORDER BY current_regime;
+"
+```
+
+This tells you how many of the 116 tickers are in each regime today. If most are Bull, the broad market is trending up. If most are Sideways, the market is choppy. If most are Bear, you are in a correction. The number itself is the answer to "what would the bot do today" — a high Bull count means many gate-passes.
+
+**Level 4 — what would the bot trade today?**
+
+```
+psql "$DATABASE_URL" -c "
+  SELECT
+    gate_rank,
+    ticker,
+    current_regime,
+    ROUND(markov_signal::numeric, 4) AS markov,
+    ROUND(persistence_diag::numeric, 3) AS persist,
+    ROUND((primary_basis->>'ratio')::numeric, 4) AS sma_ratio
+  FROM regime_bot_decisions
+  WHERE gate_rank IS NOT NULL
+    AND decided_at::date = CURRENT_DATE
+  ORDER BY gate_rank ASC;
+"
+```
+
+The top-10 list. These are the names that passed both the SMA primary and the regime gate today, ranked by combined strength.
+
+**Level 5 — what was blocked, and was the gate right to block?**
+
+```
+psql "$DATABASE_URL" -c "
+  SELECT
+    blocked_reason,
+    COUNT(*) AS n,
+    AVG((primary_basis->>'ratio')::numeric)::numeric(6,4) AS avg_sma_strength
+  FROM regime_bot_decisions
+  WHERE action_taken = 'blocked'
+    AND decided_at::date = CURRENT_DATE
+    AND primary_signal = 1
+  GROUP BY blocked_reason
+  ORDER BY n DESC;
+"
+```
+
+Rows here are tickers where the SMA *did* say go long, but the regime gate said no. These are the trades the gate refused. Over enough days you can replay them through their actual price action and answer: "would those trades have made money? How much would going through with them have changed the strategy's Sharpe?" That is the central measurement of the experiment.
+
+### 18.11 What we do NOT do, and why
+
+A few intentional non-features are worth flagging so they are not surprising:
+
+**No buy-and-hold benchmark in the bot's daily log.** The Python script reports its walk-forward Sharpe but does not compare against buy-and-hold. We will compute buy-and-hold separately in the Phase 5 backtest harness, where it is easy to layer in.
+
+**No use of `nstep_forecast` or HMM outputs.** The Python script computes Chapman-Kolmogorov n-step forecasts and Hidden Markov Model parameters and reports them in the JSON output. We store them in `regime_cache.raw_json` for audit, but the gate logic does not use them. They are reported but unused. If we want to add a forward-looking gate in v2 ("only enter if Bull is the most likely regime in 5 days"), they are already in the database.
+
+**No multi-bot configuration per user.** The main bot lets each user have up to 3 bots, each with different rules. The regime bot is a single shared experiment — there is no per-user customization, because the point is to measure one specific gate, not to give users a knob to tune.
+
+**No short positions.** Long-only in v1. Going short adds borrow costs, hard-to-borrow risk, and unbounded loss exposure — too many extra variables for the experiment to remain clean. If the gate works long-only, we will consider shorts in v2.
+
+**No transaction costs in the upstream model's walk-forward numbers.** The vendored Python script computes a walk-forward Sharpe with zero transaction costs. Our config file sets `cost_per_trade_bps = 5` for our own backtest, but the script's numbers do not reflect that. When you see `wf_sharpe = 0.43` in `regime_cache`, mentally subtract some Sharpe for real-world fills.
+
+**No use of the personal watchlist.** Unlike the main bot (Part III) which seeds its universe from the user's watchlist, the regime bot is a fixed 116-ticker basket. No personal favorites, no per-user bias. This is intentional: every user gets the same experiment, so the results are comparable.
+
+### 18.12 What we have NOT built yet
+
+The bot in its current state runs the daily scan, populates the tables, and prints what it would have done. It does not actually place orders. The pieces missing for end-to-end paper trading:
+
+1. **`src/regime-bot/alpaca.js`** — a thin wrapper around the Alpaca paper trading API to submit, monitor, and close orders. The schema for `regime_bot_trades` is already in place, so the wiring is mechanical.
+2. **`src/regime-bot/backtest.js`** — the walk-forward backtest harness with transaction costs, plus three comparisons (primary signal alone, buy-and-hold, primary + gate). This is the deliverable that answers the experiment's central question.
+3. **Unit tests under `tests/regime-bot/`** — coverage for the gate's failure modes, the price loader's edge cases, the primary signal hysteresis logic.
+4. **A small read-only `/api/regime-bot/decisions` endpoint** if we ever want to surface decisions on the dashboard. Not in scope for v1.
+
+The recommendation is to build the backtest harness *before* wiring live paper execution. If the gate makes the strategy worse on historical data, we do not want it placing real orders even on paper.
+
+### 18.13 Things to know if you are operating this bot
+
+A few practical points that will save you debugging time:
+
+The first run of the daily refresh after a clean install is slow — typically 10–20 minutes — because `uv` is downloading and installing the Python dependencies (`numpy`, `pandas`, `yfinance`, `hmmlearn`, `scipy`) on first invocation. Subsequent runs reuse the cached venv and finish in 5–10 minutes for a cold cache, or under a minute for a warm cache.
+
+The bot is fail-closed on Markov errors, but it does *not* fail-closed on database errors. If `regime_cache` cannot be written, the bot logs the failure and proceeds without caching — meaning the next decision tick will re-spawn subprocesses for everything. This is by design: a database hiccup should not silently turn the bot off.
+
+The `tmp/regime-prices/` directory holds CSVs that the bot writes for the Markov subprocess. They are not cleaned up automatically — there is a `cleanupStaleCsvs()` helper in `price-loader.js` that can be called, but it is not currently invoked anywhere. If you run the bot for months and want to reclaim disk space, run that function or just `rm -rf tmp/regime-prices/`.
+
+The Markov script reads its data from `backtest_prices`. The bot does *not* fall back to yfinance for live data — if `backtest_prices` has not been updated since last Friday and it is now Tuesday, the bot will use Friday's close as the most recent bar, which is fine for the regime model (it operates on 20-day windows so one day's staleness is invisible) but means the SMA primary signal is also using stale data. To stay current, run `npm run research:download` and `npm run research:download-etfs` daily (or schedule them).
+
+### 18.14 Recap
+
+The regime bot is a research experiment, not a production system. It exists to test whether a specific market regime model adds value as a binary gate on top of a textbook trend-following signal. It is built to make that measurement clean: fixed basket, simple primary signal, isolated tables, no shared state with anything else.
+
+The chapter-length version of what it does, in one paragraph: every weekday at 4:05 PM ET it asks the Markov model what regime each of 116 instruments is in today, caching the answer. Every weekday at 9:31 AM ET it computes a 50/200 SMA crossover signal for each instrument, combines it with today's cached regime, applies a Bull-only gate, ranks the top 10 by combined strength, and logs everything to its own audit table. It does not yet place orders. The point of the experiment is to compute, after enough days, whether the strategy's risk-adjusted return is better with the gate than without it. If it is, we wire execution. If it is not, we delete one directory and three tables and move on.
+
 ---
 
 <a name="changelog"></a>
 ## Appendix — Changelog
 
 This section records significant changes to the platform. Update it whenever you add a major feature, change a core behavior, or make an architectural decision that future developers should know about.
+
+---
+
+### 2026-05-21 (evening) — Regime Bot Phase 4 Option B
+
+A new, fully isolated bot called the **regime bot** has been added (see [Chapter 18](#chapter-18) for the full reader-friendly description). It is an experiment: a long-only 50/200 SMA crossover signal gated by a Markov regime model that classifies each instrument's market state as Bull / Bear / Sideways daily. Long entries are permitted only when the regime is Bull and the SMA primary says enter.
+
+In the current phase the bot scans, classifies, ranks, and **logs decisions only** — it does not yet place broker orders. The actual paper trading and walk-forward backtest harness are the next phase (Phase 5).
+
+**Why this exists:** to measure cleanly whether a regime gate adds value over a simple primary signal. The basket is 116 instruments (101 SP100 large-caps + 15 ETFs), kept small enough to interpret per-ticker and large enough for statistical power.
+
+**What landed:**
+
+- New isolated directory `src/regime-bot/` — 9 files, all new
+- Vendored Python script `src/regime-bot/vendor/markov/markov_regime.py` (from `jackson-video-resources/markov-hedge-fund-method` at commit `fe24cf9`, used unmodified — its existing `--csv` flag accepts our DB-extracted price series)
+- One-time vendoring script `scripts/regime/install.sh` (installs `uv` via brew, clones, copies, cleans up)
+- One-time ETF backfill `src/research/download-etfs.js` — added 15 ETFs × 5 years to `backtest_prices`
+- Three new isolated tables (idempotent migration in `src/regime-bot/migrations/001_init.sql`):
+  - `regime_cache` — daily Markov output per ticker
+  - `regime_bot_decisions` — daily scan-tick decisions (logs all 116, including blocked)
+  - `regime_bot_trades` — paper orders (Phase 5, currently empty)
+- Two cron jobs registered inside the new `trading-regime-bot` PM2 process (4:05 PM ET refresh + 9:31 AM ET decision)
+- Four new npm scripts: `regime-bot:install`, `regime-bot:start`, `regime-bot:once-decision`, `regime-bot:once-refresh`, plus `research:download-etfs`
+- `tmp/` and `data/regime-bot/` added to `.gitignore`
+
+**Isolation guarantees:** the regime bot does not import from `src/core/bot-*`, does not write to `bots`/`bot_decisions`/`trades`, and runs in a separate PM2 process. Removing one directory and three tables removes the entire experiment without affecting the main bot.
+
+**Subtle bug caught + fixed during build (commit c040154):** `rankCandidates()` in `engine.js` was mutating spread copies of the decision objects, so `gate_rank` appeared in the console output but never reached the `regime_bot_decisions` rows. Fixed by propagating ranks back to the original array via a `Map(ticker → rank)` before the batch insert.
+
+**Commits:** `ccef636` (initial bot), `c040154` (gate_rank fix). Both pushed to `chpavan/main`.
+
+**Not yet built (Phase 5):** `src/regime-bot/alpaca.js` for actual paper order placement; `src/regime-bot/backtest.js` for walk-forward Sharpe comparison vs primary-alone and buy-and-hold with real transaction costs; unit tests under `tests/regime-bot/`. Recommendation: ship the backtest before wiring live execution.
 
 ---
 
