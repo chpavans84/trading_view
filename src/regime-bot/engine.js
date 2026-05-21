@@ -92,6 +92,15 @@ function rankCandidates(decisions) {
   candidates.forEach((d, idx) => {
     d.gate_rank = idx + 1;
   });
+
+  // Propagate gate_rank back to the original `decisions` array entries
+  // (candidates above are spread copies — mutating them alone won't reach the
+  // objects we log). decision-log.js reads gate_rank from the originals.
+  const rankByTicker = new Map(candidates.map(c => [c.ticker, c.gate_rank]));
+  for (const d of decisions) {
+    if (rankByTicker.has(d.ticker)) d.gate_rank = rankByTicker.get(d.ticker);
+  }
+
   return candidates;
 }
 
