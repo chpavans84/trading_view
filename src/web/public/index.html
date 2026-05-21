@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=20260520f">
+<link rel="stylesheet" href="/css/dashboard.css?v=v25">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -5003,6 +5003,10 @@ erDiagram
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <!-- Mermaid + XTerm: admin-only — lazy loaded on demand, not on page load -->
 <script>
+// Asset version — bump this single constant on every deploy that changes local CSS/JS.
+// Matches sw.js cache version so both invalidate together.
+const ASSET_VERSION = 'v25';
+
 // ── Permissions ───────────────────────────────────────
 // Map permission key → page name used in showPage()
 const TAB_PAGE_MAP = {

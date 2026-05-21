@@ -132,6 +132,7 @@ import { runBotScanForAllActive, scanBot, startBotEngineCrons } from '../core/bo
 import { runExecutorForAllActive, processBot, startBotExecutorCrons } from '../core/bot-executor.js';
 import { reconcileBotPositions } from '../core/bot-reconciler.js';
 import { syncTradableUniverse } from '../core/universe-sync.js';
+import { cachePolicy } from './middleware/cache-policy.js';
 
 // ─── Process-level error handlers ─────────────────────────────────────────────
 process.on('uncaughtException', async (e) => {
@@ -414,37 +415,23 @@ app.get('/', (req, res, next) => {
   next();
 });
 
-// Bypass CDN/proxy cache for service worker + manifest — these files
-// bootstrap all other caching, so they must always be fresh.
+// Central cache policy — sets explicit Cache-Control on every response before
+// route handlers run. Individual routes can override for special cases (SSE,
+// timed API caches). Must be mounted before express.static and all routes.
+app.use(cachePolicy());
+
+// sw.js + manifest.json also get Surrogate-Control: no-store for CDN bypass.
+// cachePolicy handles Cache-Control; this layer adds the CDN-specific header.
 app.use(['/sw.js', '/manifest.json'], (req, res, next) => {
-  res.set('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
-  res.set('Pragma', 'no-cache');
-  res.set('Expires', '0');
-  res.set('Surrogate-Control', 'no-store');  // CDN-specific bypass header
+  res.set('Surrogate-Control', 'no-store');
   next();
 });
 
-app.use(express.static(join(__dirname, 'public'), {
-  setHeaders(res, filePath) {
-    if (filePath.endsWith('.html')) {
-      // HTML: always revalidate so deploys are picked up immediately
-      res.setHeader('Cache-Control', 'no-store');
-    } else if (/\.(css|js)$/.test(filePath) && !filePath.endsWith('sw.js') && !filePath.endsWith('manifest.json')) {
-      // CSS/JS: cache 1 day — sw.js/manifest.json excluded (handled by no-cache middleware above)
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-    } else if (/\.(png|jpg|jpeg|gif|svg|webp|ico|woff2?)$/.test(filePath)) {
-      // Static assets: cache 1 week
-      res.setHeader('Cache-Control', 'public, max-age=604800');
-    }
-  },
-}));
+// Static files — cachePolicy already set Cache-Control; no setHeaders needed.
+app.use(express.static(join(__dirname, 'public')));
 
-// Serve project-level images folder — 1 week cache (rarely changes)
-app.use('/images', express.static(join(__dirname, '../../images'), {
-  setHeaders(res) {
-    res.setHeader('Cache-Control', 'public, max-age=604800');
-  },
-}));
+// Serve project-level images folder — cachePolicy handles cache headers.
+app.use('/images', express.static(join(__dirname, '../../images')));
 
 // /terms is served as a static file: src/web/public/terms.html
 
@@ -799,9 +786,6 @@ app.get('/docs', requireAuth, async (req, res) => {
     const mdPath = join(__dirname, '../..', 'REFERENCE.md');
     const md = fs.readFileSync(mdPath, 'utf8');
     const body = marked.parse(md);
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!DOCTYPE html>
 <html lang="en">
