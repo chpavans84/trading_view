@@ -1,3 +1,7 @@
+// MUST be first import — populates empty/missing env vars from .env regardless
+// of how the process was launched. See src/core/env-loader.js for the why.
+import './core/env-loader.js';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerHealthTools } from './tools/health.js';

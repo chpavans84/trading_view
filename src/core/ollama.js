@@ -1,3 +1,5 @@
+// MUST be first — populates ANTHROPIC_API_KEY from .env if shell shadowed it as empty
+import './env-loader.js';
 /**
  * Local AI client — tries Ollama first, falls back to Anthropic.
  * Use for narrative/summary tasks that don't need real-time data.

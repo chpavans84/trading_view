@@ -1,3 +1,5 @@
+// MUST be first — populates ANTHROPIC_API_KEY from .env if shell shadowed it as empty
+import './env-loader.js';
 /**
  * Layer 2 — Intelligent Stock Selector
  * Takes market context from Layer 1 and finds the single best trade.

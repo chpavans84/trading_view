@@ -1,3 +1,5 @@
+// MUST be first — populates ANTHROPIC_API_KEY from .env if shell shadowed it as empty
+import './env-loader.js';
 /**
  * Pre-Close Sentinel — scans portfolio for upcoming risk events,
  * emails a brief, and stages one-click-confirm trade proposals.

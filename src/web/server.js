@@ -4,6 +4,10 @@
  * Protected by DASHBOARD_PASSWORD env var (required — no default)
  */
 
+// MUST be first import — populates empty/missing env vars from .env regardless
+// of how the process was launched. See src/core/env-loader.js for the why.
+import '../core/env-loader.js';
+
 import os from 'os';
 import net from 'net';
 import fs from 'fs';

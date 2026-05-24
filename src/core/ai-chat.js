@@ -1,3 +1,5 @@
+// MUST be first — populates ANTHROPIC_API_KEY from .env if shell shadowed it as empty
+import './env-loader.js';
 /**
  * Shared AI chat engine — used by both the Telegram bot and the web dashboard.
  * Exports: TOOLS, SYSTEM_PROMPT, executeTool, chat()

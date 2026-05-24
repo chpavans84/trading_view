@@ -1,3 +1,5 @@
+// MUST be first — populates ANTHROPIC_API_KEY from .env if shell shadowed it as empty
+import './env-loader.js';
 /**
  * Admin AI Chat Engine
  * Claude-powered assistant with full application management tools.
