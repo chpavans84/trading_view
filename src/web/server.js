@@ -40,6 +40,7 @@ import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, g
 import { getAccounts, getFunds, getPositions as getMoomooPositions, getMoomooTodayPnL, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
 import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, placeTigerOrder } from '../core/tiger.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
+import { startTelegramBot } from '../core/telegram-bot.js';
 import { seedKnowledge } from '../core/knowledge.js';
 import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRisk, getGraphStats, getFullGraph } from '../core/graph.js';
 import { seedGraph } from '../core/graph-seed.js';
@@ -11413,4 +11414,13 @@ httpServer.listen(PORT, () => {
       .then(r => console.log(`✅ Intraday picks warmed — ${r?.picks?.length ?? 0} picks from ${r?.scanned ?? 0} stocks`))
       .catch(e => console.warn('⚠️  Intraday picks warm failed:', e.message)),
   ]);
+
+  // Boot the Telegram AI bridge — same tools/Claude pipeline as the web AI chat.
+  // Gated by TELEGRAM_BOT_ENABLED=1 so only the prod dashboard process polls
+  // (Telegram getUpdates returns 409 if two clients poll the same bot token).
+  try {
+    startTelegramBot();
+  } catch (e) {
+    console.warn('⚠️  Telegram bot failed to start:', e.message);
+  }
 });
