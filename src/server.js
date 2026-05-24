@@ -19,6 +19,7 @@ import { registerAnalysisTools } from './tools/analysis.js';
 import { registerNewsTools } from './tools/news.js';
 import { registerPortfolioAdvisorTools } from './tools/portfolio-advisor.js';
 import { registerUwTools } from './tools/uw.js';
+import { registerEmailTools } from './tools/email.js';
 
 const server = new McpServer(
   {
@@ -112,6 +113,7 @@ registerAnalysisTools(server);
 registerNewsTools(server);
 registerPortfolioAdvisorTools(server);  // 5 tools: portfolio_advisor, bot_verdict, system_health, signal_track_record, hedge_recommendation
 registerUwTools(server);                // 5 tools: uw_flow_get, uw_insider_get, uw_congress_get, uw_top_movers_get, benzinga_news_get
+registerEmailTools(server);             // 1 tool:  send_email
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

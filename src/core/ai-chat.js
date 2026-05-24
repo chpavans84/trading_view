@@ -42,6 +42,7 @@ import { applyCalibration } from './prediction-calibration.js';
 import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswer } from './fundamental-screener.js';
 import { runCatalystScan } from './catalyst-scanner.js';
 import { getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getCorrelations, isUWConfigured } from './unusual-whales.js';
+import { sendEmail, textToHtml, resolveRecipient } from './email.js';
 
 // ── Portfolio Advisor / Health / Validation imports (added 2026-05-24) ──
 // Shared modules: same code powers the dashboard tabs AND these chat tools.
@@ -711,6 +712,22 @@ export const TOOLS = [
         remind_at: { type: 'string', description: 'ISO 8601 datetime string (e.g. "2026-05-13T09:00:00") for when to fire the reminder. Convert relative expressions like "tomorrow at 9am" to absolute ISO using the current date.' },
       },
       required: ['title', 'remind_at'],
+    },
+  },
+
+  {
+    name: 'send_email',
+    description: 'Send a transactional email via Resend. Use when the user says things like "email this to me", "send me an alert", "share this report by email", "mail me today\'s picks". Recipient defaults to the user\'s own email address; an explicit `to` is only honored if it is in the server allow-list (the user\'s own email, ALERT_EMAIL, SENTINEL_EMAIL_TO). Always confirm the subject + recipient back to the user after sending. Per-user rate limit: 10 emails per hour.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        subject: { type: 'string', description: 'Email subject line. Keep under 80 characters for best rendering.' },
+        body:    { type: 'string', description: 'Email body. Plain text is automatically wrapped in a basic HTML template; if you provide HTML markup, also set html=true so it is sent as-is.' },
+        to:      { type: 'string', description: 'Optional recipient. Defaults to the user\'s own email. Only addresses in the server allow-list are accepted.' },
+        html:    { type: 'boolean', description: 'Set true if `body` already contains HTML markup. Default false (plain text auto-wrapped).' },
+        title:   { type: 'string', description: 'Optional H2 title shown at top of the auto-wrapped HTML email. Ignored if html=true.' },
+      },
+      required: ['subject', 'body'],
     },
   },
 
@@ -1417,6 +1434,32 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
           [username, title.trim(), dt.toISOString()]
         );
         return { ok: true, id: rows[0].id, title: title.trim(), remind_at: dt.toISOString() };
+      }
+
+      case 'send_email': {
+        if (!username) return { error: 'Not logged in — cannot send email.' };
+        const { subject, body, to, html, title } = input;
+        if (!subject || !body) return { error: 'subject and body are required' };
+
+        // Look up the user's email address from the DB to use as default recipient + allow-list anchor
+        const dbU = await getDbUser(username).catch(() => null);
+        const userEmail = dbU?.email || null;
+
+        // Resolve + authorise the recipient
+        const resolved = resolveRecipient({ requestedTo: to, userEmail });
+        if (!resolved.allowed) return { error: resolved.reason };
+
+        // Build body — wrap plain text unless caller says it's already HTML
+        const finalHtml = html ? body : textToHtml(body, title ? { title } : undefined);
+
+        const res = await sendEmail({
+          to:       resolved.to,
+          subject:  String(subject).slice(0, 200),
+          html:     finalHtml,
+          username,                  // per-user rate-limit bucket
+        });
+        if (!res.ok) return { error: res.error };
+        return { ok: true, id: res.id, to: resolved.to, subject: String(subject).slice(0, 200) };
       }
 
       // ── Unusual Whales tools ────────────────────────────────────────────────
