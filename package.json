@@ -40,6 +40,9 @@
     "research:train": "node --env-file=.env src/research/train-model.js",
     "research:fundamentals": "node --env-file=.env src/research/download-fundamentals.js",
     "ollama:build": "node --env-file=.env src/research/create-modelfile.js",
+    "lint": "eslint src tests --no-warn-ignored",
+    "lint:fix": "eslint src tests --fix",
+    "lint:summary": "eslint src tests --no-warn-ignored -f compact 2>&1 | grep -oE '[a-z-]+$' | sort | uniq -c | sort -rn | head -20",
     "migrate:up": "node scripts/migrate.mjs up",
     "migrate:down": "node scripts/migrate.mjs down",
     "migrate:status": "node scripts/migrate.mjs status",
@@ -72,6 +75,9 @@
     "yahoo-finance2": "^3.14.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4",
+    "globals": "^17.6.0",
     "node-pg-migrate": "^8.0.4",
     "nodemon": "^3.1.14"
   }

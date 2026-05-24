@@ -12,16 +12,10 @@
 
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
-import pg from 'pg';
 import { MARKOV, GATE, ALERTING } from './config.js';
 import { writePricesCsv } from './price-loader.js';
-
-const { Pool } = pg;
-let _pool = null;
-function getPool() {
-  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  return _pool;
-}
+// Shared pool — one connection pool per regime-bot process.
+import { getPool, closePool as _closePool } from './db-pool.js';
 
 // ─── Subprocess wrapper ─────────────────────────────────────────────────────
 /**
@@ -284,7 +278,7 @@ function shapeBlocked(ticker, error) {
 }
 
 export async function closePool() {
-  if (_pool) { await _pool.end(); _pool = null; }
+  await _closePool();
 }
 
 // ─── Self-test ──────────────────────────────────────────────────────────────

@@ -4680,7 +4680,7 @@ const _GS_COMPANY_MAP = {
   'crowdstrike':'CRWD','palo alto':'PANW','uber':'UBER','lyft':'LYFT','airbnb':'ABNB',
   'doordash':'DASH','boeing':'BA','lockheed':'LMT','walmart':'WMT','costco':'COST',
   'nike':'NKE','disney':'DIS','exxon':'XOM','chevron':'CVX','starbucks':'SBUX',
-  'arm':'ARM','c3ai':'AI','uipath':'PATH','palantir':'PLTR',
+  'arm':'ARM','c3ai':'AI','uipath':'PATH',
 };
 
 const _GS_STOP = new Set([

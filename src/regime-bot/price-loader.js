@@ -14,15 +14,9 @@
 
 import { promises as fs } from 'fs';
 import path from 'path';
-import pg from 'pg';
 import { MARKOV } from './config.js';
-
-const { Pool } = pg;
-let _pool = null;
-function getPool() {
-  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  return _pool;
-}
+// Shared pool — one connection pool per regime-bot process.
+import { getPool } from './db-pool.js';
 
 // ─── Pull rows ──────────────────────────────────────────────────────────────
 /**
@@ -149,7 +143,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.error('[fatal]', e.message);
       process.exit(1);
     } finally {
-      if (_pool) await _pool.end();
+      const { closePool } = await import('./db-pool.js');
+      await closePool();
     }
   })();
 }

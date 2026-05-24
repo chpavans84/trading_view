@@ -2643,7 +2643,7 @@ export async function listBots(userId, { includeArchived = false } = {}) {
     );
     return rows;
   } catch (err) {
-    logger.error('[db] listBots error:', err.message);
+    console.error('[db] listBots error:', err.message);
     return [];
   }
 }
@@ -2656,7 +2656,7 @@ export async function softDeleteBot(botId, userId) {
       [botId, userId]
     );
   } catch (err) {
-    logger.error('[db] softDeleteBot error:', err.message);
+    console.error('[db] softDeleteBot error:', err.message);
   }
 }
 

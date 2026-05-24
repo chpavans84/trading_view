@@ -8,14 +8,8 @@
  * Schema reference: src/regime-bot/migrations/001_init.sql
  */
 
-import pg from 'pg';
-
-const { Pool } = pg;
-let _pool = null;
-function getPool() {
-  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  return _pool;
-}
+// Shared pool — one connection pool per regime-bot process.
+import { getPool, closePool as _closePool } from './db-pool.js';
 
 /**
  * Persists a single decision. All fields nullable except ticker, gate_passed,
@@ -185,5 +179,5 @@ export async function decisionCountsSince(fromIso) {
 }
 
 export async function closePool() {
-  if (_pool) { await _pool.end(); _pool = null; }
+  await _closePool();
 }

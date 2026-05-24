@@ -16,18 +16,8 @@
  *   closePool()                   → void
  */
 
-import pg from 'pg';
-
-const { Pool } = pg;
-let _pool = null;
-function getPool() {
-  if (!_pool) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('[trade-log] DATABASE_URL is not set — cannot connect to PostgreSQL');
-    _pool = new Pool({ connectionString: url });
-  }
-  return _pool;
-}
+// Shared pool — one connection pool per regime-bot process (was 4 before consolidation).
+import { getPool, closePool as _closePool } from './db-pool.js';
 
 // ─── Writers ─────────────────────────────────────────────────────────────────
 
@@ -160,5 +150,5 @@ export async function recentTrades(limit = 20) {
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 export async function closePool() {
-  if (_pool) { await _pool.end(); _pool = null; }
+  await _closePool();
 }
