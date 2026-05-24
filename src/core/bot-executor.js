@@ -19,6 +19,8 @@ import { placeTigerOrder, closeTigerPosition, getTigerQuote } from './tiger.js';
 import { placeQuickTrade, closePosition, getLatestPrice } from './trader.js';
 import { getUwConvictionForSymbol } from './uw-conviction.js';
 import { planEntry, computeStopPct, computeStopPrice, isCircuitBreakerTripped } from './bot-sizing.js';
+import { getActiveBots, tripCircuitBreaker, linkTrade, unlinkTrade, recordTradeClose } from '../repositories/bots-repo.js';
+import { getFreshestBuyDecision } from '../repositories/bot-decisions-repo.js';
 import { getNewsSentimentForSymbol } from './news-sentiment-modifier.js';
 import { getEarningsProximity } from './bot-indicators.js';
 
@@ -138,7 +140,7 @@ function _sellOrderParams(bot, exitPrice) {
 export async function runExecutorForAllActive() {
   if (!isDbAvailable()) return { skipped: true, reason: 'no_db' };
   try {
-    const { rows: bots } = await query(`SELECT * FROM bots WHERE status = 'active' AND deleted_at IS NULL`);
+    const bots = await getActiveBots();
     const out = [];
     for (const bot of bots) {
       if (!PAPER_BROKERS.has(bot.broker)) {
@@ -175,10 +177,7 @@ export async function processBot(bot) {
     const breakerTrip = isCircuitBreakerTripped(cumPnl, maxLoss);
 
     if (breakerTrip && bot.status !== 'stopped') {
-      await query(
-        `UPDATE bots SET status='stopped', status_message=$1, status_changed_at=NOW(), updated_at=NOW() WHERE id=$2`,
-        [`Cumulative loss reached max ($${maxLoss.toFixed(2)})`, bot.id]
-      );
+      await tripCircuitBreaker(bot.id, `Cumulative loss reached max ($${maxLoss.toFixed(2)})`);
     }
 
     // Always manage an existing open position (graceful exit even after breaker trip)
@@ -271,18 +270,8 @@ function _normalizeOrder(raw, fallbackPrice) {
 
 async function _tryOpenPosition(bot) {
   // 1. Find freshest qualifying buy decision
-  const { rows: decisions } = await query(
-    `SELECT * FROM bot_decisions
-     WHERE bot_id=$1
-       AND action='buy'
-       AND symbol IS NOT NULL
-       AND scanned_at > NOW() - INTERVAL '${DECISION_FRESHNESS_MIN} minutes'
-     ORDER BY composite_score DESC
-     LIMIT 1`,
-    [bot.id]
-  );
-  if (!decisions.length) return { action: 'no_fresh_decision' };
-  const decision = decisions[0];
+  const decision = await getFreshestBuyDecision(bot.id, DECISION_FRESHNESS_MIN);
+  if (!decision) return { action: 'no_fresh_decision' };
   const symbol   = decision.symbol;
 
   // 2. Guard: don't re-enter a symbol already open for this bot
@@ -360,10 +349,7 @@ async function _tryOpenPosition(bot) {
   await query('UPDATE trades SET bot_id=$1 WHERE id=$2', [bot.id, tradeId]);
 
   // 8. Link trade to bot
-  await query(
-    'UPDATE bots SET current_trade_id=$1, updated_at=NOW() WHERE id=$2',
-    [tradeId, bot.id]
-  );
+  await linkTrade(bot.id, tradeId);
 
   console.log(`[bot-executor] bot ${bot.id} opened ${symbol} x${qty} @ $${fillPrice} via ${bot.broker} (trade ${tradeId})`);
   return { action: 'opened', symbol, trade_id: tradeId, fill_price: fillPrice, qty, broker: bot.broker };
@@ -374,7 +360,7 @@ async function _manageOpenPosition(bot) {
   const { rows } = await query('SELECT * FROM trades WHERE id=$1', [bot.current_trade_id]);
   if (!rows.length) {
     // Trade record missing — clear the stale pointer
-    await query('UPDATE bots SET current_trade_id=NULL, updated_at=NOW() WHERE id=$1', [bot.id]);
+    await unlinkTrade(bot.id);
     return { action: 'cleared_stale_trade' };
   }
   const trade  = rows[0];
@@ -498,17 +484,7 @@ async function _closeTrade(bot, trade, exitPrice, reason) {
   });
 
   // Update bot stats
-  const won = pnlUsd > 0 ? 1 : 0;
-  await query(
-    `UPDATE bots SET
-       current_trade_id    = NULL,
-       total_trades        = COALESCE(total_trades, 0) + 1,
-       winning_trades      = COALESCE(winning_trades, 0) + $1,
-       cumulative_pnl_usd  = COALESCE(cumulative_pnl_usd, 0) + $2,
-       updated_at          = NOW()
-     WHERE id=$3`,
-    [won, pnlUsd, bot.id]
-  );
+  await recordTradeClose(bot.id, { pnlUsd, isWin: pnlUsd > 0 });
 
   console.log(`[bot-executor] bot ${bot.id} CLOSED ${symbol} @ $${exitPrice} reason=${reason} pnl=$${pnlUsd}`);
   return { action: 'closed', symbol, reason, exit_price: exitPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct };

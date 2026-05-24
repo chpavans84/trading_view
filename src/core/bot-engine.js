@@ -19,6 +19,8 @@ import {
   PRE_SIGNAL_GATES, POST_SIGNAL_GATES, SETUP_GATES,
   firstBlocker, allBlockers, gateCompositeScore,
 } from './bot-gates.js';
+import { getScannableBots, getOtherBotsHeldSymbols, tripCircuitBreaker } from '../repositories/bots-repo.js';
+import { recordDecision } from '../repositories/bot-decisions-repo.js';
 
 // ─── Single-flight guard per bot ──────────────────────────────────────────────
 const _runningBots = new Set();
@@ -28,9 +30,7 @@ const _runningBots = new Set();
 export async function runBotScanForAllActive() {
   if (!isDbAvailable()) return { skipped: true, reason: 'no_db' };
   try {
-    const { rows: bots } = await query(
-      `SELECT * FROM bots WHERE status IN ('active','paused_today') ORDER BY id ASC`
-    );
+    const bots = await getScannableBots();
     const results = [];
     for (const bot of bots) {
       if (bot.status === 'paused_today') continue;
@@ -67,10 +67,7 @@ export async function scanBot(bot) {
     const maxLoss = rules.risk?.max_loss_usd ?? 100;
     if (bot.cumulative_pnl_usd != null && Number(bot.cumulative_pnl_usd) <= -maxLoss) {
       if (bot.status !== 'stopped') {
-        await query(
-          `UPDATE bots SET status='stopped', status_message=$1, status_changed_at=NOW(), updated_at=NOW() WHERE id=$2`,
-          [`Cumulative loss reached max_loss_usd ($${maxLoss})`, bot.id]
-        );
+        await tripCircuitBreaker(bot.id, `Cumulative loss reached max_loss_usd ($${maxLoss})`);
       }
       return await _log(bot.id, 'skip_circuit_breaker', null, null, null,
         `cumulative loss ${bot.cumulative_pnl_usd} ≤ -${maxLoss}`);
@@ -199,14 +196,8 @@ async function _buildCandidateUniverse(bot) {
 }
 
 async function _getHeldSymbolsForUser(userId, excludeBotId) {
-  const { rows } = await query(
-    `SELECT t.symbol
-     FROM bots b
-     JOIN trades t ON t.id = b.current_trade_id
-     WHERE b.user_id=$1 AND b.id<>$2 AND b.current_trade_id IS NOT NULL`,
-    [userId, excludeBotId]
-  );
-  return new Set(rows.filter(r => r.symbol).map(r => r.symbol.toUpperCase()));
+  const symbols = await getOtherBotsHeldSymbols(userId, excludeBotId);
+  return new Set(symbols.filter(s => s).map(s => s.toUpperCase()));
 }
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
@@ -529,15 +520,11 @@ async function _getCurrentVix() {
 
 async function _log(botId, action, symbol, composite, factor_breakdown, notes, setup_type = null, thesis = null) {
   try {
-    await query(
-      `INSERT INTO bot_decisions
-         (bot_id, action, symbol, composite_score, factor_breakdown, notes, setup_type, thesis)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::jsonb)`,
-      [botId, action, symbol, composite,
-       factor_breakdown ? JSON.stringify(factor_breakdown) : null, notes,
-       setup_type ?? null,
-       thesis ? JSON.stringify(thesis) : null]
-    );
+    await recordDecision({
+      botId, action, symbol, composite,
+      factorBreakdown: factor_breakdown,
+      notes, setupType: setup_type, thesis,
+    });
   } catch (e) {
     console.error('[bot-engine] log failed:', e.message);
   }
