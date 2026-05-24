@@ -332,6 +332,11 @@ async function _scoreCandidate(symbol, bot) {
   // Reject unclassifiable — setup discipline gate (skipped when enforceSetup=false)
   if (enforceSetup && !setup) return null;
 
+  // Strategy filter — skip if bot is locked to a specific setup type and this candidate doesn't match
+  // 'composite' (default) = accept all setup types
+  const strategyFilter = bot.rules?.entry_filters?.strategy ?? 'composite';
+  if (strategyFilter !== 'composite' && setup?.setup_type !== strategyFilter) return null;
+
   return {
     symbol,
     composite: +composite.toFixed(2),
@@ -348,6 +353,192 @@ async function _scoreCandidate(symbol, bot) {
       rsi14, last5dReturn,
       setup_classification: setup,
     },
+  };
+}
+
+// ─── Diagnostic candidate evaluator ──────────────────────────────────────────
+//
+// MIRROR of _scoreCandidate above — runs the same gates but RECORDS failures
+// instead of bailing early. Used by the Portfolio Advisor's Best Buys panel
+// so the user sees what the live bot would actually do (BUY / NEAR / BLOCKED
+// / WATCH) plus which specific gate blocked any rejected pick.
+//
+// ⚠ DISCIPLINE: when adding a new gate to _scoreCandidate, ADD IT HERE TOO.
+// Out-of-sync gate logic will silently mislead the user about live behavior.
+//
+// Returns `{ symbol, verdict, composite, setup_type, grade, blockers[], top_drivers[], ... }`.
+// Never returns null — always returns a full diagnostic record.
+
+export async function diagnoseCandidate(symbol, bot) {
+  const rules    = bot?.rules || {};
+  const filters  = rules.entry_filters    || {};
+  const w        = rules.composite_weights || {};
+  const blockers = [];
+  const minScore = filters.min_composite_score ?? 60;
+
+  const ind = await getAllBotIndicators(symbol).catch(() => null);
+
+  // ── Hard gates (record, don't bail) ─────────────────────────────────
+  const earnDays = ind?.earnings?.days_until;
+  if (filters.avoid_earnings_within_days != null &&
+      earnDays != null && earnDays >= 0 &&
+      earnDays < filters.avoid_earnings_within_days) {
+    blockers.push({ gate: 'earnings_proximity', value: `${earnDays}d`, threshold: `>= ${filters.avoid_earnings_within_days}d`,
+                    message: `Earnings in ${earnDays} days — bot avoids within ${filters.avoid_earnings_within_days}d (binary event risk)` });
+  }
+
+  const adv = ind?.liquidity?.adv_dollar_vol_30d;
+  if (filters.min_adv_dollar_vol != null && adv != null && adv < filters.min_adv_dollar_vol) {
+    blockers.push({ gate: 'liquidity', value: `$${(adv/1e6).toFixed(1)}M`, threshold: `>= $${(filters.min_adv_dollar_vol/1e6).toFixed(1)}M`,
+                    message: `30-day avg $ vol $${(adv/1e6).toFixed(1)}M under required $${(filters.min_adv_dollar_vol/1e6).toFixed(1)}M (illiquid)` });
+  }
+
+  if (filters.skip_during_macro_blackout && ind?.macro?.in_blackout) {
+    blockers.push({ gate: 'macro_blackout', value: ind.macro.blackout_reason || 'active', threshold: 'no blackout',
+                    message: `Today is a macro-event blackout (${ind.macro.blackout_reason || 'Fed / CPI / etc'})` });
+  }
+
+  const gapPct = ind?.premarket?.gap_pct;
+  if (filters.avoid_premarket_gap_above_pct != null && gapPct != null &&
+      Math.abs(gapPct) > filters.avoid_premarket_gap_above_pct) {
+    blockers.push({ gate: 'premarket_gap', value: `${(gapPct*100).toFixed(1)}%`, threshold: `±${(filters.avoid_premarket_gap_above_pct*100).toFixed(0)}%`,
+                    message: `Premarket gap ${(gapPct*100).toFixed(1)}% exceeds ±${(filters.avoid_premarket_gap_above_pct*100).toFixed(0)}% (risk profile shifted overnight)` });
+  }
+
+  if (filters.skip_high_short_interest && ind?.short_interest?.short_pct_float > 0.30) {
+    blockers.push({ gate: 'short_interest', value: `${(ind.short_interest.short_pct_float*100).toFixed(1)}%`, threshold: '< 30%',
+                    message: `Short interest ${(ind.short_interest.short_pct_float*100).toFixed(1)}% of float — squeeze risk` });
+  }
+
+  const lastPrice = ind?.liquidity?.last_price;
+  if (lastPrice != null) {
+    if (filters.price_min != null && lastPrice < filters.price_min) {
+      blockers.push({ gate: 'price_min', value: `$${lastPrice.toFixed(2)}`, threshold: `>= $${filters.price_min}`,
+                      message: `Price $${lastPrice.toFixed(2)} below min $${filters.price_min}` });
+    }
+    if (filters.price_max != null && lastPrice > filters.price_max) {
+      blockers.push({ gate: 'price_max', value: `$${lastPrice.toFixed(2)}`, threshold: `<= $${filters.price_max}`,
+                      message: `Price $${lastPrice.toFixed(2)} above max $${filters.price_max}` });
+    }
+  }
+
+  const vix = await _getCurrentVix();
+  if (filters.vix_min != null && vix != null && vix < filters.vix_min) {
+    blockers.push({ gate: 'vix_low', value: vix.toFixed(1), threshold: `>= ${filters.vix_min}`,
+                    message: `VIX ${vix.toFixed(1)} below ${filters.vix_min} (regime too calm for this strategy)` });
+  }
+  if (filters.vix_max != null && vix != null && vix > filters.vix_max) {
+    blockers.push({ gate: 'vix_high', value: vix.toFixed(1), threshold: `<= ${filters.vix_max}`,
+                    message: `VIX ${vix.toFixed(1)} above ${filters.vix_max} (regime too volatile)` });
+  }
+
+  // ── Signal computation ───────────────────────────────────────────────
+  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig] = await Promise.all([
+    _signalConviction(symbol),
+    _signalNews(symbol),
+    _signalUw(symbol),
+    _signalGex(symbol),
+    _signalInsider(symbol),
+    _signalDistance52w(symbol),
+    _signalPredictor(symbol),
+  ]);
+  const signals = { conviction: convSig, news: newsSig, uw_options: uwSig, gex: gexSig, insider: insiderSig, distance_52w: dist52wSig, predictor: predSig };
+
+  // Grade gate
+  const gradeMin = filters.conviction_grade_min;
+  if (gradeMin && convSig.grade) {
+    const order = { A: 4, B: 3, C: 2, F: 1 };
+    if ((order[convSig.grade] ?? 0) < (order[gradeMin] ?? 0)) {
+      blockers.push({ gate: 'conviction_grade', value: convSig.grade, threshold: `>= ${gradeMin}`,
+                      message: `Conviction grade ${convSig.grade} below required minimum ${gradeMin}` });
+    }
+  }
+
+  // UW label gate
+  if (Array.isArray(filters.require_uw_label_any) && filters.require_uw_label_any.length) {
+    if (!filters.require_uw_label_any.includes(uwSig.label)) {
+      blockers.push({ gate: 'uw_label', value: uwSig.label || 'none', threshold: filters.require_uw_label_any.join(' or '),
+                      message: `UW flow label "${uwSig.label || 'none'}" not in required [${filters.require_uw_label_any.join(', ')}] — smart money not aligned` });
+    }
+  }
+
+  // News sentiment floor
+  if (filters.require_news_sentiment_min) {
+    const order = { negative: 0, neutral: 1, positive: 2 };
+    const reqMin = order[filters.require_news_sentiment_min];
+    const got    = order[newsSig.label];
+    if (got == null || got < reqMin) {
+      blockers.push({ gate: 'news_sentiment', value: newsSig.label || 'none', threshold: `>= ${filters.require_news_sentiment_min}`,
+                      message: `News sentiment "${newsSig.label || 'none'}" below required "${filters.require_news_sentiment_min}"` });
+    }
+  }
+
+  // ── Composite score ──────────────────────────────────────────────────
+  const composite =
+    (w.conviction   ?? 0) * (signals.conviction.value   ?? 0) +
+    (w.news         ?? 0) * (signals.news.value         ?? 0) +
+    (w.uw_options   ?? 0) * (signals.uw_options.value   ?? 0) +
+    (w.gex          ?? 0) * (signals.gex.value          ?? 0) +
+    (w.insider      ?? 0) * (signals.insider.value      ?? 0) +
+    (w.distance_52w ?? 0) * (signals.distance_52w.value ?? 0) +
+    (w.predictor    ?? 0) * (signals.predictor.value    ?? 0);
+
+  // Threshold gate
+  if (composite < minScore) {
+    blockers.push({ gate: 'composite_score', value: composite.toFixed(1), threshold: `>= ${minScore}`,
+                    message: `Composite ${composite.toFixed(1)} below threshold ${minScore} (signals don't align strongly enough)` });
+  }
+
+  // ── Setup classification ─────────────────────────────────────────────
+  const [last5dReturn, rsi14, fundamentals] = await Promise.all([
+    computeLast5dReturn(symbol).catch(() => null),
+    computeRsi14(symbol).catch(() => null),
+    getFundamentalsGrowth(symbol).catch(() => null),
+  ]);
+  const enforceSetup = filters.require_setup_classification !== false;
+  const setup = enforceSetup
+    ? await classifySetup({ signals, indicators: { ...ind, symbol }, rsi: rsi14, fundamentals, last5dReturn }).catch(() => null)
+    : null;
+  if (enforceSetup && !setup) {
+    blockers.push({ gate: 'setup_classification', value: 'unclassified', threshold: 'one of: catalyst/breakout/momentum/value_contrarian/mean_reversion',
+                    message: 'Could not classify into any of the 5 setup types — no clear thesis for the trade' });
+  }
+
+  // Top driver signals (sorted by absolute contribution to composite)
+  const sigEntries = Object.entries(signals).map(([k, v]) => ({
+    k,
+    value: Number(v?.value ?? 0),
+    weight: Number(w[k] ?? 0),
+    contribution: Number(v?.value ?? 0) * Number(w[k] ?? 0),
+  }));
+  sigEntries.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+  const top_drivers = sigEntries.slice(0, 3);
+
+  // Verdict logic
+  let verdict;
+  const onlyScoreGate = blockers.length === 1 && blockers[0].gate === 'composite_score';
+  if (blockers.length === 0)                                                            verdict = 'BUY';
+  else if (onlyScoreGate && composite >= (minScore - 10))                               verdict = 'NEAR';
+  else if (composite >= minScore)                                                       verdict = 'BLOCKED';
+  else                                                                                  verdict = 'WATCH';
+
+  return {
+    symbol,
+    verdict,
+    composite: +composite.toFixed(2),
+    composite_threshold: minScore,
+    setup_type: setup?.setup_type ?? null,
+    thesis:     setup?.thesis     ?? null,
+    grade:      convSig.grade ?? null,
+    blockers,
+    top_drivers,
+    signals_summary: {
+      conviction_score: convSig.value != null ? (convSig.value / 2 + 50) : null,  // centre-back to 0..100 for display
+      news_label: newsSig.label ?? null,
+      uw_label:   uwSig.label   ?? null,
+    },
+    next_earnings_days: earnDays,
+    vix,
   };
 }
 

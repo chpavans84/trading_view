@@ -37,7 +37,10 @@ const EXIT_RULES_BY_SETUP = {
                       exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
   breakout:         { hard_sl_pct: 0.04, trail_pct: 30, time_stop_days: 21,
                       exit_on_uw_flip: true,  exit_on_news: false, exit_before_earnings: true },
-  momentum:         { hard_sl_pct: 0.03, trail_pct: 30, time_stop_days:  7,
+  // hard_sl_pct widened 0.03 → 0.06 on 2026-05-23 after backtest v2 showed -5% stops
+  // killed -$40K on 78 trades at 1% WR; -8% v2 lifted Sharpe 0.58 → 0.82. See
+  // reports/replay-b37-momentum-v2-*.md and pending_tasks.md section I.
+  momentum:         { hard_sl_pct: 0.06, trail_pct: 30, time_stop_days:  7,
                       exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
   value_contrarian: { hard_sl_pct: 0.07, trail_pct: 45, time_stop_days: 30,
                       exit_on_uw_flip: false, exit_on_news: true,  exit_before_earnings: true },

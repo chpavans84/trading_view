@@ -17,6 +17,8 @@ import { registerTabTools } from './tools/tab.js';
 import { registerMoomooTools } from './tools/moomoo.js';
 import { registerAnalysisTools } from './tools/analysis.js';
 import { registerNewsTools } from './tools/news.js';
+import { registerPortfolioAdvisorTools } from './tools/portfolio-advisor.js';
+import { registerUwTools } from './tools/uw.js';
 
 const server = new McpServer(
   {
@@ -25,7 +27,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 79 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -63,6 +65,21 @@ Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
 
+Unusual Whales + Benzinga (raw data from DB — reads ingested tables, no live API calls):
+- uw_flow_get → options flow alerts for a ticker (or all). Filter by premium/sentiment. Shows what smart money is doing in options.
+- uw_insider_get → SEC Form 4 insider trades for a ticker. Returns net buy/sell value + sentiment.
+- uw_congress_get → STOCK Act congressional disclosures for a ticker or all recent. Filter by party.
+- uw_top_movers_get → today's top-moving stocks by % change from UW (gainers/losers).
+- benzinga_news_get → Benzinga sentiment signal for a ticker as stored in conviction_scores/bot_decisions. Shows the exact label (bullish/bearish/neutral), confidence, article count, and how it affected the bot's composite score.
+NOTE: These read from DB snapshots (2-min to 1-hr lag). For live UW data, use system_health to verify ingestion is current.
+
+Portfolio + Risk + Bot decisions (live, from DB):
+- portfolio_advisor → all held positions with 8-factor risk score + bot verdict + hedge recommendation
+- bot_verdict → run bot decision engine on any ticker — returns BUY/NEAR/BLOCKED/WATCH + blockers
+- system_health → all 20 system invariants (data pipeline, crons, ML, processes)
+- signal_track_record → forward-return proof that conviction signal has real edge (+9pp over 10 days)
+- hedge_recommendation → covered-call proposal for a held position
+
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
 - ALWAYS use study_filter on pine tools when you know which indicator you want
@@ -93,6 +110,8 @@ registerTabTools(server);
 registerMoomooTools(server);
 registerAnalysisTools(server);
 registerNewsTools(server);
+registerPortfolioAdvisorTools(server);  // 5 tools: portfolio_advisor, bot_verdict, system_health, signal_track_record, hedge_recommendation
+registerUwTools(server);                // 5 tools: uw_flow_get, uw_insider_get, uw_congress_get, uw_top_movers_get, benzinga_news_get
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

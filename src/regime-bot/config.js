@@ -117,6 +117,9 @@ export const EXECUTION = {
   position_size_usd:      10_000,
   signal_strength_metric: 'markov_signal_times_persistence',  // ranks gate-passing names
   cost_per_trade_bps:     5,               // round-trip; for backtest reproducibility
+  // Phase 5 kill-switch. Set to true in .env via REGIME_BOT_LIVE=1 or flip here to enable trading.
+  // Defaults to false so the bot only logs decisions until explicitly enabled.
+  live_trading_enabled:   process.env.REGIME_BOT_LIVE === '1',
 };
 
 // ─── Cron schedules (America/New_York timezone) ─────────────────────────────

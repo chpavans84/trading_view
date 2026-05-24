@@ -10,8 +10,8 @@
  *                     settled. Makes the next-day decision tick fast.
  *
  *   decision        — 9:31 AM ET weekdays
- *                     primary signal + cached regime → decision log.
- *                     No trade execution in this phase (Option B).
+ *                     primary signal + cached regime → decision log + trade execution.
+ *                     Execution requires REGIME_BOT_LIVE=1 in .env (default: log-only).
  *
  * Manual triggers:
  *   - Default invocation runs both jobs once at startup, then schedules:

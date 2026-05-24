@@ -43,6 +43,15 @@ import { isFundamentalScreeningQuestion, screenFundamentals, formatScreenerAnswe
 import { runCatalystScan } from './catalyst-scanner.js';
 import { getOptionsFlow, getInsiderTrades, getCongressionalTrades, getTopMovers, getEconomicCalendar, getCorrelations, isUWConfigured } from './unusual-whales.js';
 
+// ── Portfolio Advisor / Health / Validation imports (added 2026-05-24) ──
+// Shared modules: same code powers the dashboard tabs AND these chat tools.
+// Maintenance: when you update the underlying module, BOTH surfaces benefit.
+import { enrichPositions, getHedgeRecommendation as advHedgeRecommendation } from '../web/portfolio-advisor.js';
+import { runAllChecks as runHealthChecks } from '../web/health-checks.js';
+import { diagnoseCandidate } from './bot-engine.js';
+import { query as dbQuery } from './db.js';
+import { getAccount as getAlpacaAccount, getPositions as getAlpacaPositions, getLiveAccount, getLivePositions } from './trader.js';
+
 // ─── Live quote — Yahoo Finance, no TradingView dependency ───────────────────
 
 async function getLiveQuote(symbol) {
@@ -773,6 +782,58 @@ export const TOOLS = [
       required: ['ticker'],
     },
   },
+
+  // ── Portfolio Advisor / Health / Validation tools (added 2026-05-24) ──────
+  // These wrap the same modules powering the 💼 Advisor + 🩺 Health + 📊 Signal
+  // Validation tabs. Use them instead of hand-rolling math when the user asks
+  // about risk, hedging, the bot's verdict, system health, or signal proof.
+  {
+    name: 'get_portfolio_advisor',
+    description: 'Full portfolio advisory: every position with 8-factor risk score (0–100), the bot\'s verdict (BUY/HOLD/TRIM/EXIT) per holding, and a covered-call hedge recommendation when risk ≥ 60. Use this any time the user asks "how risky is my portfolio?", "what should I do about NVDA?", "should I hedge anything?", or wants an overall account-level read. Returns per-position breakdown including the SPECIFIC factors driving each risk score (drawdown, concentration, earnings proximity, volatility, bot conviction, UW flow, news, sector). Source defaults to the user\'s active broker selection but can be overridden.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', enum: ['alpaca','alpaca_live','moomoo'], description: 'Broker source (default: alpaca paper).' },
+      },
+    },
+  },
+  {
+    name: 'get_bot_verdict',
+    description: 'Run the bot\'s full decision engine on a single symbol — same code that drives live trading. Returns one of 4 verdicts: BUY (passes all gates, composite ≥ 60), NEAR (within 10 points of threshold), BLOCKED (composite high enough but a hard gate fails), WATCH (below threshold). Also returns the composite score, setup type (catalyst/breakout/momentum/value/mean_reversion), top 3 driver signals, and an explicit blockers[] array naming each gate that failed (e.g. earnings_proximity, liquidity, conviction_grade). Use whenever the user asks "would the bot buy X?" or "why didn\'t the bot trade X?".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Stock ticker, e.g. NVDA, AAPL.' },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'get_system_health',
+    description: 'Run all 20 system-health invariants from the 🩺 Health dashboard. Returns per-check: status (ok/warn/fail), measured value, threshold, and inline docs. Covers data pipeline (tradable_universe, UW flow, news, prices), DB integrity (dangling pointers, stale predictions), cron heartbeats (bot scanner, executor, universe sync), ML quality (model AUC, signal variance), and processes (PM2 daemons, DB latency, Anthropic key validity). Use this when the user asks "is anything broken?", "why is X not working?", or before recommending any action that depends on a particular data source being live.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_signal_track_record',
+    description: 'Forward-return analysis of the conviction signal over a recent window. For each conviction score issued, matches against the actual price 1/5/10 trading days later from backtest_prices. Returns aggregated stats by grade (A/B/C/F) and by score bucket (80-100, 60-79, 40-59, 20-39, 0-19), including avg forward return and % of cases where price was up. Use this as EVIDENCE when a user questions whether the bot\'s signals work, or to cite the empirical edge (high-score signals typically show +9pp 10-day edge over low-score signals).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        days: { type: 'number', description: 'Lookback window in days, default 90, max 365.' },
+      },
+    },
+  },
+  {
+    name: 'get_hedge_recommendation',
+    description: 'Generate a specific covered-call hedge proposal for a held position. Computes: strike (~10% out-of-the-money), expiry (~30 days out), per-share premium (from live UW option chain when available, Black-Scholes fallback), total premium across all eligible 100-share blocks, breakeven price, "if stays under strike" outcome, "if called away" outcome, and annualized yield on premium. Only suggests when position size ≥ $5,000 AND ≥ 100 shares (covered calls need 100/contract). Use when user asks "should I hedge X?" or "what would a covered call on X look like?". Read-only — proposes only, never executes.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Symbol from your existing positions to hedge.' },
+      },
+      required: ['symbol'],
+    },
+  },
 ];
 
 const _CHAT_PROFILE_PRESETS = {
@@ -1394,6 +1455,136 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         const { ticker } = input;
         if (!ticker) return { error: 'ticker is required' };
         return await getCorrelations({ ticker: ticker.toUpperCase() });
+      }
+
+      // ── Portfolio Advisor / Health / Validation handlers (added 2026-05-24) ─
+      // Each wraps the same backend module powering the corresponding dashboard
+      // tab. Stays in sync because they share the underlying function.
+
+      case 'get_portfolio_advisor': {
+        const source = (input.source || 'alpaca').toLowerCase();
+        let positions = [];
+        let accountValue = 0;
+        try {
+          if (source === 'moomoo') {
+            const [funds, posRes] = await Promise.allSettled([getFunds(), getMoomooPositions()]);
+            const f = funds.status === 'fulfilled' ? funds.value : null;
+            const p = posRes.status === 'fulfilled' ? posRes.value : null;
+            if (!p) return { error: 'Moomoo unreachable (rate-limited or OpenD not running). Open the 💼 Advisor tab once to seed the cache, then try again.' };
+            accountValue = f?.total_assets || p?.total_market_val || 0;
+            positions = (p?.positions || []).map(x => ({
+              symbol: x.symbol, name: x.name, qty: Number(x.qty),
+              avg_cost: Number(x.avg_cost), current_price: Number(x.current_price),
+              market_val: Number(x.market_val), unrealized_pl: Number(x.unrealized_pl),
+              unrealized_pl_pct: x.unrealized_pl_pct != null ? Number(x.unrealized_pl_pct) : null,
+              today_pl: Number(x.today_pl ?? 0),
+            }));
+          } else {
+            const useLive = source === 'alpaca_live';
+            const [acct, posList] = await Promise.allSettled(
+              useLive ? [getLiveAccount(), getLivePositions()] : [getAlpacaAccount(), getAlpacaPositions()]
+            );
+            accountValue = acct.status === 'fulfilled' ? Number(acct.value?.portfolio_value || 0) : 0;
+            const pl = posList.status === 'fulfilled' ? (posList.value || []) : [];
+            positions = pl.map(x => ({
+              symbol: x.symbol, name: x.symbol, qty: Math.abs(Number(x.qty)),
+              avg_cost: Number(x.avg_entry_price), current_price: Number(x.current_price),
+              market_val: Number(x.market_value), unrealized_pl: Number(x.unrealized_pl),
+              unrealized_pl_pct: Number(x.unrealized_plpc) * 100,
+              today_pl: Number(x.unrealized_intraday_pl ?? 0),
+            }));
+          }
+        } catch (e) { return { error: `Broker fetch failed: ${e.message}`, source }; }
+        if (!positions.length) return { source, account_value: accountValue, positions: [], note: `${source} account has no open positions (cash only).` };
+        const enriched = await enrichPositions(positions, accountValue, dbQuery);
+        const totalUnrealized = enriched.reduce((s, p) => s + (p.unrealized_pl || 0), 0);
+        const concerns = enriched
+          .filter(p => (p.risk?.score || 0) >= 60 || (p.unrealized_pl_pct || 0) < -10 || ((p.market_val / Math.max(accountValue, 1)) * 100) > 30)
+          .sort((a, b) => (b.risk?.score || 0) - (a.risk?.score || 0))
+          .slice(0, 3)
+          .map(p => ({ symbol: p.symbol, risk: p.risk?.score, pl_pct: p.unrealized_pl_pct }));
+        const avgRisk = Math.round(enriched.reduce((s, p) => s + (p.risk?.score || 0), 0) / enriched.length);
+        return { source, account_value: accountValue, total_unrealized_pl: +totalUnrealized.toFixed(2), avg_risk_score: avgRisk, top_concerns: concerns, positions: enriched };
+      }
+
+      case 'get_bot_verdict': {
+        const symbol = String(input.symbol || '').trim().toUpperCase();
+        if (!symbol) return { error: 'symbol is required' };
+        // Use production-default rules (same as live bot defaults — see BOT_DEFAULT_RULES in src/web/server.js)
+        const botRules = {
+          rules: {
+            entry_filters: { min_composite_score: 60, conviction_grade_min: 'C', market_cap_min_b: 5, price_min: 5, price_max: 500, min_adv_dollar_vol: 5_000_000, avoid_earnings_within_days: 3, vix_min: 15, vix_max: 60, vix_aggressive_at: 25, require_uw_label_any: ['bullish','strong_bullish'], skip_during_macro_blackout: true, avoid_premarket_gap_above_pct: 8 },
+            composite_weights: { conviction: 0.10, news: 0.22, uw_options: 0.30, gex: 0.15, insider: 0.15, distance_52w: 0.08, predictor: 0.00 },
+          },
+          capital_usd: 10000,
+        };
+        try {
+          return await diagnoseCandidate(symbol, botRules);
+        } catch (e) { return { error: `Bot diagnostic failed: ${e.message}` }; }
+      }
+
+      case 'get_system_health': {
+        try {
+          return await runHealthChecks(dbQuery);
+        } catch (e) { return { error: `Health check failed: ${e.message}` }; }
+      }
+
+      case 'get_signal_track_record': {
+        const days = Math.min(Math.max(parseInt(input.days, 10) || 90, 7), 365);
+        try {
+          const cte = `
+            WITH daily_scores AS (
+              SELECT DISTINCT ON (symbol, scored_at::date) symbol, scored_at::date AS score_date, grade, score
+              FROM conviction_scores WHERE scored_at > NOW() - INTERVAL '${days} days'
+              ORDER BY symbol, scored_at::date, scored_at DESC
+            ),
+            price_seq AS (
+              SELECT symbol, price_date, adj_close, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date) AS day_idx
+              FROM backtest_prices WHERE price_date > NOW() - INTERVAL '${days + 30} days'
+            ),
+            matched AS (
+              SELECT s.grade, s.score,
+                CASE WHEN s.score >= 80 THEN '80-100' WHEN s.score >= 60 THEN '60-79' WHEN s.score >= 40 THEN '40-59' WHEN s.score >= 20 THEN '20-39' ELSE '0-19' END AS bucket,
+                p_in.adj_close AS px_0, p5.adj_close AS px_5, p10.adj_close AS px_10
+              FROM daily_scores s
+              JOIN price_seq p_in ON p_in.symbol = s.symbol AND p_in.price_date = s.score_date
+              LEFT JOIN price_seq p5  ON p5.symbol  = s.symbol AND p5.day_idx  = p_in.day_idx + 5
+              LEFT JOIN price_seq p10 ON p10.symbol = s.symbol AND p10.day_idx = p_in.day_idx + 10
+            )`;
+          const byBucket = await dbQuery(`${cte}
+            SELECT bucket, COUNT(*)::int AS n,
+              ROUND(AVG((px_5  / px_0 - 1) * 100)::numeric, 2) AS avg_5d_pct,
+              ROUND(AVG((px_10 / px_0 - 1) * 100)::numeric, 2) AS avg_10d_pct,
+              ROUND(100.0 * COUNT(*) FILTER (WHERE px_10 > px_0)::numeric / NULLIF(COUNT(px_10), 0), 1) AS pct_up_10d
+            FROM matched WHERE px_10 IS NOT NULL GROUP BY bucket ORDER BY bucket DESC`);
+          const ml = await dbQuery(`SELECT trained_at, auc_roc, accuracy, f1_1 FROM model_results ORDER BY trained_at DESC LIMIT 1`);
+          return { window_days: days, by_score_bucket: byBucket.rows, latest_ml_model: ml.rows[0] ?? null,
+            interpretation: 'Higher buckets should show clearly larger forward returns + higher % up. A 5pp+ gap between 60+ scores and 0-19 scores = real edge. AUC > 0.6 = ML adjustment layer has skill (current ~0.54 is near-random).' };
+        } catch (e) { return { error: `Track-record query failed: ${e.message}` }; }
+      }
+
+      case 'get_hedge_recommendation': {
+        const symbol = String(input.symbol || '').trim().toUpperCase();
+        if (!symbol) return { error: 'symbol is required' };
+        try {
+          // Fetch the held position from the user's broker (Moomoo first, then Alpaca)
+          let pos = null;
+          try {
+            const m = await getMoomooPositions();
+            const found = (m?.positions || []).find(p => p.symbol.toUpperCase() === symbol);
+            if (found) pos = { symbol, qty: Number(found.qty), avg_cost: Number(found.avg_cost), current_price: Number(found.current_price), market_val: Number(found.market_val) };
+          } catch { /* fall through to alpaca */ }
+          if (!pos) {
+            try {
+              const a = await getAlpacaPositions();
+              const found = (a || []).find(p => p.symbol.toUpperCase() === symbol);
+              if (found) pos = { symbol, qty: Math.abs(Number(found.qty)), avg_cost: Number(found.avg_entry_price), current_price: Number(found.current_price), market_val: Number(found.market_value) };
+            } catch { /* nothing */ }
+          }
+          if (!pos) return { error: `${symbol} not found in any connected broker — must be a held position to hedge.` };
+          // Force the hedge recommender regardless of risk threshold (user explicitly asked)
+          return { symbol, position: pos, hedge: await advHedgeRecommendation(pos, 100) };
+        } catch (e) { return { error: `Hedge recommendation failed: ${e.message}` }; }
       }
 
       default:                         return { error: `Unknown tool: ${name}` };

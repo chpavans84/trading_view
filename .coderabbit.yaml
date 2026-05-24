@@ -1,0 +1,80 @@
+# CodeRabbit configuration for tradingview-mcp
+# https://docs.coderabbit.ai/getting-started/configure-coderabbit
+
+language: en-US
+
+reviews:
+  # Review every PR automatically
+  auto_review:
+    enabled: true
+    drafts: false
+
+  # Focus areas for this codebase
+  profile: chill        # concise, actionable comments — not nitpicky
+
+  # Path-level instructions
+  path_instructions:
+    - path: "src/web/server.js"
+      instructions: |
+        This is the main Express server (~10k lines). Focus on:
+        - Auth/session checks (every protected route must call requireAuth)
+        - SQL injection via raw query() calls — all user inputs must use parameterised queries ($1, $2…)
+        - Correct error handling — every try/catch must return a proper JSON error
+        - Bot limit bypass: admin role bypass is intentional (isAdminCreate check)
+
+    - path: "src/core/bot-engine.js"
+      instructions: |
+        Trading bot decision engine. Key rules:
+        - Every candidate evaluation must be null-safe (optional chaining on signals)
+        - Strategy filter (entry_filters.strategy) must default to 'composite' — never undefined
+        - classifySetup() can return null — always check before accessing .setup_type
+
+    - path: "src/core/bot-executor.js"
+      instructions: |
+        Executes live paper trades. Be strict about:
+        - Position sizing arithmetic — check for division by zero
+        - Order placement must have try/catch and mark trade as 'failed' on error
+        - All Alpaca API calls must be idempotent (duplicate order guard)
+
+    - path: "src/regime-bot/**"
+      instructions: |
+        Markov-gated SMA crossover bot (experimental, paper-only).
+        - EXECUTION.live_trading_enabled defaults false — never change default
+        - All Alpaca calls in alpaca.js must tag orders with 'rgb-' prefix in client_order_id
+        - trade-log.js must never read/write the main 'trades' table (B-3.7 isolation)
+        - getRegime() must never throw — it returns a fail-closed shape on error
+
+    - path: "src/web/public/index.html"
+      instructions: |
+        Single-file frontend (~25k lines). Focus only on:
+        - XSS: user-generated content rendered into innerHTML must go through _escHtml()
+        - API calls must use fetch() with correct method/headers, check r.ok before reading data
+        - Skip cosmetic/style nits — this is intentionally a single large file
+
+    - path: "src/web/public/css/dashboard.css"
+      instructions: Skip cosmetic nits. Only flag broken selectors or missing rules that would cause layout breakage.
+
+    - path: "src/core/ai-chat.js"
+      instructions: |
+        Claude API integration. Check:
+        - Tool definitions must have required 'name', 'description', 'input_schema' fields
+        - Tool result handlers must be null-safe (tool may return empty/error response)
+        - No API keys or secrets must appear in prompts or tool inputs
+
+  # Files to skip entirely
+  path_filters:
+    - "!**/*.jsonl"
+    - "!**/*.lock"
+    - "!**/node_modules/**"
+    - "!reports/**"
+    - "!tmp/**"
+    - "!data/**"
+    - "!screenshots/**"
+    - "!*.Modelfile"
+
+  # Don't summarise every unchanged file
+  collapse_walkthrough: true
+
+chat:
+  # Allow @coderabbitai commands in PR comments
+  auto_reply: true

@@ -46,6 +46,7 @@ import { seedGraph } from '../core/graph-seed.js';
 import { runPremarketScan } from '../core/premarket-scanner.js';
 import { runEarningsCascadeScan } from '../core/earnings-cascade.js';
 import { runSentinel, signToken, verifyToken } from '../core/sentinel.js';
+import { runDailyBotReport } from '../core/daily-bot-report.js';
 import { pageSuccess, pageExpired, pageAlreadyActioned, pagePriceMoved, pageTokenInvalid, pageConfirmExecute, pageConfirmIgnore } from '../core/sentinel-pages.js';
 import { getImpactAnalysis } from '../core/graph-impact.js';
 import { getStockPrediction } from '../core/predictor.js';
@@ -6673,25 +6674,107 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
     let regime = 'unknown';
     try { regime = (await getMarketRegime())?.regime || 'unknown'; } catch (_) {}
 
-    // 5. Build prompt
+    // 5. UW options flow for held positions (last 24h from uw_flow_alerts)
+    const flowBySymbol = {};
+    if (isDbAvailable() && topSyms.length) {
+      try {
+        const { rows: flowRows } = await query(
+          `SELECT ticker,
+                  SUM(CASE WHEN sentiment='bullish' THEN COALESCE(premium,0) ELSE 0 END) AS bull_prem,
+                  SUM(CASE WHEN sentiment='bearish' THEN COALESCE(premium,0) ELSE 0 END) AS bear_prem,
+                  COUNT(*) AS alerts
+           FROM uw_flow_alerts
+           WHERE ticker = ANY($1)
+             AND alerted_at > NOW() - INTERVAL '24 hours'
+           GROUP BY ticker`,
+          [topSyms]
+        );
+        for (const r of flowRows) {
+          flowBySymbol[r.ticker] = {
+            bull: Number(r.bull_prem || 0),
+            bear: Number(r.bear_prem || 0),
+            alerts: Number(r.alerts || 0),
+          };
+        }
+      } catch (_) {}
+    }
+
+    // 6. Insider trades for held positions (last 30d from uw_insider_trades)
+    const insiderBySymbol = {};
+    if (isDbAvailable() && topSyms.length) {
+      try {
+        const { rows: insiderRows } = await query(
+          `SELECT ticker,
+                  SUM(CASE WHEN LOWER(transaction_type)='buy'  THEN COALESCE(value,0) ELSE 0 END) AS buy_val,
+                  SUM(CASE WHEN LOWER(transaction_type)='sell' THEN COALESCE(value,0) ELSE 0 END) AS sell_val,
+                  COUNT(*) AS filings
+           FROM uw_insider_trades
+           WHERE ticker = ANY($1)
+             AND filed_at > NOW() - INTERVAL '30 days'
+           GROUP BY ticker`,
+          [topSyms]
+        );
+        for (const r of insiderRows) {
+          const b = Number(r.buy_val || 0), s = Number(r.sell_val || 0);
+          insiderBySymbol[r.ticker] = {
+            buy: b, sell: s, net: b - s,
+            filings: Number(r.filings || 0),
+            sentiment: b > s ? 'net_buying' : s > b ? 'net_selling' : 'neutral',
+          };
+        }
+      } catch (_) {}
+    }
+
+    // 7. Build prompt
     const posText = positions.slice(0, 8).map(p => {
       const plPct  = (p.unrealized_plpc * (Math.abs(p.unrealized_plpc) > 1 ? 1 : 100)).toFixed(1);
       const sc     = scores[p.symbol];
-      return `${p.symbol}: ${p.qty}sh @ $${p.current_price.toFixed(2)}, P&L ${plPct}%, grade ${sc?.grade || '?'}, RSI ${sc?.rsi?.toFixed(0) || '?'}`;
+      const parts  = [
+        `${p.symbol}: ${p.qty}sh @ $${p.current_price.toFixed(2)}, P&L ${plPct}%`,
+        `grade ${sc?.grade || '?'} (score ${sc?.score?.toFixed(0) || '?'})`,
+        `RSI ${(sc?.signals?.rsi ?? sc?.rsi)?.toFixed(0) || '?'}`,
+        sc?.signals?.rvol != null ? `RVOL ${Number(sc.signals.rvol).toFixed(1)}x` : null,
+        sc?.signals?.days_to_earnings != null && sc.signals.days_to_earnings <= 21
+          ? `earnings in ${sc.signals.days_to_earnings}d` : null,
+        sc?.signals?.analyst_upside_pct != null
+          ? `analyst ${sc.signals.analyst_upside_pct > 0 ? '+' : ''}${Number(sc.signals.analyst_upside_pct).toFixed(0)}% PT` : null,
+      ].filter(Boolean);
+      return parts.join(', ');
     }).join('\n') || 'No open positions';
+
+    // Options flow summary per held ticker (last 24h)
+    const flowText = topSyms.length ? topSyms.map(sym => {
+      const f = flowBySymbol[sym];
+      if (!f || f.alerts === 0) return `${sym}: no flow`;
+      const net = f.bull > f.bear ? 'net bullish' : f.bear > f.bull ? 'net bearish' : 'neutral';
+      return `${sym}: ${net} ($${(f.bull / 1000).toFixed(0)}K bull / $${(f.bear / 1000).toFixed(0)}K bear, ${f.alerts} alerts)`;
+    }).join('\n') : 'No held positions';
+
+    // Insider activity summary per held ticker (last 30d)
+    const insiderText = topSyms.length ? topSyms.map(sym => {
+      const ins = insiderBySymbol[sym];
+      if (!ins || ins.filings === 0) return `${sym}: no recent filings`;
+      const abs = Math.abs(ins.net);
+      const netFmt = abs >= 1000000
+        ? `${ins.net >= 0 ? '+' : '-'}$${(abs / 1000000).toFixed(1)}M`
+        : abs >= 1000
+          ? `${ins.net >= 0 ? '+' : '-'}$${(abs / 1000).toFixed(0)}K`
+          : `${ins.net >= 0 ? '+' : '-'}$${abs.toFixed(0)}`;
+      return `${sym}: ${ins.filings} filing(s), ${netFmt} net [${ins.sentiment}]`;
+    }).join('\n') : 'No held positions';
 
     const newsText = newsLines.join('\n') || 'No recent news';
 
     const msg = await _anthropic.messages.create({
       model: MODEL_LIGHTWEIGHT,
-      max_tokens: 900,
+      max_tokens: 1200,
       messages: [{
         role: 'user',
-        content: `You are a market observation assistant for a personal trading dashboard. Generate 4-6 personalized market observations based on the data. These are observations only — NOT trade signals or instructions.
+        content: `You are a market observation assistant for a personal trading dashboard. Generate 5-7 personalized market observations based on the data below. These are observations only — NOT trade signals or instructions.
 
-IMPORTANT: Do NOT use the words BUY, SELL, or any trade directive language. You are flagging conditions for the user to research, not telling them what to do. You have no real-time data and your knowledge may be outdated.
+IMPORTANT: Do NOT use the words BUY, SELL, or any trade directive language. Flag conditions for the user to research, not instructions. You have no real-time data and your knowledge may be outdated.
 
-PORTFOLIO:
+PORTFOLIO (symbol · qty · price · P&L · grade · score · RSI · RVOL · earnings · analyst target):
 ${posText}
 
 RECENT NEWS:
@@ -6699,24 +6782,32 @@ ${newsText}
 
 MARKET REGIME: ${regime}
 
+UW OPTIONS FLOW — last 24h for held positions (bull $K vs bear $K, alert count):
+${flowText}
+
+INSIDER ACTIVITY — SEC Form 4 filings last 30d for held positions:
+${insiderText}
+
 Return ONLY a JSON array — no prose, no markdown. Each item:
-{"type":"ALERT"|"NEWS"|"IDEA"|"INFO","title":"<60 chars","body":"<110 chars with specific numbers","symbol":"TICKER or null","action":"REVIEW"|"MONITOR"|"WATCH"|"READ"|null,"priority":"high"|"medium"|"low"}
+{"type":"ALERT"|"NEWS"|"IDEA"|"INFO"|"FLOW"|"INSIDER","title":"<60 chars","body":"<120 chars with specific numbers","symbol":"TICKER or null","action":"REVIEW"|"MONITOR"|"WATCH"|"READ"|null,"priority":"high"|"medium"|"low"}
 
 Rules:
-- ALERT: notable condition worth reviewing — RSI>70 in held stock (extended, consider reviewing), RSI<30 (oversold territory), grade F (deteriorating signals), unrealized gain >15% (large open profit — worth monitoring)
-- NEWS: news relevant to a held stock — describe the event and potential relevance, no directional prediction
-- IDEA: A-grade stocks with strong signals NOT in portfolio — flag for research only, not as entry suggestions
-- INFO: market regime insight, sector rotation, VIX context — factual observations
-- Always include specific numbers (price, %, RSI)
-- Never use directive language ("you should", "consider buying", "take profit", "cut losses")
-- Prioritize high-impact observations first`,
+- ALERT: notable technical condition — RSI>70 (overbought), RSI<30 (oversold), grade F, P&L gain >15%, RVOL>3x (unusual activity), earnings within 7 days
+- NEWS: news relevant to a held stock — describe the event and potential impact, no directional prediction
+- IDEA: A-grade stock with strong signals NOT in portfolio — flag for research only
+- INFO: market regime, sector rotation, VIX context, analyst price target gap — factual only
+- FLOW: significant options imbalance for a held position (>3:1 bull/bear ratio OR >$500K total premium). State exact amounts. Skip if balanced or under $100K.
+- INSIDER: notable insider filing for a held position. Net selling >$500K = high priority. Always name the sentiment. Skip if no filings.
+- Always include specific numbers (price, %, RSI, dollar amounts)
+- Never use directive language ("you should", "consider", "take profit", "cut losses")
+- Priority order: ALERT/FLOW/INSIDER > NEWS > IDEA/INFO`,
       }],
     });
 
     const raw  = msg.content[0]?.text || '[]';
     const json = raw.match(/\[[\s\S]*\]/)?.[0] || '[]';
     let notifications = [];
-    try { notifications = JSON.parse(json).slice(0, 6); } catch (_) {}
+    try { notifications = JSON.parse(json).slice(0, 7); } catch (_) {}
 
     const data = { notifications, generated_at: new Date().toISOString(), positions_count: positions.length };
     _notifCache.set(username, { data, ts: Date.now() });
@@ -7608,6 +7699,7 @@ const BOT_DEFAULT_RULES = {
   entry_filters: {
     min_composite_score: 60,
     conviction_grade_min: 'C',
+    strategy: 'composite',       // 'composite' | 'catalyst' | 'breakout' | 'momentum' | 'value_contrarian' | 'mean_reversion'
     sectors_excluded: [],
     market_cap_min_b: 5,
     price_min: 5,
@@ -7756,8 +7848,14 @@ app.post('/api/bots', requireAuth, async (req, res) => {
   try {
     const userId = await _currentUserId(req);
     if (!userId) return res.status(401).json({ error: 'Not authenticated' });
-    const { rows: countRows } = await query('SELECT COUNT(*) AS n FROM bots WHERE user_id=$1 AND deleted_at IS NULL', [userId]);
-    if (parseInt(countRows[0].n) >= 3) return res.status(409).json({ error: 'Bot limit reached (max 3 per user)' });
+    const dbUserBroker = await getDbUser(req.session.username);
+    const isAdminCreate = dbUserBroker?.role === 'admin';
+
+    // Enforce 3-bot cap for non-admin users only
+    if (!isAdminCreate) {
+      const { rows: countRows } = await query('SELECT COUNT(*) AS n FROM bots WHERE user_id=$1 AND deleted_at IS NULL', [userId]);
+      if (parseInt(countRows[0].n) >= 3) return res.status(409).json({ error: 'Bot limit reached (max 3 per user)' });
+    }
 
     const { name, capital_usd, rules, account_type = 'paper', broker = 'alpaca' } = req.body;
     if (!name || !BOT_NAME_RE.test(name)) return res.status(400).json({ error: 'name: 1-60 chars, alphanumeric + spaces/dashes/underscores' });
@@ -7767,8 +7865,7 @@ app.post('/api/bots', requireAuth, async (req, res) => {
     // B-3: only paper-tier brokers allowed
     const B3_BROKERS = ['alpaca', 'tiger_demo'];
     if (!B3_BROKERS.includes(broker)) return res.status(400).json({ error: `broker must be one of: ${B3_BROKERS.join(', ')} (live brokers gated until B-6)` });
-    const dbUserBroker = await getDbUser(req.session.username);
-    const isAdminCreate = dbUserBroker?.role === 'admin';
+
     if (broker === 'alpaca' && !isAdminCreate && !(dbUserBroker?.alpaca_api_key && dbUserBroker?.alpaca_secret_key)) {
       return res.status(400).json({ error: 'Alpaca paper credentials not configured. Connect Alpaca in broker settings first.' });
     }
@@ -7825,6 +7922,91 @@ app.get('/api/bot-decisions/recent', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// GET /api/bot-decisions/daily-summary — today's scanner totals + top blockers across all user bots
+app.get('/api/bot-decisions/daily-summary', requireAuth, async (req, res) => {
+  try {
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    // Midnight ET today as UTC
+    const { rows } = await query(`
+      SELECT bd.action, bd.notes, bd.composite_score, bd.symbol, b.name AS bot_name, b.id AS bot_id
+      FROM bot_decisions bd
+      JOIN bots b ON b.id = bd.bot_id
+      WHERE b.user_id = $1
+        AND b.deleted_at IS NULL
+        AND bd.scanned_at >= (NOW() AT TIME ZONE 'America/New_York')::date::timestamptz AT TIME ZONE 'America/New_York'
+      ORDER BY bd.scanned_at DESC
+    `, [userId]);
+
+    const totalScans  = rows.length;
+    const trades      = rows.filter(r => r.action === 'buy').length;
+
+    // Categorise each decision into a blocker bucket
+    const buckets = {};
+    const nearMisses = []; // composite scored but below threshold
+
+    for (const r of rows) {
+      if (r.action === 'buy') continue;
+      let bucket = r.action; // default key
+      let label  = _actionLabel(r.action);
+
+      // Refine label using notes content
+      const n = (r.notes || '').toLowerCase();
+      if (n.includes('composite too low') || n.includes('below') || r.action === 'skip_no_candidate' && r.composite_score != null) {
+        bucket = 'score_below_threshold';
+        label  = 'Score below threshold';
+        if (r.composite_score != null && r.composite_score >= 50) {
+          nearMisses.push({ symbol: r.symbol, composite: +r.composite_score, bot: r.bot_name });
+        }
+      } else if (n.includes('no classifiable') || r.action === 'skip_unclassifiable_setup') {
+        bucket = 'setup_unclassifiable';
+        label  = 'No matching setup';
+      } else if (n.includes('empty universe') || (r.action === 'skip_no_candidate' && !r.composite_score)) {
+        bucket = 'empty_universe';
+        label  = 'Empty market / no candidates';
+      } else if (n.includes('filtered') || r.action === 'skip_filtered') {
+        bucket = 'hard_gate_failed';
+        label  = 'Hard gate failed';
+      } else if (r.action === 'skip_circuit_breaker') {
+        bucket = 'circuit_breaker';
+        label  = 'Circuit breaker tripped';
+      } else if (r.action === 'skip_inflight') {
+        bucket = 'inflight';
+        label  = 'Scan already in progress';
+      } else if (r.action === 'error') {
+        bucket = 'error';
+        label  = 'Scan error';
+      }
+
+      if (!buckets[bucket]) buckets[bucket] = { key: bucket, label, count: 0 };
+      buckets[bucket].count++;
+    }
+
+    const topBlockers = Object.values(buckets)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    res.json({ ok: true, total_scans: totalScans, trades, top_blockers: topBlockers, near_misses: nearMisses.slice(0, 5) });
+  } catch (e) {
+    console.error('[bot-decisions/daily-summary]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+function _actionLabel(action) {
+  const map = {
+    skip_no_candidate:      'No candidate selected',
+    skip_filtered:          'Hard gate failed',
+    skip_unclassifiable_setup: 'No matching setup',
+    skip_circuit_breaker:   'Circuit breaker tripped',
+    skip_inflight:          'Scan already in progress',
+    error:                  'Scan error',
+    buy:                    'Trade placed',
+  };
+  return map[action] || action;
+}
 
 // GET /api/bots/:id
 app.get('/api/bots/:id', requireAuth, async (req, res) => {
@@ -8043,6 +8225,17 @@ app.post('/api/bots/:id/execute', requireAuth, async (req, res) => {
       [req.params.id, userId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Bot not found' });
+
+    // Circuit-breaker gate: stopped bots cannot open new trades even via manual trigger.
+    // (Fixes B.2 bypass — previously execute worked regardless of status.)
+    // The executor can still manage OPEN positions when status='paused' or 'paused_today'.
+    if (rows[0].status === 'stopped') {
+      return res.status(409).json({
+        error: `Bot is stopped — cannot execute trades. Reset the bot to "paused" first, then activate when ready.`,
+        status: 'stopped',
+      });
+    }
+
     const result = await processBot(rows[0]);
     res.json({ ok: true, result });
   } catch (e) {
@@ -8825,11 +9018,21 @@ wss.on('connection', (ws) => {
 // ─── News Ingester Crons ──────────────────────────────────────────────────────
 startNewsIngesterCrons();
 
-// ─── Bot Engine Crons ─────────────────────────────────────────────────────────
-startBotEngineCrons();
-
-// ─── Bot Executor Crons (B-3) ─────────────────────────────────────────────────
-startBotExecutorCrons();
+// ─── Bot Engine + Executor Crons ──────────────────────────────────────────────
+// CRITICAL: Bot crons run ONLY on prod, never on staging. Both processes share
+// the same DATABASE_URL (single Postgres), so without this gate they would
+// each scan the same active bots on the same schedule, producing duplicate
+// decisions / duplicate trades ~250ms apart. Smoking gun pre-fix: ASTS trade
+// #66 + #67 (identical $103.67 entries, 226ms apart, May 2026, paper $133 loss).
+// Convention: DASHBOARD_PORT is set in .env.staging only — same gate used by
+// /docs route. Added 2026-05-23 as part of cron-double-fire fix.
+const _IS_STAGING_DASHBOARD = !!process.env.DASHBOARD_PORT;
+if (!_IS_STAGING_DASHBOARD) {
+  startBotEngineCrons();
+  startBotExecutorCrons();
+} else {
+  console.log('[bot-crons] staging mode (DASHBOARD_PORT set) — skipping engine + executor crons; prod owns them');
+}
 
 // ─── Tradable Universe Sync — 8:00 AM ET Mon–Fri ─────────────────────────────
 cron.schedule('0 8 * * 1-5', () => syncTradableUniverse(), { timezone: 'America/New_York' });
@@ -9004,6 +9207,84 @@ app.post('/api/sentinel/run', requireAdmin, async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error('[sentinel] manual run error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Daily Bot Report — 5:00 PM ET weekdays ───────────────────────────────────
+cron.schedule('0 17 * * 1-5', async () => {
+  try {
+    const result = await runDailyBotReport();
+    console.log(`[daily-bot-report] cron done: ${JSON.stringify(result)}`);
+  } catch (err) {
+    console.error('[daily-bot-report] cron error:', err.message);
+    sysAlert({ key: 'daily-bot-report/failed', severity: 'warn', title: 'Daily bot report failed', detail: { error: err.message } }).catch(() => {});
+  }
+}, { timezone: 'America/New_York' });
+
+// ── Scanner watchdog — every 10 min during market hours ──────────────────────
+// Fires a sysAlert (which sends email) if no bot_decision row exists for active
+// bots in the last 8 min. Catches the "cron went silent at 14:10 UTC" failure.
+cron.schedule('*/10 9-16 * * 1-5', async () => {
+  try {
+    // 1. Any active bots?
+    const { rows: activeBots } = await query(`SELECT COUNT(*)::int AS n FROM bots WHERE status='active' AND deleted_at IS NULL`);
+    if (!activeBots[0]?.n) return; // no active bots → nothing to watch
+
+    // 2. Market hours check (skip outside 9:30–16:00 ET)
+    const nyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const h = nyNow.getHours(), m = nyNow.getMinutes();
+    const minsSinceOpen = (h - 9) * 60 + (m - 30);
+    if (minsSinceOpen < 0 || (h >= 16)) return; // outside market hours
+
+    // 3. Last decision timestamp
+    const { rows } = await query(`SELECT MAX(scanned_at) AS last_at FROM bot_decisions WHERE scanned_at > NOW() - INTERVAL '30 minutes'`);
+    const lastAt = rows[0]?.last_at;
+    if (!lastAt) {
+      // No decision in last 30 min during market hours = definitely stale
+      await sysAlert({
+        key: 'scanner/heartbeat-silent',
+        severity: 'critical',
+        title: '🤖 Scanner heartbeat lost — no decisions in 30 min',
+        detail: {
+          active_bots: activeBots[0].n,
+          last_decision: 'none in last 30 min',
+          hint: 'Check pm2 logs: `pm2 logs trading-dashboard --lines 100`. Likely cron stopped or OOM. Restart: `pm2 restart trading-dashboard`.',
+        },
+      });
+      console.error('[scanner-watchdog] ALERT: no bot decisions in last 30 min with active bots');
+      return;
+    }
+
+    const staleMs = Date.now() - new Date(lastAt).getTime();
+    if (staleMs > 8 * 60_000) {
+      // Stale by more than 8 min — scanner missed a cycle
+      const staleMin = (staleMs / 60_000).toFixed(1);
+      await sysAlert({
+        key: 'scanner/heartbeat-stale',
+        severity: 'warn',
+        title: `⚠️ Scanner stale — last decision ${staleMin} min ago`,
+        detail: {
+          active_bots: activeBots[0].n,
+          last_decision_at: lastAt,
+          stale_minutes: staleMin,
+          hint: 'May be a cron miss. If this persists, check pm2 logs and consider restarting trading-dashboard.',
+        },
+      });
+      console.warn(`[scanner-watchdog] stale: last decision was ${staleMin} min ago`);
+    }
+  } catch (err) {
+    console.error('[scanner-watchdog] check error:', err.message);
+  }
+}, { timezone: 'America/New_York' });
+
+// POST /api/daily-bot-report/run — manual trigger (admin only)
+app.post('/api/daily-bot-report/run', requireAdmin, async (req, res) => {
+  try {
+    const result = await runDailyBotReport();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[daily-bot-report] manual run error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -10684,6 +10965,416 @@ app.delete('/api/reminders/:id', requireAuth, async (req, res) => {
     await query(`DELETE FROM user_reminders WHERE id=$1 AND username=$2`, [parseInt(req.params.id), username]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Portfolio Advisor ───────────────────────────────────────────────────────
+// Personal portfolio dashboard: per-position risk scoring, bot's opinion,
+// hedge recommendations. Read-only — never places orders.
+import { enrichPositions, getHedgeRecommendation } from './portfolio-advisor.js';
+import { diagnoseCandidate } from '../core/bot-engine.js';
+
+// ── Moomoo positions cache + rate-limit-aware fetcher ───────────────────────
+// Why: Moomoo limits position-list calls to 10 per 30s. The dashboard's P&L
+// poller routinely exhausts that budget, so the Advisor's first load often
+// hits a 429-equivalent. This wrapper:
+//   1. Returns cached data if fresh (<30s) → saves the rate budget entirely
+//   2. On rate-limit, retries ONCE with a short backoff (gives budget time to free)
+//   3. Falls back to stale cache (up to 5 min) if retries still fail
+//   4. Only throws if there's truly nothing to return
+const _moomooPositionsCache = new Map();   // accId → { at, positions, account_value, raw }
+const MOOMOO_FRESH_MS = 30_000;   // serve cache without re-fetching if this fresh
+const MOOMOO_STALE_MS = 300_000;  // serve stale cache (with flag) up to 5 minutes
+const MOOMOO_RETRY_WAIT_MS = 3500;
+
+async function fetchMoomooPositionsResilient(accId) {
+  const key = accId || 'default';
+  const cached = _moomooPositionsCache.get(key);
+
+  // Fast path: cache is fresh, don't even call Moomoo
+  if (cached && (Date.now() - cached.at) < MOOMOO_FRESH_MS) {
+    return { ...cached, source: 'cache_fresh', ageMs: Date.now() - cached.at };
+  }
+
+  // Try a fresh fetch
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fresh = await getMoomooPositions({ acc_id: accId });
+      const fundsRes = await getFunds({ acc_id: accId }).catch(() => null);
+      const record = {
+        at: Date.now(),
+        positions: fresh?.positions || [],
+        account_value: fundsRes?.total_assets || fresh?.total_market_val || 0,
+        raw: fresh,
+      };
+      _moomooPositionsCache.set(key, record);
+      return { ...record, source: attempt === 0 ? 'fresh' : 'fresh_retried' };
+    } catch (e) {
+      lastErr = e;
+      const rateLimited = /too frequent|rate/i.test(e?.message || '');
+      if (rateLimited && attempt === 0) {
+        // Wait and retry — budget often frees within 3-5s
+        await new Promise(r => setTimeout(r, MOOMOO_RETRY_WAIT_MS));
+        continue;
+      }
+      break;
+    }
+  }
+
+  // All fetches failed — serve stale cache if we have any within MOOMOO_STALE_MS
+  if (cached && (Date.now() - cached.at) < MOOMOO_STALE_MS) {
+    return { ...cached, source: 'cache_stale', ageMs: Date.now() - cached.at, error: lastErr?.message };
+  }
+
+  // Truly nothing — bubble up the error with context
+  throw new Error(lastErr?.message || 'Moomoo position fetch failed and no cache available');
+}
+
+app.get('/api/portfolio/holdings', requireAuth, async (req, res) => {
+  try {
+    const username = req.session?.username;
+    const dbUser   = username && isDbAvailable() ? await getDbUser(username) : null;
+    // Read source preference (same convention as the rest of the dashboard).
+    // Defaults to 'alpaca' (paper) — matches the dashboard's default.
+    const requested = String(req.query.source || 'alpaca').toLowerCase();
+    const valid = ['alpaca', 'alpaca_live', 'moomoo', 'tiger', 'tiger_demo'];
+    const source = valid.includes(requested) ? requested : 'alpaca';
+    const accId  = dbUser?.moomoo_acc_id || undefined;
+
+    let positions = [], accountValue = 0;
+
+    if (source === 'moomoo') {
+      try {
+        const moo = await fetchMoomooPositionsResilient(accId);
+        const rawPositions = moo.positions || [];
+        accountValue = moo.account_value || 0;
+        positions = rawPositions.map(x => ({
+          symbol:            x.symbol,
+          name:              x.name,
+          qty:               Number(x.qty),
+          avg_cost:          Number(x.avg_cost),
+          current_price:     Number(x.current_price),
+          market_val:        Number(x.market_val),
+          unrealized_pl:     Number(x.unrealized_pl),
+          unrealized_pl_pct: x.unrealized_pl_pct != null ? Number(x.unrealized_pl_pct) : null,
+          today_pl:          Number(x.today_pl ?? 0),
+        }));
+        // Note: data freshness is logged so we can debug
+        if (moo.source !== 'fresh') {
+          console.log(`[portfolio] Moomoo served from ${moo.source} (age ${moo.ageMs}ms${moo.error ? ', error: ' + moo.error : ''})`);
+        }
+      } catch (e) {
+        const rateLimited = /too frequent|rate/i.test(e.message || '');
+        return res.status(503).json({
+          error: rateLimited
+            ? 'Moomoo rate-limited and no cached data available yet. The dashboard P&L poller is consuming the 10-call/30s budget. Open the P&L Dashboard once first to seed the cache, then return here.'
+            : `Moomoo fetch failed: ${e.message}`,
+          source: 'moomoo',
+          rate_limited: !!rateLimited,
+          hint: 'The Advisor caches Moomoo positions for 30s once it succeeds. Wait 30s and refresh, or visit the P&L Dashboard first.',
+        });
+      }
+    } else if (source === 'alpaca' || source === 'alpaca_live') {
+      const useLive = source === 'alpaca_live';
+      try {
+        const [acct, posList] = await Promise.allSettled(
+          useLive ? [getLiveAccount(), getLivePositions()] : [getAccount(), getPositions()]
+        );
+        accountValue = acct.status === 'fulfilled' ? Number(acct.value?.portfolio_value || 0) : 0;
+        const pl = posList.status === 'fulfilled' ? (posList.value || []) : [];
+        positions = pl.map(x => ({
+          symbol:            x.symbol,
+          name:              x.symbol,
+          qty:               Math.abs(Number(x.qty)),
+          avg_cost:          Number(x.avg_entry_price),
+          current_price:     Number(x.current_price),
+          market_val:        Number(x.market_value),
+          unrealized_pl:     Number(x.unrealized_pl),
+          unrealized_pl_pct: Number(x.unrealized_plpc) * 100,
+          today_pl:          Number(x.unrealized_intraday_pl ?? 0),
+        }));
+      } catch (e) {
+        return res.status(503).json({ error: `Alpaca ${useLive ? 'live' : 'paper'} unreachable: ${e.message}`, source });
+      }
+    } else {
+      // tiger / tiger_demo — not wired into Advisor yet
+      return res.status(501).json({ error: `Source "${source}" not yet supported by Portfolio Advisor. Supported: moomoo, alpaca, alpaca_live.`, source });
+    }
+
+    const enriched = await enrichPositions(positions, accountValue, query);
+
+    // Portfolio-level aggregates
+    const totalUnrealized = enriched.reduce((s, p) => s + (p.unrealized_pl || 0), 0);
+    const totalCost       = enriched.reduce((s, p) => s + (p.qty * p.avg_cost || 0), 0);
+    const totalToday      = enriched.reduce((s, p) => s + (p.today_pl || 0), 0);
+    const avgRisk         = enriched.length ? Math.round(enriched.reduce((s, p) => s + (p.risk?.score || 0), 0) / enriched.length) : 0;
+
+    // Top concerns: positions with risk >= 60 OR drawdown < -10% OR concentration > 30%
+    const concerns = enriched
+      .filter(p => (p.risk?.score || 0) >= 60 || (p.unrealized_pl_pct || 0) < -10 || (p.pct_of_portfolio || 0) > 30)
+      .sort((a, b) => (b.risk?.score || 0) - (a.risk?.score || 0))
+      .slice(0, 3)
+      .map(p => ({ symbol: p.symbol, risk: p.risk?.score, pct: p.pct_of_portfolio, pl_pct: p.unrealized_pl_pct }));
+
+    res.json({
+      generated_at: new Date().toISOString(),
+      source,
+      account_value: accountValue,
+      total_unrealized_pl:   +totalUnrealized.toFixed(2),
+      total_unrealized_pct:  totalCost > 0 ? +((totalUnrealized / totalCost) * 100).toFixed(2) : null,
+      total_today_pl:        +totalToday.toFixed(2),
+      position_count:        enriched.length,
+      avg_risk_score:        avgRisk,
+      top_concerns:          concerns,
+      positions:             enriched,
+    });
+  } catch (e) {
+    console.error('[portfolio/holdings]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Standalone hedge endpoint (in case user wants to recompute for a specific symbol)
+app.get('/api/portfolio/hedge/:symbol', requireAuth, async (req, res) => {
+  try {
+    const username = req.session?.username;
+    const dbUser = username && isDbAvailable() ? await getDbUser(username) : null;
+    const accId  = dbUser?.moomoo_acc_id || undefined;
+    const pos    = await getMoomooPositions({ acc_id: accId }).catch(() => null);
+    const target = (pos?.positions || []).find(p => p.symbol.toUpperCase() === req.params.symbol.toUpperCase());
+    if (!target) return res.status(404).json({ error: 'Position not found' });
+    const position = {
+      symbol: target.symbol, qty: Number(target.qty),
+      avg_cost: Number(target.avg_cost), current_price: Number(target.current_price),
+      market_val: Number(target.market_val),
+    };
+    // Force a hedge recommendation regardless of risk score for the standalone endpoint
+    const hedge = await getHedgeRecommendation(position, 100);
+    res.json({ position, hedge });
+  } catch (e) {
+    console.error('[portfolio/hedge]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Today's best buys — runs the bot's actual decision engine (gates + composite + setup)
+// against the top scored candidates. Cached 60s so repeated tab opens are instant.
+const _BEST_BUYS_CACHE = { at: 0, data: null };
+const BEST_BUYS_TTL_MS = 60_000;
+app.get('/api/portfolio/best-buys', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 12, 20);
+    // Cache hit?
+    if (_BEST_BUYS_CACHE.data && (Date.now() - _BEST_BUYS_CACHE.at) < BEST_BUYS_TTL_MS) {
+      return res.json({ ..._BEST_BUYS_CACHE.data, cached: true });
+    }
+    // Get top 30 raw conviction scores → run through the bot's decision engine
+    const r = await query(`
+      WITH latest_scores AS (
+        SELECT DISTINCT ON (symbol) symbol, score, scored_at
+        FROM conviction_scores
+        WHERE scored_at > NOW() - INTERVAL '24 hours'
+        ORDER BY symbol, scored_at DESC
+      )
+      SELECT symbol FROM latest_scores WHERE score >= 40 ORDER BY score DESC LIMIT $1
+    `, [Math.min(30, limit * 3)]);
+    const symbols = r.rows.map(x => x.symbol);
+    if (!symbols.length) {
+      return res.json({ generated_at: new Date().toISOString(), picks: [] });
+    }
+    // Use production default bot config — represents what a fresh bot would do today
+    const bot = { rules: BOT_DEFAULT_RULES, capital_usd: 10000 };
+    // Parallelize diagnostics; allSettled so one failure doesn't break the batch
+    const settled = await Promise.allSettled(symbols.map(s => diagnoseCandidate(s, bot)));
+    const picks = settled
+      .filter(r => r.status === 'fulfilled' && r.value)
+      .map(r => r.value);
+    // Sort: BUY first (by composite desc), then NEAR (by composite desc), then BLOCKED (by composite desc), then WATCH
+    const verdictOrder = { BUY: 0, NEAR: 1, BLOCKED: 2, WATCH: 3 };
+    picks.sort((a, b) => {
+      const v = (verdictOrder[a.verdict] ?? 9) - (verdictOrder[b.verdict] ?? 9);
+      if (v !== 0) return v;
+      return (b.composite || 0) - (a.composite || 0);
+    });
+    const result = {
+      generated_at: new Date().toISOString(),
+      picks: picks.slice(0, limit),
+      summary: {
+        buy:     picks.filter(p => p.verdict === 'BUY').length,
+        near:    picks.filter(p => p.verdict === 'NEAR').length,
+        blocked: picks.filter(p => p.verdict === 'BLOCKED').length,
+        watch:   picks.filter(p => p.verdict === 'WATCH').length,
+      },
+    };
+    _BEST_BUYS_CACHE.at = Date.now();
+    _BEST_BUYS_CACHE.data = result;
+    res.json(result);
+  } catch (e) {
+    console.error('[portfolio/best-buys]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── System Health checks ────────────────────────────────────────────────────
+// Diagnostic dashboard for invariants ("things that should always be true").
+// Every bug we find in production gets a permanent check added to health-checks.js
+// so it surfaces within minutes next time it breaks.
+import { runAllChecks } from './health-checks.js';
+
+app.get('/api/health/checks', requireAdmin, async (req, res) => {
+  try {
+    const result = await runAllChecks(query);
+    res.json(result);
+  } catch (e) {
+    console.error('[health/checks]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Backtest reports (replay harness) ──────────────────────────────────────
+// Serves JSON sidecars written by tests/bot-engine/replay-harness.js into the
+// reports/ directory. Read-only; the harness CLI is the only writer.
+const BACKTEST_REPORTS_DIR = join(__dirname, '..', '..', 'reports');
+
+app.get('/api/backtests', requireAdmin, async (req, res) => {
+  try {
+    const files = await fs.promises.readdir(BACKTEST_REPORTS_DIR).catch(() => []);
+    const jsons = files.filter(f => f.startsWith('replay-') && f.endsWith('.json'));
+    const out = [];
+    for (const f of jsons) {
+      try {
+        const raw = await fs.promises.readFile(join(BACKTEST_REPORTS_DIR, f), 'utf8');
+        const doc = JSON.parse(raw);
+        // Trim the heavy fields for the list view — detail route returns full doc
+        out.push({
+          id:           doc.id,
+          strategy:     doc.strategy,
+          generated_at: doc.generated_at,
+          args:         doc.args,
+          config:       doc.config,
+          summary:      doc.summary,
+          trade_count:  Array.isArray(doc.trades) ? doc.trades.length : 0,
+          equity_len:   Array.isArray(doc.equity_curve) ? doc.equity_curve.length : 0,
+        });
+      } catch { /* skip malformed sidecars */ }
+    }
+    // Newest first
+    out.sort((a, b) => (b.generated_at || '').localeCompare(a.generated_at || ''));
+    res.json({ runs: out });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/backtests/:id', requireAdmin, async (req, res) => {
+  try {
+    // Defend against path traversal — id must match harness's filename pattern
+    const id = String(req.params.id || '');
+    if (!/^replay-[A-Za-z0-9_-]+-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/.test(id)) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    const file = join(BACKTEST_REPORTS_DIR, `${id}.json`);
+    const raw  = await fs.promises.readFile(file, 'utf8').catch(() => null);
+    if (!raw) return res.status(404).json({ error: 'not_found' });
+    res.json(JSON.parse(raw));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Signal Validation (Conviction predictive-power test) ───────────────────
+// Tests whether the conviction score predicts forward returns using actual
+// price moves from backtest_prices. Independent of bot execution (no stop-loss
+// contamination). Two views: grade-bucketed and score-bucketed.
+app.get('/api/signal-validation/conviction', requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 90, 365);
+    // Same query we ran manually — kept inline so it's the source of truth.
+    const cte = `
+      WITH daily_scores AS (
+        SELECT DISTINCT ON (symbol, scored_at::date)
+          symbol, scored_at::date AS score_date, grade, score
+        FROM conviction_scores
+        WHERE scored_at > NOW() - INTERVAL '${days} days'
+        ORDER BY symbol, scored_at::date, scored_at DESC
+      ),
+      price_seq AS (
+        SELECT symbol, price_date, adj_close,
+               ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date) AS day_idx
+        FROM backtest_prices
+        WHERE price_date > NOW() - INTERVAL '${days + 30} days'
+      ),
+      matched AS (
+        SELECT
+          s.grade,
+          s.score,
+          CASE
+            WHEN s.score >= 80 THEN '80-100'
+            WHEN s.score >= 60 THEN '60-79'
+            WHEN s.score >= 40 THEN '40-59'
+            WHEN s.score >= 20 THEN '20-39'
+            ELSE '0-19'
+          END AS bucket,
+          p_in.adj_close AS px_0,
+          p1.adj_close  AS px_1,
+          p5.adj_close  AS px_5,
+          p10.adj_close AS px_10
+        FROM daily_scores s
+        JOIN price_seq p_in ON p_in.symbol = s.symbol AND p_in.price_date = s.score_date
+        LEFT JOIN price_seq p1  ON p1.symbol  = s.symbol AND p1.day_idx  = p_in.day_idx + 1
+        LEFT JOIN price_seq p5  ON p5.symbol  = s.symbol AND p5.day_idx  = p_in.day_idx + 5
+        LEFT JOIN price_seq p10 ON p10.symbol = s.symbol AND p10.day_idx = p_in.day_idx + 10
+      )`;
+
+    const byGrade = await query(`${cte}
+      SELECT
+        grade,
+        COUNT(*)                                                                                     AS n,
+        ROUND(AVG((px_1  / px_0 - 1) * 100)::numeric, 3)                                            AS avg_1d_pct,
+        ROUND(AVG((px_5  / px_0 - 1) * 100)::numeric, 3)                                            AS avg_5d_pct,
+        ROUND(AVG((px_10 / px_0 - 1) * 100)::numeric, 3)                                            AS avg_10d_pct,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE px_5  > px_0)::numeric / NULLIF(COUNT(px_5), 0), 1)    AS pct_up_5d,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE px_10 > px_0)::numeric / NULLIF(COUNT(px_10), 0), 1)   AS pct_up_10d,
+        ROUND(STDDEV((px_10 / px_0 - 1) * 100)::numeric, 2)                                         AS stddev_10d_pct
+      FROM matched
+      WHERE px_10 IS NOT NULL
+      GROUP BY grade
+      ORDER BY grade
+    `);
+
+    const byBucket = await query(`${cte}
+      SELECT
+        bucket,
+        COUNT(*)                                                                                     AS n,
+        ROUND(AVG((px_5  / px_0 - 1) * 100)::numeric, 3)                                            AS avg_5d_pct,
+        ROUND(AVG((px_10 / px_0 - 1) * 100)::numeric, 3)                                            AS avg_10d_pct,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE px_10 > px_0)::numeric / NULLIF(COUNT(px_10), 0), 1)   AS pct_up_10d,
+        ROUND(STDDEV((px_10 / px_0 - 1) * 100)::numeric, 2)                                         AS stddev_10d_pct
+      FROM matched
+      WHERE px_10 IS NOT NULL
+      GROUP BY bucket
+      ORDER BY bucket DESC
+    `);
+
+    // Most recent trained ML model snapshot — surfaces the AUC alongside grades
+    const modelRes = await query(`
+      SELECT trained_at, train_rows, accuracy, precision_1, recall_1, f1_1, auc_roc, scoring_adjustments
+      FROM model_results
+      ORDER BY trained_at DESC
+      LIMIT 1
+    `);
+
+    res.json({
+      window_days: days,
+      generated_at: new Date().toISOString(),
+      by_grade:  byGrade.rows,
+      by_bucket: byBucket.rows,
+      latest_ml_model: modelRes.rows[0] ?? null,
+    });
+  } catch (e) {
+    console.error('[signal-validation/conviction]', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Optional HTTPS server for mobile testing (set HTTPS_PORT + SSL_KEY_PATH + SSL_CERT_PATH)

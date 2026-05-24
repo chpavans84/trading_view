@@ -13,14 +13,25 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function loadConfig() {
-  const configPath = join(__dirname, '..', '..', 'broker.config.json');
-  const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-  const cfg = raw.alpaca || {};
-  const paper = cfg.paper !== false;
+  // Prefer env vars (consistent with src/core/trader.js); fall back to
+  // broker.config.json for legacy setups. Added 2026-05-23 after sync failed
+  // with 401 because broker.config.json had empty alpaca.api_key while the
+  // rest of the codebase reads ALPACA_API_KEY from .env.
+  let cfg = {};
+  try {
+    const configPath = join(__dirname, '..', '..', 'broker.config.json');
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+    cfg = raw.alpaca || {};
+  } catch { /* config file optional */ }
+
+  const apiKey    = process.env.ALPACA_API_KEY    || cfg.api_key    || '';
+  const apiSecret = process.env.ALPACA_SECRET_KEY || cfg.api_secret || '';
+  // Paper = true unless explicitly overridden in config to false
+  const paper     = cfg.paper !== false;
   const baseUrl = paper
     ? 'https://paper-api.alpaca.markets'
     : 'https://api.alpaca.markets';
-  return { apiKey: cfg.api_key || '', apiSecret: cfg.api_secret || '', baseUrl };
+  return { apiKey, apiSecret, baseUrl };
 }
 
 async function alpacaFetch(path) {

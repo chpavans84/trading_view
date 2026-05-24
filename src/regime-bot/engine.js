@@ -10,14 +10,24 @@
  *   tag top-N with gate_rank
  *   write all rows to regime_bot_decisions
  *
- * No trade execution here — that comes in Phase 5 (alpaca.js + trades table).
- * For Option B (current phase), the bot logs intent only.
+ * Phase 5 (execution):
+ *   if EXECUTION.live_trading_enabled (REGIME_BOT_LIVE=1 in env):
+ *     - exit_long decisions → closePosition on Alpaca (fires regardless of gate — soft gate)
+ *     - top-N enter_long decisions → placeOrder on Alpaca (buy $10K notional each)
+ *     - all trades logged to regime_bot_trades
+ *
+ * Soft gate policy:
+ *   exit_long always fires regardless of gate (individual SMA death cross manages exits)
+ *   enter_long only fires when gate_passed=true (Markov gate blocks new entries in bear)
+ *   This avoids the hard-flatten-on-regime-change that hurt the v1 backtest (-Sharpe).
  */
 
 import { TICKER_BASKET, EXECUTION, GATE } from './config.js';
 import { primarySignalForTicker } from './primary-signal.js';
 import { getRegime, closePool as closeGatePool } from './markov-gate.js';
 import { logDecisionsBatch, closePool as closeLogPool } from './decision-log.js';
+import { placeOrder, closePosition, getPositions } from './alpaca.js';
+import { openTrade, closeTrade, getOpenTrades, closePool as closeTradePool } from './trade-log.js';
 
 // ─── Per-ticker processing ──────────────────────────────────────────────────
 async function processOne(ticker) {
@@ -41,14 +51,17 @@ async function processOne(ticker) {
     };
   }
 
-  // Decide action
+  // Decide action — SOFT GATE policy:
+  //   exit_long fires regardless of gate (individual SMA death cross manages its own exit)
+  //   enter_long requires gate_passed=true (Markov gate blocks new entries only)
+  //   This avoids the hard-flatten that hurt v1 backtest performance.
   let action;
-  if (!gate.gate_passed) {
-    action = 'blocked';
+  if (primary.signal === -1) {
+    action = 'exit_long';      // always exit on death cross — gate does NOT block exits
+  } else if (!gate.gate_passed) {
+    action = 'blocked';        // gate blocks new entries only
   } else if (primary.signal === 1) {
-    action = 'enter_long';     // gate-passing + primary says enter
-  } else if (primary.signal === -1) {
-    action = 'exit_long';      // primary says exit; let executor reconcile open positions
+    action = 'enter_long';     // gate passed + golden cross → enter
   } else {
     action = 'hold';
   }
@@ -145,13 +158,27 @@ export async function runScanTick(opts = {}) {
   // For the decision log: gate_rank stays on top N, NULL on the rest.
   const topN = ranked.slice(0, EXECUTION.max_concurrent);
 
-  // Persist all decisions
-  await logDecisionsBatch(allDecisions);
+  // Persist all decisions; capture IDs for FK link in trade records
+  const decisionIds = await logDecisionsBatch(allDecisions);
+  // Build ticker→decisionId map for use in trade logging
+  const decisionIdMap = new Map(allDecisions.map((d, i) => [d.ticker, decisionIds[i]]));
 
   // Action histogram
   const histogram = {};
   for (const d of allDecisions) {
     histogram[d.action_taken] = (histogram[d.action_taken] ?? 0) + 1;
+  }
+
+  // ─── Phase 5: execute trades ──────────────────────────────────────────────
+  const execSummary = { entered: 0, exited: 0, skipped: 0, errors: 0 };
+  if (EXECUTION.live_trading_enabled) {
+    try {
+      await _executeTrades({ allDecisions, topN, decisionIdMap, execSummary });
+    } catch (e) {
+      console.error('[engine] execution block error:', e.message);
+    }
+  } else {
+    console.log('[engine] live_trading_enabled=false — decisions logged only (set REGIME_BOT_LIVE=1 to enable trades)');
   }
 
   const duration_ms = Date.now() - t0;
@@ -167,11 +194,15 @@ export async function runScanTick(opts = {}) {
       primary_ratio:    d.primary_basis?.ratio,
     })),
     actions_summary: histogram,
+    execution:       EXECUTION.live_trading_enabled ? execSummary : null,
     duration_ms,
   };
 
   console.log(`[engine] done in ${(duration_ms / 1000).toFixed(1)}s — ${summary.total} decisions, ${summary.gate_passed} gate-passed, ${topN.length} top-N entries`);
   console.log(`[engine] actions:`, histogram);
+  if (EXECUTION.live_trading_enabled) {
+    console.log(`[engine] trades — entered:${execSummary.entered} exited:${execSummary.exited} skipped:${execSummary.skipped} errors:${execSummary.errors}`);
+  }
   if (topN.length) {
     console.log(`[engine] top-${topN.length} entries today:`);
     for (const t of topN) {
@@ -182,9 +213,79 @@ export async function runScanTick(opts = {}) {
   return summary;
 }
 
+// ─── Trade execution ─────────────────────────────────────────────────────────
+
+/**
+ * Execute entries and exits against Alpaca paper.
+ * Called only when EXECUTION.live_trading_enabled = true.
+ *
+ * Soft gate rules:
+ *   - exit_long: close Alpaca position + mark DB trade closed (fires regardless of gate)
+ *   - enter_long (top-N only): open Alpaca position + insert DB trade
+ */
+async function _executeTrades({ allDecisions, topN, decisionIdMap, execSummary }) {
+  // Build a set of tickers we currently hold in DB (open trades)
+  const openTrades  = await getOpenTrades();
+  const openByTicker = new Map(openTrades.map(t => [t.ticker, t]));
+
+  // ── Exits first (soft gate: exit regardless of gate decision) ─────────────
+  const exitDecisions = allDecisions.filter(d => d.action_taken === 'exit_long');
+  for (const d of exitDecisions) {
+    const dbTrade = openByTicker.get(d.ticker);
+    if (!dbTrade) {
+      execSummary.skipped++;
+      continue;  // no open position in DB — nothing to close
+    }
+    try {
+      const result = await closePosition(d.ticker);
+      if (result.skipped) {
+        // No Alpaca position — just close the DB record
+        await closeTrade({ id: dbTrade.id, close_reason: 'primary_flip_no_alpaca_pos' });
+      } else {
+        await closeTrade({ id: dbTrade.id, close_reason: 'primary_flip', exit_price: null });
+      }
+      execSummary.exited++;
+      console.log(`[engine] ✗ exit  ${d.ticker} — order_id=${result.order_id ?? 'skipped'}`);
+    } catch (e) {
+      execSummary.errors++;
+      console.error(`[engine] exit failed for ${d.ticker}: ${e.message}`);
+    }
+  }
+
+  // ── Entries (top-N gate-passing only) ────────────────────────────────────
+  for (const d of topN) {
+    if (openByTicker.has(d.ticker)) {
+      execSummary.skipped++;
+      continue;  // already holding — don't double-enter
+    }
+    try {
+      const order = await placeOrder({
+        symbol:       d.ticker,
+        side:         'buy',
+        notional_usd: EXECUTION.position_size_usd,
+      });
+      const tradeId = await openTrade({
+        ticker:          d.ticker,
+        side:            'buy',
+        qty:             0,                         // filled in by Alpaca; unknown at order time
+        alpaca_order_id: order.alpaca_order_id,
+        decision_id:     decisionIdMap.get(d.ticker) ?? null,
+        position_rank:   d.gate_rank,
+        notes:           `rank=${d.gate_rank} regime=${d.current_regime} signal=${(d.markov_signal ?? 0).toFixed(4)}`,
+      });
+      execSummary.entered++;
+      console.log(`[engine] ✓ enter ${d.ticker} $${EXECUTION.position_size_usd} — alpaca=${order.alpaca_order_id} trade_id=${tradeId}`);
+    } catch (e) {
+      execSummary.errors++;
+      console.error(`[engine] entry failed for ${d.ticker}: ${e.message}`);
+    }
+  }
+}
+
 export async function closeAllPools() {
   await closeGatePool();
   await closeLogPool();
+  await closeTradePool();
 }
 
 // ─── Self-test (small basket subset) ────────────────────────────────────────

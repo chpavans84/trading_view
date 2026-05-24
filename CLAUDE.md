@@ -1,6 +1,6 @@
 # TradingView MCP — Claude Instructions
 
-79 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222), plus Moomoo portfolio integration.
+~99 tools total: ~80 for reading/controlling a live TradingView Desktop chart via CDP (port 9222), ~9 Moomoo broker tools, **5 portfolio/health/validation tools** (`portfolio_advisor`, `bot_verdict`, `system_health`, `signal_track_record`, `hedge_recommendation`), plus **5 Unusual Whales + Benzinga tools added 2026-05-24** (`uw_flow_get`, `uw_insider_get`, `uw_congress_get`, `uw_top_movers_get`, `benzinga_news_get` — see Decision Tree below).
 
 ## Decision Tree — Which Tool When
 
@@ -94,6 +94,28 @@ Use `study_filter` parameter to target a specific indicator by name substring (e
 ### "TradingView isn't running"
 - `tv_launch` → auto-detect and launch TradingView with CDP on Mac/Win/Linux
 - `tv_health_check` → verify connection is working
+
+### "How risky is the user's portfolio?" / "Should I hedge X?" / "What would the bot do with TSLA?"
+**Use these 5 tools instead of grepping files** (added 2026-05-24, Path B). They wrap the dashboard's Portfolio Advisor / 🩺 Health / 📊 Signal Validation / bot decision engine and return structured live data. Call before reasoning — never guess at numbers when one of these can return them.
+
+- **`portfolio_advisor`** → Every held position with 8-factor risk score (0-100), the bot's verdict (BUY/HOLD/TRIM/EXIT), and a covered-call hedge recommendation when risk ≥ 60. Returns per-position factor breakdown (drawdown / concentration / earnings / volatility / bot conviction / UW flow / news / sector). Pass `source: "moomoo" | "alpaca" | "alpaca_live"` (default alpaca paper). Use whenever the user asks about their account-level state.
+- **`bot_verdict`** with `symbol` → Runs the bot's full decision engine on a single ticker (same code as live trading). Returns verdict (BUY/NEAR/BLOCKED/WATCH), composite score, setup type (catalyst/breakout/momentum/value/mean_reversion), top 3 drivers, and explicit `blockers[]` naming each gate that failed. Use whenever asked "would the bot buy X" or "why didn't it trade X".
+- **`system_health`** → All 20 invariants from the 🩺 Health dashboard. Status (ok/warn/fail), value, threshold, what/why/if_red docs per check. Covers data pipeline / DB integrity / cron heartbeats / ML quality / processes (incl. Anthropic API key validity). Use BEFORE recommending any action that depends on a specific source being live, or when diagnosing "why is X broken".
+- **`signal_track_record`** with optional `days` (default 90, max 365) → Forward-return analysis of conviction scores vs actual price moves 5/10 days later. Returns avg return + % up by score bucket (80-100, 60-79, etc.). Use as EVIDENCE when questioning whether the signal works (typical edge: +9pp over 10 days for 60+ vs 0-19 scores).
+- **`hedge_recommendation`** with `symbol` → Specific covered-call proposal for a held position: strike (~10% OTM), expiry (~30 DTE), per-share premium (live UW chain or Black-Scholes fallback), total premium, breakeven, "stays under" / "called away" outcomes, annualized yield. Read-only — proposes only, never executes.
+
+Same 5 tools are also available inside the in-dashboard AI chat with the same names (with `get_` prefix). Both surfaces share the same backend modules (`src/web/portfolio-advisor.js`, `src/web/health-checks.js`, `src/core/bot-engine.js` `diagnoseCandidate`) — so a logic change propagates to both.
+
+### "What is UW options flow for NVDA?" / "Is there insider buying?" / "What are Congress members trading?" / "What are the top movers today?" / "What does Benzinga say about TSLA?"
+**Use these 5 raw-data tools** (added 2026-05-24). They read directly from the DB tables populated by ingestion crons — no live UW API calls, no rate-limit risk. All return structured data you can reason over directly.
+
+- **`uw_flow_get`** with optional `symbol`, `hours` (default 24), `min_premium`, `sentiment` → Options flow alerts from `uw_flow_alerts` (ingested every 2 min). Returns contract details, premium, volume vs OI, sentiment label. Omit symbol to see cross-market flow. Use `min_premium=100000` for 6-figure flows only.
+- **`uw_insider_get`** with `symbol`, optional `days` (default 30), `transaction_type` → SEC Form 4 filings from `uw_insider_trades` (ingested every 15 min). Returns net buy/sell value, insider names/roles. Summary includes `net_buying` / `net_selling` / `neutral` signal.
+- **`uw_congress_get`** with optional `symbol`, `days` (default 90), `party` → STOCK Act congressional disclosures from `uw_congressional_trades` (ingested hourly). Omit symbol for all recent activity. Filter by party (Democrat/Republican).
+- **`uw_top_movers_get`** with optional `direction` (up/down) → Today's biggest movers by % change from `uw_top_movers` (captured every 5 min). Use for a quick market scan of what's moving right now.
+- **`benzinga_news_get`** with `symbol`, optional `hours` (default 24), `raw` → The exact Benzinga sentiment signal the bot uses as its 22%-weight news factor, pulled from `conviction_scores` / `bot_decisions`. Returns label (bullish/bearish/neutral), confidence, article count, and how it affected the composite score. This is the actual Benzinga signal, NOT Yahoo Finance headlines.
+
+**Data freshness**: UW flow = 2 min lag · Insider = 15 min lag · Congress = 1 hr lag · Movers = 5 min lag · Benzinga = from last bot scan of that symbol. Run `system_health` first to confirm ingestion is live before drawing conclusions from these tools.
 
 ## Context Management Rules
 

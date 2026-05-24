@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=v25">
+<link rel="stylesheet" href="/css/dashboard.css?v=v26">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -167,11 +167,15 @@
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
     <button class="tab" id="tab-discover" onclick="showPage('discover',this)">🔥 Discover</button>
-    <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)">Signal Center</button>
+    <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)" title="Earnings calendar + reaction analysis + catalysts">📅 Earnings</button>
     <button class="tab" id="tab-trading-desk" onclick="showPage('trading-desk',this)">Trading Desk</button>
+    <button class="tab" id="tab-uw" onclick="showPage('uw',this)" title="Unusual Whales — flow / insider / congress / correlations / history">🐋 UW</button>
     <button class="tab" id="tab-bots" onclick="showPage('bots',this)">🤖 Bots</button>
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
     <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
+    <button class="tab" id="tab-backtests" onclick="showPage('backtests',this)" title="Strategy replay results" style="display:none">📊 Backtests</button>
+    <button class="tab" id="tab-health" onclick="showPage('health',this)" title="System Health diagnostics" style="display:none">🩺 Health</button>
+    <button class="tab" id="tab-advisor" onclick="showPage('advisor',this)" title="Portfolio Advisor — personal risk + hedge + picks" style="display:none">💼 Advisor</button>
     <button class="tab" id="tab-stats" onclick="showPage('stats',this)" style="display:none">Stats</button>
     <button class="tab" id="tab-users" onclick="showPage('users',this)" style="display:none">Users</button>
     <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">🔐 Admin</button>
@@ -225,19 +229,16 @@
   <div class="table-wrap trading-widget">
     <div class="widget-tab-strip">
       <button class="widget-tab active" onclick="switchWidgetTab('positions')">Open Positions</button>
-      <button class="widget-tab" onclick="switchWidgetTab('trades')">Recent Trades</button>
-      <button class="widget-tab" onclick="switchWidgetTab('catalysts')">🎯 Tomorrow's Catalysts</button>
-      <button class="widget-tab" onclick="switchWidgetTab('intraday')">Intraday Picks</button>
-      <button class="widget-tab" onclick="switchWidgetTab('watchlist')">❤️ Watchlist</button>
-      <button class="widget-tab" onclick="switchWidgetTab('cp')">📈 Trade Results</button>
-      <button class="widget-tab" onclick="switchWidgetTab('tradehistory')">📋 Trade History</button>
-      <button class="widget-tab" onclick="switchWidgetTab('uw_flow')">🐋 Options Flow</button>
-      <button class="widget-tab" onclick="switchWidgetTab('uw_insider')">👤 Insider</button>
-      <button class="widget-tab" onclick="switchWidgetTab('uw_congress')">🏛️ Congress</button>
-      <button class="widget-tab" onclick="switchWidgetTab('uw_correlations')">🔗 Correlations</button>
-      <button class="widget-tab" onclick="switchWidgetTab('uw_flow_history')">📊 Flow History</button>
-      <button class="widget-tab" onclick="switchWidgetTab('sentinel_runs')">📨 Sentinel Activity</button>
-      <button class="widget-tab" onclick="switchWidgetTab('sys_alerts')">🚨 System Alerts</button>
+      <button class="widget-tab" onclick="switchWidgetTab('trades_hub')">📋 Trades</button>
+      <button class="widget-tab" onclick="switchWidgetTab('alerts_hub')">🚨 Alerts</button>
+      <!-- Consolidated 2026-05-24:
+           • Recent Trades + Trade Results + Trade History → "Trades" hub with sub-tabs
+           • Sentinel Activity + System Alerts → "Alerts" hub with sub-tabs
+           • 🎯 Tomorrow's Catalysts → moved to Signal Center (📅 Earnings hub)
+           • Intraday Picks → superseded by 💼 Advisor's Best Buys
+           • ❤️ Watchlist → use floating 🔍 Stock Explorer (canonical watchlist)
+           • 🐋 UW widgets → dedicated 🐋 UW tab -->
+
       <div style="flex:1;min-width:8px"></div>
       <div class="wta" id="wta-positions" style="display:flex;align-items:center;gap:10px">
         <button class="refresh-btn" onclick="loadDashboard()">↻ Refresh</button>
@@ -289,161 +290,90 @@
         </div>
       </div>
     </div>
-    <div class="widget-panel" id="widget-panel-trades">
-      <div id="recentTradesTable"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="widget-panel" id="widget-panel-catalysts">
-      <div id="tcBody"><div class="loading" style="padding:32px;text-align:center">Loading tomorrow's catalysts…</div></div>
-    </div>
-    <div class="widget-panel" id="widget-panel-intraday">
-      <div id="idBody"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="widget-panel" id="widget-panel-watchlist">
-      <div id="wlTableWrap">
-        <table><thead><tr>
-          <th>Symbol</th>
-          <th>Price</th>
-          <th>Change</th>
-          <th>Score</th>
-          <th>Analyst</th>
-          <th>PT / Upside</th>
-          <th>RSI</th>
-          <th>RVOL</th>
-          <th>Trend</th>
-          <th>MACD</th>
-          <th>Short %</th>
-          <th>Earnings</th>
-          <th>Horizon</th>
-          <th></th>
-        </tr></thead>
-        <tbody id="wlBody"><tr><td colspan="14" class="loading" style="text-align:center;padding:20px">Loading…</td></tr></tbody>
-        </table>
+    <!-- ── Consolidated TRADES hub (Recent / Closed Analytics / Full History) ── -->
+    <div class="widget-panel" id="widget-panel-trades_hub">
+      <!-- Sub-tab pills -->
+      <div style="display:flex;gap:6px;padding:12px 16px 0;flex-wrap:wrap">
+        <button class="trades-sub active" data-section="recent" onclick="switchTradesSubTab('recent')"
+                style="background:#0d2818;color:#3fb950;border:1px solid #2ea043;padding:5px 12px;border-radius:16px;font-size:0.82rem;cursor:pointer;font-weight:600">Recent Trades</button>
+        <button class="trades-sub" data-section="results" onclick="switchTradesSubTab('results')"
+                style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:5px 12px;border-radius:16px;font-size:0.82rem;cursor:pointer">📈 Closed-Position Analytics</button>
+        <button class="trades-sub" data-section="history" onclick="switchTradesSubTab('history')"
+                style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:5px 12px;border-radius:16px;font-size:0.82rem;cursor:pointer">📋 Full History</button>
       </div>
-    </div>
-    <div class="widget-panel" id="widget-panel-cp">
-      <div id="cpBody"><div class="loading" style="padding:32px;text-align:center">Select a date to view results</div></div>
-    </div>
-    <div class="widget-panel" id="widget-panel-tradehistory">
-      <div class="table-wrap" id="tradesTable">
-        <div class="table-head">
-          <h3>Trade History <button class="doc-btn" onclick="openResearchDoc('trades')" title="How this works">?</button></h3>
-          <div style="display:flex;gap:8px">
-            <select id="tradeFilter" onchange="loadTrades()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
-              <option value="">All</option>
-              <option value="open">Open</option>
-              <option value="closed">Closed</option>
-            </select>
-            <button class="refresh-btn" onclick="loadTrades()">↻ Refresh</button>
+      <!-- Sub-sections -->
+      <div class="trades-section" id="trades-section-recent">
+        <div id="recentTradesTable"><div class="loading">Loading…</div></div>
+      </div>
+      <div class="trades-section" id="trades-section-results" style="display:none">
+        <div id="cpBody"><div class="loading" style="padding:32px;text-align:center">Select a date to view results</div></div>
+      </div>
+      <div class="trades-section" id="trades-section-history" style="display:none">
+        <div class="table-wrap" id="tradesTable">
+          <div class="table-head">
+            <h3>Trade History <button class="doc-btn" onclick="openResearchDoc('trades')" title="How this works">?</button></h3>
+            <div style="display:flex;gap:8px">
+              <select id="tradeFilter" onchange="loadTrades()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+                <option value="">All</option>
+                <option value="open">Open</option>
+                <option value="closed">Closed</option>
+              </select>
+              <button class="refresh-btn" onclick="loadTrades()">↻ Refresh</button>
+            </div>
           </div>
-        </div>
-        <div class="loading">Loading...</div>
-      </div>
-    </div>
-
-    <!-- UW Options Flow panel -->
-    <div class="widget-panel" id="widget-panel-uw_flow">
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>🐋 Unusual Options Flow <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="uwFlowTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWFlow()">
-            <button class="refresh-btn" onclick="loadUWFlow()">↻ Refresh</button>
-          </div>
-        </div>
-        <div id="uwFlowBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
-      </div>
-    </div>
-
-    <!-- UW Insider Trades panel -->
-    <div class="widget-panel" id="widget-panel-uw_insider">
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>👤 Insider Trades <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="uwInsiderTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWInsider()">
-            <button class="refresh-btn" onclick="loadUWInsider()">↻ Refresh</button>
-          </div>
-        </div>
-        <div id="uwInsiderBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
-      </div>
-    </div>
-
-    <!-- UW Congressional Trades panel -->
-    <div class="widget-panel" id="widget-panel-uw_congress">
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>🏛️ Congressional Trades <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="uwCongressTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWCongress()">
-            <button class="refresh-btn" onclick="loadUWCongress()">↻ Refresh</button>
-          </div>
-        </div>
-        <div id="uwCongressBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
-      </div>
-    </div>
-
-    <!-- UW Flow Alerts History panel -->
-    <div class="widget-panel" id="widget-panel-uw_flow_history">
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>📊 Flow Alerts History <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— DB-backed, last 24h</span></h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <select id="uwFlowHistHours" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
-              <option value="6">Last 6h</option>
-              <option value="24" selected>Last 24h</option>
-              <option value="48">Last 48h</option>
-              <option value="168">Last 7d</option>
-            </select>
-            <select id="uwFlowHistMinPrem" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
-              <option value="0">All premiums</option>
-              <option value="100000" selected>≥$100K</option>
-              <option value="500000">≥$500K</option>
-              <option value="1000000">≥$1M</option>
-            </select>
-            <button class="refresh-btn" onclick="loadFlowAlertsHistory()">↻ Refresh</button>
-          </div>
-        </div>
-        <div id="uwFlowHistBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
-      </div>
-    </div>
-
-    <!-- Sentinel Activity panel -->
-    <div class="widget-panel" id="widget-panel-sentinel_runs">
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>📨 Sentinel Activity <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— last 20 runs</span></h3>
-          <button class="refresh-btn" onclick="loadSentinelActivity()">↻ Refresh</button>
-        </div>
-        <div id="sentinelRunsBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
-      </div>
-      <!-- Detail modal -->
-      <div id="sentinelRunModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px">
-        <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:800px;margin:0 auto;padding:24px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <h3 style="margin:0;color:#e6edf3">Sentinel Run Detail</h3>
-            <button onclick="document.getElementById('sentinelRunModal').style.display='none'" style="background:none;border:none;color:#8b949e;font-size:1.4rem;cursor:pointer">×</button>
-          </div>
-          <pre id="sentinelRunDetail" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:0.78rem;color:#e6edf3;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word"></pre>
+          <div class="loading">Loading...</div>
         </div>
       </div>
     </div>
 
-    <!-- System Alerts panel -->
-    <div class="widget-panel" id="widget-panel-sys_alerts">
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>🚨 System Alerts <span id="sysAlertCounts" style="font-size:0.75rem;color:#8b949e;font-weight:400"></span></h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <select id="sysAlertFilter" onchange="renderSysAlerts()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
-              <option value="all">All</option>
-              <option value="critical">Critical only</option>
-              <option value="hour">Last hour</option>
-            </select>
-            <button class="refresh-btn" onclick="loadSysAlerts()">↻ Refresh</button>
+    <!-- 🎯 Tomorrow's Catalysts moved to Signal Center (📅 Earnings hub) on 2026-05-24 -->
+    <!-- ❤️ Watchlist removed — use floating 🔍 Stock Explorer (canonical watchlist) -->
+    <!-- Intraday Picks removed — superseded by 💼 Advisor's Best Buys (bot decision simulator) -->
+
+    <!-- ── Consolidated ALERTS hub (Sentinel Activity + System Alerts) ── -->
+    <div class="widget-panel" id="widget-panel-alerts_hub">
+      <!-- Sub-tab pills -->
+      <div style="display:flex;gap:6px;padding:12px 16px 0;flex-wrap:wrap">
+        <button class="alerts-sub active" data-section="sentinel" onclick="switchAlertsSubTab('sentinel')"
+                style="background:#0d2818;color:#3fb950;border:1px solid #2ea043;padding:5px 12px;border-radius:16px;font-size:0.82rem;cursor:pointer;font-weight:600">📨 Sentinel Activity</button>
+        <button class="alerts-sub" data-section="system" onclick="switchAlertsSubTab('system')"
+                style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:5px 12px;border-radius:16px;font-size:0.82rem;cursor:pointer">🚨 System Alerts</button>
+      </div>
+      <!-- Sentinel sub-section -->
+      <div class="alerts-section" id="alerts-section-sentinel">
+        <div class="table-wrap">
+          <div class="table-head">
+            <h3>📨 Sentinel Activity <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— last 20 runs</span></h3>
+            <button class="refresh-btn" onclick="loadSentinelActivity()">↻ Refresh</button>
+          </div>
+          <div id="sentinelRunsBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+        </div>
+        <div id="sentinelRunModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px">
+          <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:800px;margin:0 auto;padding:24px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <h3 style="margin:0;color:#e6edf3">Sentinel Run Detail</h3>
+              <button onclick="document.getElementById('sentinelRunModal').style.display='none'" style="background:none;border:none;color:#8b949e;font-size:1.4rem;cursor:pointer">×</button>
+            </div>
+            <pre id="sentinelRunDetail" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:0.78rem;color:#e6edf3;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word"></pre>
           </div>
         </div>
-        <div id="sysAlertsBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
       </div>
+      <!-- System Alerts sub-section -->
+      <div class="alerts-section" id="alerts-section-system" style="display:none">
+        <div class="table-wrap">
+          <div class="table-head">
+            <h3>🚨 System Alerts <span id="sysAlertCounts" style="font-size:0.75rem;color:#8b949e;font-weight:400"></span></h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="sysAlertFilter" onchange="renderSysAlerts()" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+                <option value="all">All</option>
+                <option value="critical">Critical only</option>
+                <option value="hour">Last hour</option>
+              </select>
+              <button class="refresh-btn" onclick="loadSysAlerts()">↻ Refresh</button>
+            </div>
+          </div>
+          <div id="sysAlertsBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+        </div>
       <!-- Detail modal -->
 
       <div id="sysAlertModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;overflow:auto;padding:40px 20px">
@@ -455,21 +385,10 @@
           <pre id="sysAlertDetail" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:0.78rem;color:#e6edf3;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word"></pre>
         </div>
       </div>
-    </div>
+      </div><!-- /alerts-section-system -->
+    </div><!-- /widget-panel-alerts_hub -->
 
-    <!-- UW Correlations panel -->
-    <div class="widget-panel" id="widget-panel-uw_correlations">
-      <div class="table-wrap">
-        <div class="table-head">
-          <h3>🔗 Correlations <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input id="uwCorrTicker" placeholder="Ticker (e.g. AAPL)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWCorrelations()">
-            <button class="refresh-btn" onclick="loadUWCorrelations()">↻ Refresh</button>
-          </div>
-        </div>
-        <div id="uwCorrBody" style="padding:16px 20px"><div class="loading">Enter a ticker and click Refresh</div></div>
-      </div>
-    </div>
+    <!-- UW Correlations widget moved to 🐋 UW tab (page-uw) on 2026-05-24 -->
 
   </div>
 
@@ -743,8 +662,8 @@
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
-        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">Signal Center</h2>
-        <div style="font-size:0.8rem;color:#8b949e" id="sc-meta">Graph-powered earnings cascade &amp; pre-market impact alerts</div>
+        <h2 style="font-size:1.3rem;font-weight:700;margin-bottom:4px">📅 Earnings &amp; Catalysts</h2>
+        <div style="font-size:0.8rem;color:#8b949e" id="sc-meta">Tomorrow's catalysts · earnings calendar · preview · reaction analysis · graph-powered cascades</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button id="sc-seed-btn" onclick="scSeedGraph()" style="background:#21262d;border:1px solid #30363d;border-radius:20px;padding:5px 14px;color:#3fb950;font-size:0.82rem;cursor:pointer;display:none;align-items:center;gap:5px" title="Populate Neo4j with all companies and relationships">
@@ -912,6 +831,15 @@
         </div>
 
       </div>
+    </div>
+
+    <!-- ── 🎯 Tomorrow's Catalysts (moved from P&L Dashboard on 2026-05-24) ─── -->
+    <div class="table-wrap" style="margin-bottom:20px">
+      <div class="table-head">
+        <h3>🎯 Tomorrow's Catalysts <span style="font-size:0.78rem;color:#8b949e;font-weight:400">— stocks reporting earnings tomorrow + price-action setups</span></h3>
+        <button class="refresh-btn" onclick="if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(true)">↻ Refresh</button>
+      </div>
+      <div id="tcBody" style="padding:16px"><div class="loading" style="padding:32px;text-align:center">Loading tomorrow's catalysts…</div></div>
     </div>
 
     <!-- ── Earnings Calendar ──────────────────────────────────────────────── -->
@@ -1087,7 +1015,26 @@
           <span><span style="display:inline-block;width:16px;height:3px;background:#f7c948;margin-right:3px;vertical-align:middle;border-radius:2px"></span>Invests</span>
         </div>
 
-        <!-- Historical Impact panel (shown on node/earnings click) -->
+        <!-- Direct Historical Impact lookup (added 2026-05-24 to make this discoverable
+             without having to find + click a node in the cascade graph above) -->
+        <div style="margin-top:14px;padding:12px 14px;background:#0d1117;border:1px solid #30363d;border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;flex-direction:column">
+            <span style="font-weight:600;color:#e6edf3;font-size:0.88rem">🔎 Look up historical impact</span>
+            <span style="font-size:0.72rem;color:#8b949e">See what peer stocks did when this ticker had big moves or earnings</span>
+          </div>
+          <div style="flex:1;min-width:8px"></div>
+          <input id="sc-impact-lookup-sym" placeholder="Ticker (e.g. NVDA, AAPL)" value="NVDA"
+                 onkeydown="if(event.key==='Enter')scImpactLookup()"
+                 style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:5px 10px;border-radius:6px;font-size:0.85rem;width:170px;text-transform:uppercase">
+          <select id="sc-impact-lookup-days" style="background:#21262d;border:1px solid #30363d;border-radius:6px;padding:5px 10px;color:#e6edf3;font-size:0.85rem">
+            <option value="180">6 months</option>
+            <option value="365" selected>1 year</option>
+            <option value="730">2 years</option>
+          </select>
+          <button onclick="scImpactLookup()" style="background:#0d2818;color:#3fb950;border:1px solid #2ea043;padding:5px 14px;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer">▶ Load</button>
+        </div>
+
+        <!-- Historical Impact panel (auto-shows on lookup or graph-node click) -->
         <div id="sc-node-impact" style="display:none;margin-top:12px">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px 8px 0 0;border-bottom:1px solid #21262d">
             <div>
@@ -1711,6 +1658,10 @@
       </div>
       <!-- Live decisions feed -->
       <div class="bot-decisions-feed">
+        <!-- Daily summary card -->
+        <div id="bot-daily-summary" style="background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:12px 14px;margin-bottom:10px;font-size:0.78rem">
+          <div style="color:#8b949e">Loading today's summary…</div>
+        </div>
         <div class="bot-decisions-feed-title">
           <span>⚡ Live Activity</span>
           <span id="bot-feed-ts" style="font-weight:400;font-size:0.7rem"></span>
@@ -1762,22 +1713,26 @@
       <!-- CANDIDATE UNIVERSE -->
       <div style="margin-bottom:20px">
         <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">🔭 Where Does It Find Stocks? (Candidate Universe)</div>
-        <p style="margin:0 0 10px 0">Every scan builds a fresh list of candidate symbols from three sources simultaneously:</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <p style="margin:0 0 10px 0">Every scan builds a fresh list of candidate symbols from <strong>four sources</strong>, ranked by priority. The top 200 unique symbols are then scored. Your personal watchlist is <strong>not</strong> used as a scan source.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
-            <div style="color:#3fb950;font-weight:700;margin-bottom:4px">📋 Your Watchlist</div>
-            <div style="color:#8b949e;font-size:0.82rem">All symbols you've starred in your personal watchlist.</div>
+            <div style="color:#f0883e;font-weight:700;margin-bottom:4px">🐋 UW Flow Alerts <span style="font-size:0.7rem;color:#3fb950;margin-left:4px">priority +10</span></div>
+            <div style="color:#8b949e;font-size:0.82rem">Tickers with unusual options flow ≥ $100k premium in the last 6 hours. Up to 50 symbols, sorted by premium.</div>
           </div>
           <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
-            <div style="color:#f0883e;font-weight:700;margin-bottom:4px">🐋 UW Flow Alerts</div>
-            <div style="color:#8b949e;font-size:0.82rem">Tickers with unusual options flow &gt;$100k premium in the last 6 hours (up to 30 symbols).</div>
+            <div style="color:#58a6ff;font-weight:700;margin-bottom:4px">📰 News Momentum <span style="font-size:0.7rem;color:#3fb950;margin-left:4px">priority +8</span></div>
+            <div style="color:#8b949e;font-size:0.82rem">Tickers with 3+ positive Benzinga news items in the last 1 hour. Up to 50 symbols.</div>
           </div>
           <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
-            <div style="color:#58a6ff;font-weight:700;margin-bottom:4px">📰 News Momentum</div>
-            <div style="color:#8b949e;font-size:0.82rem">Tickers with 3+ positive Benzinga news items in the last 1 hour (up to 20 symbols).</div>
+            <div style="color:#a371f7;font-weight:700;margin-bottom:4px">📈 UW Top Movers <span style="font-size:0.7rem;color:#3fb950;margin-left:4px">priority +5</span></div>
+            <div style="color:#8b949e;font-size:0.82rem">Tickers from the UW top movers list in the last 1 hour. Up to 100 symbols.</div>
+          </div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
+            <div style="color:#3fb950;font-weight:700;margin-bottom:4px">🏛 Tradable Universe (baseline) <span style="font-size:0.7rem;color:#3fb950;margin-left:4px">priority +1</span></div>
+            <div style="color:#8b949e;font-size:0.82rem">Large-cap liquid names: market cap ≥ $5B, ADV ≥ $5M, price $5-$500, fractionable. Up to 800 symbols, refreshed daily at 8 AM ET.</div>
           </div>
         </div>
-        <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">Symbols already held by your other bots are removed. Up to 30 candidates are scored per scan cycle.</div>
+        <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">Symbols already held by other bots are removed. Final pool: top 200 by combined priority weight, then scored.</div>
       </div>
 
       <!-- HARD GATES -->
@@ -1804,16 +1759,73 @@
         <p style="margin:0 0 10px 0">Each candidate that passes the hard gates is scored on <strong>7 signals</strong>. Each signal returns a value from −100 to +100. The composite score is a weighted sum, also −100 to +100. The stock with the highest composite score wins — but only if it's above the <strong>minimum composite score</strong> (default: 60).</p>
         <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
           <tr style="background:#161b22"><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Signal</th><th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">What It Measures</th><th style="text-align:right;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Default Weight</th></tr>
-          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Conviction</strong></td><td style="padding:8px 12px;color:#8b949e">Internal conviction score (0–100, centred to −100..+100). Grade A/B/C/F</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.30 (30%)</td></tr>
-          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>News</strong></td><td style="padding:8px 12px;color:#8b949e">Benzinga sentiment × confidence (article count / 10, capped at 1)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.20 (20%)</td></tr>
-          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>UW Options</strong></td><td style="padding:8px 12px;color:#8b949e">Unusual Whales options flow label (bullish = +score, bearish = −score)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.20 (20%)</td></tr>
-          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>GEX</strong></td><td style="padding:8px 12px;color:#8b949e">Net gamma exposure (call gamma − put gamma) as % of total gamma</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.10 (10%)</td></tr>
-          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Insider</strong></td><td style="padding:8px 12px;color:#8b949e">Net insider buy/sell value in last 30 days as % of total insider activity</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.10 (10%)</td></tr>
-          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Distance 52w</strong></td><td style="padding:8px 12px;color:#8b949e">Position relative to 52-week high. Sweet spot: 20–40% off the high (+80)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.05 (5%)</td></tr>
-          <tr><td style="padding:8px 12px"><strong>Predictor</strong></td><td style="padding:8px 12px;color:#8b949e">AI price-change forecast × confidence (47% historical accuracy)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.05 (5%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>UW Options Flow</strong></td><td style="padding:8px 12px;color:#8b949e">Unusual Whales options flow label (bullish = +score, bearish = −score). Largest single driver.</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.30 (30%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>News</strong></td><td style="padding:8px 12px;color:#8b949e">Benzinga sentiment × confidence (article count / 10, capped at 1)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.22 (22%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>GEX</strong></td><td style="padding:8px 12px;color:#8b949e">Net gamma exposure (call gamma − put gamma) as % of total gamma</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.15 (15%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Insider</strong></td><td style="padding:8px 12px;color:#8b949e">Net insider buy/sell value in last 30 days as % of total insider activity</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.15 (15%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Conviction</strong></td><td style="padding:8px 12px;color:#8b949e">Internal conviction score (0–100, centred to −100..+100). Grade A/B/C/F</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.10 (10%)</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Distance 52w</strong></td><td style="padding:8px 12px;color:#8b949e">Position relative to 52-week high. Sweet spot: 20–40% off the high (+80)</td><td style="padding:8px 12px;text-align:right;color:#3fb950">0.08 (8%)</td></tr>
+          <tr><td style="padding:8px 12px"><strong>Predictor</strong></td><td style="padding:8px 12px;color:#8b949e">AI price-change forecast × confidence (disabled — AUC 0.54, too low to add value)</td><td style="padding:8px 12px;text-align:right;color:#6e7681">0.00 (0%)</td></tr>
         </table>
         <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;margin-top:10px;color:#8b949e;font-size:0.82rem">
           <strong style="color:#e6edf3">52-Week High scoring breakdown:</strong> Within 5% of high → −40 (extended); 5–20% off → +30; 20–40% off → +80 (sweet spot); &gt;40% off → −60 (distressed)
+        </div>
+      </div>
+
+      <!-- STRATEGY FILTER -->
+      <div style="margin-bottom:20px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #58a6ff;padding-left:10px">🎯 Strategy — Focus Your Bot on One Setup Type</div>
+        <p style="margin:0 0 10px 0">After scoring, the bot classifies each candidate into one of <strong>5 setup types</strong> using price action, RSI, fundamentals, and recent return patterns. The <strong>Strategy</strong> setting lets you lock the bot to only trade one of these setups — or leave it on <strong>Composite</strong> (default) to accept all types.</p>
+        <div style="background:#0d2020;border:1px solid #1a3a3a;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:0.84rem;color:#c9d1d9">
+          <strong style="color:#58a6ff">How it works:</strong> When a candidate passes all hard gates and is scored, <code>classifySetup()</code> runs. If the bot's strategy ≠ <em>Composite</em> and the candidate's setup type doesn't match, the candidate is rejected — even if the composite score is excellent. The strategy filter is applied <em>after</em> scoring, so it never changes what gets scored, only what gets traded.
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.84rem">
+          <tr style="background:#161b22">
+            <th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Strategy</th>
+            <th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">What the bot looks for</th>
+            <th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Best conditions</th>
+            <th style="text-align:left;padding:8px 12px;color:#8b949e;border-bottom:1px solid #21262d">Exit profile</th>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 12px"><strong>🔀 Composite</strong> <span style="color:#3fb950;font-size:0.72rem">(default)</span></td>
+            <td style="padding:8px 12px;color:#8b949e">All setup types. Highest composite score wins.</td>
+            <td style="padding:8px 12px;color:#8b949e">All market conditions. Most trades.</td>
+            <td style="padding:8px 12px;color:#8b949e">Varies by setup type detected</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 12px"><strong>⚡ Catalyst</strong></td>
+            <td style="padding:8px 12px;color:#8b949e">Earnings surprise, FDA approval, analyst upgrade, major news event. High volume spike + price gap.</td>
+            <td style="padding:8px 12px;color:#8b949e">Earnings season, news-driven markets</td>
+            <td style="padding:8px 12px;color:#8b949e">3% hard SL · 25% trail · 3-day time stop</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 12px"><strong>📈 Breakout</strong></td>
+            <td style="padding:8px 12px;color:#8b949e">Price breaks above a key resistance level with expanding volume. RSI rising but not overbought.</td>
+            <td style="padding:8px 12px;color:#8b949e">Low-VIX trending markets</td>
+            <td style="padding:8px 12px;color:#8b949e">4% hard SL · 30% trail · 21-day time stop</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d;background:#0d2818">
+            <td style="padding:8px 12px"><strong>🚀 Momentum</strong></td>
+            <td style="padding:8px 12px;color:#8b949e">Strong trend continuation. EMA9 &gt; EMA20 &gt; EMA50, high RVOL, RSI 55–75. Not near 52w high.</td>
+            <td style="padding:8px 12px;color:#8b949e">Trending bull markets</td>
+            <td style="padding:8px 12px;color:#8b949e"><span style="color:#3fb950;font-weight:600">6% hard SL</span> (widened May 2026) · 30% trail · 7-day time stop</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 12px"><strong>💎 Value / Contrarian</strong></td>
+            <td style="padding:8px 12px;color:#8b949e">Oversold quality stock: RSI &lt; 35, strong fundamentals, 40–70% off 52w high, insider buying.</td>
+            <td style="padding:8px 12px;color:#8b949e">High-VIX sell-offs, sector rotations</td>
+            <td style="padding:8px 12px;color:#8b949e">7% hard SL · 45% trail · 30-day time stop</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 12px"><strong>↩ Mean Reversion</strong></td>
+            <td style="padding:8px 12px;color:#8b949e">Short-term extended move snapping back to mean. RSI &lt; 30, 3–5 down days in a row, quality fundamentals.</td>
+            <td style="padding:8px 12px;color:#8b949e">Choppy / range-bound markets</td>
+            <td style="padding:8px 12px;color:#8b949e">5% hard SL · 35% trail · 15-day time stop + MA50 crossover</td>
+          </tr>
+        </table>
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;margin-top:10px;color:#8b949e;font-size:0.82rem">
+          <strong style="color:#e6edf3">Tip — run multiple bots with different strategies</strong><br>
+          You can run a Momentum bot and a Mean Reversion bot simultaneously. Each only fires when its specific setup type appears, so they naturally trade different market conditions without competing. Each bot still uses its own capital budget independently.
         </div>
       </div>
 
@@ -1842,21 +1854,77 @@
       <!-- POSITION MANAGEMENT / EXIT -->
       <div style="margin-bottom:20px">
         <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #f85149;padding-left:10px">🚪 Exit — When and How a Trade Is Closed</div>
-        <p style="margin:0 0 10px 0">While a trade is open, the bot checks exit conditions every <strong>5 minutes</strong> during market hours. Two conditions can trigger a close:</p>
+
+        <!-- Validation callout -->
+        <div style="background:linear-gradient(135deg,#0d2818,#0d1117);border:1px solid #2ea043;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:0.85rem;color:#c9d1d9">
+          <strong style="color:#3fb950">🔬 Updated 2026-05-23 (backtest-validated):</strong>
+          Momentum hard stop-loss widened from <strong>3% → 6%</strong> after 5-year backtest showed -5% stops fired on natural noise (78 trades, 1% WR, -$40K). v2 backtest with -8% stop lifted Sharpe from 0.58 → 0.82. Production settled at -6% as the proven middle ground. See the <strong>📊 Backtests</strong> tab to compare strategies and rerun your own scenarios.
+        </div>
+
+        <p style="margin:0 0 10px 0">While a trade is open, the bot checks exit conditions every <strong>5 minutes</strong> during market hours. Exit rules now depend on the <strong>setup type</strong> the bot detected at entry (catalyst, breakout, momentum, value_contrarian, mean_reversion) — different setups have different natural hold periods and stop tolerances.</p>
+
+        <!-- Per-setup exit table (NEW) -->
+        <div style="font-weight:600;color:#e6edf3;margin:6px 0 8px">📋 Per-setup exit rules</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.83rem;margin-bottom:14px">
+          <tr style="background:#161b22">
+            <th style="text-align:left;padding:8px 10px;color:#8b949e;border-bottom:1px solid #21262d">Setup</th>
+            <th style="text-align:center;padding:8px 10px;color:#8b949e;border-bottom:1px solid #21262d">Hard SL</th>
+            <th style="text-align:center;padding:8px 10px;color:#8b949e;border-bottom:1px solid #21262d">Trail</th>
+            <th style="text-align:center;padding:8px 10px;color:#8b949e;border-bottom:1px solid #21262d">Time Stop</th>
+            <th style="text-align:left;padding:8px 10px;color:#8b949e;border-bottom:1px solid #21262d">Other Exits</th>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 10px"><strong>catalyst</strong></td>
+            <td style="padding:8px 10px;text-align:center;color:#f85149">3%</td>
+            <td style="padding:8px 10px;text-align:center;color:#f0883e">25%</td>
+            <td style="padding:8px 10px;text-align:center;color:#c9d1d9">3 days</td>
+            <td style="padding:8px 10px;color:#8b949e;font-size:0.78rem">UW flip · negative news · pre-earnings</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 10px"><strong>breakout</strong></td>
+            <td style="padding:8px 10px;text-align:center;color:#f85149">4%</td>
+            <td style="padding:8px 10px;text-align:center;color:#f0883e">30%</td>
+            <td style="padding:8px 10px;text-align:center;color:#c9d1d9">21 days</td>
+            <td style="padding:8px 10px;color:#8b949e;font-size:0.78rem">UW flip · pre-earnings</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d;background:#0d2818">
+            <td style="padding:8px 10px"><strong>momentum</strong> <span style="color:#3fb950;font-size:0.72rem">✓ updated</span></td>
+            <td style="padding:8px 10px;text-align:center;color:#3fb950;font-weight:600">6%</td>
+            <td style="padding:8px 10px;text-align:center;color:#f0883e">30%</td>
+            <td style="padding:8px 10px;text-align:center;color:#c9d1d9">7 days</td>
+            <td style="padding:8px 10px;color:#8b949e;font-size:0.78rem">UW flip · negative news · pre-earnings</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 10px"><strong>value_contrarian</strong></td>
+            <td style="padding:8px 10px;text-align:center;color:#f85149">7%</td>
+            <td style="padding:8px 10px;text-align:center;color:#f0883e">45%</td>
+            <td style="padding:8px 10px;text-align:center;color:#c9d1d9">30 days</td>
+            <td style="padding:8px 10px;color:#8b949e;font-size:0.78rem">Negative news · pre-earnings</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px"><strong>mean_reversion</strong></td>
+            <td style="padding:8px 10px;text-align:center;color:#f85149">5%</td>
+            <td style="padding:8px 10px;text-align:center;color:#f0883e">35%</td>
+            <td style="padding:8px 10px;text-align:center;color:#c9d1d9">15 days</td>
+            <td style="padding:8px 10px;color:#8b949e;font-size:0.78rem">Negative news · pre-earnings · MA50 crossover (reverted)</td>
+          </tr>
+        </table>
+        <div style="color:#8b949e;font-size:0.78rem;margin:0 0 14px;font-style:italic">Source of truth: <code>EXIT_RULES_BY_SETUP</code> in <code>src/core/bot-executor.js</code>. Mean-reversion's 5% stop and 15-day hold were validated against backtest as already-optimal — widening them regressed performance. Momentum's 6% is the May 2026 tightening.</div>
+
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
           <div style="background:#1a1f2e;border:1px solid #30363d;border-radius:8px;padding:14px">
             <div style="color:#f85149;font-weight:700;margin-bottom:6px">🛑 Hard Stop-Loss</div>
-            <div style="color:#c9d1d9;font-size:0.85rem">Closes the trade immediately if current P&amp;L ≤ −stop_loss_usd.</div>
-            <div style="color:#8b949e;font-size:0.82rem;margin-top:6px">Default: $50. Stop-loss price = fill price × (1 − stop_pct). Calculated at entry from dollars_invested.</div>
+            <div style="color:#c9d1d9;font-size:0.85rem">Closes the trade immediately if loss exceeds the setup's <code>hard_sl_pct</code> of dollars invested.</div>
+            <div style="color:#8b949e;font-size:0.82rem;margin-top:6px">e.g. momentum at 6% × $4,750 invested = stops out around -$285. Stop-loss price = fill price × (1 − hard_sl_pct).</div>
           </div>
           <div style="background:#1a1f2e;border:1px solid #30363d;border-radius:8px;padding:14px">
             <div style="color:#f0883e;font-weight:700;margin-bottom:6px">📉 Trailing Stop</div>
-            <div style="color:#c9d1d9;font-size:0.85rem">Fires when P&amp;L drops more than trail_pct% below the trade's peak P&amp;L.</div>
-            <div style="color:#8b949e;font-size:0.82rem;margin-top:6px">Default: 30%. Only activates after the trade reaches a profit (peak P&amp;L &gt; $0). Locks in gains as the trade runs up.</div>
+            <div style="color:#c9d1d9;font-size:0.85rem">Fires when P&amp;L drops more than <code>trail_pct</code>% below the trade's peak P&amp;L.</div>
+            <div style="color:#8b949e;font-size:0.82rem;margin-top:6px">Only activates after the trade reaches a profit (peak P&amp;L &gt; $0). Locks in gains as the trade runs up.</div>
           </div>
         </div>
         <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;font-size:0.82rem">
-          <strong style="color:#e6edf3">Exit example with defaults:</strong> You buy AAPL at $180 with $4,750 invested. Stop-loss = $50 → stop price ≈ $178.10. If AAPL rises to $182 (peak P&amp;L = +$52.78), the trailing stop activates. If price then falls back to where P&amp;L = 52.78 × (1 − 0.30) = $36.95, the trade closes automatically.
+          <strong style="color:#e6edf3">Exit example (momentum setup, current 6% SL):</strong> You buy AAPL at $180 with $4,750 invested. Hard SL fires at $180 × (1 − 0.06) = $169.20 (about -$285). If AAPL rises to $190 (peak P&amp;L = +$264) before falling back, the 30% trailing stop closes the trade at +$185 (P&amp;L drops 30% below peak).
         </div>
         <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">All exits use a market order. Sell limit offset: exit price × (1 − offset_bps).</div>
       </div>
@@ -1880,6 +1948,7 @@
           <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Broker</strong></td><td style="padding:8px 12px;color:#3fb950">Alpaca</td><td style="padding:8px 12px;color:#8b949e">Alpaca (paper) or Tiger Demo. Both are paper accounts — no real money.</td></tr>
           <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Min Composite Score</strong></td><td style="padding:8px 12px;color:#3fb950">60</td><td style="padding:8px 12px;color:#8b949e">Minimum score (0–100) required to enter a trade. Higher = pickier bot.</td></tr>
           <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Min Conviction Grade</strong></td><td style="padding:8px 12px;color:#3fb950">C</td><td style="padding:8px 12px;color:#8b949e">Skip stocks with a conviction grade below this. A = best, F = worst.</td></tr>
+          <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Strategy</strong></td><td style="padding:8px 12px;color:#3fb950">Composite</td><td style="padding:8px 12px;color:#8b949e">Focus the bot on one setup type (Catalyst / Breakout / Momentum / Value / Mean Reversion) or leave on Composite to accept all. See the Strategy section above for details.</td></tr>
           <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Max VIX</strong></td><td style="padding:8px 12px;color:#3fb950">60</td><td style="padding:8px 12px;color:#8b949e">Skip all trades if VIX is above this value. Lower = more conservative in volatile markets.</td></tr>
           <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Max Loss ($)</strong></td><td style="padding:8px 12px;color:#f85149">$100</td><td style="padding:8px 12px;color:#8b949e">Circuit breaker. Bot stops permanently when cumulative losses hit this amount.</td></tr>
           <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><strong>Stop-Loss ($)</strong></td><td style="padding:8px 12px;color:#f85149">$50</td><td style="padding:8px 12px;color:#8b949e">Per-trade stop. Exit when this trade loses $50 or more.</td></tr>
@@ -1917,6 +1986,57 @@
           <tr style="border-bottom:1px solid #21262d"><td style="padding:8px 12px"><span style="color:#f85149;font-weight:600">skip_circuit_breaker</span></td><td style="padding:8px 12px;color:#8b949e">Cumulative loss has hit max_loss_usd. Bot is stopped.</td></tr>
           <tr><td style="padding:8px 12px"><span style="color:#8b949e;font-weight:600">skip_inflight</span></td><td style="padding:8px 12px;color:#8b949e">Previous scan for this bot was still running — this scan was skipped to prevent overlap.</td></tr>
         </table>
+      </div>
+
+      <!-- BACKTEST VALIDATION (NEW) -->
+      <div style="margin-bottom:8px">
+        <div style="font-weight:700;color:#e6edf3;margin-bottom:10px;border-left:3px solid #3fb950;padding-left:10px">🔬 Backtest Validation — How We Tune the Strategy</div>
+        <p style="margin:0 0 10px 0">Every rule change is validated against 5 years of historical data <strong>before</strong> being applied to production. The replay harness simulates the strategy day-by-day across a basket of 116 large-caps, models slippage and stops, and produces a full trade ledger you can inspect.</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
+            <div style="color:#3fb950;font-weight:700;margin-bottom:4px">📊 Backtests tab</div>
+            <div style="color:#8b949e;font-size:0.82rem">Side-by-side metrics across 8 strategies: buy-and-hold SPY, SMA crossover, B-3.7 momentum/mean-reversion subsets, regime-gated variants, and the post-tightening v2s.</div>
+          </div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:12px">
+            <div style="color:#3fb950;font-weight:700;margin-bottom:4px">🔬 Failure analysis</div>
+            <div style="color:#8b949e;font-size:0.82rem">Inside any backtest's detail panel: exit-reason breakdown, top 10 worst trades, per-symbol P&amp;L, winner-vs-loser symmetry. Diagnoses exactly which rules cost the most.</div>
+          </div>
+        </div>
+
+        <div style="font-weight:600;color:#e6edf3;margin:10px 0 8px">Key findings driving current production rules</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+          <tr style="background:#161b22">
+            <th style="text-align:left;padding:8px 10px;color:#8b949e;border-bottom:1px solid #21262d">Finding</th>
+            <th style="text-align:left;padding:8px 10px;color:#8b949e;border-bottom:1px solid #21262d">Production action</th>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 10px;color:#c9d1d9">Momentum -5% stops fired on noise (78 trades, 1% WR, -$40K)</td>
+            <td style="padding:8px 10px;color:#3fb950">✓ Widened to 6% (May 2026)</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 10px;color:#c9d1d9">Mean-reversion 5% stop + 15-day hold already optimal (Calmar 0.78, beats SPY)</td>
+            <td style="padding:8px 10px;color:#8b949e">⚖ No change — widening regressed -16pp</td>
+          </tr>
+          <tr style="border-bottom:1px solid #21262d">
+            <td style="padding:8px 10px;color:#c9d1d9">B-3.7 mean-reversion subset (oversold-quality) is the empirical anchor</td>
+            <td style="padding:8px 10px;color:#8b949e">⚖ Composite scoring weights this signal class</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 10px;color:#c9d1d9">Regime-gate concept did not beat SPY's 200-day filter in this window</td>
+            <td style="padding:8px 10px;color:#f0883e">⏸ Regime bot Phase 5 deployment paused</td>
+          </tr>
+        </table>
+
+        <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:10px 12px;margin-top:10px;color:#8b949e;font-size:0.82rem">
+          <strong style="color:#e6edf3">Important caveat:</strong> the replay harness can only validate the <strong>price-based</strong> portion of B-3.7. The production bot also gates on UW options flow, news sentiment, insider activity, fundamentals, and earnings proximity — none of which have multi-year history loaded. Backtest results should be read as a lower-bound on what the live composite-gated bot achieves, not an exact prediction.
+        </div>
+
+        <div style="color:#8b949e;font-size:0.82rem;margin-top:8px">
+          To run your own backtest:
+          <code style="background:#161b22;padding:1px 6px;border-radius:4px;font-size:0.78rem">node --env-file=.env tests/bot-engine/replay-harness.js --strategy b37-momentum-prod-aligned --from 2021-05-21 --to 2026-05-22</code>
+          — results appear in the 📊 Backtests tab automatically.
+        </div>
       </div>
 
     </div>
@@ -2144,6 +2264,347 @@
       <span id="brSaveErr" style="font-size:0.8rem;color:#f85149;display:none"></span>
     </div>
   </div>
+</div>
+
+<!-- ── Backtests page (replay harness results) ──────────────────────── -->
+<div class="page" id="page-backtests">
+
+  <!-- Explainer card -->
+  <div class="table-wrap" style="margin-bottom:16px">
+    <div class="table-head"><h3>📊 What is a backtest?</h3></div>
+    <div style="padding:16px;line-height:1.55;color:#c9d1d9">
+      <p style="margin:0 0 8px">
+        A backtest pretends it's day-1 of historical data and plays a trading strategy forward, one trading day at a time.
+        At the end you see <em>every trade that would have happened</em>, the total return, the worst drawdown, and the
+        risk-adjusted scores. It's a flight simulator for trading rules — you can test ideas without spending real money.
+      </p>
+      <p style="margin:0 0 8px">
+        Each row in the table below is one historical "what-if" run produced by
+        <code style="background:#161b22;padding:1px 6px;border-radius:4px">tests/bot-engine/replay-harness.js</code>.
+        Click any row to see its equity curve and trade ledger.
+      </p>
+      <p style="margin:0;font-size:0.85rem;color:#8b949e">
+        <strong>Glossary:</strong>
+        <span title="Compound Annual Growth Rate — average yearly return.">CAGR</span> ·
+        <span title="Risk-adjusted return. >1 is great, 0.5–0.9 is most real strategies.">Sharpe</span> ·
+        <span title="Worst peak-to-trough decline. Closer to zero = safer ride.">Max DD</span> ·
+        <span title="CAGR ÷ |Max DD|. Best single-number 'is it worth the risk'.">Calmar</span> ·
+        <span title="Wins ÷ Total trades. Misleading alone — combine with profit factor.">Win rate</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- Signal Validation panel — tests whether conviction grade predicts forward returns -->
+  <div class="table-wrap" style="margin-bottom:16px">
+    <div class="table-head">
+      <h3>🎯 Signal Validation — does conviction predict forward returns?</h3>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="font-size:0.85rem;color:#8b949e">Window:</label>
+        <select id="sv-window" onchange="loadSignalValidation()" style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+          <option value="90" selected>90 days</option>
+        </select>
+        <button class="refresh-btn" onclick="loadSignalValidation()">↻ Refresh</button>
+      </div>
+    </div>
+    <div id="sv-content" style="padding:16px">
+      <div class="loading">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Comparison table -->
+  <div class="table-wrap" style="margin-bottom:16px">
+    <div class="table-head">
+      <h3>All runs</h3>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="font-size:0.85rem;color:#8b949e">Filter strategy:</label>
+        <select id="bt-filter-strategy" onchange="renderBacktestList()" style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+          <option value="">All</option>
+        </select>
+        <button class="refresh-btn" onclick="loadBacktests()">↻ Refresh</button>
+      </div>
+    </div>
+    <div id="bt-list" style="overflow-x:auto"><div class="loading" style="padding:16px">Loading…</div></div>
+  </div>
+
+  <!-- Detail panel — appears when a row is clicked -->
+  <div id="bt-detail" style="display:none">
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head">
+        <h3 id="bt-detail-title">—</h3>
+        <button class="refresh-btn" onclick="closeBacktestDetail()">✕ Close</button>
+      </div>
+      <div style="padding:16px">
+        <div id="bt-detail-config" style="font-size:0.85rem;color:#8b949e;margin-bottom:16px"></div>
+        <div id="bt-detail-headline"></div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head"><h3>Equity curve</h3></div>
+      <div style="padding:16px;background:#0d1117">
+        <canvas id="bt-equity-chart" height="240"></canvas>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head">
+        <h3>Trade ledger</h3>
+        <span id="bt-trade-count" style="font-size:0.85rem;color:#8b949e"></span>
+      </div>
+      <div id="bt-trades" style="overflow-x:auto;max-height:480px;overflow-y:auto"></div>
+    </div>
+
+    <!-- ── Failure Analysis ─────────────────────────────────────────── -->
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head">
+        <h3>🔬 Failure analysis — where the losses came from</h3>
+        <span style="font-size:0.8rem;color:#8b949e">Diagnose which rules / symbols / timing hurt this run</span>
+      </div>
+      <div id="bt-failure" style="padding:16px"><div class="loading">Computing…</div></div>
+    </div>
+  </div>
+
+  <!-- How to run script -->
+  <div class="table-wrap">
+    <div class="table-head"><h3>How to run a new backtest</h3></div>
+    <div style="padding:16px;line-height:1.6;color:#c9d1d9;font-size:0.9rem">
+      <p style="margin:0 0 8px">From the project root, run any of these in your terminal. Each writes a new entry to this dashboard.</p>
+<pre style="background:#161b22;padding:12px;border-radius:6px;overflow-x:auto;font-size:0.8rem;margin:0">
+# See all strategy + option flags
+node --env-file=.env tests/bot-engine/replay-harness.js --help
+
+# Re-run the best strategy
+node --env-file=.env tests/bot-engine/replay-harness.js \
+    --strategy b37-mean-reversion --from 2021-05-21 --to 2026-05-22
+
+# Test a single ticker
+node --env-file=.env tests/bot-engine/replay-harness.js \
+    --strategy sma-cross --from 2023-01-01 --to 2024-12-31 \
+    --symbols AAPL,MSFT,NVDA</pre>
+    </div>
+  </div>
+</div>
+
+<!-- ── 🐋 Unusual Whales hub (consolidates 5 UW widgets previously in P&L Dashboard) ── -->
+<div class="page" id="page-uw">
+  <!-- Sub-tab nav -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;border-bottom:1px solid #30363d;padding-bottom:10px">
+    <button class="uw-subtab active" data-section="flow" onclick="switchUwSubTab('flow')"
+            style="background:#0d2818;color:#3fb950;border:1px solid #2ea043;padding:6px 14px;border-radius:18px;font-size:0.85rem;cursor:pointer;font-weight:600">🐋 Options Flow</button>
+    <button class="uw-subtab" data-section="insider" onclick="switchUwSubTab('insider')"
+            style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:6px 14px;border-radius:18px;font-size:0.85rem;cursor:pointer">👤 Insider</button>
+    <button class="uw-subtab" data-section="congress" onclick="switchUwSubTab('congress')"
+            style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:6px 14px;border-radius:18px;font-size:0.85rem;cursor:pointer">🏛 Congress</button>
+    <button class="uw-subtab" data-section="correlations" onclick="switchUwSubTab('correlations')"
+            style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:6px 14px;border-radius:18px;font-size:0.85rem;cursor:pointer">🔗 Correlations</button>
+    <button class="uw-subtab" data-section="flow_history" onclick="switchUwSubTab('flow_history')"
+            style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:6px 14px;border-radius:18px;font-size:0.85rem;cursor:pointer">📊 Flow History</button>
+  </div>
+
+  <!-- Sections — the panel HTML is MOVED here from page-dashboard's widget tabs.
+       IDs (uwFlowBody, uwInsiderBody, etc.) are preserved so existing loaders work unchanged. -->
+  <div class="uw-section" id="uw-section-flow">
+    <div class="table-wrap">
+      <div class="table-head">
+        <h3>🐋 Unusual Options Flow <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="uwFlowTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWFlow()">
+          <button class="refresh-btn" onclick="loadUWFlow()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="uwFlowBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="uw-section" id="uw-section-insider" style="display:none">
+    <div class="table-wrap">
+      <div class="table-head">
+        <h3>👤 Insider Trades <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="uwInsiderTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWInsider()">
+          <button class="refresh-btn" onclick="loadUWInsider()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="uwInsiderBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="uw-section" id="uw-section-congress" style="display:none">
+    <div class="table-wrap">
+      <div class="table-head">
+        <h3>🏛️ Congressional Trades <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="uwCongressTicker" placeholder="Ticker (blank=all)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWCongress()">
+          <button class="refresh-btn" onclick="loadUWCongress()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="uwCongressBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="uw-section" id="uw-section-correlations" style="display:none">
+    <div class="table-wrap">
+      <div class="table-head">
+        <h3>🔗 Correlations <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— Unusual Whales</span></h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="uwCorrTicker" placeholder="Ticker (e.g. AAPL)" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem;width:140px" onkeydown="if(event.key==='Enter')loadUWCorrelations()">
+          <button class="refresh-btn" onclick="loadUWCorrelations()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="uwCorrBody" style="padding:16px 20px"><div class="loading">Enter a ticker and click Refresh</div></div>
+    </div>
+  </div>
+
+  <div class="uw-section" id="uw-section-flow_history" style="display:none">
+    <div class="table-wrap">
+      <div class="table-head">
+        <h3>📊 Flow Alerts History <span style="font-size:0.75rem;color:#8b949e;font-weight:400">— DB-backed, last 24h</span></h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="uwFlowHistHours" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+            <option value="6">Last 6h</option>
+            <option value="24" selected>Last 24h</option>
+            <option value="48">Last 48h</option>
+            <option value="168">Last 7d</option>
+          </select>
+          <select id="uwFlowHistMinPrem" style="background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:4px 8px;border-radius:6px;font-size:0.85rem">
+            <option value="0">All premiums</option>
+            <option value="100000" selected>≥$100K</option>
+            <option value="500000">≥$500K</option>
+            <option value="1000000">≥$1M</option>
+          </select>
+          <button class="refresh-btn" onclick="loadFlowAlertsHistory()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="uwFlowHistBody" style="padding:16px 20px"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Portfolio Advisor page (admin-only) ─────────────────────────────── -->
+<div class="page" id="page-advisor">
+
+  <!-- Hero strip: account-level snapshot -->
+  <div class="table-wrap" style="margin-bottom:16px;background:linear-gradient(135deg,#0d2818,#0d1117);border:1px solid #30363d">
+    <div style="padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:18px">
+      <div>
+        <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Account Value <button onclick="showAdvHelp('account_value')" style="background:none;border:1px solid #30363d;color:#8b949e;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:0.7rem;margin-left:4px">?</button></div>
+        <div id="adv-account-value" style="font-size:1.6rem;font-weight:700;color:#e6edf3">—</div>
+        <div id="adv-account-source" style="font-size:0.75rem;color:#8b949e;margin-top:2px">—</div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Total Unrealized P&L <button onclick="showAdvHelp('total_pl')" style="background:none;border:1px solid #30363d;color:#8b949e;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:0.7rem;margin-left:4px">?</button></div>
+        <div id="adv-total-pl" style="font-size:1.6rem;font-weight:700">—</div>
+        <div id="adv-today-pl" style="font-size:0.85rem;margin-top:2px">—</div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Portfolio Risk Score <button onclick="showAdvHelp('avg_risk')" style="background:none;border:1px solid #30363d;color:#8b949e;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:0.7rem;margin-left:4px">?</button></div>
+        <div id="adv-avg-risk" style="font-size:1.6rem;font-weight:700;color:#e6edf3">—</div>
+        <div style="font-size:0.75rem;color:#8b949e;margin-top:2px">Weighted across all holdings · 0–100</div>
+      </div>
+      <div>
+        <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Positions</div>
+        <div id="adv-position-count" style="font-size:1.6rem;font-weight:700;color:#e6edf3">—</div>
+        <div style="font-size:0.75rem;color:#8b949e;margin-top:2px">Active holdings</div>
+      </div>
+    </div>
+    <div id="adv-concerns" style="padding:0 20px 16px"></div>
+  </div>
+
+  <!-- Two-column body: positions (wide) + right rail (best buys + track record) -->
+  <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:16px">
+
+    <!-- LEFT: positions list -->
+    <div>
+      <div class="table-wrap" style="margin-bottom:16px">
+        <div class="table-head">
+          <h3>🎯 Your Positions <button onclick="showAdvHelp('positions')" style="background:none;border:1px solid #30363d;color:#8b949e;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:0.75rem;margin-left:6px">?</button></h3>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <label style="font-size:0.82rem;color:#8b949e">Broker:</label>
+            <select id="adv-source" onchange="this.dataset.userSet='1'; loadAdvisor();" style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:4px 8px;border-radius:6px;font-size:0.82rem" title="Switch broker source for the Advisor (syncs with dashboard global)">
+              <option value="alpaca">📄 Alpaca Paper</option>
+              <option value="alpaca_live">🔴 Alpaca Live</option>
+              <option value="moomoo">💰 Moomoo</option>
+            </select>
+            <label style="font-size:0.82rem;color:#8b949e">Sort:</label>
+            <select id="adv-sort" onchange="renderAdvisorPositions()" style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:4px 8px;border-radius:6px;font-size:0.82rem">
+              <option value="risk">Risk score (high → low)</option>
+              <option value="value">Position value</option>
+              <option value="pl_pct">P&L % (worst first)</option>
+              <option value="symbol">Symbol (A→Z)</option>
+            </select>
+            <button class="refresh-btn" onclick="loadAdvisor()">↻ Refresh</button>
+          </div>
+        </div>
+        <div id="adv-positions" style="padding:16px"><div class="loading">Loading positions…</div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT rail: best buys + track record -->
+    <div>
+      <!-- Today's Best Buys -->
+      <div class="table-wrap" style="margin-bottom:16px">
+        <div class="table-head">
+          <h3>🔥 Today's Best Buys <button onclick="showAdvHelp('best_buys')" style="background:none;border:1px solid #30363d;color:#8b949e;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:0.75rem;margin-left:6px">?</button></h3>
+          <button class="refresh-btn" onclick="loadAdvisorBestBuys()" style="font-size:0.75rem">↻</button>
+        </div>
+        <div id="adv-best-buys" style="padding:12px"><div class="loading">Loading picks…</div></div>
+      </div>
+
+      <!-- Track Record proof -->
+      <div class="table-wrap" style="margin-bottom:16px">
+        <div class="table-head">
+          <h3>📊 Track Record <button onclick="showAdvHelp('track_record')" style="background:none;border:1px solid #30363d;color:#8b949e;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:0.75rem;margin-left:6px">?</button></h3>
+        </div>
+        <div id="adv-track-record" style="padding:12px"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Advisor help modal ── -->
+<div id="adv-help-overlay" onclick="hideAdvHelp()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9000"></div>
+<div id="adv-help-modal" role="dialog" aria-modal="true" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9001;width:min(720px,95vw);max-height:85vh;overflow-y:auto;background:#161b22;border:1px solid #30363d;border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #21262d;position:sticky;top:0;background:#161b22">
+    <div id="adv-help-title" style="font-size:1.0rem;font-weight:700;color:#e6edf3">—</div>
+    <button onclick="hideAdvHelp()" style="background:none;border:none;color:#8b949e;font-size:1.3rem;cursor:pointer;padding:0 4px" title="Close">✕</button>
+  </div>
+  <div id="adv-help-body" style="padding:20px;color:#c9d1d9;font-size:0.88rem;line-height:1.65"></div>
+</div>
+
+<!-- ── System Health page (admin diagnostics) ──────────────────────────── -->
+<div class="page" id="page-health">
+
+  <!-- Explainer + verdict banner -->
+  <div class="table-wrap" style="margin-bottom:16px">
+    <div class="table-head">
+      <h3>🩺 System Health — invariants that should always be true</h3>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="hc-last-check" style="font-size:0.78rem;color:#8b949e"></span>
+        <button class="refresh-btn" onclick="loadHealth()">↻ Refresh</button>
+      </div>
+    </div>
+    <div style="padding:16px;line-height:1.55;color:#c9d1d9;font-size:0.9rem">
+      <p style="margin:0 0 10px">
+        Every box below is a single invariant — a thing that should always be true. <strong style="color:#3fb950">Green</strong> = healthy. <strong style="color:#f0883e">Amber</strong> = warning, look soon. <strong style="color:#f85149">Red</strong> = something is broken, act now. Click the <strong>❓</strong> on any box for what it checks, why it matters, and what to do when it goes red.
+      </p>
+      <div id="hc-summary"></div>
+    </div>
+  </div>
+
+  <!-- Check grid by category -->
+  <div id="hc-grid"><div class="loading" style="padding:24px">Loading checks…</div></div>
+</div>
+
+<!-- ── Health-check help modal ── -->
+<div id="hc-help-overlay" onclick="hideHealthHelp()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9000"></div>
+<div id="hc-help-modal" role="dialog" aria-modal="true" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9001;width:min(720px,95vw);max-height:85vh;overflow-y:auto;background:#161b22;border:1px solid #30363d;border-radius:12px;box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #21262d;position:sticky;top:0;background:#161b22">
+    <div id="hc-help-title" style="font-size:1.0rem;font-weight:700;color:#e6edf3">—</div>
+    <button onclick="hideHealthHelp()" style="background:none;border:none;color:#8b949e;font-size:1.3rem;cursor:pointer;padding:0 4px" title="Close">✕</button>
+  </div>
+  <div id="hc-help-body" style="padding:20px;color:#c9d1d9;font-size:0.88rem;line-height:1.65"></div>
 </div>
 
 <!-- ── Admin AI Chat page ─────────────────────────────── -->
@@ -5098,6 +5559,9 @@ fetch('/auth/check').then(r => r.json()).then(d => {
   if (d.role === 'admin') {
     document.getElementById('tab-users').style.display = '';
     document.getElementById('tab-admin').style.display = '';
+    document.getElementById('tab-backtests').style.display = '';
+    document.getElementById('tab-health').style.display = '';
+    document.getElementById('tab-advisor').style.display = '';
   }
   applyPermissions(d.permissions);
   updateCreditsDisplay(d.credits, d.role);
@@ -8429,6 +8893,15 @@ function setSource(src) {
   loadTomorrowCatalysts();
   loadIntradayPicks();
   loadPnl();
+  // Portfolio Advisor: only reload if currently visible (saves a Moomoo rate-limit call otherwise).
+  // Source-change must propagate here too — without this, switching broker leaves the Advisor
+  // showing stale data from the previous source. Reset the picker's user-set flag so the new
+  // currentSource wins, then trigger the load.
+  if (_showPageCurrent === 'advisor' && typeof loadAdvisor === 'function') {
+    const advPicker = document.getElementById('adv-source');
+    if (advPicker) advPicker.dataset.userSet = '0';
+    loadAdvisor();
+  }
   // Show/hide Moomoo risk panel
   const riskPanel = document.getElementById('moomooRiskPanel');
   if (riskPanel) {
@@ -8846,7 +9319,7 @@ function showPage(name, btn) {
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
   _showPageCurrent = name;
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadTomorrowCatalysts(); loadIntradayPicks(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': scOnShow, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, health: loadHealth, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); } };
   loaders[name]?.();
 }
 
@@ -8858,6 +9331,9 @@ function switchWidgetTab(name) {
   document.querySelectorAll('.widget-panel').forEach(p => {
     p.classList.toggle('active', p.id === `widget-panel-${name}`);
   });
+  // 2026-05-24: trade-hub + alert-hub use consolidated panels. Default sub-tab on first open.
+  if (name === 'trades_hub' && typeof switchTradesSubTab === 'function') switchTradesSubTab('recent');
+  if (name === 'alerts_hub' && typeof switchAlertsSubTab === 'function') switchAlertsSubTab('sentinel');
   document.querySelectorAll('.wta').forEach(a => {
     a.style.display = (a.id === `wta-${name}`) ? 'flex' : 'none';
   });
@@ -11559,6 +12035,22 @@ async function loadNodeImpact(ticker) {
 function reloadNodeImpact() {
   if (_scNodeImpactTicker) loadNodeImpact(_scNodeImpactTicker);
 }
+
+// Direct lookup from the Earnings page (added 2026-05-24).
+// Reads ticker + days from the new inline lookup row, syncs the days dropdown
+// inside the panel itself (so the panel's "change days" select shows the same value),
+// then triggers the normal loadNodeImpact flow.
+function scImpactLookup() {
+  const sym = (document.getElementById('sc-impact-lookup-sym')?.value || '').trim().toUpperCase();
+  if (!sym) return;
+  const days = document.getElementById('sc-impact-lookup-days')?.value || '365';
+  const panelDays = document.getElementById('sc-node-impact-days');
+  if (panelDays) panelDays.value = days;   // keep panel's own selector in sync
+  loadNodeImpact(sym);
+  // Smooth-scroll the impact panel into view
+  setTimeout(() => document.getElementById('sc-node-impact')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
+}
+window.scImpactLookup = scImpactLookup;
 
 function renderImpactTable(d, body) {
   if (!body) return;
@@ -19490,8 +19982,8 @@ let _notifNextAt     = 0;
 let _notifCountdownTimer = null;
 let _notifFirstLoad  = true; // suppress toasts on the initial page-load fetch
 
-const _NOTIF_ICONS   = { ALERT:'🚨', NEWS:'📰', IDEA:'💡', INFO:'ℹ️' };
-const _NOTIF_LABELS  = { ALERT:'ALERT', NEWS:'NEWS', IDEA:'IDEA', INFO:'INFO' };
+const _NOTIF_ICONS   = { ALERT:'🚨', NEWS:'📰', IDEA:'💡', INFO:'ℹ️', FLOW:'🐋', INSIDER:'👤' };
+const _NOTIF_LABELS  = { ALERT:'ALERT', NEWS:'NEWS', IDEA:'IDEA', INFO:'INFO', FLOW:'OPTIONS FLOW', INSIDER:'INSIDER' };
 
 async function fetchNotifications(force = false) {
   const statusEl = document.getElementById('notifStatusText');
@@ -22079,6 +22571,7 @@ const BOT_FORM_DEFAULTS = {
   broker: 'alpaca',
   min_composite_score: 60,
   conviction_grade_min: 'C',
+  strategy: 'composite',
   vix_max: 60,
   max_loss_usd: 100,
   stop_loss_usd: 50,
@@ -22120,11 +22613,30 @@ async function loadBots() {
   }
 }
 
+// Bot status semantic metadata — canonical definition used for badge + tooltip + actions
+function _botStatusMeta(status) {
+  const MAP = {
+    active:      { cls: 'bots-status-run',        icon: '▶', label: 'Active',       tooltip: 'Scanner runs every 5 min. Bot can open AND manage positions.' },
+    paused:      { cls: 'bots-status-pause',       icon: '⏸', label: 'Paused',       tooltip: 'Scanner skipped. Open positions are still managed — exits happen normally. Resume any time.' },
+    paused_today:{ cls: 'bots-status-pause-today', icon: '⏸', label: 'Paused Today', tooltip: 'Circuit breaker triggered — daily loss limit hit. Auto-resumes at midnight ET. Existing positions still managed.' },
+    stopped:     { cls: 'bots-status-stop',        icon: '⏹', label: 'Stopped',      tooltip: 'Terminal failure state — requires manual recovery. Positions still managed (no new opens). Click "↩ Reset" to set back to Paused once position is closed.' },
+  };
+  return MAP[status] ?? { cls: 'bots-status-idle', icon: '⏹', label: status, tooltip: status };
+}
+
+const _BOT_STRATEGY_META = {
+  composite:        { icon: '🔀', label: 'Composite' },
+  catalyst:         { icon: '⚡', label: 'Catalyst' },
+  breakout:         { icon: '📈', label: 'Breakout' },
+  momentum:         { icon: '🚀', label: 'Momentum' },
+  value_contrarian: { icon: '💎', label: 'Value' },
+  mean_reversion:   { icon: '↩',  label: 'Mean Rev' },
+};
+
 function _botCard(b) {
-  const archived    = !!b.deleted_at;
-  const statusClass = b.status === 'active' ? 'bots-status-run' : b.status === 'paused' ? 'bots-status-pause' : 'bots-status-idle';
-  const statusLabel = b.status === 'active' ? '▶ Active' : b.status === 'paused' ? '⏸ Paused' : b.status === 'paused_today' ? '⏸ Paused Today' : '⏹ Stopped';
-  const pnlNum  = parseFloat(b.cumulative_pnl_usd ?? 0);
+  const archived = !!b.deleted_at;
+  const stMeta   = _botStatusMeta(b.status);
+  const pnlNum   = parseFloat(b.cumulative_pnl_usd ?? 0);
   const pnlColor = pnlNum >= 0 ? '#3fb950' : '#f85149';
   // Prefer lifetime_trades from server if available, else fall back to bots table counters
   const trades  = Number(b.lifetime_trades ?? b.total_trades ?? 0);
@@ -22132,23 +22644,40 @@ function _botCard(b) {
   const pnl     = Number(b.lifetime_pnl    ?? b.cumulative_pnl_usd ?? 0);
   const wr      = trades ? (wins / trades * 100).toFixed(1) : '0.0';
   const locked  = b.current_trade_id != null;
-  const lifetimeBadge = `${trades} trade${trades!==1?'s':''} · ${wr}% WR · <span style="color:${pnlColor}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>`;
   const archivedBadge = archived ? `<span class="bot-badge-archived">ARCHIVED</span>` : '';
-  const actions = archived
-    ? `<button class="bots-action-btn bots-btn-edit" onclick="event.stopPropagation();botsRestore(${b.id})">♻ Restore</button>
-       <button class="bots-action-btn" onclick="event.stopPropagation();botsDrilldown(${b.id})">📋 History</button>`
-    : `${b.status === 'active'
+
+  // Strategy badge — shown when not composite (composite is the silent default)
+  const strategy      = b.rules?.entry_filters?.strategy ?? 'composite';
+  const stratMeta     = _BOT_STRATEGY_META[strategy] ?? { icon: '🔀', label: strategy };
+  const strategyBadge = strategy !== 'composite'
+    ? ` &nbsp;<span class="bot-badge-strategy">${stratMeta.icon} ${stratMeta.label}</span>`
+    : '';
+
+  // Actions strip: context-aware per status
+  let actions;
+  if (archived) {
+    actions = `<button class="bots-action-btn bots-btn-edit" onclick="event.stopPropagation();botsRestore(${b.id})">♻ Restore</button>
+               <button class="bots-action-btn" onclick="event.stopPropagation();botsDrilldown(${b.id})">📋 History</button>`;
+  } else if (b.status === 'stopped') {
+    // Stopped: can reset to paused (allows manual recovery after closing position)
+    actions = `<button class="bots-action-btn bots-btn-start" onclick="event.stopPropagation();botsResetToPaused(${b.id})" title="Set back to Paused so the bot can resume managing positions. Close any open position first.">↩ Reset</button>
+               <button class="bots-action-btn bots-btn-edit"   onclick="event.stopPropagation();botsEdit(${b.id})">✏ Edit</button>
+               <button class="bots-action-btn bots-btn-delete" onclick="event.stopPropagation();botsDelete(${b.id})">🗑 Delete</button>`;
+  } else {
+    actions = `${b.status === 'active'
         ? `<button class="bots-action-btn bots-btn-pause" onclick="event.stopPropagation();botsToggleStatus(${b.id},'paused')">⏸ Pause</button>`
         : `<button class="bots-action-btn bots-btn-start" onclick="event.stopPropagation();botsToggleStatus(${b.id},'active')">▶ Start</button>`}
        <button class="bots-action-btn bots-btn-edit"   onclick="event.stopPropagation();botsEdit(${b.id})">✏ Edit</button>
        <button class="bots-action-btn bots-btn-delete" onclick="event.stopPropagation();botsDelete(${b.id})">🗑 Delete</button>`;
+  }
+
   return `
     <div class="bots-card-top">
       <div>
         <div class="bots-card-name">${_escHtml(b.name)}${archivedBadge}</div>
-        <div class="bots-card-capital">$${Number(b.capital_usd).toLocaleString()} capital · ${_escHtml(b.broker ?? 'alpaca')}</div>
+        <div class="bots-card-capital">$${Number(b.capital_usd).toLocaleString()} capital · ${_escHtml(b.broker ?? 'alpaca')}${strategyBadge}</div>
       </div>
-      <span class="bots-status-badge ${statusClass}">${statusLabel}</span>
+      <span class="bots-status-badge ${stMeta.cls}" title="${_escHtml(stMeta.tooltip)}">${stMeta.icon} ${stMeta.label}</span>
     </div>
     <div class="bots-card-stats">
       <div class="bots-stat"><span class="bots-stat-label">Trades</span><span class="bots-stat-val">${trades}</span></div>
@@ -22212,6 +22741,7 @@ function botsEdit(id) {
     broker: bot.broker ?? 'alpaca',
     min_composite_score: ef.min_composite_score ?? 60,
     conviction_grade_min: ef.conviction_grade_min ?? 'C',
+    strategy: ef.strategy ?? 'composite',
     vix_max: ef.vix_max ?? 60,
     max_loss_usd: ri.max_loss_usd ?? 100,
     stop_loss_usd: er.stop_loss_usd ?? 50,
@@ -22280,6 +22810,17 @@ function _botRenderForm(vals, locked) {
           <label class="bots-label">Min Conviction Grade</label>
           <select class="bots-input" id="bf-grade" ${locked?'disabled':''}>${gradeOpts}</select>
         </div>
+      </div>
+      <div class="bots-field-group">
+        <label class="bots-label">Strategy</label>
+        <select class="bots-input" id="bf-strategy" ${locked?'disabled':''}>
+          <option value="composite"       ${(vals.strategy??'composite')==='composite'       ?'selected':''}>🔀 Composite — all setups (default)</option>
+          <option value="catalyst"        ${vals.strategy==='catalyst'        ?'selected':''}>⚡ Catalyst — earnings surprises, news events</option>
+          <option value="breakout"        ${vals.strategy==='breakout'        ?'selected':''}>📈 Breakout — price breaks key resistance</option>
+          <option value="momentum"        ${vals.strategy==='momentum'        ?'selected':''}>🚀 Momentum — strong trend continuation</option>
+          <option value="value_contrarian"${vals.strategy==='value_contrarian'?'selected':''}>💎 Value / Contrarian — oversold, mean-revert</option>
+          <option value="mean_reversion"  ${vals.strategy==='mean_reversion'  ?'selected':''}>↩ Mean Reversion — extended moves snapping back</option>
+        </select>
       </div>
       <div class="bots-field-row">
         <div class="bots-field-group">
@@ -22353,9 +22894,10 @@ async function botsSubmit(e) {
   const order_type       = document.getElementById('bf-order-type').value;
   const allow_outside_rth = document.getElementById('bf-allow-out-rth').checked;
   const limit_offset_bps = Number(document.getElementById('bf-limit-bps').value);
+  const strategy         = document.getElementById('bf-strategy').value;
 
   const rules = {
-    entry_filters: { min_composite_score: score, conviction_grade_min: grade, vix_max },
+    entry_filters: { min_composite_score: score, conviction_grade_min: grade, vix_max, strategy },
     exit_rules:    { stop_loss_usd: stop_loss, trail_pct },
     sizing:        { position_size_pct: pos_pct },
     risk:          { max_loss_usd: max_loss },
@@ -22405,6 +22947,24 @@ async function botsRestore(id) {
     if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? `HTTP ${r.status}`); }
     loadBots();
   } catch (err) { alert(`Error restoring bot: ${err.message}`); }
+}
+
+async function botsResetToPaused(id) {
+  const bot = _botsList.find(b => Number(b.id) === Number(id));
+  const hasOpen = bot?.current_trade_id != null;
+  const msg = hasOpen
+    ? `Reset "${bot?.name ?? id}" from Stopped → Paused?\n\n⚠️ This bot has an open position. In Paused state, the executor will still manage (and can close) the open position — but no new trades will open until you set it to Active.\n\nProceed?`
+    : `Reset "${bot?.name ?? id}" from Stopped → Paused? No open position detected — safe to proceed.`;
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch(`/api/bots/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'paused' }),
+    });
+    if (!r.ok) { const d = await r.json(); throw new Error(d.error ?? `HTTP ${r.status}`); }
+    loadBots();
+  } catch (err) { alert(`Error resetting bot: ${err.message}`); }
 }
 
 function botsToggleArchived(checked) {
@@ -22466,10 +23026,125 @@ async function _botRenderKpiStrip() {
 
 // ── Decisions Feed ────────────────────────────────────────────────────────────
 
+// Human-readable labels for each action type
+function _botActionMeta(action, notes, compositeScore) {
+  const n = (notes || '').toLowerCase();
+  // Near-miss: had a top candidate with known composite but below threshold
+  if (action === 'skip_no_candidate' && compositeScore != null) {
+    const threshold = 60; // default — could be read from bot rules
+    if (+compositeScore >= 50) {
+      return {
+        icon: '🟡', cls: 'bot-decision-near', isNear: true,
+        label: `Near-miss — score ${(+compositeScore).toFixed(1)} (need ${threshold})`,
+        detail: `Top candidate scored ${(+compositeScore).toFixed(1)}, just ${(threshold - +compositeScore).toFixed(1)} points below the ${threshold} threshold. Close but no trade.`,
+      };
+    }
+    return {
+      icon: '⏸', cls: 'bot-decision-skip', isNear: false,
+      label: `Score too low (${(+compositeScore).toFixed(1)})`,
+      detail: `Best candidate scored ${(+compositeScore).toFixed(1)} — well below the minimum composite threshold.`,
+    };
+  }
+  if (n.includes('composite too low') || n.includes('below threshold')) {
+    return {
+      icon: '⏸', cls: 'bot-decision-skip', isNear: false,
+      label: 'Score below threshold',
+      detail: notes,
+    };
+  }
+  if (action === 'skip_unclassifiable_setup' || n.includes('no classifiable')) {
+    return {
+      icon: '🔶', cls: 'bot-decision-skip', isNear: false,
+      label: 'No setup match',
+      detail: 'Candidates were scored but none matched a classifiable setup (catalyst / breakout / momentum / value / mean-reversion). Check setup_classifier rules.',
+    };
+  }
+  if (action === 'skip_filtered' || n.includes('filtered')) {
+    return {
+      icon: '🚫', cls: 'bot-decision-skip', isNear: false,
+      label: 'Hard gate blocked',
+      detail: notes || 'A hard filter (earnings, VIX, liquidity, price range, gap) blocked all candidates.',
+    };
+  }
+  if (n.includes('empty universe') || (action === 'skip_no_candidate' && !compositeScore)) {
+    return {
+      icon: '🌐', cls: 'bot-decision-skip', isNear: false,
+      label: 'No candidates in universe',
+      detail: 'The scanner found no stocks in the tradable universe to evaluate. This is normal pre-market or on low-volume days.',
+    };
+  }
+  if (action === 'skip_circuit_breaker') {
+    return {
+      icon: '🛑', cls: 'bot-decision-error', isNear: false,
+      label: 'Circuit breaker tripped',
+      detail: 'The bot hit its daily loss limit. No new trades allowed until next day.',
+    };
+  }
+  if (action === 'skip_inflight') {
+    return {
+      icon: '⏳', cls: 'bot-decision-skip', isNear: false,
+      label: 'Scan already running',
+      detail: 'A previous scan was still in progress when this cron fired. Skipped to avoid duplicate decisions.',
+    };
+  }
+  if (action === 'buy') {
+    return { icon: '✅', cls: 'bot-decision-buy', isNear: false, label: 'Trade placed', detail: '' };
+  }
+  if (action === 'error') {
+    return { icon: '❌', cls: 'bot-decision-error', isNear: false, label: 'Scan error', detail: notes || 'Unexpected error during scan.' };
+  }
+  return { icon: '⏸', cls: 'bot-decision-skip', isNear: false, label: action, detail: notes || '' };
+}
+
+async function _botLoadDailySummary() {
+  const el = document.getElementById('bot-daily-summary');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/bot-decisions/daily-summary', { cache: 'no-store' });
+    if (!r.ok) { el.innerHTML = '<div style="color:#6e7681;font-size:0.76rem">Summary unavailable</div>'; return; }
+    const { total_scans, trades, top_blockers, near_misses } = await r.json();
+    if (total_scans === 0) {
+      el.innerHTML = '<div style="color:#6e7681;font-size:0.76rem">No scans yet today — market opens 9:30 AM ET.</div>';
+      return;
+    }
+    const tradeColor = trades > 0 ? '#3fb950' : '#8b949e';
+    const nmHtml = near_misses.length
+      ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #21262d;color:#e3b341;font-size:0.75rem">
+           🟡 <strong>${near_misses.length} near-miss${near_misses.length > 1 ? 'es' : ''}</strong> today: ${near_misses.map(m => `${_escHtml(m.symbol)} (${m.composite.toFixed(1)})`).join(', ')} — score was ≥ 50 but below threshold
+         </div>`
+      : '';
+    const blockHtml = top_blockers.length
+      ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
+           ${top_blockers.map(b => {
+             const isPrimary = top_blockers.indexOf(b) === 0;
+             const bg = isPrimary ? 'rgba(248,81,73,0.12)' : 'rgba(139,148,158,0.08)';
+             const c  = isPrimary ? '#f85149' : '#8b949e';
+             return `<span style="background:${bg};color:${c};border:1px solid ${isPrimary?'rgba(248,81,73,0.3)':'#21262d'};border-radius:4px;padding:2px 7px;font-size:0.71rem;white-space:nowrap" title="${_escHtml(b.label)}">${_escHtml(b.label)} <strong>${b.count}</strong></span>`;
+           }).join('')}
+         </div>`
+      : '';
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+        <span style="font-weight:700;color:#e6edf3;font-size:0.8rem">📊 Today's Scanner</span>
+        <span style="color:#6e7681;font-size:0.7rem">${new Date().toLocaleDateString([], {month:'short',day:'numeric'})}</span>
+      </div>
+      <div style="display:flex;gap:16px;font-size:0.76rem">
+        <span style="color:#8b949e">${total_scans} scan${total_scans !== 1 ? 's' : ''}</span>
+        <span style="color:${tradeColor};font-weight:700">${trades} trade${trades !== 1 ? 's' : ''}</span>
+        ${near_misses.length ? `<span style="color:#e3b341">${near_misses.length} near-miss</span>` : ''}
+      </div>
+      ${blockHtml}
+      ${nmHtml}`;
+  } catch (e) {
+    el.innerHTML = '<div style="color:#6e7681;font-size:0.76rem">Summary unavailable</div>';
+  }
+}
+
 async function _botLoadDecisionsFeed() {
   if (document.hidden) return;
   const list = document.getElementById('bot-decisions-list');
   if (!list) return;
+  _botLoadDailySummary(); // refresh summary in parallel
   try {
     const r = await fetch('/api/bot-decisions/recent?limit=20', { cache: 'no-store' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -22481,18 +23156,30 @@ async function _botLoadDecisionsFeed() {
       return;
     }
     list.innerHTML = decisions.map(d => {
-      const t   = new Date(d.scanned_at);
-      const tStr = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const score = d.composite_score != null ? (+d.composite_score).toFixed(1) : '—';
-      const isBuy  = d.action === 'buy';
-      const isErr  = d.action === 'error';
-      const cls    = isBuy ? 'bot-decision-buy' : isErr ? 'bot-decision-error' : 'bot-decision-skip';
-      const icon   = isBuy ? '✅' : isErr ? '❌' : '⏸';
-      const sym    = d.symbol ? `<span class="bot-decision-symbol">${_escHtml(d.symbol)}</span> · ` : '';
-      const setupBadge = d.setup_type ? `<span class="setup-badge setup-${d.setup_type.toLowerCase()}">${d.setup_type.toUpperCase()}</span> · ` : '';
-      return `<div class="bot-decision-row" onclick="botsDrilldown(${d.bot_id})">
-        <div><span class="bot-decision-time">${tStr}</span> <span class="bot-decision-name">${_escHtml(d.bot_name)}</span></div>
-        <div>${sym}${setupBadge}<span class="bot-decision-score">score ${score}</span> <span class="${cls}">${icon} ${_escHtml(d.action)}${d.notes?` — ${_escHtml(d.notes.slice(0,40))}`  :''}</span></div>
+      const t     = new Date(d.scanned_at);
+      const tStr  = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const score = d.composite_score != null ? (+d.composite_score).toFixed(1) : null;
+      const meta  = _botActionMeta(d.action, d.notes, d.composite_score);
+      const sym   = d.symbol ? `<span class="bot-decision-symbol">${_escHtml(d.symbol)}</span>` : '';
+      const setupBadge = d.setup_type ? `<span class="setup-badge setup-${d.setup_type.toLowerCase()}">${d.setup_type.toUpperCase()}</span>` : '';
+      const scoreStr = score != null ? `<span class="bot-decision-score" style="${meta.isNear?'color:#e3b341':''}">${score}</span>` : '';
+      // Tooltip with explanation
+      const tooltip  = meta.detail ? ` title="${_escHtml(meta.detail)}"` : '';
+      const whyHtml  = meta.detail
+        ? `<span style="cursor:help;color:#58a6ff;font-size:0.68rem;margin-left:4px" title="${_escHtml(meta.detail)}">Why?</span>`
+        : '';
+      return `<div class="bot-decision-row" onclick="botsDrilldown(${d.bot_id})"${tooltip}>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="bot-decision-time">${tStr}</span>
+          <span class="bot-decision-name">${_escHtml(d.bot_name)}</span>
+          ${sym ? `· ${sym}` : ''}
+          ${setupBadge}
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
+          ${scoreStr ? `${scoreStr} ·` : ''}
+          <span class="${meta.cls}">${meta.icon} ${_escHtml(meta.label)}</span>
+          ${whyHtml}
+        </div>
       </div>`;
     }).join('');
   } catch (e) {
@@ -22628,26 +23315,27 @@ async function botsDrilldown(id) {
       <div class="bot-section-title" style="margin-top:18px">Recent Decisions (last ${decisions.length})</div>
       <div style="font-size:0.78rem">
         ${decisions.map(d => {
-          const tStr = new Date(d.scanned_at).toLocaleString([], { month:'short',day:'numeric',hour:'2-digit',minute:'2-digit' });
-          const isBuy = d.action === 'buy';
-          const cls   = isBuy ? 'bot-decision-buy' : 'bot-decision-skip';
-          const score = d.composite_score != null ? (+d.composite_score).toFixed(1) : '—';
-          return `<div style="padding:5px 0;border-bottom:1px solid #21262d;display:flex;gap:8px;align-items:baseline">
+          const tStr  = new Date(d.scanned_at).toLocaleString([], { month:'short',day:'numeric',hour:'2-digit',minute:'2-digit' });
+          const score = d.composite_score != null ? (+d.composite_score).toFixed(1) : null;
+          const meta  = _botActionMeta(d.action, d.notes, d.composite_score);
+          return `<div style="padding:5px 0;border-bottom:1px solid #21262d;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap" title="${_escHtml(meta.detail)}">
             <span style="color:#8b949e;min-width:110px">${tStr}</span>
-            <span style="color:#58a6ff;font-weight:700">${_escHtml(d.symbol??'—')}</span>
-            <span style="color:#8b949e">score ${score}</span>
-            <span class="${cls}">${isBuy?'✅':'⏸'} ${_escHtml(d.action)}</span>
-            ${d.notes?`<span style="color:#6e7681">${_escHtml(d.notes.slice(0,50))}</span>`:''}
+            ${d.symbol ? `<span style="color:#58a6ff;font-weight:700">${_escHtml(d.symbol)}</span>` : ''}
+            ${score ? `<span style="color:${meta.isNear?'#e3b341':'#8b949e'}">${score}</span>` : ''}
+            <span class="${meta.cls}">${meta.icon} ${_escHtml(meta.label)}</span>
           </div>`;
         }).join('')}
       </div>` : '';
 
+    const stMeta = _botStatusMeta(bot?.status);
     const activeActions = !archived ? `
       <div class="bot-drilldown-actions">
         <button class="bots-action-btn bots-btn-edit" onclick="botsDrilldownClose();botsEdit(${id})">✏ Edit Rules</button>
-        ${bot?.status==='active'
-          ? `<button class="bots-action-btn bots-btn-pause" onclick="botsDrilldownClose();botsToggleStatus(${id},'paused')">⏸ Pause</button>`
-          : `<button class="bots-action-btn bots-btn-start" onclick="botsDrilldownClose();botsToggleStatus(${id},'active')">▶ Start</button>`}
+        ${bot?.status === 'stopped'
+          ? `<button class="bots-action-btn bots-btn-start" onclick="botsDrilldownClose();botsResetToPaused(${id})" title="${_escHtml(stMeta.tooltip)}">↩ Reset to Paused</button>`
+          : bot?.status === 'active'
+            ? `<button class="bots-action-btn bots-btn-pause" onclick="botsDrilldownClose();botsToggleStatus(${id},'paused')">⏸ Pause</button>`
+            : `<button class="bots-action-btn bots-btn-start" onclick="botsDrilldownClose();botsToggleStatus(${id},'active')">▶ Start</button>`}
         <button class="bots-action-btn bots-btn-delete" onclick="botsDrilldownClose();botsDelete(${id})">🗑 Archive</button>
       </div>` : `
       <div class="bot-drilldown-actions">
@@ -22659,7 +23347,9 @@ async function botsDrilldown(id) {
         <span style="font-size:0.82rem;color:#8b949e">${_escHtml(bot?.broker??'')}</span>
         <span style="font-size:0.82rem;color:#8b949e">·</span>
         <span style="font-size:0.82rem;color:#8b949e">$${Number(bot?.capital_usd??0).toLocaleString()} capital</span>
-        ${archived?'<span class="bot-badge-archived" style="margin-left:4px">ARCHIVED</span>':''}
+        ${archived
+          ? '<span class="bot-badge-archived" style="margin-left:4px">ARCHIVED</span>'
+          : `<span class="bots-status-badge ${stMeta.cls}" style="font-size:0.7rem;padding:2px 8px" title="${_escHtml(stMeta.tooltip)}">${stMeta.icon} ${stMeta.label}</span>`}
       </div>
       <div class="bot-drilldown-stats-grid">
         <div class="bot-drilldown-stat"><div class="bot-drilldown-stat-label">Total Trades</div><div class="bot-drilldown-stat-value">${closed.length}</div></div>
@@ -22731,6 +23421,1401 @@ document.addEventListener('keydown', e => {
     <div id="uwConvictionModalBody" style="color:#c9d1d9;font-size:0.85rem"></div>
   </div>
 </div>
+
+<!-- ── Backtests dashboard logic ─────────────────────────────────────────── -->
+<script>
+(function() {
+  'use strict';
+
+  let _btRuns      = [];          // cached list response
+  let _btChart     = null;        // Chart.js instance for equity curve
+
+  // ── Number helpers ────────────────────────────────────────────────────
+  function fmtUsd(v) {
+    if (v == null || !Number.isFinite(v)) return '—';
+    return '$' + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  function fmtPct(v, digits = 2) {
+    if (v == null || !Number.isFinite(v)) return '—';
+    return v.toFixed(digits) + '%';
+  }
+  function fmtNum(v, digits = 2) {
+    if (v == null || !Number.isFinite(v)) return '—';
+    return Number(v).toFixed(digits);
+  }
+  function prettyStrategy(s) {
+    return ({
+      'buy-and-hold':           'Buy & Hold SPY',
+      'sma-cross':              'SMA 50/200 Cross',
+      'sma-cross-20-100':       'SMA 20/100 Cross (faster)',
+      'b37-momentum':           'B-3.7 Momentum (v1, price-only)',
+      'b37-momentum-v2':        'B-3.7 Momentum v2 (no mom-broken exit, wider stop)',
+      'b37-momentum-prod-aligned': 'B-3.7 Momentum (prod-aligned: 6% stop, keeps mom-broken)',
+      'b37-mean-reversion':     'B-3.7 Mean-Reversion (v1, price-only)',
+      'b37-mean-reversion-v2':  'B-3.7 Mean-Reversion v2 (no falling knives, wider stop)',
+      'regime-gated':           'Regime-Gated SMA (hard flatten)',
+      'regime-gated-soft':      'Regime-Gated SMA Soft (block entries only)',
+    })[s] || s;
+  }
+  function metricColor(metric, val) {
+    if (val == null) return '#8b949e';
+    if (metric === 'cagr' || metric === 'total_return' || metric === 'sharpe' || metric === 'calmar') {
+      if (val > 0)  return '#3fb950';
+      if (val < 0)  return '#f85149';
+      return '#c9d1d9';
+    }
+    if (metric === 'mdd') {
+      // less-negative is better
+      if (val > -10) return '#3fb950';
+      if (val > -20) return '#c9d1d9';
+      return '#f85149';
+    }
+    return '#c9d1d9';
+  }
+
+  // ── Signal Validation panel ───────────────────────────────────────────
+  // Tests whether the conviction signal is predictive of forward returns
+  // — independent of bot execution. Result drives the 30%-weight decision.
+  async function loadSignalValidation() {
+    const host = document.getElementById('sv-content');
+    if (!host) return;
+    const days = document.getElementById('sv-window')?.value || '90';
+    host.innerHTML = '<div class="loading">Loading…</div>';
+    try {
+      const r = await fetch(`/api/signal-validation/conviction?days=${encodeURIComponent(days)}`, { credentials: 'same-origin' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'fetch failed');
+      renderSignalValidation(j);
+    } catch (e) {
+      host.innerHTML = `<div style="color:#f85149">Error: ${e.message}</div>`;
+    }
+  }
+
+  function renderSignalValidation(j) {
+    const host    = document.getElementById('sv-content');
+    const byGrade = j.by_grade  || [];
+    const byBkt   = j.by_bucket || [];
+    const ml      = j.latest_ml_model;
+
+    // Compute the headline edge: avg 10d for high-score (60+) vs low-score (0-19)
+    const high = byBkt.find(b => b.bucket === '80-100');
+    const mid  = byBkt.find(b => b.bucket === '60-79');
+    const lo   = byBkt.find(b => b.bucket === '0-19');
+    const highAvg = ((Number(high?.n||0)*Number(high?.avg_10d_pct||0)) + (Number(mid?.n||0)*Number(mid?.avg_10d_pct||0))) / ((Number(high?.n||0)+(Number(mid?.n||0))) || 1);
+    const lowAvg  = Number(lo?.avg_10d_pct||0);
+    const edgePp  = highAvg - lowAvg;
+    const totalN  = byBkt.reduce((s,b)=>s + Number(b.n||0), 0);
+
+    // Verdict
+    let verdict, color;
+    if (totalN < 100) { verdict = '⏳ Not enough data yet — need ≥100 forward-matched scores'; color = '#8b949e'; }
+    else if (edgePp >= 4) { verdict = '✅ Signal works — high-score forward returns clearly beat low-score'; color = '#3fb950'; }
+    else if (edgePp >= 2) { verdict = '⚠️ Signal is weak but present — marginal edge'; color = '#f0883e'; }
+    else { verdict = '❌ Signal not detected — no edge in forward returns'; color = '#f85149'; }
+
+    // Helper for cell color
+    const v = x => x == null ? '—' : (x >= 0 ? '+' : '') + Number(x).toFixed(2) + '%';
+    const col = x => x == null ? '#8b949e' : (Number(x) > 0 ? '#3fb950' : '#f85149');
+
+    let html = `
+      <!-- Verdict banner -->
+      <div style="background:linear-gradient(135deg,#0d2818,#0d1117);border-left:4px solid ${color};padding:14px 16px;border-radius:6px;margin-bottom:16px">
+        <div style="font-size:0.95rem;font-weight:600;color:${color};margin-bottom:4px">${verdict}</div>
+        <div style="font-size:0.85rem;color:#c9d1d9">
+          Over the last <strong>${j.window_days} days</strong>: high-score (60+) average 10-day forward return <strong style="color:#3fb950">${v(highAvg)}</strong> ·
+          low-score (0-19) average 10-day forward return <strong style="color:${col(lowAvg)}">${v(lowAvg)}</strong> ·
+          <strong>edge ${edgePp.toFixed(2)}pp</strong> · ${totalN} matched scores.
+        </div>
+      </div>
+
+      <p style="margin:0 0 12px;color:#8b949e;font-size:0.85rem;line-height:1.55">
+        Each conviction score in the last ${j.window_days} days is matched against the symbol's actual price on the score date, plus 1 / 5 / 10 trading days later from <code>backtest_prices</code>. If high-conviction scores predict higher subsequent returns than low-conviction scores, the signal works. This test is independent of bot execution — no stop-loss interference.
+      </p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px">
+
+        <!-- By score bucket -->
+        <div>
+          <div style="font-size:0.78rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">By score bucket (continuous)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+            <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d">
+              <tr>
+                <th style="text-align:left;padding:6px 10px">Score</th>
+                <th style="text-align:right;padding:6px 10px">N</th>
+                <th style="text-align:right;padding:6px 10px">Avg 5d</th>
+                <th style="text-align:right;padding:6px 10px" title="Avg 10-day forward return">Avg 10d</th>
+                <th style="text-align:right;padding:6px 10px" title="% of trades where price was higher at 10 days">% up 10d</th>
+                <th style="text-align:right;padding:6px 10px" title="10-day standard deviation">σ</th>
+              </tr>
+            </thead><tbody>`;
+    for (const b of byBkt) {
+      const label = b.bucket === '80-100' ? '80-100 (A)'
+                  : b.bucket === '60-79'  ? '60-79 (B)'
+                  : b.bucket === '40-59'  ? '40-59 (C)'
+                  : b.bucket === '20-39'  ? '20-39 (F)'
+                  :                          '0-19 (F)';
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:6px 10px;color:#e6edf3;font-weight:500">${label}</td>
+        <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${b.n}</td>
+        <td style="padding:6px 10px;text-align:right;color:${col(b.avg_5d_pct)}">${v(b.avg_5d_pct)}</td>
+        <td style="padding:6px 10px;text-align:right;color:${col(b.avg_10d_pct)};font-weight:600">${v(b.avg_10d_pct)}</td>
+        <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${Number(b.pct_up_10d).toFixed(1)}%</td>
+        <td style="padding:6px 10px;text-align:right;color:#8b949e">${Number(b.stddev_10d_pct).toFixed(1)}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>
+        </div>
+
+        <!-- By grade -->
+        <div>
+          <div style="font-size:0.78rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">By assigned grade (A/B/C/F)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+            <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d">
+              <tr>
+                <th style="text-align:left;padding:6px 10px">Grade</th>
+                <th style="text-align:right;padding:6px 10px">N</th>
+                <th style="text-align:right;padding:6px 10px">1d</th>
+                <th style="text-align:right;padding:6px 10px">5d</th>
+                <th style="text-align:right;padding:6px 10px">10d</th>
+                <th style="text-align:right;padding:6px 10px">% up 10d</th>
+              </tr>
+            </thead><tbody>`;
+    for (const b of byGrade) {
+      html += `<tr style="border-bottom:1px solid #21262d">
+        <td style="padding:6px 10px;color:#e6edf3;font-weight:600">${b.grade}</td>
+        <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${b.n}</td>
+        <td style="padding:6px 10px;text-align:right;color:${col(b.avg_1d_pct)}">${v(b.avg_1d_pct)}</td>
+        <td style="padding:6px 10px;text-align:right;color:${col(b.avg_5d_pct)}">${v(b.avg_5d_pct)}</td>
+        <td style="padding:6px 10px;text-align:right;color:${col(b.avg_10d_pct)};font-weight:600">${v(b.avg_10d_pct)}</td>
+        <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${Number(b.pct_up_10d).toFixed(1)}%</td>
+      </tr>`;
+    }
+    html += `</tbody></table>
+        </div>
+      </div>`;
+
+    // ML model status
+    if (ml) {
+      const auc = Number(ml.auc_roc);
+      const aucColor = auc >= 0.6 ? '#3fb950' : auc >= 0.55 ? '#f0883e' : '#f85149';
+      const aucLabel = auc >= 0.6 ? 'meaningful' : auc >= 0.55 ? 'marginal' : 'random (broken)';
+      html += `
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px 14px;font-size:0.85rem;color:#c9d1d9;margin-top:4px">
+          <div style="font-weight:600;color:#e6edf3;margin-bottom:6px">🤖 ML grade-adjustment model status</div>
+          Latest training: ${new Date(ml.trained_at).toISOString().slice(0,10)} · ${ml.train_rows.toLocaleString()} rows ·
+          <strong>AUC <span style="color:${aucColor}">${auc.toFixed(3)}</span></strong> (${aucLabel}) ·
+          Accuracy ${(Number(ml.accuracy)*100).toFixed(1)}% · F1 ${Number(ml.f1_1).toFixed(3)} ·
+          Adjustments: <code>${JSON.stringify(ml.scoring_adjustments)}</code>
+          <div style="color:#8b949e;font-size:0.78rem;margin-top:6px">
+            The composite signal (above) is empirically validated. The ML adjustment layer (this row) adds noise — AUC < 0.6 = no skill. Considered safe to leave in place because it currently only contributes ±1 point to grade A.
+          </div>
+        </div>`;
+    }
+
+    html += `
+      <div style="color:#8b949e;font-size:0.78rem;margin-top:10px;font-style:italic">
+        Coverage caveat: only conviction scores for symbols present in <code>backtest_prices</code> can be tested (~56% of all scores). Smaller-cap or special-situation symbols scored by the bot but outside the S&amp;P500 + NASDAQ100 + ETF universe are not represented in this analysis.
+      </div>
+    `;
+
+    host.innerHTML = html;
+  }
+
+  // ── List view ─────────────────────────────────────────────────────────
+  async function loadBacktests() {
+    const listDiv = document.getElementById('bt-list');
+    listDiv.innerHTML = '<div class="loading" style="padding:16px">Loading…</div>';
+    try {
+      const r = await fetch('/api/backtests', { credentials: 'same-origin' });
+      const j = await r.json();
+      _btRuns = (j.runs || []);
+      // Populate filter dropdown
+      const sel = document.getElementById('bt-filter-strategy');
+      if (sel) {
+        const current = sel.value;
+        const strategies = [...new Set(_btRuns.map(x => x.strategy))].sort();
+        sel.innerHTML = '<option value="">All</option>' +
+          strategies.map(s => `<option value="${s}" ${s===current?'selected':''}>${prettyStrategy(s)}</option>`).join('');
+      }
+      renderBacktestList();
+    } catch (e) {
+      listDiv.innerHTML = `<div style="padding:16px;color:#f85149">Error: ${e.message}</div>`;
+    }
+  }
+
+  function renderBacktestList() {
+    const listDiv = document.getElementById('bt-list');
+    const filter  = document.getElementById('bt-filter-strategy')?.value || '';
+    const rows    = _btRuns.filter(r => !filter || r.strategy === filter);
+    if (!rows.length) {
+      listDiv.innerHTML = '<div style="padding:16px;color:#8b949e">No backtest runs yet. Run the harness CLI (see below) to create one.</div>';
+      return;
+    }
+    let html = `
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+        <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d">
+          <tr>
+            <th style="text-align:left;padding:10px 12px">Strategy</th>
+            <th style="text-align:left;padding:10px 12px">Window</th>
+            <th style="text-align:right;padding:10px 12px" title="Total return over the whole window">Total</th>
+            <th style="text-align:right;padding:10px 12px" title="Compound Annual Growth Rate">CAGR</th>
+            <th style="text-align:right;padding:10px 12px" title="Risk-adjusted return">Sharpe</th>
+            <th style="text-align:right;padding:10px 12px" title="Worst peak-to-trough decline">Max DD</th>
+            <th style="text-align:right;padding:10px 12px" title="CAGR ÷ |Max DD| — risk-adjusted score">Calmar</th>
+            <th style="text-align:right;padding:10px 12px">Trades</th>
+            <th style="text-align:right;padding:10px 12px" title="Wins ÷ total">WR</th>
+            <th style="text-align:left;padding:10px 12px;font-size:0.75rem">Run at</th>
+          </tr>
+        </thead>
+        <tbody>`;
+    for (const r of rows) {
+      const s   = r.summary || {};
+      const ret = s.returns || {};
+      const rsk = s.risk    || {};
+      const tr  = s.trades  || {};
+      const win = (r.args?.from || '?') + ' → ' + (r.args?.to || '?');
+      html += `
+        <tr style="border-bottom:1px solid #21262d;cursor:pointer" onclick="btOpenDetail('${r.id}')"
+            onmouseover="this.style.background='#161b22'" onmouseout="this.style.background='transparent'">
+          <td style="padding:10px 12px;color:#e6edf3">${prettyStrategy(r.strategy)}</td>
+          <td style="padding:10px 12px;color:#8b949e;font-size:0.8rem">${win}</td>
+          <td style="padding:10px 12px;text-align:right;font-weight:600;color:${metricColor('total_return', ret.total_return_pct)}">${fmtPct(ret.total_return_pct)}</td>
+          <td style="padding:10px 12px;text-align:right;color:${metricColor('cagr', ret.cagr_pct)}">${fmtPct(ret.cagr_pct)}</td>
+          <td style="padding:10px 12px;text-align:right;color:${metricColor('sharpe', rsk.sharpe)}">${fmtNum(rsk.sharpe)}</td>
+          <td style="padding:10px 12px;text-align:right;color:${metricColor('mdd', rsk.max_drawdown_pct)}">${fmtPct(rsk.max_drawdown_pct)}</td>
+          <td style="padding:10px 12px;text-align:right;color:${metricColor('calmar', rsk.calmar)}">${fmtNum(rsk.calmar)}</td>
+          <td style="padding:10px 12px;text-align:right;color:#c9d1d9">${tr.total_trades ?? 0}</td>
+          <td style="padding:10px 12px;text-align:right;color:#c9d1d9">${fmtPct((tr.win_rate ?? 0) * 100, 1)}</td>
+          <td style="padding:10px 12px;color:#8b949e;font-size:0.75rem">${(r.generated_at || '').slice(0, 16).replace('T', ' ')}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    listDiv.innerHTML = html;
+  }
+
+  // ── Detail view ───────────────────────────────────────────────────────
+  async function btOpenDetail(id) {
+    const det = document.getElementById('bt-detail');
+    det.style.display = 'block';
+    document.getElementById('bt-detail-title').textContent = 'Loading…';
+    document.getElementById('bt-detail-config').textContent = '';
+    document.getElementById('bt-detail-headline').innerHTML = '<div class="loading">Loading…</div>';
+    document.getElementById('bt-trades').innerHTML        = '<div class="loading" style="padding:16px">Loading…</div>';
+    document.getElementById('bt-trade-count').textContent = '';
+    document.getElementById('bt-failure').innerHTML       = '<div class="loading">Computing…</div>';
+    try {
+      const r = await fetch('/api/backtests/' + encodeURIComponent(id), { credentials: 'same-origin' });
+      const doc = await r.json();
+      if (!r.ok) throw new Error(doc.error || 'fetch failed');
+      btRenderDetail(doc);
+      det.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      document.getElementById('bt-detail-title').textContent  = 'Error';
+      document.getElementById('bt-detail-headline').innerHTML = `<div style="color:#f85149;padding:16px">Error: ${e.message}</div>`;
+    }
+  }
+
+  function btRenderDetail(doc) {
+    const s = doc.summary || {};
+    document.getElementById('bt-detail-title').textContent = prettyStrategy(doc.strategy);
+    const a = doc.args || {}, c = doc.config || {};
+    document.getElementById('bt-detail-config').innerHTML = `
+      <strong>Window:</strong> ${a.from} → ${a.to} (${s.period?.years ?? '?'} yrs) ·
+      <strong>Universe:</strong> ${c.universe_size ?? '?'} symbols ·
+      <strong>Capital:</strong> ${fmtUsd(a.initial_capital)} ·
+      <strong>Max positions:</strong> ${c.max_positions} ·
+      <strong>Size per pos:</strong> ${fmtUsd(c.position_size_usd)} ·
+      <strong>Slippage:</strong> ${c.slippage_bps} bps`;
+
+    const ret = s.returns || {};
+    const rsk = s.risk    || {};
+    const tr  = s.trades  || {};
+
+    const cards = [
+      { label: 'Final value',  v: fmtUsd(ret.final_value_usd),    desc: 'Account value at end of window' },
+      { label: 'Total return', v: fmtPct(ret.total_return_pct),    desc: 'Net change over whole window' },
+      { label: 'CAGR',         v: fmtPct(ret.cagr_pct),            desc: 'Annualized return rate' },
+      { label: 'Sharpe',       v: fmtNum(rsk.sharpe),              desc: 'Return per unit of volatility' },
+      { label: 'Max drawdown', v: fmtPct(rsk.max_drawdown_pct),    desc: 'Worst peak-to-trough drop' },
+      { label: 'Calmar',       v: fmtNum(rsk.calmar),              desc: 'CAGR ÷ |max DD|' },
+      { label: 'Trades',       v: String(tr.total_trades ?? 0),    desc: 'Round-trip trades closed' },
+      { label: 'Win rate',     v: fmtPct((tr.win_rate ?? 0) * 100, 1), desc: '% of trades closed for gain' },
+      { label: 'Profit factor', v: tr.profit_factor === null ? '—' : (Number.isFinite(tr.profit_factor) ? fmtNum(tr.profit_factor) : '∞'), desc: 'Sum of wins ÷ sum of losses' },
+      { label: 'Avg winner',   v: fmtUsd(tr.avg_winner),           desc: 'Average $ profit per win' },
+      { label: 'Avg loser',    v: fmtUsd(tr.avg_loser),            desc: 'Average $ loss per losing trade' },
+      { label: 'Avg hold',     v: fmtNum(tr.avg_hold_days, 1) + ' d', desc: 'Average days a position was held' },
+    ];
+    let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">';
+    for (const c of cards) {
+      html += `
+        <div title="${c.desc}" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px 12px">
+          <div style="font-size:0.7rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">${c.label}</div>
+          <div style="font-size:1.05rem;font-weight:600;color:#e6edf3">${c.v}</div>
+        </div>`;
+    }
+    html += '</div>';
+    document.getElementById('bt-detail-headline').innerHTML = html;
+
+    btRenderChart(doc);
+    btRenderTrades(doc);
+    btRenderFailureAnalysis(doc);
+  }
+
+  // ── Failure analysis ──────────────────────────────────────────────────
+  // Pure client-side aggregation on doc.trades. Five subsections:
+  //  1. Exit-reason breakdown (which exit rule cost the most)
+  //  2. Top 10 worst trades (with date context for manual lookup)
+  //  3. Per-symbol P&L (which symbols were money pits)
+  //  4. Winners vs losers — hold-time and PnL skew
+  //  5. Whipsaw rate on stop-outs (only shown if any stops fired)
+  function btRenderFailureAnalysis(doc) {
+    const trades = (doc.trades || []).slice();
+    const host   = document.getElementById('bt-failure');
+    if (!trades.length) {
+      host.innerHTML = '<div style="color:#8b949e">No trades to analyze.</div>';
+      return;
+    }
+    const winners = trades.filter(t => (t.pnl_usd ?? 0) > 0);
+    const losers  = trades.filter(t => (t.pnl_usd ?? 0) <= 0);
+
+    // ─── 1. Exit-reason breakdown ─────────────────────────────────
+    const byReason = new Map();
+    for (const t of trades) {
+      const r = t.exit_reason || 'unknown';
+      if (!byReason.has(r)) byReason.set(r, { count: 0, wins: 0, losses: 0, totalPnl: 0, totalPnlPct: 0 });
+      const b = byReason.get(r);
+      b.count++;
+      b.totalPnl    += Number(t.pnl_usd ?? 0);
+      b.totalPnlPct += Number(t.pnl_pct ?? 0);
+      if ((t.pnl_usd ?? 0) > 0) b.wins++; else b.losses++;
+    }
+    const reasonRows = [...byReason.entries()]
+      .map(([r, b]) => ({ reason: r, ...b, avgPnl: b.totalPnl / b.count, avgPnlPct: b.totalPnlPct / b.count, wr: b.count ? b.wins / b.count : 0 }))
+      .sort((a, b) => a.totalPnl - b.totalPnl);   // worst total PnL first
+
+    // ─── 2. Top 10 worst trades ───────────────────────────────────
+    const worst = trades.slice().sort((a, b) => (a.pnl_usd ?? 0) - (b.pnl_usd ?? 0)).slice(0, 10);
+
+    // ─── 3. Per-symbol P&L ────────────────────────────────────────
+    const bySym = new Map();
+    for (const t of trades) {
+      const s = t.symbol || 'UNKNOWN';
+      if (!bySym.has(s)) bySym.set(s, { count: 0, wins: 0, totalPnl: 0 });
+      const b = bySym.get(s);
+      b.count++;
+      b.totalPnl += Number(t.pnl_usd ?? 0);
+      if ((t.pnl_usd ?? 0) > 0) b.wins++;
+    }
+    const symRows = [...bySym.entries()].map(([sym, b]) => ({ sym, ...b, wr: b.count ? b.wins / b.count : 0 }))
+      .sort((a, b) => a.totalPnl - b.totalPnl);
+    const worstSym = symRows.slice(0, 8);
+    const bestSym  = symRows.slice().reverse().slice(0, 8);
+
+    // ─── 4. Winner vs loser stats ─────────────────────────────────
+    const avgHoldW = winners.length ? winners.reduce((s, t) => s + (t.hold_days ?? 0), 0) / winners.length : 0;
+    const avgHoldL = losers.length  ? losers.reduce((s, t) => s + (t.hold_days ?? 0), 0) / losers.length  : 0;
+    const avgPctW  = winners.length ? winners.reduce((s, t) => s + (t.pnl_pct ?? 0), 0) / winners.length * 100 : 0;
+    const avgPctL  = losers.length  ? losers.reduce((s, t) => s + (t.pnl_pct ?? 0), 0) / losers.length  * 100 : 0;
+    const sumW     = winners.reduce((s, t) => s + (t.pnl_usd ?? 0), 0);
+    const sumL     = losers.reduce((s, t) => s + (t.pnl_usd ?? 0), 0);
+
+    // ─── 5. Stop-out detection (for any stop_loss reason) ─────────
+    const stops = trades.filter(t => /stop/i.test(t.exit_reason || ''));
+    const stopBlock = stops.length
+      ? `<div style="margin-top:16px;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:0.85rem;color:#c9d1d9">
+           <strong>Stop-out analysis:</strong> ${stops.length} trades exited on a stop. Average loss: ${(stops.reduce((s, t) => s + (t.pnl_pct ?? 0), 0) / stops.length * 100).toFixed(2)}%.
+           <span style="color:#8b949e">If the strategy hits stops often, the stop distance may be too tight relative to natural noise — widen stops or reduce position sizing.</span>
+         </div>`
+      : '';
+
+    // ─── Render everything ────────────────────────────────────────
+    let html = '';
+
+    // Section 1: Exit-reason
+    html += `
+      <h4 style="margin:0 0 8px;color:#e6edf3;font-size:0.95rem">1. Which exit rules cost the most</h4>
+      <p style="margin:0 0 10px;color:#8b949e;font-size:0.82rem">Sort by total P&amp;L (most negative first). The rule that exits the most-losing trades is the prime suspect.</p>
+      <div style="overflow-x:auto;margin-bottom:24px">
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+        <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d">
+          <tr>
+            <th style="text-align:left;padding:8px 10px">Exit reason</th>
+            <th style="text-align:right;padding:8px 10px">Count</th>
+            <th style="text-align:right;padding:8px 10px">Wins / Losses</th>
+            <th style="text-align:right;padding:8px 10px">WR</th>
+            <th style="text-align:right;padding:8px 10px">Avg PnL %</th>
+            <th style="text-align:right;padding:8px 10px">Total PnL $</th>
+          </tr>
+        </thead><tbody>`;
+    for (const r of reasonRows) {
+      const c = r.totalPnl >= 0 ? '#3fb950' : '#f85149';
+      html += `
+        <tr style="border-bottom:1px solid #21262d">
+          <td style="padding:6px 10px;color:#c9d1d9;font-family:ui-monospace,monospace;font-size:0.78rem">${r.reason}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${r.count}</td>
+          <td style="padding:6px 10px;text-align:right;color:#8b949e">${r.wins} / ${r.losses}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${(r.wr * 100).toFixed(0)}%</td>
+          <td style="padding:6px 10px;text-align:right;color:${r.avgPnlPct >= 0 ? '#3fb950' : '#f85149'}">${(r.avgPnlPct * 100).toFixed(2)}%</td>
+          <td style="padding:6px 10px;text-align:right;color:${c};font-weight:600">${r.totalPnl >= 0 ? '+' : ''}$${r.totalPnl.toFixed(0)}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div>';
+
+    // Section 2: Worst trades
+    html += `
+      <h4 style="margin:0 0 8px;color:#e6edf3;font-size:0.95rem">2. Top 10 worst trades</h4>
+      <p style="margin:0 0 10px;color:#8b949e;font-size:0.82rem">Look these up in TradingView for the dates shown — what was happening to the market or the symbol? Earnings? News? Sector rotation?</p>
+      <div style="overflow-x:auto;margin-bottom:24px">
+      <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+        <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d">
+          <tr>
+            <th style="text-align:left;padding:8px 10px">Symbol</th>
+            <th style="text-align:left;padding:8px 10px">Opened</th>
+            <th style="text-align:left;padding:8px 10px">Closed</th>
+            <th style="text-align:right;padding:8px 10px">Hold</th>
+            <th style="text-align:right;padding:8px 10px">Entry</th>
+            <th style="text-align:right;padding:8px 10px">Exit</th>
+            <th style="text-align:right;padding:8px 10px">PnL $</th>
+            <th style="text-align:right;padding:8px 10px">PnL %</th>
+            <th style="text-align:left;padding:8px 10px">Exit reason</th>
+          </tr>
+        </thead><tbody>`;
+    for (const t of worst) {
+      html += `
+        <tr style="border-bottom:1px solid #21262d">
+          <td style="padding:6px 10px;color:#e6edf3;font-weight:600">${t.symbol}</td>
+          <td style="padding:6px 10px;color:#8b949e;font-size:0.78rem">${(t.opened_at || '').slice(0, 10)}</td>
+          <td style="padding:6px 10px;color:#8b949e;font-size:0.78rem">${(t.closed_at || '').slice(0, 10)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${fmtNum(t.hold_days, 1)}d</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">$${Number(t.entry_price).toFixed(2)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">$${Number(t.exit_price).toFixed(2)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#f85149;font-weight:600">$${Number(t.pnl_usd).toFixed(0)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#f85149">${(Number(t.pnl_pct) * 100).toFixed(2)}%</td>
+          <td style="padding:6px 10px;color:#8b949e;font-size:0.78rem">${t.exit_reason || '—'}</td>
+        </tr>`;
+    }
+    html += '</tbody></table></div>';
+
+    // Section 3: Per-symbol
+    html += `
+      <h4 style="margin:0 0 8px;color:#e6edf3;font-size:0.95rem">3. Per-symbol total P&amp;L</h4>
+      <p style="margin:0 0 10px;color:#8b949e;font-size:0.82rem">If a few symbols dominate the losses, the universe (or filter) is the problem, not the rule.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+        <div>
+          <div style="font-size:0.78rem;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Worst symbols</div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+            <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d">
+              <tr><th style="text-align:left;padding:6px 10px">Sym</th><th style="text-align:right;padding:6px 10px">N</th><th style="text-align:right;padding:6px 10px">WR</th><th style="text-align:right;padding:6px 10px">Total PnL</th></tr>
+            </thead><tbody>`;
+    for (const s of worstSym) {
+      html += `<tr style="border-bottom:1px solid #21262d"><td style="padding:5px 10px;color:#e6edf3;font-weight:500">${s.sym}</td><td style="padding:5px 10px;text-align:right;color:#c9d1d9">${s.count}</td><td style="padding:5px 10px;text-align:right;color:#c9d1d9">${(s.wr*100).toFixed(0)}%</td><td style="padding:5px 10px;text-align:right;color:#f85149;font-weight:600">$${s.totalPnl.toFixed(0)}</td></tr>`;
+    }
+    html += `</tbody></table></div>
+        <div>
+          <div style="font-size:0.78rem;color:#8b949e;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px">Best symbols</div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+            <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d">
+              <tr><th style="text-align:left;padding:6px 10px">Sym</th><th style="text-align:right;padding:6px 10px">N</th><th style="text-align:right;padding:6px 10px">WR</th><th style="text-align:right;padding:6px 10px">Total PnL</th></tr>
+            </thead><tbody>`;
+    for (const s of bestSym) {
+      html += `<tr style="border-bottom:1px solid #21262d"><td style="padding:5px 10px;color:#e6edf3;font-weight:500">${s.sym}</td><td style="padding:5px 10px;text-align:right;color:#c9d1d9">${s.count}</td><td style="padding:5px 10px;text-align:right;color:#c9d1d9">${(s.wr*100).toFixed(0)}%</td><td style="padding:5px 10px;text-align:right;color:#3fb950;font-weight:600">+$${s.totalPnl.toFixed(0)}</td></tr>`;
+    }
+    html += '</tbody></table></div></div>';
+
+    // Section 4: Winner vs loser
+    html += `
+      <h4 style="margin:0 0 8px;color:#e6edf3;font-size:0.95rem">4. Winners vs losers — symmetry check</h4>
+      <p style="margin:0 0 10px;color:#8b949e;font-size:0.82rem">Healthy strategies cut losers fast and let winners run. If avg loser hold ≥ avg winner hold, you're holding losses too long.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:8px">
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px">
+          <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Count</div>
+          <div style="font-size:1rem;color:#3fb950">${winners.length} won</div>
+          <div style="font-size:1rem;color:#f85149">${losers.length} lost</div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px">
+          <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Avg hold</div>
+          <div style="font-size:1rem;color:#3fb950">${avgHoldW.toFixed(1)}d won</div>
+          <div style="font-size:1rem;color:#f85149">${avgHoldL.toFixed(1)}d lost</div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px">
+          <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Avg PnL %</div>
+          <div style="font-size:1rem;color:#3fb950">+${avgPctW.toFixed(2)}% won</div>
+          <div style="font-size:1rem;color:#f85149">${avgPctL.toFixed(2)}% lost</div>
+        </div>
+        <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px">
+          <div style="font-size:0.72rem;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Total $</div>
+          <div style="font-size:1rem;color:#3fb950">+$${sumW.toFixed(0)} won</div>
+          <div style="font-size:1rem;color:#f85149">$${sumL.toFixed(0)} lost</div>
+        </div>
+      </div>`;
+
+    // Section 5: Stops (conditional)
+    html += stopBlock;
+
+    // Diagnostic summary at the bottom
+    const dominantBadReason = reasonRows[0];
+    const dominantBadSym    = worstSym[0];
+    html += `
+      <div style="margin-top:20px;padding:14px;background:linear-gradient(135deg,#1f2730,#161b22);border-left:3px solid #f0883e;border-radius:6px;color:#c9d1d9;font-size:0.85rem;line-height:1.6">
+        <strong style="color:#f0883e">📋 What this tells you:</strong><br>
+        ${dominantBadReason && dominantBadReason.totalPnl < 0
+          ? `&bull; The exit rule <code style="background:#0d1117;padding:1px 6px;border-radius:3px;color:#f0883e">${dominantBadReason.reason}</code> cost the most ($${dominantBadReason.totalPnl.toFixed(0)} across ${dominantBadReason.count} trades, ${(dominantBadReason.wr*100).toFixed(0)}% WR). Consider tuning this exit specifically.<br>`
+          : `&bull; No single exit reason dominates losses — the strategy fails on entry quality, not exit timing.<br>`}
+        ${dominantBadSym && dominantBadSym.totalPnl < -500
+          ? `&bull; Symbol <strong>${dominantBadSym.sym}</strong> lost $${Math.abs(dominantBadSym.totalPnl).toFixed(0)} over ${dominantBadSym.count} trades — removing it from the universe would change the result.<br>`
+          : ''}
+        ${avgHoldL > avgHoldW * 1.5
+          ? `&bull; You're holding losers (${avgHoldL.toFixed(1)}d) materially longer than winners (${avgHoldW.toFixed(1)}d). Tighten exits or trail stops.<br>`
+          : avgHoldW > avgHoldL * 1.5
+            ? `&bull; Winners are held ${avgHoldW.toFixed(1)}d vs losers ${avgHoldL.toFixed(1)}d — that's healthy (cutting losses fast, riding winners).<br>`
+            : `&bull; Hold-time symmetry roughly balanced (winners ${avgHoldW.toFixed(1)}d vs losers ${avgHoldL.toFixed(1)}d).<br>`}
+        ${Math.abs(avgPctL) > avgPctW * 1.5
+          ? `&bull; Average losing trade loses ${Math.abs(avgPctL).toFixed(2)}% — bigger than the ${avgPctW.toFixed(2)}% won per winning trade. Asymmetric losses are a red flag.<br>`
+          : ''}
+      </div>`;
+
+    host.innerHTML = html;
+  }
+
+  function btRenderChart(doc) {
+    const canvas = document.getElementById('bt-equity-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const eq = doc.equity_curve || [];
+    if (!eq.length) return;
+    // Sample down to ~200 points for clean rendering
+    const stride = Math.max(1, Math.floor(eq.length / 200));
+    const labels = [], data = [];
+    for (let i = 0; i < eq.length; i += stride) {
+      labels.push(i);
+      data.push(eq[i]);
+    }
+    if (_btChart) _btChart.destroy();
+    _btChart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Equity ($)',
+          data,
+          borderColor: '#3fb950',
+          backgroundColor: 'rgba(63,185,80,0.10)',
+          fill: true,
+          tension: 0.1,
+          pointRadius: 0,
+          borderWidth: 2,
+        }, {
+          label: 'Initial capital',
+          data: data.map(() => doc.args?.initial_capital ?? 100000),
+          borderColor: '#8b949e',
+          borderDash: [4, 4],
+          borderWidth: 1,
+          pointRadius: 0,
+          fill: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+          y: { ticks: { color: '#8b949e', callback: v => '$' + Number(v).toLocaleString() }, grid: { color: '#21262d' } },
+        },
+        plugins: {
+          legend:  { labels: { color: '#c9d1d9' } },
+          tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: $${Number(ctx.parsed.y).toLocaleString(undefined, {maximumFractionDigits:0})}` } },
+        },
+      },
+    });
+  }
+
+  function btRenderTrades(doc) {
+    const trades = doc.trades || [];
+    document.getElementById('bt-trade-count').textContent = `${trades.length} round-trip trades`;
+    if (!trades.length) {
+      document.getElementById('bt-trades').innerHTML = '<div style="padding:16px;color:#8b949e">No trades executed.</div>';
+      return;
+    }
+    let html = `
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem">
+        <thead style="background:#161b22;color:#8b949e;border-bottom:1px solid #30363d;position:sticky;top:0">
+          <tr>
+            <th style="text-align:left;padding:8px 10px">Symbol</th>
+            <th style="text-align:left;padding:8px 10px">Opened</th>
+            <th style="text-align:left;padding:8px 10px">Closed</th>
+            <th style="text-align:right;padding:8px 10px">Qty</th>
+            <th style="text-align:right;padding:8px 10px">Entry</th>
+            <th style="text-align:right;padding:8px 10px">Exit</th>
+            <th style="text-align:right;padding:8px 10px">Hold</th>
+            <th style="text-align:right;padding:8px 10px">PnL $</th>
+            <th style="text-align:right;padding:8px 10px">PnL %</th>
+            <th style="text-align:left;padding:8px 10px">Exit reason</th>
+          </tr>
+        </thead>
+        <tbody>`;
+    // Show newest first
+    const sorted = trades.slice().sort((a, b) => (b.closed_at || '').localeCompare(a.closed_at || ''));
+    for (const t of sorted) {
+      const pnlColor = (t.pnl_usd ?? 0) >= 0 ? '#3fb950' : '#f85149';
+      html += `
+        <tr style="border-bottom:1px solid #21262d">
+          <td style="padding:6px 10px;color:#e6edf3;font-weight:500">${t.symbol}</td>
+          <td style="padding:6px 10px;color:#8b949e;font-size:0.78rem">${(t.opened_at || '').slice(0, 10)}</td>
+          <td style="padding:6px 10px;color:#8b949e;font-size:0.78rem">${(t.closed_at || '').slice(0, 10)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${t.qty}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">$${Number(t.entry_price).toFixed(2)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">$${Number(t.exit_price).toFixed(2)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c9d1d9">${fmtNum(t.hold_days, 1)}d</td>
+          <td style="padding:6px 10px;text-align:right;color:${pnlColor};font-weight:600">${(t.pnl_usd ?? 0) >= 0 ? '+' : ''}${Number(t.pnl_usd).toFixed(2)}</td>
+          <td style="padding:6px 10px;text-align:right;color:${pnlColor}">${(Number(t.pnl_pct) * 100).toFixed(2)}%</td>
+          <td style="padding:6px 10px;color:#8b949e;font-size:0.75rem">${t.exit_reason || '—'}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    document.getElementById('bt-trades').innerHTML = html;
+  }
+
+  function closeBacktestDetail() {
+    document.getElementById('bt-detail').style.display = 'none';
+    if (_btChart) { _btChart.destroy(); _btChart = null; }
+  }
+
+  // ── Globals ───────────────────────────────────────────────────────────
+  window.loadBacktests        = loadBacktests;
+  window.renderBacktestList   = renderBacktestList;
+  window.btOpenDetail         = btOpenDetail;
+  window.closeBacktestDetail  = closeBacktestDetail;
+  window.loadSignalValidation = loadSignalValidation;
+
+  // ────────────────────────────────────────────────────────────────────────
+  // ── System Health dashboard
+  // ────────────────────────────────────────────────────────────────────────
+
+  let _hcData = null;
+
+  const HC_CATEGORIES = [
+    { id: 'data',      label: '📡 Data Pipeline',  blurb: 'External feeds the bot depends on' },
+    { id: 'cron',      label: '⏰ Cron Health',     blurb: 'Scheduled jobs and heartbeats' },
+    { id: 'integrity', label: '🔗 DB Integrity',   blurb: 'Invariants that should always hold' },
+    { id: 'ml',        label: '🤖 ML & Signals',   blurb: 'Predictive layer quality' },
+    { id: 'process',   label: '⚙️ Processes',      blurb: 'PM2 daemons + DB latency + bot fleet' },
+  ];
+
+  async function loadHealth() {
+    const grid = document.getElementById('hc-grid');
+    if (!grid) return;
+    grid.innerHTML = '<div class="loading" style="padding:24px">Loading checks…</div>';
+    try {
+      const r = await fetch('/api/health/checks', { credentials: 'same-origin' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'fetch failed');
+      _hcData = j;
+      renderHealth(j);
+    } catch (e) {
+      grid.innerHTML = `<div style="padding:24px;color:#f85149">Error: ${e.message}</div>`;
+    }
+  }
+
+  function renderHealth(data) {
+    // Summary header
+    const s = data.summary;
+    const mh = data.market_hours;
+    const summaryHtml = `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px">
+        <span style="background:#0d2818;border:1px solid #2ea043;color:#3fb950;padding:4px 10px;border-radius:14px;font-size:0.82rem;font-weight:600">${s.ok} OK</span>
+        <span style="background:#2d1b00;border:1px solid #9e6a03;color:#f0883e;padding:4px 10px;border-radius:14px;font-size:0.82rem;font-weight:600">${s.warn} WARN</span>
+        <span style="background:#3d0e0e;border:1px solid #6d2929;color:#f85149;padding:4px 10px;border-radius:14px;font-size:0.82rem;font-weight:600">${s.fail} FAIL</span>
+        <span style="color:#8b949e;font-size:0.82rem;margin-left:8px">${s.total} checks · ${data.duration_ms}ms ·
+          ${mh.isMarketHours ? '<span style="color:#3fb950">🟢 market open</span>' : '<span style="color:#8b949e">🔴 market closed</span>'}
+        </span>
+      </div>`;
+    document.getElementById('hc-summary').innerHTML = summaryHtml;
+    document.getElementById('hc-last-check').textContent = 'Last run: ' + new Date(data.generated_at).toLocaleTimeString();
+
+    // Render by category
+    const grid = document.getElementById('hc-grid');
+    let html = '';
+    for (const cat of HC_CATEGORIES) {
+      const inCat = data.checks.filter(c => c.category === cat.id);
+      if (!inCat.length) continue;
+      html += `
+        <div class="table-wrap" style="margin-bottom:16px">
+          <div class="table-head">
+            <h3>${cat.label}</h3>
+            <span style="font-size:0.8rem;color:#8b949e">${cat.blurb}</span>
+          </div>
+          <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">`;
+      for (const chk of inCat) {
+        const colorMap = { ok: '#3fb950', warn: '#f0883e', fail: '#f85149' };
+        const bgMap    = { ok: '#0d2818', warn: '#2d1b00', fail: '#3d0e0e' };
+        const iconMap  = { ok: '✓', warn: '⚠', fail: '✗' };
+        const c = colorMap[chk.status];
+        const b = bgMap[chk.status];
+        html += `
+          <div style="background:${b};border:1px solid ${c}33;border-left:4px solid ${c};border-radius:6px;padding:12px 14px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px;gap:8px">
+              <div style="font-weight:600;color:#e6edf3;font-size:0.88rem;line-height:1.3">${chk.title}</div>
+              <button onclick="showHealthHelp('${chk.id}')" title="What does this check?" style="background:#0d1117;border:1px solid #30363d;color:#8b949e;width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:0.75rem;flex-shrink:0">?</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="color:${c};font-weight:700;font-size:0.85rem">${iconMap[chk.status]} ${chk.status.toUpperCase()}</span>
+            </div>
+            <div style="color:#c9d1d9;font-size:0.83rem;line-height:1.5">${chk.value}</div>
+            ${chk.threshold ? `<div style="color:#8b949e;font-size:0.75rem;margin-top:4px;font-style:italic">threshold: ${chk.threshold}</div>` : ''}
+          </div>`;
+      }
+      html += '</div></div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  function showHealthHelp(checkId) {
+    if (!_hcData) return;
+    const chk = _hcData.checks.find(c => c.id === checkId);
+    if (!chk || !chk.doc) return;
+    const colorMap = { ok: '#3fb950', warn: '#f0883e', fail: '#f85149' };
+    const c = colorMap[chk.status];
+    document.getElementById('hc-help-title').innerHTML = `<span style="color:${c}">${chk.status.toUpperCase()}</span> &nbsp; ${chk.title}`;
+    document.getElementById('hc-help-body').innerHTML = `
+      <div style="margin-bottom:14px;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px">
+        <div style="font-size:0.78rem;color:#8b949e;margin-bottom:4px">Current value</div>
+        <div style="color:#e6edf3;font-weight:600">${chk.value}</div>
+        ${chk.threshold ? `<div style="color:#8b949e;font-size:0.78rem;margin-top:6px">Threshold: ${chk.threshold}</div>` : ''}
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-weight:600;color:#e6edf3;border-left:3px solid #58a6ff;padding-left:8px;margin-bottom:6px">What this checks</div>
+        <div style="color:#c9d1d9">${chk.doc.what}</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-weight:600;color:#e6edf3;border-left:3px solid #a371f7;padding-left:8px;margin-bottom:6px">Why it matters</div>
+        <div style="color:#c9d1d9">${chk.doc.why}</div>
+      </div>
+      <div>
+        <div style="font-weight:600;color:#e6edf3;border-left:3px solid #f85149;padding-left:8px;margin-bottom:6px">What to do if this is red</div>
+        <div style="color:#c9d1d9">${chk.doc.if_red}</div>
+      </div>
+    `;
+    document.getElementById('hc-help-overlay').style.display = 'block';
+    document.getElementById('hc-help-modal').style.display   = 'block';
+    document.body.style.overflow = 'hidden';
+  }
+  function hideHealthHelp() {
+    document.getElementById('hc-help-overlay').style.display = 'none';
+    document.getElementById('hc-help-modal').style.display   = 'none';
+    document.body.style.overflow = '';
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('hc-help-modal')?.style.display !== 'none') hideHealthHelp();
+  });
+
+  // Globals
+  window.loadHealth      = loadHealth;
+  window.showHealthHelp  = showHealthHelp;
+  window.hideHealthHelp  = hideHealthHelp;
+
+  // ════════════════════════════════════════════════════════════════════
+  // ── Portfolio Advisor ───────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════
+
+  let _advData = null;
+
+  // Documentation embedded in the page — every ❓ button references one of these keys
+  const ADV_DOCS = {
+    account_value: {
+      title: 'Account Value',
+      what: 'Total broker account value from Moomoo (or Alpaca paper as fallback). Includes cash + market value of all positions.',
+      why:  'Baseline for every other calculation in this dashboard — concentration %, risk weighting, position sizing.',
+      if_red: 'If "—", broker connection is down. Check `pm2 logs trading-dashboard | grep moomoo`. Moomoo OpenD must be running on localhost:11111.',
+    },
+    total_pl: {
+      title: 'Total Unrealized P&L',
+      what: 'Sum of unrealized profit/loss across all current holdings, in dollars and as % of cost basis.',
+      why:  'The bottom-line "how am I doing" number. Today P&L (smaller text below) shows just the last-session move.',
+      if_red: 'Negative P&L isn\'t a bug — it\'s a market condition. Look at individual position cards to find the drivers.',
+    },
+    avg_risk: {
+      title: 'Portfolio Risk Score',
+      what: 'Average risk score (0–100) across all positions, weighted by position value. Each position\'s risk is the sum of 8 factors: drawdown, concentration, days-to-earnings, volatility, bot conviction grade, UW flow sentiment, news sentiment, sector concentration.',
+      why:  'Single-glance health of your overall portfolio. 0–30 = healthy. 30–60 = warning. 60+ = action recommended (consider trim, hedge, or diversify).',
+      if_red: 'Click any position card with risk ≥ 60 — the risk breakdown shows which factors are driving the score so you can address the root cause.',
+    },
+    positions: {
+      title: 'Your Positions',
+      what: 'Every active holding from your broker, annotated with: risk score (8-factor 0–100 breakdown), the bot\'s verdict (BUY/HOLD/TRIM/EXIT based on the same engine your live bot uses), and a hedge recommendation if applicable.',
+      why:  'Combines your real positions with the bot\'s analytical engine. Tells you what the bot WOULD do with each of these names if it were managing them.',
+      if_red: 'Empty? Means the broker returned zero positions. Check `pm2 logs trading-dashboard | grep portfolio` for errors. If Moomoo unreachable, it auto-falls-back to Alpaca paper.',
+    },
+    best_buys: {
+      title: 'Today\'s Best Buys — Full bot-decision simulator',
+      what: 'For each of the top 30 scored names in the last 24h, runs the bot\'s actual decision engine (same code as live): all hard gates (earnings, VIX, liquidity, gap, short interest, price range), conviction-grade gate, UW label requirement, news sentiment floor, setup classification, and the composite-score threshold. Returns one of 4 verdicts: <strong>BUY</strong> (passes everything), <strong>NEAR</strong> (only blocker is being ≤10 points under threshold), <strong>BLOCKED</strong> (score high enough but a gate fails), <strong>WATCH</strong> (score below threshold).',
+      why:  'A bare composite score can mislead. A name scoring 65 looks like a BUY — but might be blocked by an earnings event tomorrow, illiquid trading, or a missing setup classification. This panel tells you what the live bot would <em>actually</em> do, including <em>which specific gate</em> blocks any non-buy pick.',
+      if_red: 'Empty: no symbols have been scored in the last 24h. Most likely cause: scanner hasn\'t run during market hours yet. Check 🩺 Health → "Bot scanner heartbeat". This panel is cached 60s — refresh to recompute.',
+    },
+    track_record: {
+      title: 'Track Record (signal proof)',
+      what: 'Forward-return analysis: for every conviction score issued in the last 90 days, we look up the actual price 5/10 days later. Win rate = % of scores where price rose. Avg = mean forward return.',
+      why:  'Direct empirical proof that the underlying scoring signal works. If grade-A win rate is well above the F-grade win rate, the signal has real edge — independent of bot execution quality (stops, slippage, etc).',
+      if_red: 'See the dedicated 📊 Backtests tab → "Signal Validation" section for the full picture including the ML model AUC.',
+    },
+    risk_gauge: {
+      title: 'Position Risk Gauge',
+      what: '0–100 risk score for this specific position. Built from 8 weighted factors. Hover the bar (or expand) to see which factors are driving the score.',
+      why:  'A high risk score isn\'t a sell signal — it\'s a flag to investigate. Sometimes high risk is justified (concentrated bet on conviction); sometimes it means hedge or trim.',
+      if_red: 'Score ≥ 60 = the hedge recommender will activate on this card. Read the bot\'s verdict — if it says EXIT, give that more weight than your emotional attachment to the position.',
+    },
+    bot_verdict: {
+      title: 'Bot\'s Verdict',
+      what: 'BUY / HOLD / TRIM / EXIT — produced by running the bot\'s actual scoring engine on this symbol right now. Same code, same gates, same threshold (composite ≥ 60 for BUY).',
+      why:  'Gives you an objective second opinion from the same algorithm that\'s managing the trading bots. Disagreeing with the bot isn\'t wrong — but knowing it disagrees is information.',
+      if_red: 'UNKNOWN means the bot hasn\'t scored this symbol in 7 days. Likely outside the scan universe — add to tradable_universe or wait for the next 8 AM ET sync.',
+    },
+    hedge: {
+      title: 'Hedge Recommendation',
+      what: 'A specific covered-call suggestion: sell N call contracts at a chosen strike (~10% above current price) expiring ~30 days out. Premium estimated from live UW option chain when available, Black-Scholes fallback otherwise.',
+      why:  'Covered calls turn a sideways/down stock into income. You collect premium upfront. Worst outcome is your shares get sold at a price ABOVE where they are now (you locked in a profit). Most common outcome is keeping the premium AND the shares.',
+      if_red: 'Only shown when risk ≥ 60, position ≥ $5,000, and qty ≥ 100 shares (one contract = 100 shares). Outside those bounds, hedging cost dominates the benefit.',
+    },
+  };
+
+  function showAdvHelp(key) {
+    const doc = ADV_DOCS[key];
+    if (!doc) return;
+    document.getElementById('adv-help-title').textContent = doc.title;
+    document.getElementById('adv-help-body').innerHTML = `
+      <div style="margin-bottom:14px">
+        <div style="font-weight:600;color:#e6edf3;border-left:3px solid #58a6ff;padding-left:8px;margin-bottom:6px">What this is</div>
+        <div>${doc.what}</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-weight:600;color:#e6edf3;border-left:3px solid #a371f7;padding-left:8px;margin-bottom:6px">Why it matters</div>
+        <div>${doc.why}</div>
+      </div>
+      <div>
+        <div style="font-weight:600;color:#e6edf3;border-left:3px solid #f0883e;padding-left:8px;margin-bottom:6px">If empty / red / unexpected</div>
+        <div>${doc.if_red}</div>
+      </div>
+    `;
+    document.getElementById('adv-help-overlay').style.display = 'block';
+    document.getElementById('adv-help-modal').style.display   = 'block';
+    document.body.style.overflow = 'hidden';
+  }
+  function hideAdvHelp() {
+    document.getElementById('adv-help-overlay').style.display = 'none';
+    document.getElementById('adv-help-modal').style.display   = 'none';
+    document.body.style.overflow = '';
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('adv-help-modal')?.style.display !== 'none') hideAdvHelp();
+  });
+
+  // ── Number/formatting helpers ──────────────────────────────────────
+  const advFmt = {
+    usd(n)   { if (n == null || !isFinite(n)) return '—'; const s = Math.abs(n) >= 1000 ? Math.round(n).toLocaleString() : Number(n).toFixed(2); return (n < 0 ? '-$' : '$') + s.replace('-', ''); },
+    pct(n,d=2){ if (n == null || !isFinite(n)) return '—'; return (n >= 0 ? '+' : '') + Number(n).toFixed(d) + '%'; },
+    int(n)   { return n == null ? '—' : Number(n).toLocaleString(); },
+  };
+  function riskColor(s) {
+    if (s == null) return '#8b949e';
+    if (s < 30) return '#3fb950';
+    if (s < 60) return '#f0883e';
+    return '#f85149';
+  }
+  function verdictStyle(v) {
+    return ({
+      BUY:     { bg:'#0d2818', border:'#2ea043', color:'#3fb950', icon:'🟢' },
+      HOLD:    { bg:'#1a1f2e', border:'#30363d', color:'#c9d1d9', icon:'🟡' },
+      TRIM:    { bg:'#2d1b00', border:'#9e6a03', color:'#f0883e', icon:'🟠' },
+      EXIT:    { bg:'#3d0e0e', border:'#6d2929', color:'#f85149', icon:'🔴' },
+      UNKNOWN: { bg:'#161b22', border:'#30363d', color:'#8b949e', icon:'⚪' },
+    })[v] || { bg:'#161b22', border:'#30363d', color:'#8b949e', icon:'⚪' };
+  }
+
+  // ── Main loader ─────────────────────────────────────────────────────
+  async function loadAdvisor() {
+    document.getElementById('adv-positions').innerHTML = '<div class="loading">Loading positions…</div>';
+    document.getElementById('adv-account-value').textContent = '—';
+    document.getElementById('adv-total-pl').textContent = '—';
+    document.getElementById('adv-today-pl').textContent = '—';
+    document.getElementById('adv-avg-risk').textContent = '—';
+    document.getElementById('adv-position-count').textContent = '—';
+    document.getElementById('adv-concerns').innerHTML = '';
+    document.getElementById('adv-account-source').textContent = '';
+
+    // Always honor the dashboard global currentSource — it's updated whenever
+    // the user switches broker anywhere in the dashboard. The Advisor's own
+    // picker is just a convenient mirror that we keep in sync.
+    //
+    // EXCEPTION: if the user actively changed the Advisor's own picker (which
+    // we detect via the data-user-set attribute set by onchange), use that
+    // value instead — and write it back to currentSource so the rest of the
+    // dashboard follows along.
+    const picker = document.getElementById('adv-source');
+    const valid  = ['alpaca', 'alpaca_live', 'moomoo'];
+    let src;
+    if (picker?.dataset?.userSet === '1' && valid.includes(picker.value)) {
+      // User just switched the in-tab picker → that's authoritative this call
+      src = picker.value;
+      picker.dataset.userSet = '0';
+      // Push the change back to the dashboard global so other tabs follow
+      try {
+        if (typeof window.setSource === 'function')         window.setSource(src);
+        else if (typeof window.updateSource === 'function') window.updateSource(src);
+        else                                                 window.currentSource = src;
+      } catch { window.currentSource = src; }
+    } else {
+      // Normal case: re-read dashboard global. If it's an unsupported source,
+      // (tiger / tiger_demo), fall back to alpaca paper so the Advisor still works.
+      src = (typeof currentSource !== 'undefined' && currentSource) ? currentSource : 'alpaca';
+      if (!valid.includes(src)) src = 'alpaca';
+      if (picker && picker.value !== src) picker.value = src;
+    }
+    try {
+      const r = await fetch('/api/portfolio/holdings?source=' + encodeURIComponent(src), { credentials: 'same-origin' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'fetch failed');
+      _advData = j;
+      renderAdvisorHero(j);
+      renderAdvisorPositions();
+    } catch (e) {
+      const srcLabel = src === 'moomoo' ? 'Moomoo (OpenD on localhost:11111)'
+                     : src === 'alpaca_live' ? 'Alpaca Live'
+                     : src === 'alpaca' ? 'Alpaca Paper'
+                     : src;
+      document.getElementById('adv-positions').innerHTML = `
+        <div style="padding:16px;color:#f85149">
+          <div style="font-weight:600;margin-bottom:6px">⚠ Could not load portfolio from ${srcLabel}: ${e.message}</div>
+          <div style="color:#8b949e;font-size:0.85rem">
+            Currently using source: <code style="background:#161b22;padding:1px 6px;border-radius:4px">${src}</code>.
+            To switch source, use the broker picker in your account settings. Common causes:
+            (1) Broker not connected for your account; (2) Broker API down or rate-limited; (3) Zero positions.
+          </div>
+        </div>`;
+    }
+
+    // Side rail — these are independent, fire and forget
+    loadAdvisorBestBuys();
+    loadAdvisorTrackRecord();
+  }
+
+  function renderAdvisorHero(j) {
+    document.getElementById('adv-account-value').textContent  = advFmt.usd(j.account_value);
+    const srcLabel = ({
+      'alpaca':       '📄 Alpaca Paper',
+      'alpaca_live':  '🔴 Alpaca Live',
+      'moomoo':       '💰 Moomoo',
+      'tiger':        '🐯 Tiger',
+      'tiger_demo':   '🐯 Tiger Demo',
+    })[j.source] || j.source;
+    document.getElementById('adv-account-source').textContent = `Source: ${srcLabel}`;
+    const plEl = document.getElementById('adv-total-pl');
+    plEl.textContent = advFmt.usd(j.total_unrealized_pl) + (j.total_unrealized_pct != null ? `  (${advFmt.pct(j.total_unrealized_pct)})` : '');
+    plEl.style.color = (j.total_unrealized_pl || 0) >= 0 ? '#3fb950' : '#f85149';
+    const todayEl = document.getElementById('adv-today-pl');
+    todayEl.textContent = 'Today: ' + advFmt.usd(j.total_today_pl);
+    todayEl.style.color = (j.total_today_pl || 0) >= 0 ? '#3fb950' : '#f85149';
+    const riskEl = document.getElementById('adv-avg-risk');
+    riskEl.textContent = String(j.avg_risk_score ?? '—');
+    riskEl.style.color = riskColor(j.avg_risk_score);
+    document.getElementById('adv-position-count').textContent = String(j.position_count ?? 0);
+
+    // Top concerns banner
+    const c = document.getElementById('adv-concerns');
+    if (!Array.isArray(j.top_concerns) || !j.top_concerns.length) { c.innerHTML = ''; return; }
+    let html = '<div style="margin-top:8px;padding:10px 12px;background:#3d0e0e;border:1px solid #6d2929;border-radius:6px;color:#c9d1d9;font-size:0.85rem"><strong style="color:#f85149">⚠ Top concerns:</strong> ';
+    html += j.top_concerns.map(x => `<strong>${x.symbol}</strong> (risk ${x.risk}, ${x.pct != null ? x.pct.toFixed(0)+'% portfolio, ' : ''}${advFmt.pct(x.pl_pct, 1)})`).join(' · ');
+    html += '</div>';
+    c.innerHTML = html;
+  }
+
+  function renderAdvisorPositions() {
+    if (!_advData) return;
+    const sortKey = document.getElementById('adv-sort')?.value || 'risk';
+    const positions = _advData.positions.slice();
+    positions.sort((a, b) => {
+      if (sortKey === 'risk')   return (b.risk?.score || 0) - (a.risk?.score || 0);
+      if (sortKey === 'value')  return (b.market_val || 0) - (a.market_val || 0);
+      if (sortKey === 'pl_pct') return (a.unrealized_pl_pct || 0) - (b.unrealized_pl_pct || 0);
+      if (sortKey === 'symbol') return a.symbol.localeCompare(b.symbol);
+      return 0;
+    });
+    const host = document.getElementById('adv-positions');
+    if (!positions.length) {
+      const src = _advData?.source || '?';
+      const acctVal = _advData?.account_value || 0;
+      const srcLabel = ({ 'alpaca':'Alpaca Paper', 'alpaca_live':'Alpaca Live', 'moomoo':'Moomoo', 'tiger':'Tiger', 'tiger_demo':'Tiger Demo' })[src] || src;
+      host.innerHTML = `
+        <div style="padding:24px;text-align:center">
+          <div style="font-size:2.6rem;margin-bottom:8px">💵</div>
+          <div style="font-weight:700;color:#e6edf3;font-size:1.05rem;margin-bottom:6px">No open positions in ${srcLabel}</div>
+          <div style="color:#8b949e;font-size:0.9rem;margin-bottom:14px">Account is all-cash. Available: <strong style="color:#3fb950">$${Number(acctVal).toLocaleString(undefined, {maximumFractionDigits:2})}</strong></div>
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;max-width:520px;margin:0 auto;text-align:left;font-size:0.82rem;color:#c9d1d9;line-height:1.55">
+            <strong style="color:#e6edf3">If you expected positions here:</strong>
+            <ul style="margin:6px 0 0;padding-left:20px;color:#8b949e">
+              <li><strong>Wrong broker selected?</strong> Use the "Broker:" dropdown above to switch source. Try 💰 Moomoo if your positions are there.</li>
+              <li><strong>Bot trades closed?</strong> The bot may have opened and exited trades — past P&amp;L lives in the 📊 P&amp;L Dashboard; only currently-open positions show here.</li>
+              <li><strong>Admin vs personal Alpaca creds?</strong> Admin users hit the system Alpaca account from <code>.env</code>; non-admin users hit per-user credentials. These can hold different positions.</li>
+            </ul>
+          </div>
+        </div>`;
+      return;
+    }
+    host.innerHTML = positions.map(renderPositionCard).join('');
+  }
+
+  function renderPositionCard(p) {
+    const r = p.risk || { score: 0, factors: [] };
+    const v = p.verdict || { action: 'UNKNOWN', reasoning: 'not scored', score: null };
+    const h = p.hedge   || { suggested: false };
+    const vs = verdictStyle(v.action);
+    const pnlColor = (p.unrealized_pl || 0) >= 0 ? '#3fb950' : '#f85149';
+    const rc = riskColor(r.score);
+
+    // Risk gauge: SVG semi-circle that fills based on score
+    const gauge = renderRiskGauge(r.score);
+
+    const factorRows = (r.factors || []).map(f => {
+      const pct = f.max > 0 ? (f.contribution / f.max) * 100 : 0;
+      return `
+        <div style="margin-bottom:6px">
+          <div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:2px">
+            <span style="color:#c9d1d9">${f.name}</span>
+            <span style="color:#8b949e">+${f.contribution.toFixed(1)} / ${f.max}</span>
+          </div>
+          <div style="background:#0d1117;height:6px;border-radius:3px;overflow:hidden">
+            <div style="width:${Math.min(100,pct)}%;height:100%;background:${pct > 60 ? '#f85149' : pct > 30 ? '#f0883e' : '#3fb950'}"></div>
+          </div>
+          <div style="color:#8b949e;font-size:0.72rem;margin-top:2px;font-style:italic">${f.evidence}</div>
+        </div>`;
+    }).join('');
+
+    const cardId = 'adv-pos-' + p.symbol.replace(/[^A-Z0-9]/gi, '');
+
+    let hedgeBlock = '';
+    if (h.suggested) {
+      hedgeBlock = `
+        <div style="border-top:1px solid #21262d;padding:14px 16px;background:#0d2818">
+          <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="document.getElementById('${cardId}-hedge').style.display = document.getElementById('${cardId}-hedge').style.display==='none' ? 'block' : 'none'">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:1.2rem">🛡</span>
+              <div>
+                <div style="font-weight:600;color:#3fb950;font-size:0.92rem">Suggested hedge: covered call</div>
+                <div style="color:#8b949e;font-size:0.82rem">${h.contracts} contract${h.contracts>1?'s':''} · ${p.symbol} $${h.strike} call · exp ${h.expiry} · collect ~$${(h.total_premium||0).toLocaleString()}</div>
+              </div>
+            </div>
+            <button onclick="event.stopPropagation();showAdvHelp('hedge')" style="background:none;border:1px solid #30363d;color:#8b949e;width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:0.75rem">?</button>
+          </div>
+          <div id="${cardId}-hedge" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #21262d">
+            <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:14px;margin-bottom:12px;font-size:0.85rem;color:#c9d1d9;line-height:1.65">
+              ${(h.plain_english || []).map(line => `<div style="margin-bottom:6px">• ${line}</div>`).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:10px">
+              <div style="background:#0d1117;border:1px solid #2ea043;border-radius:6px;padding:10px"><div style="font-size:0.7rem;color:#8b949e;text-transform:uppercase">If stays under $${h.strike}</div><div style="font-size:1rem;color:#3fb950;font-weight:600">${advFmt.usd(h.if_flat?.total_pnl)}</div><div style="color:#8b949e;font-size:0.78rem">${h.if_flat?.summary || ''}</div></div>
+              <div style="background:#0d1117;border:1px solid #58a6ff;border-radius:6px;padding:10px"><div style="font-size:0.7rem;color:#8b949e;text-transform:uppercase">If called away at $${h.strike}</div><div style="font-size:1rem;color:#58a6ff;font-weight:600">${advFmt.usd(h.if_called_away?.total_pnl)}</div><div style="color:#8b949e;font-size:0.78rem">${h.if_called_away?.summary || ''}</div></div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:0.8rem;color:#8b949e">
+              <span>Breakeven: <strong style="color:#c9d1d9">$${h.breakeven}</strong></span>
+              <span>Annualized yield (premium): <strong style="color:#c9d1d9">${h.annualized_yield}%</strong></span>
+              <span>Premium per share: <strong style="color:#c9d1d9">$${h.premium_per_share}</strong></span>
+            </div>
+            <div style="color:#8b949e;font-size:0.72rem;margin-top:10px;font-style:italic">Source: ${h.source}. <strong>Read-only suggestion</strong> — place the order yourself in Moomoo if you want it.</div>
+            <details style="margin-top:10px"><summary style="cursor:pointer;color:#58a6ff;font-size:0.82rem">📚 Options in 60 seconds (covered calls)</summary>
+              <div style="margin-top:8px;padding:12px;background:#0d1117;border:1px solid #21262d;border-radius:6px;font-size:0.82rem;color:#c9d1d9;line-height:1.65">
+                <strong>A call option</strong> is a contract that gives the buyer the right (not obligation) to buy 100 shares at a fixed "strike" price by an expiration date. The seller of the call collects "premium" upfront.<br><br>
+                <strong>Selling a call you own (covered call)</strong> means: you own the 100 shares, you sell someone the right to buy them from you at the strike. If the stock stays below the strike, the call expires worthless — you keep the premium AND the shares. If the stock rises above the strike, the buyer "calls them away" — you sell at the strike (higher than today's price), keep all premium + the gain up to the strike. You give up upside ABOVE the strike.<br><br>
+                <strong>Why it makes sense here:</strong> ${p.symbol} is in a position where the bot sees ${v.action.toLowerCase()} pressure. Selling premium turns "uncertain hold" into "certain $${(h.total_premium||0).toLocaleString()} now". Worst case you sell shares at a price above where they are today.<br><br>
+                <strong>Risk you take:</strong> if ${p.symbol} rockets to $${(h.strike*1.5).toFixed(0)}+, you only capture up to $${h.strike}. You don't get the moonshot.<br><br>
+                <strong>To execute</strong>: in Moomoo or any broker, go to Options chain → ${p.symbol} → exp ${h.expiry} → strike $${h.strike} → "Sell to open" → ${h.contracts} contract${h.contracts>1?'s':''} → review → confirm. The premium hits your cash balance within seconds.
+              </div>
+            </details>
+          </div>
+        </div>`;
+    } else if (r.score >= 40 && r.score < 60) {
+      hedgeBlock = `
+        <div style="border-top:1px solid #21262d;padding:10px 16px;color:#8b949e;font-size:0.8rem;font-style:italic">
+          🛡 No hedge suggested — risk score ${r.score} below threshold (60). ${h.reason || ''}
+        </div>`;
+    } else if (!h.suggested && h.reason) {
+      hedgeBlock = `
+        <div style="border-top:1px solid #21262d;padding:10px 16px;color:#8b949e;font-size:0.8rem;font-style:italic">
+          🛡 No hedge suggested — ${h.reason}
+        </div>`;
+    }
+
+    return `
+      <div style="background:#161b22;border:1px solid #30363d;border-left:4px solid ${rc};border-radius:8px;margin-bottom:14px;overflow:hidden">
+        <!-- Header row -->
+        <div style="padding:14px 16px;display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;align-items:center">
+          <div style="text-align:center">${gauge}</div>
+          <div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+              <div style="font-size:1.15rem;font-weight:700;color:#e6edf3">${p.symbol}</div>
+              <div style="color:#8b949e;font-size:0.82rem">${p.name || ''}</div>
+              <button onclick="showAdvHelp('risk_gauge')" style="background:none;border:1px solid #30363d;color:#8b949e;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:0.65rem">?</button>
+            </div>
+            <div style="color:#8b949e;font-size:0.8rem">
+              ${advFmt.int(p.qty)} sh · avg $${Number(p.avg_cost).toFixed(2)} · now $${Number(p.current_price).toFixed(2)}
+              · ${p.pct_of_portfolio != null ? p.pct_of_portfolio.toFixed(1) + '% of portfolio' : ''}
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div style="color:${pnlColor};font-weight:700;font-size:1.05rem">${advFmt.usd(p.unrealized_pl)}</div>
+            <div style="color:${pnlColor};font-size:0.85rem">${advFmt.pct(p.unrealized_pl_pct)}</div>
+          </div>
+          <button onclick="document.getElementById('${cardId}-detail').style.display = document.getElementById('${cardId}-detail').style.display==='none' ? 'block' : 'none'"
+                  style="background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem">Details ▾</button>
+        </div>
+
+        <!-- Bot verdict row -->
+        <div style="border-top:1px solid #21262d;padding:12px 16px;background:${vs.bg};border-left:3px solid ${vs.border}">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:1.0rem">${vs.icon}</span>
+              <div>
+                <div style="font-weight:600;color:${vs.color};font-size:0.9rem">Bot: ${v.action}${v.score != null ? ` (composite ${Math.round(v.score)}, grade ${v.grade})` : ''}</div>
+                <div style="color:#c9d1d9;font-size:0.82rem;margin-top:2px">${v.reasoning || ''}</div>
+              </div>
+            </div>
+            <button onclick="showAdvHelp('bot_verdict')" style="background:none;border:1px solid #30363d;color:#8b949e;width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:0.75rem">?</button>
+          </div>
+        </div>
+
+        <!-- Expandable detail: factor breakdown -->
+        <div id="${cardId}-detail" style="display:none;border-top:1px solid #21262d;padding:14px 16px;background:#0d1117">
+          <div style="font-weight:600;color:#e6edf3;margin-bottom:10px;font-size:0.88rem">Risk breakdown (${r.score}/100)</div>
+          ${factorRows}
+        </div>
+
+        ${hedgeBlock}
+      </div>`;
+  }
+
+  function renderRiskGauge(score) {
+    const s = Math.max(0, Math.min(100, score || 0));
+    const c = riskColor(s);
+    // Semi-circle: arc from 180° to 360° (left to right)
+    const r = 28;
+    const cx = 36, cy = 38;
+    const angle = 180 + (s / 100) * 180;
+    const rad = (angle * Math.PI) / 180;
+    const x = cx + r * Math.cos(rad);
+    const y = cy + r * Math.sin(rad);
+    const largeArc = s > 50 ? 1 : 0;
+    const path = `M ${cx - r},${cy} A ${r},${r} 0 ${largeArc} 1 ${x.toFixed(2)},${y.toFixed(2)}`;
+    return `
+      <svg width="72" height="50" viewBox="0 0 72 50" style="display:block">
+        <path d="M ${cx - r},${cy} A ${r},${r} 0 1 1 ${cx + r},${cy}" stroke="#21262d" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <path d="${path}" stroke="${c}" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <text x="${cx}" y="${cy - 2}" text-anchor="middle" font-size="14" font-weight="700" fill="${c}">${s}</text>
+        <text x="${cx}" y="${cy + 10}" text-anchor="middle" font-size="7" fill="#8b949e">RISK</text>
+      </svg>`;
+  }
+
+  // ── Right-rail loaders ─────────────────────────────────────────────
+  // Forward-return priors from Signal Validation panel — used to annotate picks
+  // with "if you bought at this score historically, here's the avg 10d return"
+  const SCORE_FORWARD_RETURN_10D = {
+    '80-100': 8.73, '60-79': 10.44, '40-59': 5.36, '20-39': 6.47, '0-19': 1.37,
+  };
+  function scoreBucket(s) {
+    if (s == null) return null;
+    if (s >= 80) return '80-100';
+    if (s >= 60) return '60-79';
+    if (s >= 40) return '40-59';
+    if (s >= 20) return '20-39';
+    return '0-19';
+  }
+  const SETUP_COLORS = {
+    catalyst:         { bg: '#3d0e0e', border: '#f85149', label: '🚨 CATALYST' },
+    breakout:         { bg: '#2d1b00', border: '#f0883e', label: '🚀 BREAKOUT' },
+    momentum:         { bg: '#0d2940', border: '#58a6ff', label: '📈 MOMENTUM' },
+    value_contrarian: { bg: '#0d2818', border: '#3fb950', label: '💎 VALUE' },
+    mean_reversion:   { bg: '#221540', border: '#a371f7', label: '🔄 MEAN-REV' },
+  };
+  const VERDICT_STYLE = {
+    BUY:     { bg: '#0d2818', border: '#3fb950', color: '#3fb950', icon: '🟢', label: 'BUY' },
+    NEAR:    { bg: '#2d1b00', border: '#f0883e', color: '#f0883e', icon: '🟡', label: 'NEAR THRESHOLD' },
+    BLOCKED: { bg: '#3d0e0e', border: '#f85149', color: '#f85149', icon: '🔴', label: 'BLOCKED' },
+    WATCH:   { bg: '#161b22', border: '#30363d', color: '#8b949e', icon: '⚪', label: 'WATCHING' },
+  };
+
+  async function loadAdvisorBestBuys() {
+    const host = document.getElementById('adv-best-buys');
+    host.innerHTML = '<div class="loading">Running bot decision engine on top candidates…</div>';
+    try {
+      const r = await fetch('/api/portfolio/best-buys?limit=12', { credentials: 'same-origin' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'fetch failed');
+      if (!j.picks || !j.picks.length) {
+        host.innerHTML = '<div style="color:#8b949e;font-size:0.85rem;padding:8px">No candidates passed scoring in the last 24h. Try during market hours.</div>';
+        return;
+      }
+      const s = j.summary || {};
+      let html = `
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;font-size:0.7rem">
+          ${s.buy     ? `<span style="background:#0d2818;color:#3fb950;padding:2px 6px;border-radius:8px;border:1px solid #2ea043">🟢 ${s.buy} buy</span>` : ''}
+          ${s.near    ? `<span style="background:#2d1b00;color:#f0883e;padding:2px 6px;border-radius:8px;border:1px solid #9e6a03">🟡 ${s.near} near</span>` : ''}
+          ${s.blocked ? `<span style="background:#3d0e0e;color:#f85149;padding:2px 6px;border-radius:8px;border:1px solid #6d2929">🔴 ${s.blocked} blocked</span>` : ''}
+          ${s.watch   ? `<span style="background:#161b22;color:#8b949e;padding:2px 6px;border-radius:8px;border:1px solid #30363d">⚪ ${s.watch} watch</span>` : ''}
+        </div>`;
+      html += j.picks.map(p => {
+        const vs = VERDICT_STYLE[p.verdict] || VERDICT_STYLE.WATCH;
+        const setupCfg = p.setup_type ? SETUP_COLORS[p.setup_type] : null;
+        const cardId = 'adv-pick-' + p.symbol.replace(/[^A-Z0-9]/gi, '');
+        const bucket = scoreBucket(p.signals_summary?.conviction_score);
+        const fwd = bucket ? SCORE_FORWARD_RETURN_10D[bucket] : null;
+        const drivers = (p.top_drivers || []).filter(d => d.contribution > 0).slice(0, 2);
+
+        // Blocker preview (first one only — full list in expander)
+        const blockerPreview = p.blockers?.length
+          ? `<div style="color:${vs.color};font-size:0.72rem;margin-top:3px">${p.blockers[0].gate.replace(/_/g,' ')}: ${p.blockers[0].value}${p.blockers.length > 1 ? ` (+${p.blockers.length-1} more)` : ''}</div>`
+          : '';
+
+        return `
+          <div style="background:${vs.bg};border:1px solid ${vs.border}55;border-left:3px solid ${vs.border};border-radius:6px;padding:8px 10px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="font-weight:700;color:#e6edf3;font-size:0.95rem">${p.symbol}</div>
+                ${setupCfg ? `<span style="background:${setupCfg.bg};color:${setupCfg.border};padding:1px 5px;border-radius:4px;font-size:0.62rem;font-weight:600;letter-spacing:0.3px">${setupCfg.label}</span>` : ''}
+              </div>
+              <div style="color:${vs.color};font-weight:600;font-size:0.82rem">${Math.round(p.composite)}${p.grade ? ` ${p.grade}` : ''}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+              <span style="color:${vs.color};font-size:0.7rem;text-transform:uppercase;letter-spacing:0.5px;font-weight:600">${vs.icon} ${vs.label}</span>
+              ${fwd != null ? `<span style="color:#8b949e;font-size:0.68rem">· ${fwd > 0 ? '+' : ''}${fwd.toFixed(1)}% / 10d (historical)</span>` : ''}
+            </div>
+            ${drivers.length ? `<div style="color:#8b949e;font-size:0.7rem">+ ${drivers.map(d => d.k).join(', ')}</div>` : ''}
+            ${blockerPreview}
+            ${p.blockers?.length ? `
+              <details style="margin-top:6px"><summary style="cursor:pointer;color:${vs.color};font-size:0.72rem">Why blocked ▾</summary>
+                <div style="margin-top:6px;padding-top:6px;border-top:1px solid #30363d;font-size:0.72rem;color:#c9d1d9">
+                  ${p.blockers.map(b => `<div style="margin-bottom:4px">• <strong>${b.gate.replace(/_/g,' ')}</strong>: ${b.message}</div>`).join('')}
+                </div>
+              </details>` : ''}
+          </div>`;
+      }).join('');
+      host.innerHTML = html;
+    } catch (e) {
+      host.innerHTML = `<div style="color:#f85149;font-size:0.85rem;padding:8px">Error: ${e.message}</div>`;
+    }
+  }
+
+  async function loadAdvisorTrackRecord() {
+    const host = document.getElementById('adv-track-record');
+    host.innerHTML = '<div class="loading">Loading…</div>';
+    try {
+      const r = await fetch('/api/signal-validation/conviction?days=90', { credentials: 'same-origin' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'fetch failed');
+      const high = (j.by_bucket || []).find(b => b.bucket === '80-100');
+      const mid  = (j.by_bucket || []).find(b => b.bucket === '60-79');
+      const lo   = (j.by_bucket || []).find(b => b.bucket === '0-19');
+      const highN = Number(high?.n||0), midN = Number(mid?.n||0), loN = Number(lo?.n||0);
+      const highAvg = ((highN*Number(high?.avg_10d_pct||0)) + (midN*Number(mid?.avg_10d_pct||0))) / ((highN+midN) || 1);
+      const loAvg = Number(lo?.avg_10d_pct||0);
+      const edge = highAvg - loAvg;
+      const verdict = edge >= 4 ? '✅ Signal works' : edge >= 2 ? '⚠️ Marginal edge' : '❌ No edge';
+      const vcolor = edge >= 4 ? '#3fb950' : edge >= 2 ? '#f0883e' : '#f85149';
+      host.innerHTML = `
+        <div style="font-size:0.85rem;color:#c9d1d9;line-height:1.5">
+          <div style="font-weight:700;color:${vcolor};margin-bottom:4px;font-size:0.95rem">${verdict}</div>
+          <div style="color:#8b949e;font-size:0.78rem;margin-bottom:8px">Last ${j.window_days} days · ${highN + midN + loN + Number(j.by_bucket?.find(b=>b.bucket==='40-59')?.n||0) + Number(j.by_bucket?.find(b=>b.bucket==='20-39')?.n||0)} matched scores</div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 10px;margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between"><span style="color:#3fb950">Score 60+</span><strong style="color:#3fb950">${(highAvg).toFixed(2)}% / 10d</strong></div>
+          </div>
+          <div style="background:#0d1117;border:1px solid #21262d;border-radius:6px;padding:8px 10px;margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between"><span style="color:#f85149">Score 0-19</span><strong style="color:#f85149">${(loAvg).toFixed(2)}% / 10d</strong></div>
+          </div>
+          <div style="font-size:0.78rem;color:#8b949e;font-style:italic">Edge: ${edge.toFixed(2)}pp/10d</div>
+          <div style="font-size:0.7rem;color:#8b949e;margin-top:6px">Full breakdown in 📊 Backtests tab.</div>
+        </div>`;
+    } catch (e) {
+      host.innerHTML = `<div style="color:#f85149;font-size:0.85rem;padding:8px">Error: ${e.message}</div>`;
+    }
+  }
+
+  // Globals for the Advisor tab
+  window.loadAdvisor             = loadAdvisor;
+  window.loadAdvisorBestBuys     = loadAdvisorBestBuys;
+  window.loadAdvisorTrackRecord  = loadAdvisorTrackRecord;
+  window.renderAdvisorPositions  = renderAdvisorPositions;
+  window.showAdvHelp             = showAdvHelp;
+  window.hideAdvHelp             = hideAdvHelp;
+
+  // ════════════════════════════════════════════════════════════════════
+  // ── 🐋 UW sub-tab switcher (used by the new Unusual Whales hub tab)
+  // ════════════════════════════════════════════════════════════════════
+  function switchUwSubTab(name) {
+    // Toggle button highlight (pill style)
+    document.querySelectorAll('.uw-subtab').forEach(b => {
+      const active = b.dataset.section === name;
+      b.classList.toggle('active', active);
+      if (active) {
+        b.style.background = '#0d2818';
+        b.style.color      = '#3fb950';
+        b.style.borderColor = '#2ea043';
+        b.style.fontWeight = '600';
+      } else {
+        b.style.background = '#161b22';
+        b.style.color      = '#c9d1d9';
+        b.style.borderColor = '#30363d';
+        b.style.fontWeight = 'normal';
+      }
+    });
+    // Show only the selected section
+    document.querySelectorAll('.uw-section').forEach(s => {
+      s.style.display = (s.id === 'uw-section-' + name) ? '' : 'none';
+    });
+    // Lazy-load that section's data
+    try {
+      if      (name === 'flow'         && typeof loadUWFlow            === 'function') loadUWFlow();
+      else if (name === 'insider'      && typeof loadUWInsider         === 'function') loadUWInsider();
+      else if (name === 'congress'     && typeof loadUWCongress        === 'function') loadUWCongress();
+      else if (name === 'correlations' && typeof loadUWCorrelations    === 'function') {
+        // Correlations needs a ticker — only auto-load if input is already populated
+        const t = document.getElementById('uwCorrTicker')?.value?.trim();
+        if (t) loadUWCorrelations();
+      }
+      else if (name === 'flow_history' && typeof loadFlowAlertsHistory === 'function') loadFlowAlertsHistory();
+    } catch (e) { console.warn('[uw subtab load]', e); }
+  }
+  window.switchUwSubTab = switchUwSubTab;
+
+  // ════════════════════════════════════════════════════════════════════
+  // ── Trades / Alerts hub sub-tab switchers (consolidated 2026-05-24)
+  // ════════════════════════════════════════════════════════════════════
+  function _toggleSubTabs(buttonClass, sectionClass, sectionPrefix, name, activeBg, activeColor, activeBorder) {
+    document.querySelectorAll('.' + buttonClass).forEach(b => {
+      const active = b.dataset.section === name;
+      b.classList.toggle('active', active);
+      b.style.background  = active ? activeBg     : '#161b22';
+      b.style.color       = active ? activeColor  : '#c9d1d9';
+      b.style.borderColor = active ? activeBorder : '#30363d';
+      b.style.fontWeight  = active ? '600'        : 'normal';
+    });
+    document.querySelectorAll('.' + sectionClass).forEach(s => {
+      s.style.display = (s.id === sectionPrefix + name) ? '' : 'none';
+    });
+  }
+
+  function switchTradesSubTab(name) {
+    _toggleSubTabs('trades-sub', 'trades-section', 'trades-section-', name, '#0d2818', '#3fb950', '#2ea043');
+    try {
+      if      (name === 'recent'  && typeof loadDashboard      === 'function') loadDashboard();   // populates recentTradesTable
+      else if (name === 'results' && typeof loadClosedPositions === 'function') loadClosedPositions?.();
+      else if (name === 'history' && typeof loadTrades         === 'function') loadTrades();
+    } catch (e) { console.warn('[trades subtab]', e); }
+  }
+  function switchAlertsSubTab(name) {
+    _toggleSubTabs('alerts-sub', 'alerts-section', 'alerts-section-', name, '#0d2818', '#3fb950', '#2ea043');
+    try {
+      if      (name === 'sentinel' && typeof loadSentinelActivity === 'function') loadSentinelActivity();
+      else if (name === 'system'   && typeof loadSysAlerts        === 'function') loadSysAlerts();
+    } catch (e) { console.warn('[alerts subtab]', e); }
+  }
+  window.switchTradesSubTab = switchTradesSubTab;
+  window.switchAlertsSubTab = switchAlertsSubTab;
+})();
+</script>
 
 </body>
 </html>

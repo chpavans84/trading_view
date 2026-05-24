@@ -1999,17 +1999,21 @@
   .notif-card { margin:5px 10px; padding:11px 13px; background:rgba(22,27,34,0.9); border-radius:12px; border:1px solid rgba(255,255,255,0.06); border-left:3px solid #30363d; animation:ncFadeIn .2s ease-out; }
   .notif-card:hover { background:rgba(28,34,44,0.95); }
   @keyframes ncFadeIn { from{opacity:0;transform:translateX(14px)} to{opacity:1;transform:none} }
-  .notif-alert { border-left-color:#f85149; }
-  .notif-news  { border-left-color:#58a6ff; }
-  .notif-idea  { border-left-color:#3fb950; }
-  .notif-info  { border-left-color:#e3b341; }
+  .notif-alert   { border-left-color:#f85149; }
+  .notif-news    { border-left-color:#58a6ff; }
+  .notif-idea    { border-left-color:#3fb950; }
+  .notif-info    { border-left-color:#e3b341; }
+  .notif-flow    { border-left-color:#bc8cff; }
+  .notif-insider { border-left-color:#ff9500; }
   .nc-top { display:flex; align-items:center; gap:5px; margin-bottom:5px; }
   .nc-icon { font-size:0.82rem; }
   .nc-badge { font-size:0.62rem; font-weight:700; letter-spacing:.04em; padding:1px 5px; border-radius:3px; background:rgba(255,255,255,0.07); color:#8b949e; }
-  .notif-alert .nc-badge { background:rgba(248,81,73,.15); color:#f85149; }
-  .notif-news  .nc-badge { background:rgba(88,166,255,.15); color:#58a6ff; }
-  .notif-idea  .nc-badge { background:rgba(63,185,80,.15); color:#3fb950; }
-  .notif-info  .nc-badge { background:rgba(227,179,65,.15); color:#e3b341; }
+  .notif-alert   .nc-badge { background:rgba(248,81,73,.15);  color:#f85149; }
+  .notif-news    .nc-badge { background:rgba(88,166,255,.15); color:#58a6ff; }
+  .notif-idea    .nc-badge { background:rgba(63,185,80,.15);  color:#3fb950; }
+  .notif-info    .nc-badge { background:rgba(227,179,65,.15); color:#e3b341; }
+  .notif-flow    .nc-badge { background:rgba(188,140,255,.15);color:#bc8cff; }
+  .notif-insider .nc-badge { background:rgba(255,149,0,.15);  color:#ff9500; }
   .nc-prio { width:6px; height:6px; border-radius:50%; display:inline-block; }
   .nc-prio.high { background:#f85149; }
   .nc-prio.med  { background:#e3b341; }
@@ -2022,10 +2026,12 @@
   .nc-sym   { font-size:0.7rem; font-weight:700; color:#58a6ff; background:rgba(88,166,255,.1); border:1px solid rgba(88,166,255,.2); border-radius:3px; padding:1px 5px; cursor:pointer; }
   .nc-sym:hover { background:rgba(88,166,255,.2); }
   .nc-act   { font-size:0.7rem; font-weight:700; padding:2px 8px; border-radius:4px; cursor:pointer; border:1px solid; }
-  .notif-alert .nc-act { color:#f85149; border-color:rgba(248,81,73,.4); background:rgba(248,81,73,.1); }
-  .notif-idea  .nc-act { color:#3fb950; border-color:rgba(63,185,80,.4); background:rgba(63,185,80,.1); }
-  .notif-news  .nc-act { color:#58a6ff; border-color:rgba(88,166,255,.4); background:rgba(88,166,255,.1); }
-  .notif-info  .nc-act { color:#e3b341; border-color:rgba(227,179,65,.4); background:rgba(227,179,65,.1); }
+  .notif-alert   .nc-act { color:#f85149; border-color:rgba(248,81,73,.4);   background:rgba(248,81,73,.1); }
+  .notif-idea    .nc-act { color:#3fb950; border-color:rgba(63,185,80,.4);   background:rgba(63,185,80,.1); }
+  .notif-news    .nc-act { color:#58a6ff; border-color:rgba(88,166,255,.4);  background:rgba(88,166,255,.1); }
+  .notif-info    .nc-act { color:#e3b341; border-color:rgba(227,179,65,.4);  background:rgba(227,179,65,.1); }
+  .notif-flow    .nc-act { color:#bc8cff; border-color:rgba(188,140,255,.4); background:rgba(188,140,255,.1); }
+  .notif-insider .nc-act { color:#ff9500; border-color:rgba(255,149,0,.4);   background:rgba(255,149,0,.1); }
   .nc-disclaimer { font-size:0.63rem; color:#6e7681; margin-top:6px; padding:4px 6px; background:rgba(255,255,255,0.03); border-radius:4px; border-left:2px solid #30363d; line-height:1.4; }
   /* Toast stack */
   #notifToastStack { position:fixed; bottom:24px; right:16px; z-index:2100; display:flex; flex-direction:column-reverse; gap:8px; pointer-events:none; max-width:310px; }
@@ -4097,9 +4103,13 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   border-radius: 20px;
   white-space: nowrap;
 }
-.bots-status-run   { background: #0d2b1a; color: #3fb950; border: 1px solid #3fb950; }
-.bots-status-pause { background: #2b2000; color: #d29922; border: 1px solid #d29922; }
-.bots-status-idle  { background: #1c2128; color: #8b949e; border: 1px solid #30363d; }
+.bots-status-run        { background: #0d2b1a; color: #3fb950; border: 1px solid #3fb950; }        /* active — green */
+.bots-status-pause      { background: #2b2000; color: #d29922; border: 1px solid #d29922; }        /* paused — amber */
+.bots-status-pause-today{ background: #231b00; color: #e3b341; border: 1px solid #e3b341; }        /* paused_today — yellow, circuit breaker */
+.bots-status-stop       { background: #2b0d0d; color: #f85149; border: 1px solid #f85149; }        /* stopped — red, requires manual reset */
+.bots-status-idle       { background: #1c2128; color: #8b949e; border: 1px solid #30363d; }        /* fallback */
+/* tooltip cursor on status badges */
+.bots-status-badge[title] { cursor: help; }
 
 .bots-card-stats {
   display: flex;
@@ -4340,6 +4350,18 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   margin-left: 6px;
   vertical-align: middle;
 }
+.bot-badge-strategy {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  background: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 
 /* Decisions feed panel */
 .bot-decisions-feed {
@@ -4349,7 +4371,8 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  max-height: 520px;
+  max-height: 620px; /* expanded to accommodate daily summary card */
+  padding: 10px 10px 0;
 }
 .bot-decisions-feed-title {
   font-size: 0.78rem;
@@ -4383,6 +4406,8 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
 .bot-decision-buy   { color: #3fb950; }
 .bot-decision-skip  { color: #6e7681; }
 .bot-decision-error { color: #f85149; }
+.bot-decision-near  { color: #e3b341; font-weight: 600; } /* near-miss: score ≥ 50 but below threshold */
+/* Tooltip-style "Why?" links already use title= attribute — no extra CSS needed */
 .bot-decisions-empty {
   padding: 16px 12px;
   color: #8b949e;
