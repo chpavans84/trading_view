@@ -185,19 +185,33 @@ export function registerPortfolioAdvisorTools(server) {
       const sym = (symbol || '').trim().toUpperCase();
       if (!sym) return jsonResult({ error: 'symbol is required' }, true);
       let pos = null;
+
+      // 1. Try Moomoo
       try {
         const m = await getMoomooPositions();
         const found = (m?.positions || []).find(p => p.symbol.toUpperCase() === sym);
         if (found) pos = { symbol: sym, qty: Number(found.qty), avg_cost: Number(found.avg_cost), current_price: Number(found.current_price), market_val: Number(found.market_val) };
-      } catch { /* fall through to alpaca */ }
+      } catch { /* fall through */ }
+
+      // 2. Try Alpaca paper
       if (!pos) {
         try {
           const a = await getAlpacaPositions();
           const found = (a || []).find(p => p.symbol.toUpperCase() === sym);
           if (found) pos = { symbol: sym, qty: Math.abs(Number(found.qty)), avg_cost: Number(found.avg_entry_price), current_price: Number(found.current_price), market_val: Number(found.market_value) };
+        } catch { /* fall through */ }
+      }
+
+      // 3. Try Alpaca live
+      if (!pos) {
+        try {
+          const a = await getLivePositions();
+          const found = (a || []).find(p => p.symbol.toUpperCase() === sym);
+          if (found) pos = { symbol: sym, qty: Math.abs(Number(found.qty)), avg_cost: Number(found.avg_entry_price), current_price: Number(found.current_price), market_val: Number(found.market_value) };
         } catch { /* nothing */ }
       }
-      if (!pos) return jsonResult({ error: `${sym} not found in any connected broker — must be a held position to hedge.` }, true);
+
+      if (!pos) return jsonResult({ error: `${sym} not found in any connected broker (Moomoo, Alpaca paper, or Alpaca live) — must be a held position to hedge.` }, true);
       try { return jsonResult({ symbol: sym, position: pos, hedge: await advHedgeRecommendation(pos, 100) }); }
       catch (err) { return jsonResult({ error: `Hedge recommendation failed: ${err.message}` }, true); }
     }

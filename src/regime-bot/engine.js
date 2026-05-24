@@ -158,10 +158,8 @@ export async function runScanTick(opts = {}) {
   // For the decision log: gate_rank stays on top N, NULL on the rest.
   const topN = ranked.slice(0, EXECUTION.max_concurrent);
 
-  // Persist all decisions; capture IDs for FK link in trade records
-  const decisionIds = await logDecisionsBatch(allDecisions);
-  // Build ticker→decisionId map for use in trade logging
-  const decisionIdMap = new Map(allDecisions.map((d, i) => [d.ticker, decisionIds[i]]));
+  // Persist all decisions; returns Map<ticker, id> for FK link in trade records
+  const decisionIdMap = await logDecisionsBatch(allDecisions);
 
   // Action histogram
   const histogram = {};
@@ -172,11 +170,10 @@ export async function runScanTick(opts = {}) {
   // ─── Phase 5: execute trades ──────────────────────────────────────────────
   const execSummary = { entered: 0, exited: 0, skipped: 0, errors: 0 };
   if (EXECUTION.live_trading_enabled) {
-    try {
-      await _executeTrades({ allDecisions, topN, decisionIdMap, execSummary });
-    } catch (e) {
-      console.error('[engine] execution block error:', e.message);
-    }
+    // _executeTrades handles per-trade errors internally; outer catch is last resort only
+    await _executeTrades({ allDecisions, topN, decisionIdMap, execSummary }).catch(e =>
+      console.error('[engine] _executeTrades unexpected error:', e.message)
+    );
   } else {
     console.log('[engine] live_trading_enabled=false — decisions logged only (set REGIME_BOT_LIVE=1 to enable trades)');
   }
@@ -224,11 +221,18 @@ export async function runScanTick(opts = {}) {
  *   - enter_long (top-N only): open Alpaca position + insert DB trade
  */
 async function _executeTrades({ allDecisions, topN, decisionIdMap, execSummary }) {
-  // Build a set of tickers we currently hold in DB (open trades)
-  const openTrades  = await getOpenTrades();
+  // Load DB open trades — required for both exits and duplicate-entry guard.
+  // Fetched independently from Alpaca so a broker API failure never blocks exits.
+  let openTrades = [];
+  try {
+    openTrades = await getOpenTrades();
+  } catch (e) {
+    console.error('[engine] getOpenTrades failed — will still attempt exits using empty map:', e.message);
+  }
   const openByTicker = new Map(openTrades.map(t => [t.ticker, t]));
 
   // ── Exits first (soft gate: exit regardless of gate decision) ─────────────
+  // Each exit runs in its own try/catch so one failure never blocks the others.
   const exitDecisions = allDecisions.filter(d => d.action_taken === 'exit_long');
   for (const d of exitDecisions) {
     const dbTrade = openByTicker.get(d.ticker);
@@ -244,6 +248,8 @@ async function _executeTrades({ allDecisions, topN, decisionIdMap, execSummary }
       } else {
         await closeTrade({ id: dbTrade.id, close_reason: 'primary_flip', exit_price: null });
       }
+      // Remove from map so entries later in this tick don't treat it as still-open
+      openByTicker.delete(d.ticker);
       execSummary.exited++;
       console.log(`[engine] ✗ exit  ${d.ticker} — order_id=${result.order_id ?? 'skipped'}`);
     } catch (e) {
@@ -253,6 +259,7 @@ async function _executeTrades({ allDecisions, topN, decisionIdMap, execSummary }
   }
 
   // ── Entries (top-N gate-passing only) ────────────────────────────────────
+  // Each entry runs in its own try/catch so one bad order never blocks the rest.
   for (const d of topN) {
     if (openByTicker.has(d.ticker)) {
       execSummary.skipped++;

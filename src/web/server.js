@@ -6727,7 +6727,8 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
 
     // 7. Build prompt
     const posText = positions.slice(0, 8).map(p => {
-      const plPct  = (p.unrealized_plpc * (Math.abs(p.unrealized_plpc) > 1 ? 1 : 100)).toFixed(1);
+      // unrealized_plpc is always a decimal ratio (0.05 = 5%) from both Moomoo and Alpaca
+      const plPct  = (p.unrealized_plpc * 100).toFixed(1);
       const sc     = scores[p.symbol];
       const parts  = [
         `${p.symbol}: ${p.qty}sh @ $${p.current_price.toFixed(2)}, P&L ${plPct}%`,

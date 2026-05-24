@@ -92,7 +92,7 @@ async function scoreVolatility(position, query) {
        ORDER BY price_date ASC`,
       [position.symbol.toUpperCase()]
     );
-    const closes = r.rows.map(x => Number(x.close)).filter(Number.isFinite);
+    const closes = r.rows.map(x => Number(x.close)).filter(c => Number.isFinite(c) && c > 0);
     if (closes.length < 15) return factor('Volatility (30d)', 0, 'insufficient price history', FACTOR_WEIGHTS.volatility);
     const rets = [];
     for (let i = 1; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i-1]));
@@ -423,18 +423,35 @@ export async function getHedgeRecommendation(position, riskScore) {
 // ─── Convenience: enrich a full set of positions ────────────────────────────
 
 export async function enrichPositions(positions, accountValue, query) {
-  const enriched = [];
-  for (const p of positions) {
-    const risk = await getRiskScore(p, accountValue, positions, query);
-    const verdict = await getBotVerdict(p.symbol, p, query);
-    const hedge = await getHedgeRecommendation(p, risk.score);
-    enriched.push({
-      ...p,
-      pct_of_portfolio: accountValue ? +(((p.market_val / accountValue) * 100).toFixed(2)) : null,
-      risk,
-      verdict,
-      hedge,
-    });
-  }
-  return enriched;
+  // Run all 3 enrichment calls per position in parallel, and all positions concurrently.
+  // Promise.allSettled so one failing position never blocks the rest.
+  const results = await Promise.allSettled(
+    positions.map(async p => {
+      const [risk, verdict, hedge] = await Promise.allSettled([
+        getRiskScore(p, accountValue, positions, query),
+        getBotVerdict(p.symbol, p, query),
+        getHedgeRecommendation(p, 0),   // score filled in after risk resolves
+      ]);
+      const riskVal   = risk.status    === 'fulfilled' ? risk.value    : { score: 0, factors: [], grade: 'unknown' };
+      const verdictVal= verdict.status === 'fulfilled' ? verdict.value : null;
+      // Re-run hedge with real risk score if it wasn't available initially
+      let hedgeVal    = hedge.status   === 'fulfilled' ? hedge.value   : null;
+      if (hedgeVal === null || (riskVal.score > 0 && hedge.status !== 'fulfilled')) {
+        hedgeVal = await getHedgeRecommendation(p, riskVal.score).catch(() => null);
+      }
+      return {
+        ...p,
+        pct_of_portfolio: accountValue ? +(((p.market_val / accountValue) * 100).toFixed(2)) : null,
+        risk:    riskVal,
+        verdict: verdictVal,
+        hedge:   hedgeVal,
+      };
+    })
+  );
+
+  return results.map((r, i) =>
+    r.status === 'fulfilled'
+      ? r.value
+      : { ...positions[i], pct_of_portfolio: null, risk: { score: 0, factors: [], grade: 'unknown' }, verdict: null, hedge: null }
+  );
 }

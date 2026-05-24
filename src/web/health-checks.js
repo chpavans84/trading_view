@@ -440,14 +440,23 @@ export async function runAllChecks(query) {
     checkActiveBots(query),
     checkDbLatency(query),
     checkAnthropicKey(),
+    // PM2 check returns an array — wrap so allSettled handles it uniformly
+    checkPm2Processes(),
   ]);
-  const flat = checks.flatMap(r => r.status === 'fulfilled' ? [r.value] : [fail('err', 'process', 'Check error', r.reason?.message ?? 'unknown', 'no errors', {
-    what: 'A check threw an unhandled exception.', why: 'Bug in the check itself.', if_red: 'Inspect server logs.',
-  })]);
 
-  // PM2 processes — returns an array
-  const pm2 = await checkPm2Processes();
-  flat.push(...pm2);
+  // Flatten results; rejected checks get a synthetic fail entry with a unique id
+  let errIdx = 0;
+  const flat = checks.flatMap((r, i) => {
+    if (r.status === 'fulfilled') {
+      // PM2 returns an array; all others return a single object
+      return Array.isArray(r.value) ? r.value : [r.value];
+    }
+    return [fail(`err_${errIdx++}`, 'process', 'Check error', r.reason?.message ?? 'unknown', 'no errors', {
+      what: 'A health check threw an unhandled exception.',
+      why:  'Bug in the check itself or an unexpected runtime error.',
+      if_red: 'Inspect server logs for the stack trace.',
+    })];
+  });
 
   return {
     generated_at: new Date().toISOString(),

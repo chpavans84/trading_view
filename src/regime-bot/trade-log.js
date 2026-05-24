@@ -21,7 +21,11 @@ import pg from 'pg';
 const { Pool } = pg;
 let _pool = null;
 function getPool() {
-  if (!_pool) _pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  if (!_pool) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error('[trade-log] DATABASE_URL is not set — cannot connect to PostgreSQL');
+    _pool = new Pool({ connectionString: url });
+  }
   return _pool;
 }
 
@@ -75,13 +79,17 @@ export async function openTrade({ ticker, side, qty, alpaca_order_id,
  * @param {string}  [opts.close_reason]   'primary_flip' | 'manual' | 'rejected'
  */
 export async function closeTrade({ id, exit_price, pnl_usd, pnl_pct, close_reason }) {
-  await getPool().query(
+  const { rowCount } = await getPool().query(
     `UPDATE regime_bot_trades
      SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4,
          close_reason=$5, closed_at=NOW()
      WHERE id=$1 AND status='open'`,
     [id, exit_price ?? null, pnl_usd ?? null, pnl_pct ?? null, close_reason ?? null]
   );
+  if (rowCount === 0) {
+    // Trade was already closed or never existed — log a warning but don't throw
+    console.warn(`[trade-log] closeTrade: no open row found for id=${id} (already closed or wrong id)`);
+  }
 }
 
 /**

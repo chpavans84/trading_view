@@ -88,19 +88,20 @@ export async function logDecision(decision) {
 }
 
 /**
- * Batch insert for efficiency on the daily 116-ticker scan tick. Returns
- * inserted ids in order. If any single insert fails, the whole batch
- * rolls back — the audit log must stay consistent.
+ * Batch insert for efficiency on the daily 116-ticker scan tick.
+ * Returns Map<ticker, id> — keyed by ticker so callers never rely on
+ * positional index alignment.  If any single insert fails the whole
+ * batch rolls back — the audit log must stay consistent.
  *
  * @param {Array<object>} decisions
- * @returns {Promise<Array<number>>}
+ * @returns {Promise<Map<string, number>>}  ticker (upper-case) → inserted row id
  */
 export async function logDecisionsBatch(decisions) {
-  if (!Array.isArray(decisions) || decisions.length === 0) return [];
+  if (!Array.isArray(decisions) || decisions.length === 0) return new Map();
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
-    const ids = [];
+    const idMap = new Map();
     for (const d of decisions) {
       const result = await client.query(
         `INSERT INTO regime_bot_decisions (
@@ -132,10 +133,10 @@ export async function logDecisionsBatch(decisions) {
           d.notes            ?? null,
         ]
       );
-      ids.push(result.rows[0].id);
+      idMap.set(d.ticker.toUpperCase(), result.rows[0].id);
     }
     await client.query('COMMIT');
-    return ids;
+    return idMap;
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     throw e;

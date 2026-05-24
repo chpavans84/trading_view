@@ -504,6 +504,13 @@ export async function diagnoseCandidate(symbol, bot) {
                     message: 'Could not classify into any of the 5 setup types — no clear thesis for the trade' });
   }
 
+  // Strategy filter — mirrors the live engine check in _scoreCandidate
+  const strategyFilter = filters.strategy ?? 'composite';
+  if (strategyFilter !== 'composite' && setup?.setup_type && setup.setup_type !== strategyFilter) {
+    blockers.push({ gate: 'strategy_filter', value: setup.setup_type, threshold: strategyFilter,
+                    message: `Setup type "${setup.setup_type}" doesn't match bot strategy "${strategyFilter}" — bot is focused on ${strategyFilter} setups only` });
+  }
+
   // Top driver signals (sorted by absolute contribution to composite)
   const sigEntries = Object.entries(signals).map(([k, v]) => ({
     k,
