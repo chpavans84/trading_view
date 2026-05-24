@@ -10797,6 +10797,14 @@ app.get('/api/knowledge/count', requireAuth, async (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 await initDb();
+
+// Run any pending node-pg-migrate migrations that postdate the baseline schema.
+// Fails-safe: if a migration errors, boot continues with the baseline.
+{
+  const { runPendingMigrations } = await import('../core/migration-runner.js');
+  await runPendingMigrations();
+}
+
 seedKnowledge()
   .then(r => { if (r?.seeded) console.log(`[knowledge] seeded ${r.seeded} chunks`); })
   .catch(e => console.error('[knowledge] seed error:', e.message));

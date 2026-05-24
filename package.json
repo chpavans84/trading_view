@@ -39,7 +39,11 @@
     "graph:seed": "node --env-file=.env src/core/graph-seed.js",
     "research:train": "node --env-file=.env src/research/train-model.js",
     "research:fundamentals": "node --env-file=.env src/research/download-fundamentals.js",
-    "ollama:build": "node --env-file=.env src/research/create-modelfile.js"
+    "ollama:build": "node --env-file=.env src/research/create-modelfile.js",
+    "migrate:up": "node scripts/migrate.mjs up",
+    "migrate:down": "node scripts/migrate.mjs down",
+    "migrate:status": "node scripts/migrate.mjs status",
+    "migrate:create": "node scripts/migrate.mjs create"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -68,6 +72,7 @@
     "yahoo-finance2": "^3.14.0"
   },
   "devDependencies": {
+    "node-pg-migrate": "^8.0.4",
     "nodemon": "^3.1.14"
   }
 }
