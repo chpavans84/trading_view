@@ -441,6 +441,61 @@ app.use('/images', express.static(join(__dirname, '../../images')));
 
 // /terms is served as a static file: src/web/public/terms.html
 
+// ─── Liveness + Readiness probes ────────────────────────────────────────────
+// Designed for PM2 / Kubernetes / load balancers. Unauthenticated by design.
+//
+// /health/live   — fast liveness: process is up + event loop responsive.
+//                  Returns 200 always (unless event loop is dead).
+//                  Use as PM2 --max-memory-restart trigger + LB liveness probe.
+//
+// /health/ready  — readiness: checks dependencies the dashboard NEEDS to serve
+//                  user requests. Returns 200 if all OK, 503 if any are down.
+//                  Checks: DB ping, Anthropic key present + non-empty.
+//                  Use to gate traffic — don't send users to a process whose
+//                  dependencies aren't wired.
+const _bootTime = Date.now();
+app.get('/health/live', (_req, res) => {
+  // Pure liveness — no I/O. Just confirms the event loop is responsive.
+  res.json({ status: 'ok', uptime_s: Math.floor((Date.now() - _bootTime) / 1000) });
+});
+
+app.get('/health/ready', async (_req, res) => {
+  const t0 = Date.now();
+  const checks = {};
+
+  // 1. DB ping with 1.5s timeout — fail fast
+  try {
+    const dbPromise = isDbAvailable() ? query('SELECT 1') : Promise.reject(new Error('DATABASE_URL unset'));
+    await Promise.race([
+      dbPromise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('DB ping timeout >1.5s')), 1500)),
+    ]);
+    checks.db = 'ok';
+  } catch (e) {
+    checks.db = `fail: ${e.message}`;
+  }
+
+  // 2. Anthropic API key must be present + non-empty (the trap that bit us once)
+  const ak = process.env.ANTHROPIC_API_KEY;
+  checks.anthropic_key = ak && ak.trim().length > 10 ? 'ok' : 'fail: missing or empty';
+
+  // 3. Telegram bot — only if enabled. Reports informational state.
+  if (process.env.TELEGRAM_BOT_ENABLED === '1') {
+    try {
+      const { isTelegramBotRunning } = await import('../core/telegram-bot.js');
+      checks.telegram = isTelegramBotRunning() ? 'ok' : 'fail: not polling';
+    } catch { checks.telegram = 'fail: module load error'; }
+  }
+
+  const allOk = Object.values(checks).every(v => v === 'ok');
+  res.status(allOk ? 200 : 503).json({
+    status:    allOk ? 'ok' : 'degraded',
+    checks,
+    latency_ms: Date.now() - t0,
+    checked_at: new Date().toISOString(),
+  });
+});
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {

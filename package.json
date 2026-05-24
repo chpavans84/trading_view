@@ -22,7 +22,7 @@
     "test:all": "node --test tests/e2e.test.js tests/pine_analyze.test.js tests/cli.test.js",
     "test:verbose": "node --test --test-reporter=spec tests/e2e.test.js tests/pine_analyze.test.js",
     "test:count": "node --test --test-reporter=spec tests/e2e.test.js 2>&1 | tail -5",
-    "dashboard": "pkill -f 'web/server.js' 2>/dev/null; sleep 0.5; node --env-file=.env src/web/server.js",
+    "dashboard": "pm2 restart trading-dashboard --update-env || node --env-file=.env src/web/server.js",
     "smoke": "node scripts/smoke-test.js 3000",
     "smoke:staging": "node scripts/smoke-test.js 3001",
     "test:dashboard": "node --test --test-reporter=spec tests/dashboard.test.js",
