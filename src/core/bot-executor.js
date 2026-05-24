@@ -18,6 +18,7 @@ import { decryptCredential } from './crypto.js';
 import { placeTigerOrder, closeTigerPosition, getTigerQuote } from './tiger.js';
 import { placeQuickTrade, closePosition, getLatestPrice } from './trader.js';
 import { getUwConvictionForSymbol } from './uw-conviction.js';
+import { planEntry, computeStopPct, computeStopPrice, isCircuitBreakerTripped } from './bot-sizing.js';
 import { getNewsSentimentForSymbol } from './news-sentiment-modifier.js';
 import { getEarningsProximity } from './bot-indicators.js';
 
@@ -171,7 +172,7 @@ export async function processBot(bot) {
     const capital     = Number(bot.capital_usd) || 0;
     const maxLoss     = Number(bot.rules?.risk?.max_loss_usd) || (capital * 0.10) || 100;
     const cumPnl      = Number(bot.cumulative_pnl_usd) || 0;
-    const breakerTrip = cumPnl <= -maxLoss;
+    const breakerTrip = isCircuitBreakerTripped(cumPnl, maxLoss);
 
     if (breakerTrip && bot.status !== 'stopped') {
       await query(
@@ -301,11 +302,14 @@ async function _tryOpenPosition(bot) {
   const price = quote.ask ?? quote.mid ?? quote.bid;
   if (!price || price <= 0) return { action: 'skip_bad_price', symbol };
 
-  // 4. Size position
+  // 4. Size position (pure math in bot-sizing.js — unit-tested)
   const sizePct       = bot.rules?.sizing?.position_size_pct ?? 95;
-  const dollarBudget  = Math.floor(Number(bot.capital_usd) * sizePct / 100);
-  const qty           = Math.floor(dollarBudget / price);
-  if (qty < 1) return { action: 'skip_insufficient_capital', symbol, price, budget: dollarBudget };
+  const stopLossUsd0  = bot.rules?.exit_rules?.stop_loss_usd  ?? 50;
+  const plan          = planEntry({ capitalUsd: bot.capital_usd, price, sizePct, stopLossUsd: stopLossUsd0 });
+  if (plan.skip === 'no_capital')          return { action: 'skip_no_capital', symbol };
+  if (plan.skip === 'no_price')            return { action: 'skip_bad_price', symbol, price };
+  if (plan.skip === 'insufficient_capital') return { action: 'skip_insufficient_capital', symbol, price, budget: plan.dollarBudget };
+  const { qty, dollarBudget } = plan;
 
   // 5. Place buy
   const rawOrder = await _placeBuyForBot(bot, symbol, qty, sizingCreds);
@@ -319,10 +323,11 @@ async function _tryOpenPosition(bot) {
   const fillPrice      = order.fill_price || price;
   const dollarsInvested = +(fillPrice * qty).toFixed(2);
 
-  // 6. Derive stop-loss price from dollar risk rule
+  // 6. Derive stop-loss price from dollar risk rule (uses fill price, not the
+  //    earlier quote — broker fill can differ). Pure math in bot-sizing.js.
   const stopLossUsd = bot.rules?.exit_rules?.stop_loss_usd ?? 50;
-  const stopPct     = qty > 0 ? +((stopLossUsd / dollarsInvested) * 100).toFixed(2) : 3;
-  const stopPrice   = +(fillPrice * (1 - stopPct / 100)).toFixed(2);
+  const stopPct     = computeStopPct(stopLossUsd, dollarsInvested);
+  const stopPrice   = computeStopPrice(fillPrice, stopPct);
 
   // 7. Record trade and tag with bot_id + setup classification
   const tradeId = await recordTrade({
