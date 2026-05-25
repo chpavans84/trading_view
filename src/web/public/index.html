@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=v28">
+<link rel="stylesheet" href="/css/dashboard.css?v=v29">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -12348,10 +12348,44 @@ async function loadEarningsReaction(sym, force = false) {
     </div>`;
 }
 
+/**
+ * Build an inline SVG sparkline polyline path from an array of close prices.
+ * Returns a `<polyline>`-ready SVG fragment scaled to the given width/height.
+ * Color tracks the day's direction (green if last > first, red otherwise).
+ *
+ * Empty/error data → returns a flat dim line so cards stay visually consistent.
+ */
+function _renderSparkline(closes, { width = 130, height = 36 } = {}) {
+  if (!Array.isArray(closes) || closes.length < 2) {
+    return `<svg class="mkt-spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
+      <line x1="0" y1="${height/2}" x2="${width}" y2="${height/2}" stroke="#30363d" stroke-width="1.5" stroke-dasharray="3 3"/>
+    </svg>`;
+  }
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min || 1;
+  const dx = width / (closes.length - 1);
+  const pts = closes.map((c, i) => {
+    const x = (i * dx).toFixed(2);
+    const y = (height - ((c - min) / range) * height).toFixed(2);
+    return `${x},${y}`;
+  }).join(' ');
+  const up = closes[closes.length - 1] >= closes[0];
+  const stroke = up ? '#3fb950' : '#f85149';
+  const fill   = up ? 'rgba(63,185,80,0.12)' : 'rgba(248,81,73,0.12)';
+  // Area fill polygon — close path down to the baseline
+  const areaPts = `0,${height} ${pts} ${width},${height}`;
+  return `<svg class="mkt-spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="none">
+    <polygon points="${areaPts}" fill="${fill}"/>
+    <polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
 async function loadMarket() {
-  const [d, news] = await Promise.all([
+  const [d, news, sparks] = await Promise.all([
     api('/api/market'),
     api('/api/home-news', 8000).catch(() => null),
+    api('/api/market/sparklines?symbols=DIA,QQQ,SPY,IWM', 10000).catch(() => null),
   ]);
 
   if (!d) {
@@ -12420,12 +12454,22 @@ async function loadMarket() {
       const cls = chg == null ? 'flat' : chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
       const sign = chg == null ? '' : chg >= 0 ? '+' : '';
       const arrow = chg == null ? '' : chg >= 0 ? '▲' : '▼';
+      // Sparkline from the intraday closes for this proxy ticker
+      const sparkData = sparks?.[proxy]?.closes;
+      const sparkSvg  = _renderSparkline(sparkData);
       return `
         <div class="mkt-index-card">
-          <div class="mkt-index-name">${name}</div>
-          <div class="mkt-index-price">${price != null ? Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—'}</div>
-          <div class="mkt-index-chg ${cls}">${arrow} ${chg != null ? sign + chg.toFixed(2) + '%' : 'n/a'}</div>
-          ${proxy ? `<div class="mkt-index-proxy">via ${proxy}</div>` : ''}
+          <div class="mkt-index-card-top">
+            <div>
+              <div class="mkt-index-name">${name}</div>
+              <div class="mkt-index-price">${price != null ? Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—'}</div>
+            </div>
+            <div class="mkt-index-spark-wrap">${sparkSvg}</div>
+          </div>
+          <div class="mkt-index-card-bot">
+            <div class="mkt-index-chg ${cls}">${arrow} ${chg != null ? sign + chg.toFixed(2) + '%' : 'n/a'}</div>
+            ${proxy ? `<div class="mkt-index-proxy">via ${proxy}</div>` : ''}
+          </div>
         </div>`;
     };
     indexRow.innerHTML = [

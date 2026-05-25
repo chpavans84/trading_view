@@ -4095,6 +4095,64 @@ function toMoomooTicker(sym) {
   return sym.replace(/-([A-Z])$/, '.$1');
 }
 
+// GET /api/market/sparklines?symbols=SPY,QQQ,DIA,IWM[&range=1d&interval=5m]
+//
+// Returns intraday close-price points for each symbol, suitable for inline
+// SVG sparklines on the Market tab's index cards. Range/interval default to
+// 1d/5m. Cached for 2 minutes (intraday data refreshes every 5 min during
+// market hours; 2 min keeps it fresh without hammering Yahoo).
+//
+// Response shape:
+//   {
+//     SPY: { closes: [745.1, 745.4, ...], min, max, first, last, ts },
+//     QQQ: { ... }, ...
+//   }
+//
+// Missing/failing symbols return `{ closes: [], error: 'xxx' }` instead
+// of throwing — the frontend renders a flat line + empty state for those.
+app.get('/api/market/sparklines', requireAuth, async (req, res) => {
+  const symbols = (req.query.symbols || 'SPY,QQQ,DIA,IWM')
+    .split(',').map(s => s.trim().toUpperCase()).filter(Boolean).slice(0, 10);
+  const range    = String(req.query.range || '1d');
+  const interval = String(req.query.interval || '5m');
+
+  const cacheKey = `sparkline:${symbols.join(',')}:${range}:${interval}`;
+  try {
+    const data = await ttlCache(cacheKey, 2 * 60 * 1000, async () => {
+      const out = {};
+      await Promise.all(symbols.map(async (sym) => {
+        try {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}`
+                    + `?range=${range}&interval=${interval}&includePrePost=false`;
+          const r = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!r.ok) { out[sym] = { closes: [], error: `HTTP ${r.status}` }; return; }
+          const j = await r.json();
+          const result = j?.chart?.result?.[0];
+          const closes = (result?.indicators?.quote?.[0]?.close || []).filter(v => v != null);
+          if (closes.length === 0) { out[sym] = { closes: [], error: 'no_data' }; return; }
+          out[sym] = {
+            closes,
+            min:   Math.min(...closes),
+            max:   Math.max(...closes),
+            first: closes[0],
+            last:  closes[closes.length - 1],
+            ts:    Date.now(),
+          };
+        } catch (e) {
+          out[sym] = { closes: [], error: e.message };
+        }
+      }));
+      return out;
+    });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/market/top-stocks', async (req, res) => {
   try {
     const index  = req.query.index === 'nasdaq' ? 'nasdaq' : 'sp500';

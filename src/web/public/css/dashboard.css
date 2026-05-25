@@ -4736,3 +4736,27 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
   font-variant-numeric: tabular-nums;
   margin-top: 2px;
 }
+
+/* Market index-card sparkline layout (added 2026-05-25 Phase 2) */
+.mkt-index-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mkt-index-card-bot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+.mkt-index-spark-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+svg.mkt-spark {
+  display: block;
+  opacity: 0.9;
+}
