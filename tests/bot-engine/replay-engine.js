@@ -29,8 +29,19 @@ class Portfolio {
   positionCount() { return this.positions.size; }
   availableSlots() { return this.maxPositions - this.positions.size; }
 
-  /** Open a position at fillPrice. Returns the position object or null if no cash/slots. */
-  open({ symbol, fillPrice, day, stopPrice }) {
+  /** Open a position at fillPrice. Returns the position object or null if no cash/slots.
+   *
+   *  Extra fields (all optional, for day-trade / take-profit support):
+   *    - stopPrice / takeProfitPrice: absolute prices (legacy interface)
+   *    - stopPct / takeProfitPct:     percentages computed against the actual
+   *                                    fill price. Use these when entry fills
+   *                                    may differ from the strategy's reference
+   *                                    price (e.g. day-trade strategies that
+   *                                    open on next bar's open after a gap).
+   *                                    These OVERRIDE the absolute prices.
+   *    - forceCloseEod:               close at today's close regardless of P&L
+   */
+  open({ symbol, fillPrice, day, stopPrice, takeProfitPrice, stopPct, takeProfitPct, forceCloseEod }) {
     if (this.positions.has(symbol)) return null;       // already holding
     if (this.positionCount() >= this.maxPositions) return null;
     const qty = Math.floor(this.positionSizeUsd / fillPrice);
@@ -38,9 +49,19 @@ class Portfolio {
     const cost = qty * fillPrice;
     if (cost > this.cash) return null;
     this.cash -= cost;
+    // Percentage-based TP/SL (computed against actual fill price)
+    const effStopPrice  = stopPct != null
+      ? fillPrice * (1 - Math.abs(stopPct))
+      : (stopPrice ?? null);
+    const effTpPrice    = takeProfitPct != null
+      ? fillPrice * (1 + Math.abs(takeProfitPct))
+      : (takeProfitPrice ?? null);
     const pos = {
       symbol, qty, entryPrice: fillPrice, openedAt: day,
-      stopPrice: stopPrice ?? null, peakPnl: 0,
+      stopPrice:       effStopPrice,
+      takeProfitPrice: effTpPrice,
+      forceCloseEod:   !!forceCloseEod,
+      peakPnl: 0,
     };
     this.positions.set(symbol, pos);
     return pos;
@@ -205,6 +226,16 @@ export class MarketData {
     return (px - hi) / hi;   // negative when below high
   }
 
+  /** Returns the bar from N trading days before dateStr (1 = previous trading day). */
+  getBarNDaysBefore(symbol, dateStr, n = 1) {
+    const sym = this._priceCache.get(symbol);
+    if (!sym) return null;
+    const dates = [...sym.keys()].sort();
+    const idx = dates.indexOf(dateStr);
+    if (idx === -1 || idx < n) return null;
+    return sym.get(dates[idx - n]);
+  }
+
   /** Last N-day percentage return as of dateStr (close-to-close). */
   lastNdReturn(symbol, dateStr, n = 5) {
     const sym = this._priceCache.get(symbol);
@@ -309,7 +340,11 @@ export async function runBacktest(opts) {
         const fillPrice = nextBar.open * (1 + slipMult);
         portfolio.open({
           symbol: order.symbol, fillPrice, day: nextBar.date,
-          stopPrice: order.stopPrice,
+          stopPrice:       order.stopPrice,
+          takeProfitPrice: order.takeProfitPrice,
+          stopPct:         order.stopPct,
+          takeProfitPct:   order.takeProfitPct,
+          forceCloseEod:   order.forceCloseEod,
         });
       } else if (order.action === 'exit_long') {
         const nextBar = market.getNextBar(order.symbol, day);
@@ -319,13 +354,41 @@ export async function runBacktest(opts) {
       }
     }
 
-    // Intra-day stop check: if any position's stop was touched today, close at stop
+    // ── Intraday exit checks for all open positions ────────────────────────
+    // CRITICAL: orders processed above CREATE positions with openedAt =
+    // nextBar.date (the NEXT trading day). Those positions don't yet exist
+    // on `day` — their bar is the one we're checking on the next iteration.
+    // Skip them here to avoid checking yesterday's bar against tomorrow's
+    // position (the bug that produced negative hold_days in v1).
+    //
+    // Order: take-profit FIRST (winners exit first), then stop-loss, then EOD.
+    // When both TP and SL would have fired (gap-day), this is a tie-break;
+    // assuming TP first is OPTIMISTIC.
     for (const pos of [...portfolio.positions.values()]) {
-      if (pos.stopPrice == null) continue;
+      if (pos.openedAt > day) continue;          // position opens NEXT iteration; skip
       const bar = market.getBar(pos.symbol, day);
-      if (bar && bar.low <= pos.stopPrice) {
+      if (!bar) continue;
+
+      // 1. Take profit (intraday)
+      if (pos.takeProfitPrice != null && bar.high >= pos.takeProfitPrice) {
+        const fillPrice = pos.takeProfitPrice * (1 - slipMult);
+        portfolio.close({ symbol: pos.symbol, fillPrice, day, reason: 'take_profit' });
+        continue;
+      }
+
+      // 2. Stop loss (intraday)
+      if (pos.stopPrice != null && bar.low <= pos.stopPrice) {
         const fillPrice = pos.stopPrice * (1 - slipMult);
         portfolio.close({ symbol: pos.symbol, fillPrice, day, reason: 'stop_loss' });
+        continue;
+      }
+
+      // 3. End-of-day force close (day-trade mode) — exits at today's close
+      //    if position was opened today (i.e., this morning). Multi-day
+      //    positions ignore this flag.
+      if (pos.forceCloseEod && pos.openedAt === day) {
+        const fillPrice = bar.close * (1 - slipMult);
+        portfolio.close({ symbol: pos.symbol, fillPrice, day, reason: 'eod_force_close' });
       }
     }
 
