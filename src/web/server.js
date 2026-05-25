@@ -280,7 +280,9 @@ async function migrateUsersToDb() {
 
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
-const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots'];
+// 'stats' merged into 'health' (2026-05-25). Both keys accepted for backwards
+// compat — TAB_PAGE_MAP in index.html aliases 'stats' → 'health'.
+const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'health', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots'];
 const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
 
 const DEFAULT_PERMISSIONS = {

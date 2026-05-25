@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=v26">
+<link rel="stylesheet" href="/css/dashboard.css?v=v27">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -174,9 +174,9 @@
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
     <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
     <button class="tab" id="tab-backtests" onclick="showPage('backtests',this)" title="Strategy replay results" style="display:none">📊 Backtests</button>
-    <button class="tab" id="tab-health" onclick="showPage('health',this)" title="System Health diagnostics" style="display:none">🩺 Health</button>
+    <button class="tab" id="tab-health" onclick="showPage('health',this)" title="System health invariants + Claude API stats" style="display:none">🩺 Health &amp; Stats</button>
     <button class="tab" id="tab-advisor" onclick="showPage('advisor',this)" title="Portfolio Advisor — personal risk + hedge + picks" style="display:none">💼 Advisor</button>
-    <button class="tab" id="tab-stats" onclick="showPage('stats',this)" style="display:none">Stats</button>
+    <!-- tab-stats merged into tab-health (2026-05-25). Removed. -->
     <button class="tab" id="tab-users" onclick="showPage('users',this)" style="display:none">Users</button>
     <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">🔐 Admin</button>
   </div>
@@ -468,42 +468,10 @@
 </div>
 
 <!-- ── STATS ──────────────────────────────────────────── -->
-<div class="page" id="page-stats">
-  <!-- Service Health -->
-  <div class="table-wrap" style="margin-bottom:16px">
-    <div class="table-head">
-      <h3>Service Health <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3>
-      <button class="refresh-btn" onclick="loadStats()">↻ Refresh</button>
-    </div>
-    <div id="healthCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;padding:16px">
-      <div class="loading">Checking services…</div>
-    </div>
-  </div>
-
-  <!-- Claude API Cost Per Day -->
-  <div class="table-wrap" style="margin-bottom:16px">
-    <div class="table-head"><h3>Claude API Cost Per Day (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
-    <div id="statsCostPerDay"><div class="loading">Loading…</div></div>
-  </div>
-
-  <!-- Claude API Summary by Source -->
-  <div class="table-wrap" style="margin-bottom:16px">
-    <div class="table-head"><h3>Claude API — By Source (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
-    <div id="statsSource"><div class="loading">Loading…</div></div>
-  </div>
-
-  <!-- Daily breakdown -->
-  <div class="table-wrap" style="margin-bottom:16px">
-    <div class="table-head"><h3>Daily Token Usage <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
-    <div id="statsDaily"><div class="loading">Loading…</div></div>
-  </div>
-
-  <!-- Recent calls log -->
-  <div class="table-wrap">
-    <div class="table-head"><h3>Recent API Calls (Last 50) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
-    <div id="statsRecent"><div class="loading">Loading…</div></div>
-  </div>
-</div>
+<!-- page-stats merged into page-health (2026-05-25).
+     The "Service Health" widget here was a duplicate of the newer
+     🩺 System Health invariants on page-health, so it was dropped entirely.
+     The 4 Claude API widgets moved to page-health below the invariants. -->
 
 <!-- ── Docs page ──────────────────────────────────────── -->
 <div class="page" id="page-docs">
@@ -2595,6 +2563,37 @@ node --env-file=.env tests/bot-engine/replay-harness.js \
 
   <!-- Check grid by category -->
   <div id="hc-grid"><div class="loading" style="padding:24px">Loading checks…</div></div>
+
+  <!-- ── Claude API usage stats (merged from old Stats tab, 2026-05-25) ── -->
+  <div style="margin-top:24px;padding-top:16px;border-top:2px solid #21262d">
+    <div style="font-size:0.78rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">
+      Claude API Stats
+    </div>
+
+    <!-- Claude API Cost Per Day -->
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head"><h3>Claude API Cost Per Day (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+      <div id="statsCostPerDay"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- Claude API Summary by Source -->
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head"><h3>Claude API — By Source (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+      <div id="statsSource"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- Daily breakdown -->
+    <div class="table-wrap" style="margin-bottom:16px">
+      <div class="table-head"><h3>Daily Token Usage <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+      <div id="statsDaily"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- Recent calls log -->
+    <div class="table-wrap">
+      <div class="table-head"><h3>Recent API Calls (Last 50) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+      <div id="statsRecent"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Health-check help modal ── -->
@@ -5472,7 +5471,9 @@ const ASSET_VERSION = 'v25';
 // Map permission key → page name used in showPage()
 const TAB_PAGE_MAP = {
   dashboard: 'dashboard', trades: 'trades',
-  market: 'market', stats: 'stats', research: 'research',
+  // Stats merged into Health (2026-05-25). Old 'stats' permission key
+  // routes to the merged tab so existing users keep working.
+  market: 'market', stats: 'health', health: 'health', research: 'research',
   bot_rules: 'bot', admin_bot: 'admin', calendar: 'calendar',
   discover:      'discover',
   signal_center: 'signal-center',
@@ -9319,7 +9320,7 @@ function showPage(name, btn) {
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
   _showPageCurrent = name;
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, stats: loadStats, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, health: loadHealth, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, /* Stats merged into Health (2026-05-25): one tab loads both */ health: () => { loadHealth(); loadStats(); }, stats: () => { showPage('health'); }, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); } };
   loaders[name]?.();
 }
 
@@ -12777,16 +12778,21 @@ async function loadStats() {
     api('/api/stats/detail'),
   ]);
 
-  // ── Service Health cards ───────────────────────────────
-  const statusIcon = s => s === 'ok' ? '🟢' : s === 'unavailable' ? '🟡' : '🔴';
-  const statusColor = s => s === 'ok' ? '#3fb950' : s === 'unavailable' ? '#f0883e' : '#f85149';
-  document.getElementById('healthCards').innerHTML = (health?.services ?? []).map(svc => `
-    <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px">
-      <div style="font-size:1.4rem;margin-bottom:6px">${statusIcon(svc.status)}</div>
-      <div style="font-weight:600;font-size:0.9rem">${svc.name}</div>
-      <div style="color:${statusColor(svc.status)};font-size:0.78rem;margin-top:4px">${svc.status.toUpperCase()}</div>
-      <div style="color:#8b949e;font-size:0.75rem;margin-top:4px">${svc.detail || ''}</div>
-    </div>`).join('') || '<div class="empty">Health check unavailable</div>';
+  // ── Service Health cards ── (legacy: container removed during Stats→Health
+  //    merge on 2026-05-25. Skip silently if the DOM element isn't present.
+  //    The newer 🩺 System Health invariants on the same page replace it.)
+  const _healthCardsEl = document.getElementById('healthCards');
+  if (_healthCardsEl) {
+    const statusIcon = s => s === 'ok' ? '🟢' : s === 'unavailable' ? '🟡' : '🔴';
+    const statusColor = s => s === 'ok' ? '#3fb950' : s === 'unavailable' ? '#f0883e' : '#f85149';
+    _healthCardsEl.innerHTML = (health?.services ?? []).map(svc => `
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px">
+        <div style="font-size:1.4rem;margin-bottom:6px">${statusIcon(svc.status)}</div>
+        <div style="font-weight:600;font-size:0.9rem">${svc.name}</div>
+        <div style="color:${statusColor(svc.status)};font-size:0.78rem;margin-top:4px">${svc.status.toUpperCase()}</div>
+        <div style="color:#8b949e;font-size:0.75rem;margin-top:4px">${svc.detail || ''}</div>
+      </div>`).join('') || '<div class="empty">Health check unavailable</div>';
+  }
 
   const sourceLabel = { auto_scan: '🔄 Auto Scanner', morning_briefing: '☀️ Morning Briefing', telegram_chat: '💬 Telegram Chat', dashboard_chat: '🖥 Dashboard Chat' };
 
