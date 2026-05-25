@@ -129,23 +129,49 @@ export async function scanBot(bot) {
 
 async function _buildCandidateUniverse(bot) {
   const universe = new Map();
-  const bump = (sym, w) => {
+  const bump = (sym, w, src) => {
     const s = String(sym || '').toUpperCase();
     if (!s) return;
     universe.set(s, (universe.get(s) || 0) + w);
+    // Track which sources contributed (visible in scan logs for debugging)
+    if (src) _sourceContrib.set(s, [...(_sourceContrib.get(s) || []), src]);
   };
+  const _sourceContrib = new Map();
 
-  // Source 1: UW flow alerts — institutional money flow (HIGHEST priority)
+  // ── Source 1a: UW flow alerts by SINGLE-ALERT premium (mega-cap whales) ──
+  // Captures the SPY/QQQ/NVDA-tier giant alerts. Expanded LIMIT from 50 → 150
+  // because the previous cap was filtering out 93% of UW activity (731 tickers
+  // were active in a typical 5-day window; only 50 reached the bot).
   try {
     const { rows: flow } = await query(
       `SELECT ticker, premium FROM uw_flow_alerts
        WHERE alerted_at > NOW() - INTERVAL '6 hours' AND premium >= 100000
-       ORDER BY premium DESC LIMIT 50`
+       ORDER BY premium DESC LIMIT 150`
     );
-    flow.forEach(r => bump(r.ticker, 10 + Math.min(5, Math.log10(Number(r.premium) || 1) - 5)));
-  } catch (e) { console.warn('[bot-engine] uw_flow query failed:', e.message); }
+    flow.forEach(r => bump(r.ticker, 10 + Math.min(5, Math.log10(Number(r.premium) || 1) - 5), 'uw_flow_abs'));
+  } catch (e) { console.warn('[bot-engine] uw_flow abs query failed:', e.message); }
 
-  // Source 2: Benzinga positive news catalysts (HIGH priority)
+  // ── Source 1b: UW BULLISH-ONLY aggregated premium ────────────────────────
+  // CRDO case study: had $2.7M bullish premium across 7 alerts on May 22 but
+  // ranked #85 in absolute volume, well outside the LIMIT 50. This source
+  // groups by ticker and sums BULLISH premium only — surfaces mid-caps with
+  // unusual aggregate bullish flow that single-alert ranking missed.
+  try {
+    const { rows: bullish } = await query(
+      `SELECT ticker, SUM(premium)::numeric AS bull_premium
+       FROM uw_flow_alerts
+       WHERE alerted_at > NOW() - INTERVAL '6 hours'
+         AND sentiment IN ('bullish', 'strong_bullish')
+         AND premium >= 50000
+       GROUP BY ticker
+       HAVING SUM(premium) >= 200000
+       ORDER BY bull_premium DESC
+       LIMIT 100`
+    );
+    bullish.forEach(r => bump(r.ticker, 11 + Math.min(4, Math.log10(Number(r.bull_premium) || 1) - 5), 'uw_flow_bullish'));
+  } catch (e) { console.warn('[bot-engine] uw_flow bullish query failed:', e.message); }
+
+  // ── Source 2: Benzinga positive news catalysts ───────────────────────────
   try {
     const { rows: news } = await query(
       `SELECT t.ticker, COUNT(*)::int AS n
@@ -153,19 +179,19 @@ async function _buildCandidateUniverse(bot) {
        WHERE bn.published_at > NOW() - INTERVAL '1 hour' AND bn.sentiment = 'positive'
        GROUP BY t.ticker HAVING COUNT(*) >= 3 LIMIT 50`
     );
-    news.forEach(r => bump(r.ticker, 8 + Math.min(4, r.n - 3)));
+    news.forEach(r => bump(r.ticker, 8 + Math.min(4, r.n - 3), 'news'));
   } catch (e) { console.warn('[bot-engine] news query failed:', e.message); }
 
-  // Source 3: UW top movers — price action catalysts (MEDIUM priority)
+  // ── Source 3: UW top movers ──────────────────────────────────────────────
   try {
     const { rows: movers } = await query(
       `SELECT DISTINCT ticker FROM uw_top_movers
        WHERE captured_at > NOW() - INTERVAL '1 hour' LIMIT 100`
     );
-    movers.forEach(r => bump(r.ticker, 5));
+    movers.forEach(r => bump(r.ticker, 5, 'movers'));
   } catch (e) { console.warn('[bot-engine] movers query failed:', e.message); }
 
-  // Source 4: Filtered tradable universe — large-cap liquid base (BASELINE priority)
+  // ── Source 4: Filtered tradable universe — large-cap liquid baseline ─────
   const filters      = bot.rules?.entry_filters ?? {};
   const minMktCapB   = filters.market_cap_min_b  ?? 5;
   const minAdvDollar = filters.min_adv_dollar_vol ?? 5_000_000;
@@ -182,13 +208,30 @@ async function _buildCandidateUniverse(bot) {
        LIMIT 800`,
       [minMktCapB * 1_000_000_000, minAdvDollar, minPrice, maxPrice]
     );
-    base.forEach(r => bump(r.symbol, 1));
+    base.forEach(r => bump(r.symbol, 1, 'baseline'));
   } catch (e) { console.warn('[bot-engine] tradable_universe query failed:', e.message); }
 
-  // Sort by priority desc, cap at 200
+  // ── Source 5: User's watchlist — always include, high priority ──────────
+  // Catches names the user is actively interested in, even if no UW or news
+  // signal currently exists. Falls back gracefully if user_id can't be mapped
+  // to a username or the watchlist is empty.
+  try {
+    if (bot.user_id != null) {
+      const { rows: wl } = await query(
+        `SELECT w.symbol
+         FROM user_watchlist w
+         JOIN users u ON u.username = w.username
+         WHERE u.id = $1`,
+        [bot.user_id]
+      );
+      wl.forEach(r => bump(r.symbol, 7, 'watchlist'));
+    }
+  } catch (e) { console.warn('[bot-engine] watchlist query failed:', e.message); }
+
+  // Sort by priority desc, cap at 250 (up from 200 — accommodates the new sources)
   const ranked = [...universe.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 200)
+    .slice(0, 250)
     .map(([sym]) => sym);
 
   console.log(`[bot-engine] universe built: ${ranked.length} candidates (top 5: ${ranked.slice(0, 5).join(', ')})`);

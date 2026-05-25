@@ -8879,6 +8879,46 @@ if (!_IS_STAGING_DASHBOARD) {
   console.log('[bot-crons] staging mode (DASHBOARD_PORT set) — skipping engine + executor crons; prod owns them');
 }
 
+// ─── Near-Miss Report — 4:30 PM ET Mon–Fri (after close) ─────────────────────
+// Surfaces stocks the bot didn't trade but should have considered. Email
+// digest only — see src/core/near-miss-notifier.js for what counts as a
+// near-miss. Skipped on staging (DASHBOARD_PORT set) so prod owns the
+// notification.
+if (!_IS_STAGING_DASHBOARD) {
+  cron.schedule('30 16 * * 1-5', async () => {
+    try {
+      const { runNearMissReport } = await import('../core/near-miss-notifier.js');
+      const r = await runNearMissReport();
+      if (!r.ok) console.warn('[near-miss-cron] report failed:', r.error);
+    } catch (err) {
+      console.error('[near-miss-cron] error:', err.message);
+    }
+  }, { timezone: 'America/New_York' });
+}
+
+// POST /api/near-miss/run?dry=1&hours=120 — admin trigger for ad-hoc generation
+//   dry=1   : assemble report but skip email send (preview only)
+//   hours=N : lookback window in hours (1..168, default 24)
+app.post('/api/near-miss/run', requireAdmin, async (req, res) => {
+  try {
+    const { runNearMissReport } = await import('../core/near-miss-notifier.js');
+    const dry         = String(req.query.dry || '') === '1';
+    const windowHours = req.query.hours ? Number(req.query.hours) : 24;
+    const r = await runNearMissReport({ sendEmail: !dry, windowHours });
+    if (!r.ok) return res.status(500).json({ error: r.error });
+    res.json({
+      ok: true,
+      window_hours: windowHours,
+      summary: r.summary,
+      picks_count: r.picks.length,
+      preview: r.body.split('\n').slice(0, 80).join('\n'),
+      email_sent: r.emailResult?.ok ?? false,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Tradable Universe Sync — 8:00 AM ET Mon–Fri ─────────────────────────────
 cron.schedule('0 8 * * 1-5', () => syncTradableUniverse(), { timezone: 'America/New_York' });
 
