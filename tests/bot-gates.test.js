@@ -38,7 +38,7 @@ function ctx(overrides = {}) {
       avoid_earnings_within_days: 3,
       min_adv_dollar_vol: 5_000_000,
       skip_during_macro_blackout: true,
-      avoid_premarket_gap_above_pct: 0.08,
+      avoid_premarket_gap_above_pct: 8,           // PERCENT — matches live data (8 = 8%)
       skip_high_short_interest: false,
       price_min: 5,
       price_max: 500,
@@ -55,7 +55,7 @@ function ctx(overrides = {}) {
       earnings: { days_until: 10 },
       liquidity: { adv_dollar_vol_30d: 50_000_000, last_price: 100 },
       macro: { in_blackout: false, blackout_reason: null },
-      premarket: { gap_pct: 0.01 },
+      premarket: { gap_pct: 1.0 },                // PERCENT — matches live data (1 = 1%)
       short_interest: { short_pct_float: 0.05 },
       ...overrides.indicators,
     },
@@ -157,12 +157,12 @@ describe('gatePremarketGap', () => {
   });
 
   it('blocks when positive gap exceeds threshold', () => {
-    const r = gatePremarketGap(ctx({ indicators: { premarket: { gap_pct: 0.15 } } }));
+    const r = gatePremarketGap(ctx({ indicators: { premarket: { gap_pct: 15 } } }));   // 15% > 8% → block
     assert.equal(r?.gate, 'premarket_gap');
   });
 
   it('blocks when negative gap exceeds threshold (magnitude)', () => {
-    const r = gatePremarketGap(ctx({ indicators: { premarket: { gap_pct: -0.20 } } }));
+    const r = gatePremarketGap(ctx({ indicators: { premarket: { gap_pct: -20 } } }));  // |-20%| > 8% → block
     assert.equal(r?.gate, 'premarket_gap');
   });
 

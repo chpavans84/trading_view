@@ -79,19 +79,23 @@ export function gateMacroBlackout({ filters, indicators }) {
   };
 }
 
+/**
+ * UNITS CHECK (2026-05-25 audit):
+ *   indicators.premarket.gap_pct is stored as PERCENT (e.g. 8.0 = 8% gap)
+ *   per src/core/bot-indicators.js: `gap = ((pre - prev) / prev) * 100`
+ *   So filters.avoid_premarket_gap_above_pct is also PERCENT (8 = 8%, NOT 0.08).
+ *   Defaults: 8 (block on > 8% gaps). Set 12-15 for breakout-friendly bots.
+ */
 export function gatePremarketGap({ filters, indicators }) {
   const limit = filters.avoid_premarket_gap_above_pct;
   const gap   = indicators?.premarket?.gap_pct;
   if (limit == null || gap == null) return null;
   if (Math.abs(gap) <= limit) return null;
-  // Live engine compares the raw decimal vs the threshold (treats threshold as decimal too —
-  // e.g. limit=0.08 means ±8%). Some configs pass the threshold as %; we preserve
-  // current behavior exactly to avoid regressing live decisions.
   return {
     gate: 'premarket_gap',
-    value: `${(gap * 100).toFixed(1)}%`,
-    threshold: `±${(limit * 100).toFixed(0)}%`,
-    message: `Premarket gap ${(gap * 100).toFixed(1)}% exceeds ±${(limit * 100).toFixed(0)}% (risk profile shifted overnight)`,
+    value: `${gap.toFixed(1)}%`,
+    threshold: `±${limit.toFixed(0)}%`,
+    message: `Premarket gap ${gap.toFixed(1)}% exceeds ±${limit.toFixed(0)}% (risk profile shifted overnight)`,
   };
 }
 
