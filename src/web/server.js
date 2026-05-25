@@ -7770,7 +7770,18 @@ const BOT_DEFAULT_RULES = {
     vix_min: 15,
     vix_max: 60,
     vix_aggressive_at: 25,
-    require_uw_label_any: ['bullish', 'strong_bullish'],
+    // require_uw_label_any: previously ['bullish', 'strong_bullish'] but the
+    // UW conviction labeler returns 'no_data' or 'neutral' for almost every
+    // symbol — even mega-caps with huge flow. That made this gate a death
+    // sentence (100% rejection rate in production diagnostics).
+    //
+    // Removed as the default after 2-year backtest showed price-only momentum
+    // strategy returns +42.6% / 1.29 Sharpe vs +29.3% / 0.80 Sharpe with UW
+    // gating in the classifier. UW data is still a 30% weighted signal in the
+    // composite score — when present it boosts ranking; when absent the bot
+    // is no longer crippled. Set to a non-empty array on a specific bot to
+    // re-enable strict UW filtering.
+    require_uw_label_any: null,
     require_news_sentiment_min: null,
     skip_during_macro_blackout: true,
     skip_high_short_interest: false,

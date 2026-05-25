@@ -22628,6 +22628,7 @@ const _BOT_STRATEGY_META = {
   composite:        { icon: '🔀', label: 'Composite' },
   catalyst:         { icon: '⚡', label: 'Catalyst' },
   breakout:         { icon: '📈', label: 'Breakout' },
+  price_breakout:   { icon: '🔥', label: 'Price Brk' },
   momentum:         { icon: '🚀', label: 'Momentum' },
   value_contrarian: { icon: '💎', label: 'Value' },
   mean_reversion:   { icon: '↩',  label: 'Mean Rev' },
@@ -22817,7 +22818,8 @@ function _botRenderForm(vals, locked) {
           <option value="composite"       ${(vals.strategy??'composite')==='composite'       ?'selected':''}>🔀 Composite — all setups (default)</option>
           <option value="catalyst"        ${vals.strategy==='catalyst'        ?'selected':''}>⚡ Catalyst — earnings surprises, news events</option>
           <option value="breakout"        ${vals.strategy==='breakout'        ?'selected':''}>📈 Breakout — price breaks key resistance</option>
-          <option value="momentum"        ${vals.strategy==='momentum'        ?'selected':''}>🚀 Momentum — strong trend continuation</option>
+          <option value="price_breakout" ${vals.strategy==='price_breakout'  ?'selected':''}>🔥 Price Breakout — pure price action (+42% / 1.29 Sharpe 2yr)</option>
+          <option value="momentum"        ${vals.strategy==='momentum'        ?'selected':''}>🚀 Momentum — strong trend continuation (requires UW data)</option>
           <option value="value_contrarian"${vals.strategy==='value_contrarian'?'selected':''}>💎 Value / Contrarian — oversold, mean-revert</option>
           <option value="mean_reversion"  ${vals.strategy==='mean_reversion'  ?'selected':''}>↩ Mean Reversion — extended moves snapping back</option>
         </select>

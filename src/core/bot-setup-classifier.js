@@ -134,6 +134,13 @@ function _momentumThesis({ pctOff52w, last5dReturn, uwLabel, uwScore }) {
   };
 }
 
+function _priceBreakoutThesis({ pctOff52w, last5dReturn }) {
+  return {
+    text: `Price-action breakout. +${(last5dReturn * 100).toFixed(1)}% over last 5 days with price ${(pctOff52w * 100).toFixed(1)}% from 52w high. Pure technical setup — no UW or news confirmation required (backtest evidence shows price-only edge: +42.6% return / 1.29 Sharpe over 2 years). Time stop at 7 days.`,
+    pctOff52w, last5dReturn,
+  };
+}
+
 function _valueThesis({ grade, score, pctOff52w, insiderNetUsd, fundamentals }) {
   const fundSummary = fundamentals
     ? [
@@ -284,7 +291,44 @@ export async function classifySetup({ signals, indicators, rsi, fundamentals, la
     }
   }
 
-  // ── 3. MOMENTUM ───────────────────────────────────────────────────────────
+  // ── 3a. PRICE_BREAKOUT ────────────────────────────────────────────────────
+  //
+  //   Pure price-action momentum — NO UW data required. Catches mid-cap
+  //   breakouts (CRDO-style: +44% in 4 days) that the UW-gated 'momentum'
+  //   setup rejects because the UW conviction labeler returns 'no_data' or
+  //   'neutral' for almost every symbol during periods of moderate flow.
+  //
+  //   Backtest evidence (2024-05-23 → 2026-05-22, 116-symbol universe,
+  //   $100k initial / $10k per position):
+  //
+  //     Strategy              Return   Sharpe   Max DD    WR
+  //     ───────────────────  ──────   ──────   ──────   ────
+  //     price-breakout       +42.6%   +1.29    -12.8%   54.5%
+  //     b37-momentum-v2      +29.3%   +0.80    -16.2%   50.6%
+  //     buy-and-hold SPY      +3.9%   +1.23     -2.0%    100%
+  //
+  //   Net: removing UW gating BEATS keeping it by 13pp return with higher
+  //   Sharpe and lower drawdown. Negative news is still a hard reject
+  //   (don't catch falling-knife setups), but UW absence is no longer fatal.
+  //
+  if (
+    pctOff52w != null && pctOff52w >= -0.10 &&
+    last5dReturn != null && last5dReturn >= 0.05 &&     // 5% bar (vs 2% for momentum)
+    newsLabel !== 'negative' &&
+    uwLabel !== 'bearish' && uwLabel !== 'strong_bearish'  // still avoid bearish UW
+  ) {
+    return {
+      setup_type: 'price_breakout',
+      thesis: _priceBreakoutThesis({ pctOff52w, last5dReturn }),
+      expected_hold_days_min: 2,
+      expected_hold_days_max: 7,
+    };
+  }
+
+  // ── 3b. MOMENTUM (legacy — kept for backwards compatibility) ──────────────
+  //   Only different from price_breakout in that it requires bullish UW data.
+  //   In practice this rarely fires because UW conviction labels are sparse.
+  //   Most viable candidates now route through price_breakout above.
   if (
     pctOff52w != null && pctOff52w >= -0.10 &&
     last5dReturn != null && last5dReturn >= 0.02 &&

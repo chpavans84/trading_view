@@ -33,6 +33,7 @@ import { b37MeanReversionV2Strategy } from './strategies/b37-mean-reversion-v2.j
 import { regimeGatedSoftStrategy } from './strategies/regime-gated-soft.js';
 import { b37MomentumProdAlignedStrategy } from './strategies/b37-momentum-prod-aligned.js';
 import { dayTradeStrategy, makeDayTradeStrategy } from './strategies/day-trade.js';
+import { priceBreakoutStrategy, makePriceBreakoutStrategy } from './strategies/price-breakout.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -126,6 +127,9 @@ function getStrategy(name) {
   if (name === 'day-trade')                 return dayTradeStrategy;
   if (name === 'day-trade-tight')           return makeDayTradeStrategy({ tpPct: 0.02, slPct: 0.015 });
   if (name === 'day-trade-loose')           return makeDayTradeStrategy({ tpPct: 0.05, slPct: 0.03 });
+  if (name === 'price-breakout')            return priceBreakoutStrategy;
+  if (name === 'price-breakout-tight')      return makePriceBreakoutStrategy({ entry5dReturn: 0.08, stopPct: -0.06 });
+  if (name === 'price-breakout-loose')      return makePriceBreakoutStrategy({ entry5dReturn: 0.03, stopPct: -0.10 });
   throw new Error(`unknown strategy: ${name}`);
 }
 
