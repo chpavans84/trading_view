@@ -268,8 +268,8 @@ export async function getMarketSentiment() {
   // Fetch in parallel: VIX from CBOE, index ETF proxies from Moomoo, futures from Yahoo
   const [vixData, moomooIdx, yfFutures] = await Promise.allSettled([
     fetchVix(),
-    fetchMoomooQuotes(['SPY', 'QQQ', 'DIA']),  // ETF proxies for S&P/Nasdaq/Dow
-    fetchAll(['ES=F', 'NQ=F'], 600),            // futures — Yahoo only
+    fetchMoomooQuotes(['SPY', 'QQQ', 'DIA', 'IWM']),  // ETF proxies for S&P/Nasdaq/Dow/Russell
+    fetchAll(['ES=F', 'NQ=F'], 600),                   // futures — Yahoo only
   ]);
 
   const vix    = vixData.status    === 'fulfilled' ? vixData.value    : null;
@@ -280,6 +280,7 @@ export async function getMarketSentiment() {
   const spy    = mIdx.get('SPY')  ?? null;
   const qqq    = mIdx.get('QQQ')  ?? null;
   const dia    = mIdx.get('DIA')  ?? null;
+  const iwm    = mIdx.get('IWM')  ?? null;
   const es     = yf.get('ES=F')   ?? null;
   const nq     = yf.get('NQ=F')   ?? null;
 
@@ -322,9 +323,10 @@ export async function getMarketSentiment() {
       source:     vix?.source  ?? null,
     },
     indices: {
-      sp500:  { price: spy?.price,  chg_pct: spy?.chg_pct  ?? 'n/a', proxy: 'SPY'  },
-      nasdaq: { price: qqq?.price,  chg_pct: qqq?.chg_pct  ?? 'n/a', proxy: 'QQQ'  },
-      dow:    { price: dia?.price,  chg_pct: dia?.chg_pct  ?? 'n/a', proxy: 'DIA'  },
+      sp500:   { price: spy?.price,  chg_pct: spy?.chg_pct  ?? 'n/a', proxy: 'SPY'  },
+      nasdaq:  { price: qqq?.price,  chg_pct: qqq?.chg_pct  ?? 'n/a', proxy: 'QQQ'  },
+      dow:     { price: dia?.price,  chg_pct: dia?.chg_pct  ?? 'n/a', proxy: 'DIA'  },
+      russell: { price: iwm?.price,  chg_pct: iwm?.chg_pct  ?? 'n/a', proxy: 'IWM'  },
     },
     futures: {
       es: { price: es?.price, chg_pct: es?.chg_pct ?? 'n/a', label: 'S&P 500 Futures' },

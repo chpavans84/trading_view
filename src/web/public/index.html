@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=v27">
+<link rel="stylesheet" href="/css/dashboard.css?v=v28">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -411,20 +411,53 @@
 <!-- ── SCORES ─────────────────────────────────────────── -->
 <!-- ── MARKET ─────────────────────────────────────────── -->
 <div class="page" id="page-market">
-  <div class="grid-3" id="marketCards">
-    <div class="loading">Loading...</div>
+
+  <!-- ── 1. News headline ticker (Bloomberg-style banner) ──────────────── -->
+  <div class="mkt-news-ticker" id="mktNewsTicker">
+    <span class="mkt-news-ticker-label">📰 LATEST</span>
+    <span class="mkt-news-ticker-headline" id="mktNewsTickerText">Loading market news…</span>
+    <a class="mkt-news-ticker-more" id="mktNewsTickerLink" href="#" target="_blank" rel="noopener" style="display:none">More →</a>
   </div>
-  <div class="grid-2">
+
+  <!-- ── 2. Index cards row (DOW / NASDAQ / S&P 500 / RUSSELL 2000) ────── -->
+  <div class="mkt-index-row" id="mktIndexRow">
+    <div class="mkt-index-card mkt-index-skeleton">DOW</div>
+    <div class="mkt-index-card mkt-index-skeleton">NASDAQ</div>
+    <div class="mkt-index-card mkt-index-skeleton">S&amp;P 500</div>
+    <div class="mkt-index-card mkt-index-skeleton">RUSSELL 2000</div>
+  </div>
+
+  <!-- ── 3. Two-column: Top Movers (left) + Sector Heatmap (right) ─────── -->
+  <div class="mkt-2col">
+
+    <!-- LEFT — Top Movers table -->
     <div class="table-wrap">
-      <div class="table-head"><h3>Sector Performance <button class="doc-btn" onclick="openResearchDoc('market_sectors')" title="How this works">?</button></h3><button class="refresh-btn" onclick="loadMarket()">↻ Refresh</button></div>
-      <div style="padding:20px" id="sectorBars"><div class="loading">Loading...</div></div>
+      <div class="table-head">
+        <h3>Top Movers Today
+          <button class="doc-btn" onclick="openResearchDoc('market_movers')" title="How this works">?</button>
+        </h3>
+        <button class="refresh-btn" onclick="loadMarket()">↻ Refresh</button>
+      </div>
+      <div class="mkt-movers-wrap" id="moversList">
+        <div class="loading" style="padding:20px">Loading…</div>
+      </div>
     </div>
+
+    <!-- RIGHT — S&P 500 / Sector heatmap -->
     <div class="table-wrap">
-      <div class="table-head"><h3>Top Movers Today <button class="doc-btn" onclick="openResearchDoc('market_movers')" title="How this works">?</button></h3></div>
-      <div style="padding:16px"><div class="movers" id="moversList"><div class="loading">Loading...</div></div></div>
+      <div class="table-head">
+        <h3>S&amp;P 500 Sector Heatmap
+          <span style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px">1-day performance, sized by weight</span>
+          <button class="doc-btn" onclick="openResearchDoc('market_sectors')" title="How this works">?</button>
+        </h3>
+      </div>
+      <div class="mkt-heatmap" id="sectorBars">
+        <div class="loading" style="padding:20px">Loading…</div>
+      </div>
     </div>
   </div>
-  <!-- Top Trading Today — S&P 500 / NASDAQ 100 tabs -->
+
+  <!-- ── 4. Top Trading Today (kept lower in the page) ─────────────────── -->
   <div class="table-wrap" style="margin-top:16px">
     <div class="table-head">
       <h3>Top Trading Today <span id="topStocksBadge" style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px"></span> <button class="doc-btn" onclick="openResearchDoc('top_trading')" title="How this works">?</button></h3>
@@ -440,8 +473,6 @@
       <div class="loading" style="padding:20px">Loading…</div>
     </div>
   </div>
-
-  <div id="page-home"></div>
 
   <!-- ── Unusual Options Flow (Benzinga) ─────────────────────────────────── -->
   <div class="table-wrap" style="margin-top:16px">
@@ -12318,11 +12349,14 @@ async function loadEarningsReaction(sym, force = false) {
 }
 
 async function loadMarket() {
-  const d = await api('/api/market');
+  const [d, news] = await Promise.all([
+    api('/api/market'),
+    api('/api/home-news', 8000).catch(() => null),
+  ]);
 
   if (!d) {
     const msg = '<div style="color:#8b949e;padding:12px 0">⚡ Server unreachable</div>';
-    document.getElementById('marketCards').innerHTML = msg;
+    const ir = document.getElementById('mktIndexRow'); if (ir) ir.innerHTML = msg;
     document.getElementById('sectorBars').innerHTML  = msg;
     document.getElementById('moversList').innerHTML  = msg;
     return;
@@ -12330,13 +12364,32 @@ async function loadMarket() {
 
   const s = d.sentiment;
   const offline = !s && !d.sectors && !d.movers;
-  const offlineNote = offline ? ' <span style="font-size:0.72rem;color:#8b949e">· offline</span>' : '';
 
-  // ── Hero banner market indicators ──────────────────────────────────────────
+  // ── Top news ticker headline ─────────────────────────────────────────────
+  const tickerText = document.getElementById('mktNewsTickerText');
+  const tickerLink = document.getElementById('mktNewsTickerLink');
+  if (tickerText) {
+    const first = Array.isArray(news) && news.length ? news[0] : null;
+    if (first) {
+      tickerText.textContent = first.title || '';
+      if (first.url && tickerLink) {
+        tickerLink.href = first.url;
+        tickerLink.style.display = '';
+      }
+    } else {
+      tickerText.textContent = 'No fresh market headlines.';
+    }
+  }
+
+  // ── Legacy hero strip (still updated for backwards compat) ──────────────
   const spPrice  = s?.indices?.sp500?.price;
   const spChg    = s?.indices?.sp500?.chg_pct;
   const nqPrice  = s?.indices?.nasdaq?.price;
   const nqChg    = s?.indices?.nasdaq?.chg_pct;
+  const dowPrice = s?.indices?.dow?.price;
+  const dowChg   = s?.indices?.dow?.chg_pct;
+  const russPrice = s?.indices?.russell?.price ?? s?.indices?.iwm?.price;
+  const russChg   = s?.indices?.russell?.chg_pct ?? s?.indices?.iwm?.chg_pct;
   const vixPrice = s?.vix?.value;
   const vixChg   = s?.vix?.chg_pct;
   const btcPrice = s?.indices?.btc?.price ?? s?.crypto?.btc?.price;
@@ -12360,49 +12413,89 @@ async function loadMarket() {
   setHero('heroVix', vixPrice, vixChg, '', 2);
   setHero('heroBtc', btcPrice, btcChg, '$', 0);
 
-  document.getElementById('marketCards').innerHTML = `
-    <div class="card">
-      <div class="card-label">S&amp;P 500${offlineNote}</div>
-      <div class="card-value ${colorClass(s?.indices?.sp500?.chg_pct)}">${s?.indices?.sp500?.price ? '$' + Number(s.indices.sp500.price).toLocaleString() : '—'}</div>
-      <div class="card-sub">${fmtPct(s?.indices?.sp500?.chg_pct)}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Nasdaq${offlineNote}</div>
-      <div class="card-value ${colorClass(s?.indices?.nasdaq?.chg_pct)}">${s?.indices?.nasdaq?.price ? '$' + Number(s.indices.nasdaq.price).toLocaleString() : '—'}</div>
-      <div class="card-sub">${fmtPct(s?.indices?.nasdaq?.chg_pct)}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Rotation Signal</div>
-      <div class="card-value" style="font-size:0.95rem;line-height:1.4">${d.sectors?.rotation_signal ?? '—'}</div>
-    </div>
-  `;
+  // ── 4 index cards (DOW / NASDAQ / S&P 500 / RUSSELL 2000) ───────────────
+  const indexRow = document.getElementById('mktIndexRow');
+  if (indexRow) {
+    const renderIndexCard = (name, proxy, price, chg) => {
+      const cls = chg == null ? 'flat' : chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
+      const sign = chg == null ? '' : chg >= 0 ? '+' : '';
+      const arrow = chg == null ? '' : chg >= 0 ? '▲' : '▼';
+      return `
+        <div class="mkt-index-card">
+          <div class="mkt-index-name">${name}</div>
+          <div class="mkt-index-price">${price != null ? Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—'}</div>
+          <div class="mkt-index-chg ${cls}">${arrow} ${chg != null ? sign + chg.toFixed(2) + '%' : 'n/a'}</div>
+          ${proxy ? `<div class="mkt-index-proxy">via ${proxy}</div>` : ''}
+        </div>`;
+    };
+    indexRow.innerHTML = [
+      renderIndexCard('DOW',          s?.indices?.dow?.proxy     || 'DIA', dowPrice,  dowChg),
+      renderIndexCard('NASDAQ',       s?.indices?.nasdaq?.proxy  || 'QQQ', nqPrice,   nqChg),
+      renderIndexCard('S&P 500',      s?.indices?.sp500?.proxy   || 'SPY', spPrice,   spChg),
+      renderIndexCard('RUSSELL 2000', s?.indices?.russell?.proxy || 'IWM', russPrice, russChg),
+    ].join('');
+  }
 
-  // Sector bars
+  // ── Sector Heatmap (replaces horizontal bars) ────────────────────────────
+  //
+  // Tiles colored by chg_pct intensity. Brighter = stronger move. Sized
+  // equally for the Phase 1 simple grid; Phase 2 will size by market-cap weight.
   const sectors = d.sectors?.all_sectors ?? [];
-  const maxAbs = Math.max(...sectors.map(s => Math.abs(s.chg_pct ?? 0)), 1);
-  document.getElementById('sectorBars').innerHTML = sectors.length === 0
-    ? `<div style="color:#8b949e;padding:8px 0">${offline ? '📡 No internet — sector data unavailable' : 'No sector data — market may be closed'}</div>`
-    : sectors.slice(0, 12).map(s => `
-    <div class="sector-row">
-      <div class="sector-name">${s.sector}</div>
-      <div class="sector-bar-wrap">
-        <div class="sector-bar" style="width:${Math.abs(s.chg_pct/maxAbs)*100}%;background:${s.chg_pct >= 0 ? '#3fb950' : '#f85149'}"></div>
+  const heatEl = document.getElementById('sectorBars');
+  if (sectors.length === 0) {
+    heatEl.innerHTML = `<div style="color:#8b949e;padding:20px">${offline ? '📡 No internet — sector data unavailable' : 'No sector data — market may be closed'}</div>`;
+  } else {
+    const maxAbs = Math.max(...sectors.map(x => Math.abs(x.chg_pct ?? 0)), 1);
+    const tileBg = chg => {
+      if (chg == null) return '#21262d';
+      const intensity = Math.min(Math.abs(chg) / maxAbs, 1);
+      // Greens for up, reds for down — luminance scales with intensity
+      const opacity = 0.35 + intensity * 0.55;     // 0.35..0.90
+      const base = chg >= 0 ? '63,185,80' : '248,81,73';
+      return `rgba(${base}, ${opacity})`;
+    };
+    heatEl.innerHTML = sectors.slice(0, 12).map(sec => `
+      <div class="mkt-heat-tile" style="background:${tileBg(sec.chg_pct)}" title="${sec.sector} — ${fmtPct(sec.chg_pct)}">
+        <div class="tile-symbol">${(sec.symbol || sec.proxy || sec.sector.slice(0, 4)).toUpperCase()}</div>
+        <div class="tile-name">${sec.sector}</div>
+        <div class="tile-chg">${sec.chg_pct != null ? (sec.chg_pct >= 0 ? '+' : '') + sec.chg_pct.toFixed(2) + '%' : '—'}</div>
       </div>
-      <div class="sector-pct ${colorClass(s.chg_pct)}">${fmtPct(s.chg_pct)}</div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 
-  // Movers
+  // ── Top Movers (restyled as a table) ────────────────────────────────────
   const movers = d.movers?.gainers ?? [];
-  document.getElementById('moversList').innerHTML = movers.length === 0
-    ? `<div style="color:#8b949e">${offline ? '📡 No internet — movers unavailable' : 'No data — market may be closed'}</div>`
-    : movers.map(m => `
-      <div class="mover">
-        <div class="mover-sym"><span class="sym-link" data-symbol="${m.symbol}">${m.symbol}</span></div>
-        <div style="font-size:0.7rem;color:#8b949e;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.name || KNOWN_NAMES[m.symbol] || ''}</div>
-        <div class="mover-pct ${colorClass(m.chg_pct)}">${fmtPct(m.chg_pct)}</div>
-        <div class="mover-price">${fmtDollar(m.price)}</div>
-      </div>`).join('');
+  const moversEl = document.getElementById('moversList');
+  if (movers.length === 0) {
+    moversEl.innerHTML = `<div style="color:#8b949e;padding:20px">${offline ? '📡 No internet — movers unavailable' : 'No data — market may be closed'}</div>`;
+  } else {
+    const rows = movers.slice(0, 15).map(m => {
+      const chg = m.chg_pct ?? 0;
+      const cls = chg > 0 ? 'up' : chg < 0 ? 'down' : '';
+      const sign = chg >= 0 ? '+' : '';
+      return `
+        <tr>
+          <td><span class="mkt-movers-ticker sym-link" data-symbol="${m.symbol}">${m.symbol}</span></td>
+          <td class="right">${fmtDollar(m.price)}</td>
+          <td class="right ${cls}">${sign}${chg.toFixed(2)}%</td>
+          <td class="right" style="color:#8b949e">${m.volume ? fmtVol(m.volume) : '—'}</td>
+          <td>${m.name || KNOWN_NAMES[m.symbol] || ''}</td>
+        </tr>`;
+    }).join('');
+    moversEl.innerHTML = `
+      <table class="mkt-movers-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th class="right">Last</th>
+            <th class="right">Change</th>
+            <th class="right">Volume</th>
+            <th>Name</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
 
   loadTopStocks();
 }

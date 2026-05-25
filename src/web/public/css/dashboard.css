@@ -4549,3 +4549,190 @@ body.td-resizing .td-divider::after { background: rgba(88,166,255,0.55); }
 .setup-momentum        { background: rgba( 88,166,255,0.15); color: #58a6ff; border: 1px solid rgba( 88,166,255,0.30); }
 .setup-value_contrarian{ background: rgba(188,140,255,0.15); color: #bc8cff; border: 1px solid rgba(188,140,255,0.30); }
 .setup-mean_reversion  { background: rgba(255,197, 61,0.15); color: #ffc53d; border: 1px solid rgba(255,197, 61,0.30); }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Market page — Bloomberg-style redesign (2026-05-25)
+   Top: news ticker + 4 index cards
+   Middle: Top Movers (left) + Sector Heatmap (right)
+   ───────────────────────────────────────────────────────────────────── */
+
+/* News ticker banner */
+.mkt-news-ticker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: linear-gradient(90deg, #0d1117 0%, #161b22 100%);
+  border: 1px solid #30363d;
+  border-left: 3px solid #f0883e;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.mkt-news-ticker-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #f0883e;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+.mkt-news-ticker-headline {
+  color: #c9d1d9;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mkt-news-ticker-more {
+  color: #58a6ff;
+  text-decoration: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.mkt-news-ticker-more:hover { text-decoration: underline; }
+
+/* Index card row — 4 columns desktop, 2 mobile */
+.mkt-index-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) {
+  .mkt-index-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+.mkt-index-card {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color .15s;
+}
+.mkt-index-card:hover { border-color: #58a6ff; }
+.mkt-index-skeleton {
+  color: #6e7681;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  min-height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mkt-index-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #8b949e;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.mkt-index-price {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #e6edf3;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.mkt-index-chg {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.mkt-index-chg.up   { color: #3fb950; }
+.mkt-index-chg.down { color: #f85149; }
+.mkt-index-chg.flat { color: #8b949e; }
+.mkt-index-proxy {
+  font-size: 0.65rem;
+  color: #6e7681;
+  font-weight: 500;
+}
+
+/* 2-column row: movers + heatmap */
+.mkt-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 1100px) {
+  .mkt-2col { grid-template-columns: 1fr; }
+}
+
+/* Top Movers — styled table */
+.mkt-movers-wrap { padding: 0; }
+.mkt-movers-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.mkt-movers-table thead th {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  border-bottom: 1px solid #21262d;
+  text-align: left;
+}
+.mkt-movers-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #161b22;
+  color: #c9d1d9;
+  font-variant-numeric: tabular-nums;
+}
+.mkt-movers-table tbody tr:hover { background: #0d1117; }
+.mkt-movers-ticker { font-weight: 700; color: #58a6ff; }
+.mkt-movers-table td.up   { color: #3fb950; font-weight: 600; }
+.mkt-movers-table td.down { color: #f85149; font-weight: 600; }
+.mkt-movers-table td.right { text-align: right; }
+
+/* Sector heatmap — tile grid */
+.mkt-heatmap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 12px;
+}
+@media (max-width: 600px) {
+  .mkt-heatmap { grid-template-columns: repeat(2, 1fr); }
+}
+.mkt-heat-tile {
+  border-radius: 6px;
+  padding: 14px 12px;
+  text-align: center;
+  cursor: default;
+  transition: transform .12s, box-shadow .12s;
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.mkt-heat-tile:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+.mkt-heat-tile .tile-symbol {
+  font-size: 1.0rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.mkt-heat-tile .tile-name {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: rgba(255,255,255,0.75);
+}
+.mkt-heat-tile .tile-chg {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
