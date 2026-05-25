@@ -15,13 +15,13 @@
  * that set vars via systemd/CI continue to win.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// .env lives at the project root, two levels up from src/core/
-const ENV_PATH = join(__dirname, '..', '..', '.env');
+// Project root is two levels up from src/core/
+const ROOT = join(__dirname, '..', '..');
 
 let _loaded = false;
 let _overridden = [];
@@ -47,17 +47,74 @@ function parseEnvFile(content) {
   return out;
 }
 
+/**
+ * Resolve which env file(s) to load. We try environment-specific files first
+ * (`.env.<NODE_ENV>`), then the generic `.env`. Existing process.env values
+ * already win over either — these are only fallbacks for empty/missing vars.
+ *
+ * Also detects --env-file=<path> in process.argv so the loader naturally
+ * reads the same file Node was launched with.
+ */
+function getEnvPathsToTry() {
+  const paths = [];
+
+  // 1. Match the --env-file flag if PM2 launched node with one.
+  //    Note: Node strips --env-file from process.argv but preserves it in
+  //    process.execArgv (the actual node CLI flags).
+  for (let i = 0; i < process.execArgv.length; i++) {
+    const arg = process.execArgv[i];
+    if (arg === '--env-file' && process.execArgv[i + 1]) {
+      paths.push(process.execArgv[i + 1]);
+    } else if (arg.startsWith('--env-file=')) {
+      paths.push(arg.slice('--env-file='.length));
+    }
+  }
+
+  // 2. NODE_ENV-specific (e.g. .env.staging, .env.production)
+  const nodeEnv = (process.env.NODE_ENV || '').trim();
+  if (nodeEnv && nodeEnv !== 'production') {
+    paths.push(join(ROOT, `.env.${nodeEnv}`));
+  }
+
+  // 3. Generic .env (fallback)
+  paths.push(join(ROOT, '.env'));
+
+  // De-dupe + only keep paths that exist
+  const seen = new Set();
+  return paths
+    .map(p => (p.startsWith('/') ? p : join(ROOT, p)))
+    .filter(p => {
+      if (seen.has(p) || !existsSync(p)) return false;
+      seen.add(p);
+      return true;
+    });
+}
+
 export function loadEnvOverride() {
   if (_loaded) return _overridden;
   _loaded = true;
-  let content;
-  try { content = readFileSync(ENV_PATH, 'utf8'); }
-  catch (e) {
-    console.warn(`[env-loader] could not read ${ENV_PATH}: ${e.message}`);
+
+  const pathsTried = getEnvPathsToTry();
+  if (pathsTried.length === 0) {
+    console.warn('[env-loader] no .env files found at project root');
     return [];
   }
-  const parsed = parseEnvFile(content);
-  for (const [k, v] of Object.entries(parsed)) {
+
+  // Read each path; earlier paths win (so .env.staging takes precedence over .env).
+  const merged = {};
+  for (const path of pathsTried) {
+    try {
+      const content = readFileSync(path, 'utf8');
+      const parsed  = parseEnvFile(content);
+      for (const [k, v] of Object.entries(parsed)) {
+        if (!(k in merged)) merged[k] = v;  // first-wins (path priority)
+      }
+    } catch (e) {
+      console.warn(`[env-loader] could not read ${path}: ${e.message}`);
+    }
+  }
+
+  for (const [k, v] of Object.entries(merged)) {
     if (!process.env[k] || process.env[k].trim() === '') {
       if (v) {
         process.env[k] = v;
@@ -66,7 +123,8 @@ export function loadEnvOverride() {
     }
   }
   if (_overridden.length) {
-    console.log(`[env-loader] override-populated ${_overridden.length} empty vars from .env: ${_overridden.join(', ')}`);
+    const fileLabels = pathsTried.map(p => p.replace(ROOT + '/', '')).join(' + ');
+    console.log(`[env-loader] override-populated ${_overridden.length} empty vars from ${fileLabels}: ${_overridden.join(', ')}`);
   }
   return _overridden;
 }
