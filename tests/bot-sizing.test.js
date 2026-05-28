@@ -170,6 +170,38 @@ describe('planEntry', () => {
     assert.equal(r.qty, 95);
     assert.equal(r.stopPct, 5.26);
   });
+
+  // ─── 2026-05-28: maxPositionUsd cap ────────────────────────────────────────
+  it('caps dollarBudget at maxPositionUsd when set', () => {
+    const r = planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: 1000 });
+    assert.equal(r.dollarBudget, 1000);
+    assert.equal(r.qty, 10);
+  });
+
+  it('does not raise dollarBudget if maxPositionUsd > computed budget', () => {
+    const r = planEntry({ capitalUsd: 1000, price: 50, maxPositionUsd: 100000 });
+    assert.equal(r.dollarBudget, 950);   // 95% of 1000, NOT 100000
+  });
+
+  it('floors fractional maxPositionUsd', () => {
+    const r = planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: 1000.99 });
+    assert.equal(r.dollarBudget, 1000);
+  });
+
+  it('ignores maxPositionUsd=null', () => {
+    const r = planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: null });
+    assert.equal(r.dollarBudget, 9500);
+  });
+
+  it('ignores maxPositionUsd<=0', () => {
+    assert.equal(planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: 0    }).dollarBudget, 9500);
+    assert.equal(planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: -500 }).dollarBudget, 9500);
+  });
+
+  it('ignores non-finite maxPositionUsd', () => {
+    assert.equal(planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: NaN }).dollarBudget, 9500);
+    assert.equal(planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: 'abc' }).dollarBudget, 9500);
+  });
 });
 
 // ─── isCircuitBreakerTripped ─────────────────────────────────────────────────

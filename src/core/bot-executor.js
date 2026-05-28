@@ -35,14 +35,22 @@ function _normalizeAccountSource(broker) {
 
 // ─── Per-setup exit rules (B-3.7) ─────────────────────────────────────────────
 
+// 2026-05-28 retrospective: the core problem is that 3-4% hard stops fire on intraday
+// noise within minutes, killing trades before the 5-10 day signal edge can play out.
+// Backtest edge lives at T+5d (70% win rate, +10% avg) — but avg hold was 83 min.
+// Fix: widen hard stops to match the hold horizon. Smaller positions (max_position_usd)
+// keep dollar risk contained despite wider percentage stops.
 const EXIT_RULES_BY_SETUP = {
-  catalyst:         { hard_sl_pct: 0.03, trail_pct: 25, time_stop_days:  3,
+  catalyst:         { hard_sl_pct: 0.05, trail_pct: 25, time_stop_days:  3,
                       exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
-  breakout:         { hard_sl_pct: 0.04, trail_pct: 30, time_stop_days: 21,
+  // price_breakout was missing — fell to LEGACY 3% hard stop, fired in minutes.
+  // Now explicit: 8% stop gives room to hold 5-7 days. Edge is price momentum
+  // continuing, so wider stop is consistent with the thesis.
+  price_breakout:   { hard_sl_pct: 0.08, trail_pct: 30, time_stop_days:  7,
                       exit_on_uw_flip: true,  exit_on_news: false, exit_before_earnings: true },
-  // hard_sl_pct widened 0.03 → 0.06 on 2026-05-23 after backtest v2 showed -5% stops
-  // killed -$40K on 78 trades at 1% WR; -8% v2 lifted Sharpe 0.58 → 0.82. See
-  // reports/replay-b37-momentum-v2-*.md and pending_tasks.md section I.
+  // widened 0.04 → 0.07 (2026-05-28): breakout needs multi-week hold to work.
+  breakout:         { hard_sl_pct: 0.07, trail_pct: 30, time_stop_days: 14,
+                      exit_on_uw_flip: true,  exit_on_news: false, exit_before_earnings: true },
   momentum:         { hard_sl_pct: 0.06, trail_pct: 30, time_stop_days:  7,
                       exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
   value_contrarian: { hard_sl_pct: 0.07, trail_pct: 45, time_stop_days: 30,
@@ -50,6 +58,10 @@ const EXIT_RULES_BY_SETUP = {
   mean_reversion:   { hard_sl_pct: 0.05, trail_pct: 35, time_stop_days: 15,
                       exit_on_uw_flip: false, exit_on_news: true,  exit_before_earnings: true,
                       exit_on_ma50_cross: true },
+  // momentum_flip: 0/2 live win rate. Overbought guard added 2026-05-28. Widened
+  // stop to 6% to let the early-cycle thesis develop over the full 5-day window.
+  momentum_flip:    { hard_sl_pct: 0.06, trail_pct: 35, time_stop_days:  5,
+                      exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
 };
 
 const LEGACY_EXIT_RULES = {
@@ -292,9 +304,10 @@ async function _tryOpenPosition(bot) {
   if (!price || price <= 0) return { action: 'skip_bad_price', symbol };
 
   // 4. Size position (pure math in bot-sizing.js — unit-tested)
-  const sizePct       = bot.rules?.sizing?.position_size_pct ?? 95;
-  const stopLossUsd0  = bot.rules?.exit_rules?.stop_loss_usd  ?? 50;
-  const plan          = planEntry({ capitalUsd: bot.capital_usd, price, sizePct, stopLossUsd: stopLossUsd0 });
+  const sizePct        = bot.rules?.sizing?.position_size_pct ?? 95;
+  const stopLossUsd0   = bot.rules?.exit_rules?.stop_loss_usd  ?? 50;
+  const maxPositionUsd = bot.rules?.sizing?.max_position_usd   ?? null;  // 2026-05-28: hard dollar cap per trade
+  const plan           = planEntry({ capitalUsd: bot.capital_usd, price, sizePct, stopLossUsd: stopLossUsd0, maxPositionUsd });
   if (plan.skip === 'no_capital')          return { action: 'skip_no_capital', symbol };
   if (plan.skip === 'no_price')            return { action: 'skip_bad_price', symbol, price };
   if (plan.skip === 'insufficient_capital') return { action: 'skip_insufficient_capital', symbol, price, budget: plan.dollarBudget };
@@ -387,6 +400,11 @@ async function _manageOpenPosition(bot) {
 
   // Per-setup exit rules
   const exitRules    = EXIT_RULES_BY_SETUP[trade.setup_type] ?? LEGACY_EXIT_RULES;
+  if (exitRules === LEGACY_EXIT_RULES) {
+    // 2026-05-28 (review nice-to-have): surface when LEGACY rules fire so we can see
+    // any new unclassified setup_type slipping through. Should be rare after Phase 2.3 audit.
+    console.warn(`[bot-exec] LEGACY exit rules used for trade ${trade.id} (setup_type=${trade.setup_type ?? 'null'})`);
+  }
   const dollarsInvested = parseFloat(trade.entry_price) * parseFloat(trade.qty);
   const hardSlUsd    = dollarsInvested * exitRules.hard_sl_pct;
 
@@ -395,9 +413,17 @@ async function _manageOpenPosition(bot) {
     return await _closeTrade(bot, trade, currentPrice, 'stop_loss');
   }
 
-  // Trailing stop
-  const trailFrac = exitRules.trail_pct / 100;
-  if (peakPnl > 0 && currentPnl < peakPnl * (1 - trailFrac)) {
+  // Trailing stop — Phase 2.8 (2026-05-27): require peak ≥ 1% of dollars_invested
+  // before the trail can fire. Without this guard, a 30% trail on a $5-18 peak
+  // (1-3 ticks on a high-priced stock) fires on normal bid/ask noise. Tonight's
+  // ASML × 3 trades (peaks $7-19, exits within 6 min net +$8.63) and AMAT
+  // (peak $5.46, then crashed to -$241 before market sell filled) all bled out
+  // through this exact hole. 1% peak = a real move, not just spread chatter.
+  //
+  // Hard stop (above) still applies — this only delays the TRAIL, not protection.
+  const trailFrac  = exitRules.trail_pct / 100;
+  const minPeakUsd = dollarsInvested * 0.01;
+  if (peakPnl > minPeakUsd && currentPnl < peakPnl * (1 - trailFrac)) {
     return await _closeTrade(bot, trade, currentPrice, 'trailing_stop');
   }
 
@@ -493,9 +519,16 @@ async function _closeTrade(bot, trade, exitPrice, reason) {
 // ─── Cron registration ────────────────────────────────────────────────────────
 
 export function startBotExecutorCrons() {
+  // 2026-05-28 fix: gate cron registration on BOT_CRON_OWNER=true so only ONE process
+  // owns the executor (avoid double order placement when both trading-bot and trading-dashboard
+  // both load this module via npm start). See bot-engine.js for the parallel scanner gate.
+  if (process.env.BOT_CRON_OWNER !== 'true') {
+    console.log('[bot-executor] cron NOT scheduled (BOT_CRON_OWNER != true) — this process is a non-owner');
+    return;
+  }
   const TZ = { timezone: 'America/New_York' };
   // Last 30 min of 9 AM (9:30–9:59) and every minute of 10 AM–3 PM
   cron.schedule('30-59 9 * * 1-5', () => runExecutorForAllActive(), TZ);
   cron.schedule('* 10-15 * * 1-5', () => runExecutorForAllActive(), TZ);
-  console.log('[bot-executor] cron scheduled — every minute during market hours');
+  console.log('[bot-executor] cron scheduled — every minute during market hours (BOT_CRON_OWNER=true)');
 }

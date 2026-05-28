@@ -15,11 +15,12 @@ import { getUwConvictionForSymbol } from './uw-conviction.js';
 import { getNewsSentimentForSymbol } from './news-sentiment-modifier.js';
 import { getAllBotIndicators } from './bot-indicators.js';
 import { classifySetup, computeLast5dReturn, computeRsi14, getFundamentalsGrowth } from './bot-setup-classifier.js';
+import { getConvictionScore } from './scoring.js';
 import {
   PRE_SIGNAL_GATES, POST_SIGNAL_GATES, SETUP_GATES,
   firstBlocker, allBlockers, gateCompositeScore,
 } from './bot-gates.js';
-import { getScannableBots, getOtherBotsHeldSymbols, tripCircuitBreaker } from '../repositories/bots-repo.js';
+import { getScannableBots, getOtherBotsHeldSymbols, tripCircuitBreaker, unlinkTrade } from '../repositories/bots-repo.js';
 import { recordDecision } from '../repositories/bot-decisions-repo.js';
 
 // ─── Single-flight guard per bot ──────────────────────────────────────────────
@@ -57,10 +58,27 @@ export async function scanBot(bot) {
   try {
     const rules = bot.rules || {};
 
-    // Bot already holding a trade — exits are managed by B-3
+    // Bot already holding a trade — exits are managed by B-3.
+    // Phase 2.9 (2026-05-27): self-heal stale pointers. If current_trade_id
+    // points at a row whose status is no longer 'open' (e.g. closed via a path
+    // that bypassed recordTradeClose — manual dashboard sell, sentinel auto-exit,
+    // broker-side reconciliation), clear the pointer instead of dead-locking the
+    // bot. Bot 25 sat idle for 75+ min tonight on a stale pointer to closed
+    // trade #74 and missed buying MU at composite 84.77.
     if (bot.current_trade_id) {
-      return await _log(bot.id, 'hold', null, null, null,
-        `bot is holding trade #${bot.current_trade_id} — exits managed by B-3`);
+      const { rows: tr } = await query(
+        `SELECT status FROM trades WHERE id = $1`,
+        [bot.current_trade_id]
+      );
+      const stillOpen = tr[0]?.status === 'open';
+      if (stillOpen) {
+        return await _log(bot.id, 'hold', null, null, null,
+          `bot is holding trade #${bot.current_trade_id} — exits managed by B-3`);
+      }
+      console.warn(`[bot-engine] bot ${bot.id}: clearing stale current_trade_id=${bot.current_trade_id} (trade status=${tr[0]?.status ?? 'missing'})`);
+      await unlinkTrade(bot.id).catch(e => console.warn(`[bot-engine] unlinkTrade failed: ${e.message}`));
+      bot.current_trade_id = null;
+      // fall through to normal scan
     }
 
     // Circuit breaker
@@ -88,31 +106,117 @@ export async function scanBot(bot) {
     }
 
     // 3. Score each candidate (cap at 50 per scan)
+    // 2026-05-27: collect per-candidate blocker info so the scan log carries a
+    // gate histogram + named-symbol detail. Replaces the useless "none passed
+    // hard gates" message with: { gate_histogram: { uw_label: 32, conviction_grade: 5 }, sample_blocked: [{symbol, gate, value, threshold}, ...] }
+    const candidates = filtered.slice(0, 50);
+
+    // Phase 2.5 (2026-05-27): pre-warm conviction_scores for any candidate that
+    // doesn't have a recent row. Without this, `_signalConviction` returned
+    // value=0 for ~72 of yesterday's 90 quality movers (LRCX, TXN, KLAC, ADI,
+    // SCCO, NXPI, STM, TER, WDC, AMAT, ...) because nothing had ever triggered
+    // a score for them. Their composite was silently dragged down by ~10%
+    // weight × 0 = real points missed. Pre-warm in parallel batches of 10 to
+    // avoid Yahoo rate-limit storms; 60-min freshness window during market hours.
+    // Treat rows lacking macd_hist as STALE — the tradingview-bridge fix
+    // (Phase 2.7, 2026-05-27 22:00 SGT) means rows written before that time
+    // have macd_hist=null, which silently disables momentum_flip. Force a
+    // re-score so technicals get populated and the override path works.
+    try {
+      const { rows: fresh } = await query(
+        `SELECT DISTINCT symbol FROM conviction_scores
+         WHERE symbol = ANY($1::text[])
+           AND scored_at > NOW() - INTERVAL '60 minutes'
+           AND jsonb_typeof(signals->'macd_hist') = 'number'`,
+        [candidates]
+      );
+      const haveFresh = new Set(fresh.map(r => r.symbol));
+      const missing = candidates.filter(s => !haveFresh.has(s));
+      if (missing.length > 0) {
+        console.log(`[bot-engine] bot ${bot.id}: pre-warming conviction for ${missing.length}/${candidates.length} candidates (no row <60min)`);
+        const CONCURRENCY = 10;
+        for (let i = 0; i < missing.length; i += CONCURRENCY) {
+          const batch = missing.slice(i, i + CONCURRENCY);
+          await Promise.allSettled(batch.map(sym =>
+            getConvictionScore({ symbol: sym }).catch(err => {
+              console.warn(`[bot-engine] pre-warm conviction failed for ${sym}:`, err.message);
+              return null;
+            })
+          ));
+        }
+      }
+    } catch (e) {
+      console.warn(`[bot-engine] bot ${bot.id} pre-warm step failed (continuing without):`, e.message);
+    }
+
     const scored = [];
-    for (const symbol of filtered.slice(0, 50)) {
+    const blocked = [];
+    for (const symbol of candidates) {
       try {
         const result = await _scoreCandidate(symbol, bot);
-        if (result) scored.push(result);
+        if (result?._blocked) blocked.push(result);
+        else if (result) scored.push(result);
       } catch (e) {
         console.warn(`[bot-engine] bot ${bot.id} candidate ${symbol} score failed:`, e.message);
+        blocked.push({ symbol, gate: 'exception', value: e.message?.slice(0, 80), threshold: 'no-throw' });
       }
     }
 
     if (!scored.length) {
-      return await _log(bot.id, filtered.length > 0 ? 'skip_unclassifiable_setup' : 'skip_filtered', null, null, null,
-        `${filtered.length} candidates evaluated, none passed hard gates or setup classification`);
+      // Build a gate histogram so we know exactly what's killing trades this scan
+      const gateHistogram = blocked.reduce((acc, b) => { acc[b.gate] = (acc[b.gate] || 0) + 1; return acc; }, {});
+      const sample = blocked.slice(0, 5).map(b => ({ symbol: b.symbol, gate: b.gate, value: b.value, threshold: b.threshold }));
+      const breakdown = { gate_histogram: gateHistogram, sample_blocked: sample, candidates_evaluated: filtered.slice(0, 50).length };
+      // Notes string keeps a human-readable summary of the top blockers (e.g. "uw_label×32, conviction_grade×5")
+      const topGates = Object.entries(gateHistogram).sort((a, b) => b[1] - a[1]).slice(0, 3)
+        .map(([g, n]) => `${g}×${n}`).join(', ');
+      return await _log(bot.id, filtered.length > 0 ? 'skip_unclassifiable_setup' : 'skip_filtered', null, null, breakdown,
+        `${filtered.length} candidates evaluated, all blocked. Top gates: ${topGates || '(none recorded)'}`);
     }
 
     // 4. Pick top scorer
     scored.sort((a, b) => b.composite - a.composite);
     const top = scored[0];
-    const minScore = rules.entry_filters?.min_composite_score ?? 60;
-    if (top.composite < minScore) {
+    // Raised 2026-05-27 from 60 → 70 based on 90-day backtest:
+    //   score 70-79 = 70% win rate at 10d, +9.98% avg return
+    //   score 40-49 = 46.6% win rate (worse than coin flip), +2.14% avg
+    // Threshold 60 still includes 60-69 (62.5% win, +6.86%) which is acceptable
+    // but 70 is the sharp cliff above which alpha really lives. See conviction_scores
+    // backtest in chat transcript 2026-05-27 for the full table.
+    //
+    // Phase 2.1 Option C (also 2026-05-27): allow composite 60-69 through IF
+    // _scoreCandidate flagged it as a momentum_flip override (drift_5d>0 + macd_hist>-3,
+    // within per-bot daily cap of 5). +6.86%/65.5% backtest win rate in flat regimes.
+    const minScore = rules.entry_filters?.min_composite_score ?? 70;
+    if (top.composite < minScore && !top._momentum_flip) {
       return await _log(bot.id, 'skip_no_candidate', top.symbol, top.composite, top.breakdown,
         `top score ${top.composite.toFixed(1)} below threshold ${minScore}`);
     }
 
-    // 5. Log WOULD-TRADE decision — no actual trade placed
+    // 5. Cross-process dedup guard (2026-05-28 fix: trading-bot + trading-dashboard both run
+    //    startBotEngineCrons, causing duplicate scans → duplicate trades on the same symbol).
+    //    PRIMARY fix is gating cron registration on BOT_CRON_OWNER env var (see startBotEngineCrons).
+    //    This DB check is belt-and-suspenders: if a deploy ever forgets to set the env var,
+    //    we still cap dupes at "one decision per symbol per 15 min" instead of two.
+    //    Note: still TOCTOU-racey under simultaneous SELECT — the env-var gate is the real fix.
+    try {
+      const { rows: recentDecision } = await query(
+        `SELECT id FROM bot_decisions
+         WHERE symbol = $1 AND action = 'buy'
+           AND scanned_at > NOW() - INTERVAL '15 minutes'
+         LIMIT 1`,
+        [top.symbol]
+      );
+      if (recentDecision.length > 0) {
+        return await _log(bot.id, 'skip_no_candidate', top.symbol, top.composite, top.breakdown,
+          `cross-process dedup: ${top.symbol} already decided by another bot/process in last 15min`,
+          top.setup_type ?? null, top.thesis ?? null);   // pass setup metadata so telemetry stays clean
+      }
+    } catch (e) {
+      console.warn(`[bot-engine] bot ${bot.id}: dedup check failed (proceeding):`, e.message);
+    }
+
+    // 6. Log WOULD-TRADE decision — no actual trade placed
     return await _log(bot.id, 'buy', top.symbol, top.composite, top.breakdown,
       `WOULD BUY ${top.symbol} @ composite ${top.composite.toFixed(1)} setup=${top.setup_type} (B-3 will execute)`,
       top.setup_type ?? null, top.thesis ?? null);
@@ -196,15 +300,31 @@ async function _buildCandidateUniverse(bot) {
   const minMktCapB   = filters.market_cap_min_b  ?? 5;
   const minAdvDollar = filters.min_adv_dollar_vol ?? 5_000_000;
   const minPrice     = filters.price_min ?? 5;
-  const maxPrice     = filters.price_max ?? 500;
+  const maxPrice     = filters.price_max ?? 2500;  // raised 2026-05-27 (500→1500→2500) — KLAC trades above $2000, fractionable lets us size in dollars not shares
   try {
+    // Two NULL-tolerant escape hatches around weak sync data:
+    //
+    //   (a) ADV-NULL safety net: ~67% of tradable_universe rows have NULL
+    //       adv_dollar_30d (sync is incomplete). `NULL >= $2` is false in SQL,
+    //       so the OLD query silently dropped MU/AMD/MRVL/NVDA/KLAC/AMAT/AVGO/LRCX
+    //       even though they're $100B+ mega-caps. Fix: trust mktcap ≥ $10B as
+    //       a liquidity proxy when ADV is missing.
+    //
+    //   (b) mktcap-NULL escape for ETFs: SOXX, SMH, XLK, QQQ etc. have NULL
+    //       market_cap_usd (they're funds, not companies), so the mktcap ≥ $5B
+    //       gate kills them. Fix: allow NULL mktcap when ADV ≥ $1B/day, which
+    //       only the actually-huge ETFs clear.
+    //
+    // Diagnosed 2026-05-27 after MU +20% / SOXL +18% / semis ripped and the bot
+    // saw nothing. Of 734 stocks that moved ≥5% on 05-26, 491 were killed by
+    // path (a) alone. Sector ETFs were a separate silent rejection via path (b).
     const { rows: base } = await query(
       `SELECT symbol FROM tradable_universe
-       WHERE market_cap_usd >= $1
-         AND adv_dollar_30d  >= $2
+       WHERE (market_cap_usd >= $1 OR (market_cap_usd IS NULL AND adv_dollar_30d >= 1e9))
+         AND (adv_dollar_30d >= $2 OR (adv_dollar_30d IS NULL AND market_cap_usd >= 1e10))
          AND last_price BETWEEN $3 AND $4
          AND fractionable = TRUE
-       ORDER BY adv_dollar_30d DESC
+       ORDER BY COALESCE(adv_dollar_30d, 0) DESC, COALESCE(market_cap_usd, 0) DESC
        LIMIT 800`,
       [minMktCapB * 1_000_000_000, minAdvDollar, minPrice, maxPrice]
     );
@@ -257,10 +377,13 @@ async function _scoreCandidate(symbol, bot) {
   const ind = await getAllBotIndicators(symbol).catch(() => null);
   const vix = await _getCurrentVix();
   const preCtx = { filters, indicators: ind, vix };
-  if (firstBlocker(preCtx, PRE_SIGNAL_GATES)) return null;
+  // 2026-05-27: surface which gate blocked so the caller can build a histogram
+  // ("why didn't bot buy X" used to be impossible to answer per-candidate).
+  const preBlocker = firstBlocker(preCtx, PRE_SIGNAL_GATES);
+  if (preBlocker) return { _blocked: true, symbol, gate: preBlocker.gate, value: preBlocker.value, threshold: preBlocker.threshold, message: preBlocker.message };
 
   // ── Signal computation ──────────────────────────────────────────────────
-  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig] = await Promise.all([
+  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig, congressSig] = await Promise.all([
     _signalConviction(symbol),
     _signalNews(symbol),
     _signalUw(symbol),
@@ -268,6 +391,7 @@ async function _scoreCandidate(symbol, bot) {
     _signalInsider(symbol),
     _signalDistance52w(symbol),
     _signalPredictor(symbol),
+    _signalCongress(symbol),
   ]);
   const signals = {
     conviction:   convSig,
@@ -277,21 +401,45 @@ async function _scoreCandidate(symbol, bot) {
     insider:      insiderSig,
     distance_52w: dist52wSig,
     predictor:    predSig,
+    congress:     congressSig,
   };
 
   // ── Post-signal gates (need conviction/UW/news to be computed) ───────────
-  if (firstBlocker({ ...preCtx, signals }, POST_SIGNAL_GATES)) return null;
+  const postBlocker = firstBlocker({ ...preCtx, signals }, POST_SIGNAL_GATES);
+  if (postBlocker) return { _blocked: true, symbol, gate: postBlocker.gate, value: postBlocker.value, threshold: postBlocker.threshold, message: postBlocker.message };
 
-  // ── Composite score ─────────────────────────────────────────────────────
+  // ── Composite score (renormalized over signals with data) ──────────────
+  // OLD bug: signals returning value=0 (no_data) diluted the composite. A
+  // stock with one STRONG signal (e.g. +80 UW) and 6 no_data signals scored
+  //   composite = 0.30 * 80 + 0.70 * 0 = 24
+  // — below any reasonable threshold. We now exclude no-data signals from
+  // the denominator: same stock above scores
+  //   composite = (0.30 * 80) / 0.30 = 80
+  // so a single strong signal still counts. Signals that EXPLICITLY return
+  // a non-zero value (positive or negative) participate; those returning 0
+  // are treated as "no data" and don't dilute.
+  // Phase 4.2 (2026-05-28): congress signal added. Only participates when
+  // there are recent congressional buys (value=0 otherwise → excluded).
   const w = rules.composite_weights || {};
-  const composite =
-    (w.conviction   ?? 0) * (signals.conviction.value   ?? 0) +
-    (w.news         ?? 0) * (signals.news.value         ?? 0) +
-    (w.uw_options   ?? 0) * (signals.uw_options.value   ?? 0) +
-    (w.gex          ?? 0) * (signals.gex.value          ?? 0) +
-    (w.insider      ?? 0) * (signals.insider.value      ?? 0) +
-    (w.distance_52w ?? 0) * (signals.distance_52w.value ?? 0) +
-    (w.predictor    ?? 0) * (signals.predictor.value    ?? 0);
+  const pairs = [
+    ['conviction',   signals.conviction.value],
+    ['news',         signals.news.value],
+    ['uw_options',   signals.uw_options.value],
+    ['gex',          signals.gex.value],
+    ['insider',      signals.insider.value],
+    ['distance_52w', signals.distance_52w.value],
+    ['predictor',    signals.predictor.value],
+    ['congress',     signals.congress.value],
+  ];
+  let weightedSum = 0, weightTotal = 0;
+  for (const [key, val] of pairs) {
+    const weight = w[key] ?? 0;
+    if (weight <= 0) continue;
+    if (val == null || val === 0) continue;      // no-data signal — skip
+    weightedSum += weight * val;
+    weightTotal += weight;
+  }
+  const composite = weightTotal > 0 ? (weightedSum / weightTotal) : 0;
 
   // Note: _scoreCandidate does NOT enforce min_composite_score itself — the
   // selector layer applies that. We keep the composite in the return value so
@@ -315,12 +463,80 @@ async function _scoreCandidate(symbol, bot) {
     getFundamentalsGrowth(symbol).catch(() => null),
   ]);
   const enforceSetup = filters.require_setup_classification !== false;
-  const setup = enforceSetup
+  let setup = enforceSetup
     ? await classifySetup({ signals, indicators: { ...ind, symbol }, rsi: rsi14, fundamentals, last5dReturn }).catch(() => null)
     : null;
 
   // Setup classification + strategy filter (shared with diagnoseCandidate)
-  if (firstBlocker({ filters, setup, enforceSetup }, SETUP_GATES)) return null;
+  const setupBlocker = firstBlocker({ filters, setup, enforceSetup }, SETUP_GATES);
+  if (setupBlocker) return { _blocked: true, symbol, gate: setupBlocker.gate, value: setupBlocker.value, threshold: setupBlocker.threshold, message: setupBlocker.message };
+
+  // ── Phase 2.1 Option C: momentum_flip override (experimental, capped at 5/day) ──
+  // Backtest 2026-05-27 (BOT_DESIGN.md Decision Log): composite 60-69 + drift_5d_pct>0 + macd_hist>-3
+  // yielded +6.86% / 65.5% win rate over 90d, N=1,477. CONDITIONAL on flat-to-mild-up SPY regime;
+  // UNDERPERFORMS in strong SPY-up regime. Live-experiment with daily cap until we have a regime detector.
+  // Kill-switch: set `entry_filters.momentum_flip_enabled = false` to disable per-bot.
+  const momentumFlipEnabled = filters.momentum_flip_enabled !== false;
+  const baseThreshold = filters.min_composite_score ?? 70;
+  let momentumFlipApplied = false;
+  if (momentumFlipEnabled && composite >= 60 && composite < baseThreshold) {
+    try {
+      // Pull drift_5d_pct + macd_hist from the latest conviction_scores row (last 6h)
+      const { rows: cs } = await query(
+        `SELECT
+           CASE WHEN jsonb_typeof(signals->'drift_5d_pct') = 'number' THEN (signals->>'drift_5d_pct')::numeric ELSE NULL END AS drift_5d,
+           CASE WHEN jsonb_typeof(signals->'macd_hist') = 'number' THEN (signals->>'macd_hist')::numeric ELSE NULL END AS macd_hist
+         FROM conviction_scores
+         WHERE symbol = $1 AND scored_at > NOW() - INTERVAL '6 hours'
+         ORDER BY scored_at DESC LIMIT 1`,
+        [symbol]
+      );
+      const drift5d = cs[0]?.drift_5d != null ? Number(cs[0].drift_5d) : null;
+      const macdHist = cs[0]?.macd_hist != null ? Number(cs[0].macd_hist) : null;
+      // 2026-05-28 fix: TTMI had RSI=69.4 + drift_5d=+19.6% and lost -14.5% (gapped through stop).
+      // Cap momentum_flip at RSI < 68 (not already overbought) and drift_5d < 15%
+      // (stock hasn't already made its move). Backtest edge was for early-stage momentum, not exhausted.
+      // Note: rsi14 may be null (signal missing) → treat as pass so we don't double-block good setups.
+      if (
+        drift5d != null && macdHist != null &&
+        drift5d > 0 && drift5d < 15 &&
+        macdHist > -3 &&
+        (rsi14 == null || rsi14 < 68)
+      ) {
+        // Check per-bot daily cap (max 5 momentum_flip buys per bot per day)
+        const dailyCap = filters.momentum_flip_daily_cap ?? 5;
+        const { rows: capRows } = await query(
+          `SELECT COUNT(*)::int AS n FROM bot_decisions
+           WHERE bot_id = $1 AND action = 'buy' AND setup_type = 'momentum_flip'
+             AND (scanned_at AT TIME ZONE 'America/New_York')::date
+                 = (NOW() AT TIME ZONE 'America/New_York')::date`,
+          [bot.id]
+        );
+        if ((capRows[0]?.n ?? 0) < dailyCap) {
+          // Override setup metadata to mark this as the experimental path
+          const overrideSetup = {
+            setup_type: 'momentum_flip',
+            thesis: {
+              text: `Momentum-flip experimental (Phase 2.1 Option C). Composite ${composite.toFixed(1)} (60-69 range) + drift_5d=${drift5d.toFixed(1)}% + MACD turning (${macdHist.toFixed(2)}). 5-day time-stop. Backtest 90d: +6.86%/65.5% win on N=1,477 in SPY-flat regimes. Daily cap ${dailyCap}.`,
+              drift_5d_pct: drift5d,
+              macd_hist: macdHist,
+              backtest_evidence: 'BOT_DESIGN.md Decision Log 2026-05-27',
+              experimental: true,
+            },
+            expected_hold_days_min: 1,
+            expected_hold_days_max: 5,
+          };
+          // Splice override into the local `setup` so the return shape below picks it up
+          // (a non-mutating wrapper would be cleaner, but `setup` may be null when classifier
+          // returned no result for this candidate, so we just replace it here)
+          setup = overrideSetup;
+          momentumFlipApplied = true;
+        }
+      }
+    } catch (e) {
+      console.warn(`[bot-engine] momentum_flip override check failed for ${symbol}:`, e.message);
+    }
+  }
 
   return {
     symbol,
@@ -329,6 +545,7 @@ async function _scoreCandidate(symbol, bot) {
     thesis:     setup?.thesis ?? null,
     expected_hold_days_min: setup?.expected_hold_days_min ?? null,
     expected_hold_days_max: setup?.expected_hold_days_max ?? null,
+    _momentum_flip: momentumFlipApplied,   // signal to caller to allow this through the composite gate
     breakdown: {
       vix,
       signals,
@@ -354,11 +571,21 @@ async function _scoreCandidate(symbol, bot) {
 // Returns `{ symbol, verdict, composite, setup_type, grade, blockers[], top_drivers[], ... }`.
 // Never returns null — always returns a full diagnostic record.
 
+// Default weights when diagnose is called without a specific bot — matches
+// what the user's bots ship with so the diagnostic view reflects what bots see.
+// Phase 4.2 (2026-05-28): added congress 0.05 — weak but real signal (+0.44pp edge).
+// Weights are renormalized over signals WITH data so congress only participates
+// when there are recent congressional buys for the given stock.
+const DIAGNOSE_DEFAULT_WEIGHTS = {
+  conviction: 0.10, news: 0.22, uw_options: 0.30, gex: 0.15,
+  insider: 0.15, distance_52w: 0.08, predictor: 0, congress: 0.05,
+};
+
 export async function diagnoseCandidate(symbol, bot) {
   const rules    = bot?.rules || {};
   const filters  = rules.entry_filters    || {};
-  const w        = rules.composite_weights || {};
-  const minScore = filters.min_composite_score ?? 60;
+  const w        = Object.keys(rules.composite_weights || {}).length ? rules.composite_weights : DIAGNOSE_DEFAULT_WEIGHTS;
+  const minScore = filters.min_composite_score ?? 70;   // raised 2026-05-27 from 40 — backtest showed 40-49 has 46.6% win rate (worse than coin flip)
 
   // ── Pre-signal data ─────────────────────────────────────────────────
   const ind = await getAllBotIndicators(symbol).catch(() => null);
@@ -369,7 +596,7 @@ export async function diagnoseCandidate(symbol, bot) {
   const blockers = allBlockers({ filters, indicators: ind, vix }, PRE_SIGNAL_GATES);
 
   // ── Signal computation ───────────────────────────────────────────────
-  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig] = await Promise.all([
+  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig, congressSig] = await Promise.all([
     _signalConviction(symbol),
     _signalNews(symbol),
     _signalUw(symbol),
@@ -377,21 +604,33 @@ export async function diagnoseCandidate(symbol, bot) {
     _signalInsider(symbol),
     _signalDistance52w(symbol),
     _signalPredictor(symbol),
+    _signalCongress(symbol),
   ]);
-  const signals = { conviction: convSig, news: newsSig, uw_options: uwSig, gex: gexSig, insider: insiderSig, distance_52w: dist52wSig, predictor: predSig };
+  const signals = { conviction: convSig, news: newsSig, uw_options: uwSig, gex: gexSig, insider: insiderSig, distance_52w: dist52wSig, predictor: predSig, congress: congressSig };
 
   // Post-signal gates (conviction grade, UW label, news sentiment)
   blockers.push(...allBlockers({ filters, signals }, POST_SIGNAL_GATES));
 
-  // ── Composite score ──────────────────────────────────────────────────
-  const composite =
-    (w.conviction   ?? 0) * (signals.conviction.value   ?? 0) +
-    (w.news         ?? 0) * (signals.news.value         ?? 0) +
-    (w.uw_options   ?? 0) * (signals.uw_options.value   ?? 0) +
-    (w.gex          ?? 0) * (signals.gex.value          ?? 0) +
-    (w.insider      ?? 0) * (signals.insider.value      ?? 0) +
-    (w.distance_52w ?? 0) * (signals.distance_52w.value ?? 0) +
-    (w.predictor    ?? 0) * (signals.predictor.value    ?? 0);
+  // ── Composite score (renormalized — see _scoreCandidate for rationale) ─
+  const pairs = [
+    ['conviction',   signals.conviction.value],
+    ['news',         signals.news.value],
+    ['uw_options',   signals.uw_options.value],
+    ['gex',          signals.gex.value],
+    ['insider',      signals.insider.value],
+    ['distance_52w', signals.distance_52w.value],
+    ['predictor',    signals.predictor.value],
+    ['congress',     signals.congress.value],
+  ];
+  let weightedSum = 0, weightTotal = 0;
+  for (const [key, val] of pairs) {
+    const weight = w[key] ?? 0;
+    if (weight <= 0) continue;
+    if (val == null || val === 0) continue;
+    weightedSum += weight * val;
+    weightTotal += weight;
+  }
+  const composite = weightTotal > 0 ? +(weightedSum / weightTotal).toFixed(2) : 0;
 
   const scoreBlock = gateCompositeScore({ filters: { min_composite_score: minScore }, composite });
   if (scoreBlock) blockers.push(scoreBlock);
@@ -471,14 +710,45 @@ async function _signalNews(symbol) {
 }
 
 async function _signalUw(symbol) {
+  // Primary: UW conviction labeler (returns no_data 80% of the time though)
   const c     = await getUwConvictionForSymbol(symbol).catch(() => null);
   const label = c?.composite?.label ?? 'no_data';
   const score = c?.composite?.score;
-  if (label === 'no_data' || score == null) return { value: 0, label };
-  const sign = (label === 'bullish' || label === 'strong_bullish')  ?  1
-             : (label === 'bearish' || label === 'strong_bearish')  ? -1
-             : 0;
-  return { value: +(sign * score * 100).toFixed(1), label };
+  if (label !== 'no_data' && score != null) {
+    const sign = (label === 'bullish' || label === 'strong_bullish')  ?  1
+               : (label === 'bearish' || label === 'strong_bearish')  ? -1
+               : 0;
+    return { value: +(sign * score * 100).toFixed(1), label, source: 'labeler' };
+  }
+  // Fallback: raw flow data — when labeler can't decide, look at the actual
+  // dollar premium of bullish vs bearish alerts in the last 6h. A stock with
+  // $5M of bullish premium today has VERY strong UW signal even if labeler
+  // returned no_data. Was returning 0 for every stock except the ~50 the
+  // labeler had enough data for.
+  try {
+    const { rows } = await query(
+      `SELECT
+         SUM(CASE WHEN sentiment IN ('bullish','strong_bullish') THEN premium ELSE 0 END) AS bull,
+         SUM(CASE WHEN sentiment IN ('bearish','strong_bearish') THEN premium ELSE 0 END) AS bear
+       FROM uw_flow_alerts
+       WHERE ticker=$1 AND alerted_at > NOW() - INTERVAL '6 hours'`,
+      [symbol]
+    );
+    const bull = Number(rows[0]?.bull) || 0;
+    const bear = Number(rows[0]?.bear) || 0;
+    if (bull === 0 && bear === 0) return { value: 0, label: 'no_data', source: 'raw' };
+    const total = bull + bear;
+    const tilt  = (bull - bear) / total;            // -1 (all bear) → +1 (all bull)
+    // Magnitude scaler: $50K = weak signal, $1M+ = full strength
+    const mag   = Math.min(1, Math.log10(total / 50_000) / 1.5);
+    const value = +(tilt * Math.max(0, mag) * 100).toFixed(1);
+    const dLabel = tilt > 0.2 ? (mag > 0.7 ? 'strong_bullish' : 'bullish')
+                 : tilt < -0.2 ? (mag > 0.7 ? 'strong_bearish' : 'bearish')
+                 : 'neutral';
+    return { value, label: dLabel, source: 'raw', bull_usd: bull, bear_usd: bear };
+  } catch {
+    return { value: 0, label: 'no_data', source: 'raw' };
+  }
 }
 
 async function _signalGex(symbol) {
@@ -496,21 +766,93 @@ async function _signalGex(symbol) {
 }
 
 async function _signalInsider(symbol) {
-  // uw_insider_trades uses transaction_type ('buy'/'sell'), not a 'side' column
+  // SEC transaction codes — only count meaningful open-market transactions:
+  // Buys:  P = open-market purchase
+  // Sells: S = open-market sale (excludes F=tax withholding, A=grant, D=derivative)
+  //
+  // Phase 4.2 improvements (2026-05-28, BOT_DESIGN.md Decision Log):
+  // Backtest on 1,658 events (2024-01-01→2026-04-30) showed:
+  //   <$10K buys:  48.5% win (below SPY 62.7%) — noise, excluded
+  //   Director/10%Owner ≥$100K: 67.0% win, +3.49% 5d — highest conviction
+  //   All buys ≥$10K: 61.2% win, +2.78% 5d — meaningful signal
+  // Role weighting: Director/10%Owner → 1.5×, Officer → 1.0×
   const { rows } = await query(
     `SELECT
-       SUM(CASE WHEN transaction_type='buy'  THEN value ELSE 0 END) AS buy_val,
-       SUM(CASE WHEN transaction_type='sell' THEN value ELSE 0 END) AS sell_val
+       -- Weighted buy: Director/10%Owner 1.5×, Officer/other 1.0×, <$10K excluded
+       SUM(CASE
+         WHEN transaction_type='P' AND value >= 10000
+              AND (role ILIKE '%Director%' OR role ILIKE '%10% Owner%')
+         THEN value * 1.5
+         WHEN transaction_type='P' AND value >= 10000
+         THEN value
+         ELSE 0
+       END) AS buy_val_weighted,
+       -- Raw buy for display (unweighted, ≥$10K only)
+       SUM(CASE WHEN transaction_type='P' AND value >= 10000 THEN value ELSE 0 END) AS buy_val_raw,
+       -- High-conviction subset: Director/10%Owner ≥$100K
+       SUM(CASE
+         WHEN transaction_type='P' AND value >= 100000
+              AND (role ILIKE '%Director%' OR role ILIKE '%10% Owner%')
+         THEN value ELSE 0
+       END) AS hc_buy_val,
+       SUM(CASE WHEN transaction_type='S' THEN value ELSE 0 END) AS sell_val
      FROM uw_insider_trades
      WHERE ticker=$1 AND filed_at > NOW() - INTERVAL '30 days'`,
     [symbol]
   );
-  const buy  = Number(rows[0]?.buy_val)  || 0;
-  const sell = Number(rows[0]?.sell_val) || 0;
-  if (buy + sell === 0) return { value: 0, buy_usd: 0, sell_usd: 0 };
+  const buy  = Number(rows[0]?.buy_val_weighted) || 0;
+  const sell = Number(rows[0]?.sell_val)         || 0;
+  const raw  = Number(rows[0]?.buy_val_raw)      || 0;
+  const hc   = Number(rows[0]?.hc_buy_val)       || 0;
+  if (buy + sell === 0) return { value: 0, buy_usd: 0, sell_usd: 0, hc_buy_usd: 0 };
   const net   = buy - sell;
   const total = buy + sell;
-  return { value: +((net / total) * 100).toFixed(1), buy_usd: buy, sell_usd: sell };
+  return {
+    value:       +((net / total) * 100).toFixed(1),
+    buy_usd:     raw,
+    sell_usd:    sell,
+    hc_buy_usd:  hc,
+    role_weighted: true,
+  };
+}
+
+async function _signalCongress(symbol) {
+  // Congressional trade signal (STOCK Act filings).
+  // Phase 4.1B backtest (2025-12-22→2026-05-18, N=854 buys):
+  //   All buys ≥$15K:    +0.44pp edge vs SPY, 57.6% win
+  //   ≥$100K buys:       66.1% win, N=56
+  //   Quick filers 0-5d: +2.34% 5d, 66.7% win
+  // Sell signal: inconclusive — stocks also rose after sells (market bias period)
+  // Returns 0 when no recent congressional buys (no-data → excluded from composite)
+  const { rows } = await query(
+    `SELECT
+       COUNT(*) FILTER (
+         WHERE transaction_type='Buy'
+           AND amount_range != '$1,001 - $15,000'
+       ) AS buy_count,
+       COUNT(*) FILTER (
+         WHERE transaction_type='Buy'
+           AND (amount_range LIKE '$100,001%' OR amount_range LIKE '$250,001%'
+             OR amount_range LIKE '$500,001%' OR amount_range LIKE '>%')
+       ) AS hc_buy_count,
+       MIN(EXTRACT(DAY FROM (filed_at - traded_at::timestamptz)))
+         FILTER (WHERE transaction_type='Buy' AND amount_range != '$1,001 - $15,000')
+         AS min_lag_days
+     FROM uw_congressional_trades
+     WHERE ticker=$1 AND filed_at > NOW() - INTERVAL '30 days'`,
+    [symbol]
+  );
+  const buys    = Number(rows[0]?.buy_count)    || 0;
+  const hcBuys  = Number(rows[0]?.hc_buy_count) || 0;
+  const minLag  = Number(rows[0]?.min_lag_days);
+  if (buys === 0) return { value: 0, buy_count: 0, hc_buy_count: 0 };
+  // Score: base signal + HC bonus + quick-filer bonus
+  let value = buys === 1 ? 30 : 50;               // 1 buy → +30, 2+ → +50
+  if (hcBuys >= 1) value = Math.max(value, 60);   // ≥$100K → at least +60
+  if (hcBuys >= 2) value = Math.max(value, 75);   // 2+ HC buys → +75
+  if (!isNaN(minLag) && minLag <= 5) value += 15; // quick filer bonus: +15
+  value = Math.min(100, value);
+  return { value, buy_count: buys, hc_buy_count: hcBuys, min_lag_days: isNaN(minLag) ? null : minLag };
 }
 
 async function _signalDistance52w(symbol) {
@@ -528,12 +870,20 @@ async function _signalDistance52w(symbol) {
   const high = Number(hi[0]?.hi52w) || price;
   if (!high) return { value: 0 };
   const pctOff = (price - high) / high; // -1..0
-  // Backtest sweet spot: 20-40% off the 52w high
+  // ── Phase 2.6 momentum re-weighting (2026-05-27, BOT_DESIGN.md Decision Log) ──
+  // OLD mapping was empirically backwards: penalized near-52w-high with -40
+  // (mean-reversion bias), rewarded -40% off the high with +80 (catching falling
+  // knives). Backtest on 21,719 signal_returns rows proved the inversion:
+  //   Top 10% by signal:  OLD +2.82%/5d 58.2% win  →  NEW +9.00%/5d 76.6% win
+  //   Top 25% by signal:  OLD +1.46%/5d 53.6% win  →  NEW +7.06%/5d 68.2% win
+  // Edge: +6.2pp on top picks, +14.4pp winrate. Far above +3pp ship threshold.
+  // Aligns with Jegadeesh-Titman (1993) momentum literature and Pavan's earlier
+  // pushback "buying at 52w high underperforms is wrong".
   let value;
-  if      (pctOff > -0.05) value = -40;  // within 5% of high — extended
-  else if (pctOff > -0.20) value =  30;  // 5-20% off
-  else if (pctOff > -0.40) value =  80;  // 20-40% off — sweet spot
-  else                     value = -60;  // >40% off — distressed
+  if      (pctOff > -0.02) value =  80;  // within 2% of high — breakout/momentum
+  else if (pctOff > -0.10) value =  50;  // 2-10% off — still in trend
+  else if (pctOff > -0.25) value =  10;  // 10-25% off — correction/neutral zone
+  else                     value = -40;  // > 25% off — distressed / falling knife
   return { value, pct_off_52w_high: +pctOff.toFixed(3) };
 }
 
@@ -577,10 +927,19 @@ async function _log(botId, action, symbol, composite, factor_breakdown, notes, s
 // ─── Cron registration ────────────────────────────────────────────────────────
 
 export function startBotEngineCrons() {
+  // 2026-05-28 fix: trading-bot AND trading-dashboard both run `npm start` and both
+  // call startBotEngineCrons → duplicate scans firing within ms of each other → duplicate
+  // 'buy' decisions on the same symbol (TOCTOU on the DB dedup guard).
+  // Gate cron registration on BOT_CRON_OWNER=true so only ONE process owns the scanner.
+  // Set this in the trading-bot PM2 process env only; leave it unset on trading-dashboard.
+  if (process.env.BOT_CRON_OWNER !== 'true') {
+    console.log('[bot-engine] crons NOT scheduled (BOT_CRON_OWNER != true) — this process is a non-owner');
+    return;
+  }
   const TZ = { timezone: 'America/New_York' };
   // 9:30–9:59 ET on :30 past then every 5 min
   cron.schedule('30/5 9 * * 1-5', () => runBotScanForAllActive(), TZ);
   // 10:00–15:59 ET every 5 min
   cron.schedule('*/5 10-15 * * 1-5', () => runBotScanForAllActive(), TZ);
-  console.log('[bot-engine] crons scheduled — scanning every 5 min during market hours');
+  console.log('[bot-engine] crons scheduled — scanning every 5 min during market hours (BOT_CRON_OWNER=true)');
 }

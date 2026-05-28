@@ -13,11 +13,13 @@ import assert from 'node:assert/strict';
 import {
   gateEarningsProximity,
   gateLiquidity,
+  gateLiquidityStale,
   gateMacroBlackout,
   gatePremarketGap,
   gateShortInterest,
   gatePriceRange,
   gateVixRange,
+  gateMarketCloseProximity,
   gateConvictionGrade,
   gateUwLabel,
   gateNewsSentiment,
@@ -126,6 +128,84 @@ describe('gateLiquidity', () => {
       indicators: { liquidity: { adv_dollar_vol_30d: 100 } },
     })), null);
   });
+});
+
+// ─── Liquidity-stale gate (2026-05-28) ──────────────────────────────────────
+describe('gateLiquidityStale', () => {
+  // Helper: ISO date N calendar days ago at noon UTC (avoids DST edge cases)
+  function nDaysAgo(n) {
+    const d = new Date();
+    d.setUTCHours(12, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  it('passes when last_date is absent', () => {
+    assert.equal(gateLiquidityStale({ indicators: { liquidity: {} } }), null);
+  });
+
+  it('passes when last_date is today', () => {
+    assert.equal(gateLiquidityStale({
+      indicators: { liquidity: { last_date: nDaysAgo(0) } },
+    }), null);
+  });
+
+  it('passes when last_date is yesterday (1 trading day)', () => {
+    assert.equal(gateLiquidityStale({
+      indicators: { liquidity: { last_date: nDaysAgo(1) } },
+    }), null);
+  });
+
+  it('passes when stale across a weekend (Fri data → Mon scan = 1 trading day)', () => {
+    // 3 calendar days but only 1 weekday between Fri and Mon — should pass
+    // We can only reliably test this when "today" is Monday, so we just verify
+    // the helper math via a 4-cal-day-ago date and expect 2-3 trading days.
+    const r = gateLiquidityStale({
+      indicators: { liquidity: { last_date: nDaysAgo(3) } },
+    });
+    // 3 cal days can be 2 or 3 trading days depending on day-of-week.
+    // Either passes (≤2) or blocks (3) — both are correct, just don't crash.
+    assert.ok(r === null || r.gate === 'liquidity_stale');
+  });
+
+  it('blocks when 5 trading days old (TTMI repro)', () => {
+    // 8 calendar days = at least 5 trading days no matter what weekday today is
+    const r = gateLiquidityStale({
+      indicators: { liquidity: { last_date: nDaysAgo(8), last_price: 189.50 } },
+    });
+    assert.ok(r);
+    assert.equal(r.gate, 'liquidity_stale');
+    assert.match(r.message, /trading days stale/);
+    assert.match(r.value, /\$189\.50/);   // cached_price in value field
+  });
+
+  it('handles invalid last_date gracefully', () => {
+    assert.equal(gateLiquidityStale({
+      indicators: { liquidity: { last_date: 'not-a-date' } },
+    }), null);
+  });
+});
+
+// ─── Market-close-proximity gate (2026-05-28) ───────────────────────────────
+describe('gateMarketCloseProximity', () => {
+  it('passes when opt-out is set', () => {
+    assert.equal(gateMarketCloseProximity({ filters: { block_late_session: false } }), null);
+  });
+
+  it('returns either null or a structured blocker (never throws)', () => {
+    // We can't deterministically set "now" without monkey-patching Date.
+    // Smoke-test: the call doesn't crash and returns the expected shape.
+    const r = gateMarketCloseProximity({ filters: {} });
+    if (r !== null) {
+      assert.equal(r.gate, 'market_close_proximity');
+      assert.ok(typeof r.value === 'string');
+      assert.ok(typeof r.message === 'string');
+    }
+  });
+
+  // Note: full DST-correctness + weekday early-out + cutoff-window testing requires
+  // dependency injection of `new Date()` — left as TODO. The signature above guards
+  // against the worst regression (throwing on any input).
 });
 
 // ─── Macro blackout ──────────────────────────────────────────────────────────

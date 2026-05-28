@@ -133,6 +133,90 @@ export function gatePriceRange({ filters, indicators }) {
   return null;
 }
 
+/**
+ * Bug fix 2026-05-28: TTMI entered at $208 but liquidity cache showed $189 (last_date 5 days stale).
+ * Gate price checks (price_min/price_max) use the cached last_price, which is dangerously wrong when
+ * the cache is stale. Block when the cache is more than 3 TRADING days stale.
+ *
+ * 2026-05-28 (review fix): count trading days, not calendar days. Calendar-day count fails on
+ * Thanksgiving (Thu+Fri half-day → 4–5 cal days) and Christmas+NY straddles (4 cal days).
+ * Trading-day count handles all US-market holidays correctly without needing a holiday list:
+ * just count weekdays in the gap. (A 3-day weekend = 1 trading-day-old, still fresh.)
+ *
+ * Threshold = 3 trading days:
+ *   - 1 trading day = data from yesterday's close → pass (normal case)
+ *   - 2 trading days = data from 2 sessions ago → pass (worst-case after a holiday)
+ *   - 3+ trading days = stale → block (TTMI case: 5 cal days = 3 trading days → blocked ✓)
+ */
+function _tradingDaysBetween(from, to) {
+  // Exclusive of `from`, inclusive of `to`. Counts only Mon-Fri.
+  // Does not consult a holiday calendar — overcounts by at most 2-3 days/year, which is acceptable
+  // because the gate's tolerance is already 3 days. Wrong direction (false negatives) is safer.
+  let days = 0;
+  const cursor = new Date(from);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+  while (cursor < end) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const dow = cursor.getUTCDay();
+    if (dow !== 0 && dow !== 6) days += 1;
+  }
+  return days;
+}
+
+export function gateLiquidityStale({ indicators }) {
+  const lastDate = indicators?.liquidity?.last_date;
+  if (!lastDate) return null;
+  const last = new Date(lastDate);
+  if (Number.isNaN(last.getTime())) return null;
+  const now = new Date();
+  const tradingDays = _tradingDaysBetween(last, now);
+  if (tradingDays <= 2) return null;
+  const cachedPrice = indicators?.liquidity?.last_price;
+  const priceTag = cachedPrice != null ? ` cached_price=$${Number(cachedPrice).toFixed(2)}` : '';
+  return {
+    gate: 'liquidity_stale',
+    value: `last_date=${lastDate} (${tradingDays} trading days ago)${priceTag}`,
+    threshold: '<= 2 trading days',
+    message: `Price data is ${tradingDays} trading days stale${priceTag} — risk checks (stop-loss, price gates) unreliable`,
+  };
+}
+
+/**
+ * Bug fix 2026-05-28: AMD entered at 19:56 UTC (3:56 PM ET), stopped out 19:59 (3:59 PM ET),
+ * 1 min before close. No session-cutoff gate existed. Block new entries after 3:30 PM ET
+ * to avoid end-of-day volatility and forced close-at-market-price fills.
+ * Only applies when filters.block_late_session !== false (opt-out per-bot if needed).
+ *
+ * 2026-05-28 (review fix): use ET wall-clock (via toLocaleString) not UTC arithmetic.
+ * Original code hard-coded 19:30 UTC = 3:30 PM EDT, which is WRONG during EST (Nov-Mar) when
+ * 3:30 PM ET = 20:30 UTC. The DST-naive version blocked entries 90 min early every winter.
+ * Also early-out on weekends so non-trading-day cron ticks don't pollute gate-rejection telemetry.
+ */
+export function gateMarketCloseProximity({ filters }) {
+  if (filters.block_late_session === false) return null;
+  // Convert current time → America/New_York wall clock (handles DST correctly).
+  // toLocaleString('en-US', { timeZone }) returns a parseable date string in the target tz.
+  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = et.getDay();
+  // Early-out: US equities are closed Sat/Sun, no point firing this gate (would pollute telemetry).
+  if (day === 0 || day === 6) return null;
+  const minsET = et.getHours() * 60 + et.getMinutes();
+  const closeET  = 16 * 60;        // 4:00 PM ET
+  const cutoffET = 15 * 60 + 30;   // 3:30 PM ET
+  // Only block during the cutoff..close window. Pre-market and after-close also skip;
+  // we don't want to block at 8 PM ET (post-close) just because clock < close.
+  if (minsET < cutoffET || minsET >= closeET) return null;
+  const minsUntilClose = closeET - minsET;
+  return {
+    gate: 'market_close_proximity',
+    value: `${minsUntilClose}min until close`,
+    threshold: '>= 30 min remaining',
+    message: `Only ${minsUntilClose} min until market close — new entries blocked after 3:30 PM ET`,
+  };
+}
+
 export function gateVixRange({ filters, vix }) {
   if (vix == null) return null;
   if (filters.vix_min != null && vix < filters.vix_min) {
@@ -222,7 +306,7 @@ export function gateStrategyFilter({ filters, setup }) {
 // can't fully evaluate it here without doing the weighted-sum math. The caller
 // computes it then asks us to validate. Keeping the API symmetric.
 export function gateCompositeScore({ filters, composite }) {
-  const min = filters.min_composite_score ?? 60;
+  const min = filters.min_composite_score ?? 70;   // raised 2026-05-27 from 60 — backtest 90d shows score 70+ has 10% avg 10d return, ~70% win rate
   if (composite == null || composite >= min) return null;
   return {
     gate: 'composite_score',
@@ -241,11 +325,13 @@ export function gateCompositeScore({ filters, composite }) {
 export const PRE_SIGNAL_GATES = [
   gateEarningsProximity,
   gateLiquidity,
+  gateLiquidityStale,       // 2026-05-28: block on stale price data (> 3 calendar days)
   gateMacroBlackout,
   gatePremarketGap,
   gateShortInterest,
   gatePriceRange,
   gateVixRange,
+  gateMarketCloseProximity, // 2026-05-28: block entries after 3:30 PM ET
 ];
 
 /**

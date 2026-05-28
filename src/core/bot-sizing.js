@@ -82,16 +82,25 @@ export function computeStopPrice(fillPrice, stopPct) {
  * decisions in one place so the test suite can verify the entire chain.
  *
  * @param {object} args
- * @param {number} args.capitalUsd
- * @param {number} args.price
- * @param {number} [args.sizePct]
- * @param {number} [args.stopLossUsd]
+ * @param {number} args.capitalUsd       bot's total budget
+ * @param {number} args.price            current quote
+ * @param {number} [args.sizePct]        percent of capital to deploy. Defaults to 95.
+ * @param {number} [args.stopLossUsd]    dollar loss budget per trade. Defaults to 50.
+ * @param {number|null} [args.maxPositionUsd]  HARD CEILING on per-trade $ size (added 2026-05-28).
+ *                                       If set and >0, dollarBudget = min(dollarBudget, floor(maxPositionUsd)).
+ *                                       Used to bound losses while win rate is still proving out;
+ *                                       leave null to disable the cap.
  * @returns {{ skip: 'no_capital' | 'no_price' | 'insufficient_capital' } |
  *           { qty: number, dollarBudget: number, dollarsInvested: number,
  *             stopPct: number, stopPrice: number }}
  */
-export function planEntry({ capitalUsd, price, sizePct = DEFAULT_SIZE_PCT, stopLossUsd = DEFAULT_STOP_LOSS_USD }) {
-  const dollarBudget = computeDollarBudget(capitalUsd, sizePct);
+export function planEntry({ capitalUsd, price, sizePct = DEFAULT_SIZE_PCT, stopLossUsd = DEFAULT_STOP_LOSS_USD, maxPositionUsd = null }) {
+  let dollarBudget = computeDollarBudget(capitalUsd, sizePct);
+  // 2026-05-28: cap per-trade dollar size so losses stay bounded while win rate is still proving out.
+  // Set sizing.max_position_usd in bot rules (e.g. 1000) to enforce a hard ceiling.
+  if (maxPositionUsd != null && Number.isFinite(Number(maxPositionUsd)) && Number(maxPositionUsd) > 0) {
+    dollarBudget = Math.min(dollarBudget, Math.floor(Number(maxPositionUsd)));
+  }
   if (dollarBudget <= 0) {
     return { skip: 'no_capital', dollarBudget: 0, qty: 0, dollarsInvested: 0, stopPct: 0, stopPrice: 0 };
   }

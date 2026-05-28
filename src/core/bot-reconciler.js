@@ -9,8 +9,40 @@
 import { query, isDbAvailable, getDbUser, recordTrade } from './db.js';
 import { getTigerPositions } from './tiger.js';
 import { getPositions, getUserPositions } from './trader.js';
+import { alert as raiseSystemAlert } from './system-alerts.js';
 
-const LOOKBACK_DAYS = 7;
+// 2026-05-28 (review fix): bump to 30 to preserve provenance for positions held >7 days.
+// Decisions table is small; widening the scan window costs nothing and lets us join
+// reconciled trades back to their original buy decision for signal_returns analytics.
+const LOOKBACK_DAYS = 30;
+
+// 2026-05-28 (review fix): quantity-mismatch comparison must tolerate fractional-share
+// float noise (Alpaca returns 5.0000... vs DB NUMERIC 5.0 — strict !== fires phantoms).
+// Tolerance picked from MIN_FRACTIONAL_INCREMENT = 0.0001 share on Alpaca.
+const QTY_EQ_TOLERANCE = 1e-4;
+
+/**
+ * Compare a broker-reported qty vs a DB-stored qty with tolerance + NaN handling.
+ * Exported for unit testing — the rest of this module is I/O-coupled.
+ *
+ * @param {*} dbQty       value from DB (may be NUMERIC string, number, or null/NaN)
+ * @param {number} brokerQty broker-reported qty (already cast to Number)
+ * @returns {{ match: boolean, dbQty: number|null }}
+ *          match=true  → quantities agree within tolerance OR dbQty is unusable
+ *                        (in which case caller treats as "qty_null_in_db" mismatch)
+ *          dbQty=null  → DB value was NaN/null — surface to caller for separate handling
+ */
+export function _compareQty(dbQty, brokerQty) {
+  // Explicit null/undefined guard: Number(null) === 0 in JS, which would silently
+  // mask a NULL DB qty as "0 shares match broker's 0" instead of flagging the mismatch.
+  if (dbQty == null) return { match: false, dbQty: null };
+  const num = Number(dbQty);
+  if (!Number.isFinite(num)) return { match: false, dbQty: null };
+  return {
+    match: Math.abs(num - brokerQty) <= QTY_EQ_TOLERANCE,
+    dbQty: num,
+  };
+}
 
 /**
  * Reconcile broker positions against the trades table for a given user.
@@ -28,15 +60,24 @@ export async function reconcileBotPositions({ userId, username, dryRun = true })
   );
   if (!bots.length) return { matched: [], unmatched: [] };
 
-  // 2. Collect open DB trades keyed by symbol+broker so we can detect gaps
+  // 2. Collect open DB trades keyed by symbol+broker so we can detect gaps.
+  //    Also build a qty map for mismatch detection (qty stored as NUMERIC → cast to number).
   const { rows: openTrades } = await query(
-    `SELECT symbol, account_source, order_id, bot_id
+    `SELECT symbol, account_source, order_id, bot_id, qty
        FROM trades
       WHERE status='open' AND bot_id IN (${bots.map((_, i) => `$${i + 1}`).join(',')})`,
     bots.map(b => b.id)
   );
+  // key → true means "DB has a row for this symbol+broker"
   const openTradeKey = new Set(
     openTrades.map(t => `${(t.symbol || '').toUpperCase()}::${(t.account_source || '').toLowerCase()}`)
+  );
+  // key → qty map for quantity-mismatch detection
+  const openTradeQty = new Map(
+    openTrades.map(t => [
+      `${(t.symbol || '').toUpperCase()}::${(t.account_source || '').toLowerCase()}`,
+      Number(t.qty),
+    ])
   );
 
   // 3. Fetch recent buy decisions across all bots (last LOOKBACK_DAYS days)
@@ -88,8 +129,9 @@ export async function reconcileBotPositions({ userId, username, dryRun = true })
     }
   }
 
-  const matched   = [];
-  const unmatched = [];
+  const matched      = [];
+  const unmatched    = [];
+  const qty_mismatch = []; // broker qty != DB qty for positions that DO have a DB row
   const processedPositionKeys = new Set(); // dedup: one position must not be reconciled for multiple bots
 
   // 5. For each bot, compare broker positions against DB open trades
@@ -105,7 +147,26 @@ export async function reconcileBotPositions({ userId, username, dryRun = true })
       if (qty <= 0) continue;
 
       const key = `${sym}::${bot.broker.toLowerCase()}`;
-      if (openTradeKey.has(key)) continue;           // already in DB — no gap
+
+      // Quantity-mismatch detection: DB has this symbol but with a different qty.
+      // Uses tolerance (not strict !==) via _compareQty to avoid false alarms on fractional shares.
+      if (openTradeKey.has(key)) {
+        const { match, dbQty } = _compareQty(openTradeQty.get(key), qty);
+        if (!match) {
+          qty_mismatch.push({
+            symbol:     sym,
+            broker:     bot.broker,
+            broker_qty: qty,
+            // dbQty=null when DB row had qty=NULL/NaN — caller distinguishes via `reason`
+            db_qty:     dbQty,
+            // delta sign convention: POSITIVE → broker has MORE shares than DB (reconcile UP)
+            //                       NEGATIVE → broker has FEWER shares than DB (DB stale, sell-fill missed)
+            delta:      dbQty !== null ? (qty - dbQty) : null,
+            reason:     dbQty !== null ? 'qty_mismatch' : 'qty_null_in_db',
+          });
+        }
+        continue; // regardless of qty match — row exists, skip reconcile
+      }
       if (processedPositionKeys.has(key)) continue;  // already reconciled this run
 
       // Find most recent buy decision for this symbol on this bot
@@ -181,5 +242,22 @@ export async function reconcileBotPositions({ userId, username, dryRun = true })
     }
   }
 
-  return { matched, unmatched, dryRun };
+  // 2026-05-28 (review fix): raise a system alert whenever broker/DB quantities diverge —
+  // it means our recordTrade pipeline missed a partial fill or sell. Dedup window 60min so
+  // we don't spam the same alert every reconcile run for an unresolved mismatch.
+  if (qty_mismatch.length > 0) {
+    try {
+      await raiseSystemAlert({
+        key:      'reconciler_qty_mismatch',
+        severity: 'warn',
+        title:    `Reconciler found ${qty_mismatch.length} broker/DB quantity mismatch(es)`,
+        detail:   { mismatches: qty_mismatch, username, dryRun },
+        dedup_window_minutes: 60,
+      });
+    } catch (e) {
+      console.error('[reconciler] system_alert raise failed:', e.message);
+    }
+  }
+
+  return { matched, unmatched, qty_mismatch, dryRun };
 }
