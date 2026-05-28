@@ -13,6 +13,7 @@
 
 import { initDb, query } from '../src/core/db.js';
 import { runAdvanceScanForAllActive } from '../src/core/bot-advance/engine.js';
+import { runAdvanceExecutorForAllActive } from '../src/core/bot-advance/executor.js';
 import os from 'node:os';
 
 const CMD = process.argv[2];
@@ -129,19 +130,44 @@ async function cmdScan() {
   console.log(JSON.stringify(r, null, 2));
 }
 
+async function cmdExecute() {
+  console.log('Running one EXECUTOR tick across all active advance bots…');
+  console.log('(shadow_mode bots are skipped; only live-paper bots place real orders)');
+  const t = performance.now();
+  const r = await runAdvanceExecutorForAllActive();
+  console.log(`Done in ${((performance.now() - t) / 1000).toFixed(1)}s`);
+  console.log(JSON.stringify(r, null, 2));
+}
+
 async function cmdSetMode() {
   const mode = ARG;
+  const botIdArg = process.argv[4];   // optional 3rd arg: specific bot id
   if (mode !== 'shadow' && mode !== 'live') {
-    console.error('Usage: npm run bot-advance:set-mode shadow|live');
+    console.error('Usage: npm run bot-advance:set-mode shadow|live [bot_id]');
     process.exit(2);
   }
   const newVal = mode === 'shadow';
-  const r = await query(`UPDATE bots_advance SET shadow_mode=$1, updated_at=NOW() RETURNING id, name, shadow_mode`, [newVal]);
+
+  // Default: only ACTIVE bots get flipped (stopped bots stay stopped — flipping their
+  // shadow flag is meaningless and confusing). Override by passing a specific bot id.
+  let r;
+  if (botIdArg) {
+    const id = parseInt(botIdArg, 10);
+    if (!Number.isFinite(id)) { console.error('Bad bot id:', botIdArg); process.exit(2); }
+    r = await query(`UPDATE bots_advance SET shadow_mode=$1, updated_at=NOW() WHERE id=$2 RETURNING id, name, status, shadow_mode`, [newVal, id]);
+  } else {
+    r = await query(`UPDATE bots_advance SET shadow_mode=$1, updated_at=NOW() WHERE status='active' RETURNING id, name, status, shadow_mode`, [newVal]);
+  }
+  if (!r.rows.length) {
+    console.log('ℹ️  No bots updated (target was empty — all bots may be stopped, or bot id not found).');
+    return;
+  }
   await audit(`set-mode-${mode}`, r.rows.map(x => x.id));
-  console.log(`🔧 Set ${r.rows.length} bot(s) to shadow_mode=${newVal}:`);
-  r.rows.forEach(x => console.log(`   - bot ${x.id} ${x.name} shadow=${x.shadow_mode}`));
+  console.log(`🔧 Set ${r.rows.length} active bot(s) to shadow_mode=${newVal}:`);
+  r.rows.forEach(x => console.log(`   - bot ${x.id} ${x.name} (${x.status}) shadow=${x.shadow_mode}`));
   if (!newVal) {
     console.log('\n⚠️  LIVE-PAPER MODE ACTIVE. Bot-advance will now place real paper trades.');
+    console.log('   Run `npm run bot-advance:set-mode shadow` to revert.');
   }
 }
 
@@ -151,13 +177,15 @@ try {
     case 'stop':     await cmdStop(); break;
     case 'start':    await cmdStart(); break;
     case 'scan':     await cmdScan(); break;
+    case 'execute':  await cmdExecute(); break;
     case 'set-mode': await cmdSetMode(); break;
     default:
       console.log(`Usage:
   npm run bot-advance:status
   npm run bot-advance:stop [id|all]
   npm run bot-advance:start [id|all]
-  npm run bot-advance:scan                  # run one scan tick now
+  npm run bot-advance:scan                  # run one scan tick now (engine)
+  npm run bot-advance:execute               # run one executor tick now (places orders if live)
   npm run bot-advance:set-mode shadow|live  # flip all advance bots`);
       process.exit(1);
   }

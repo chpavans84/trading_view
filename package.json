@@ -26,6 +26,7 @@
     "bot-advance:stop":     "node --env-file=.env scripts/bot-advance-control.mjs stop",
     "bot-advance:start":    "node --env-file=.env scripts/bot-advance-control.mjs start",
     "bot-advance:scan":     "node --env-file=.env scripts/bot-advance-control.mjs scan",
+    "bot-advance:execute":  "node --env-file=.env scripts/bot-advance-control.mjs execute",
     "bot-advance:set-mode": "node --env-file=.env scripts/bot-advance-control.mjs set-mode",
     "start": "node src/server.js",
     "dev": "nodemon --env-file=.env src/web/server.js",
