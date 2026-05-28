@@ -117,13 +117,38 @@ async function _placeSellOrder(bot, creds, symbol, qty) {
   throw new Error(`unsupported broker ${bot.broker}`);
 }
 
+// Try live quote first; fall back to last close from backtest_prices.
+// The fallback is only for SIZING — the actual stop_loss is computed from the
+// broker's real fill price, not from this estimate. Off-by-a-few-percent on
+// sizing is bounded by max_position_usd=$1K anyway.
 async function _getLivePrice(bot, creds, symbol) {
-  if (bot.broker === 'tiger_demo') {
-    const q = await getTigerQuote(creds, symbol);
-    return q?.latestPrice ?? q?.last ?? q?.bidPrice ?? q?.askPrice ?? null;
+  let live = null;
+  try {
+    if (bot.broker === 'tiger_demo') {
+      const q = await getTigerQuote(creds, symbol);
+      live = q?.latestPrice ?? q?.last ?? q?.bidPrice ?? q?.askPrice ?? null;
+    } else {
+      const q = await getLatestPrice(symbol);
+      live = q?.ask ?? q?.mid ?? q?.bid ?? null;
+    }
+  } catch (_) {
+    live = null;
   }
-  const q = await getLatestPrice(symbol);
-  return q?.ask ?? q?.mid ?? q?.bid ?? null;
+  if (live && live > 0) return live;
+
+  // Fallback — last close (Alpaca refresh-prices cron keeps this fresh daily)
+  try {
+    const { rows } = await query(
+      `SELECT close FROM backtest_prices WHERE symbol=$1 ORDER BY price_date DESC LIMIT 1`,
+      [symbol.toUpperCase()]
+    );
+    const fallback = Number(rows[0]?.close);
+    if (Number.isFinite(fallback) && fallback > 0) {
+      console.log(`[bot-advance/exec] ${symbol}: live quote unavailable, using last close $${fallback.toFixed(2)} for sizing`);
+      return fallback;
+    }
+  } catch (_) {}
+  return null;
 }
 
 function _normalizeOrder(raw, fallbackPrice) {
