@@ -10,6 +10,7 @@
 import os from 'os';
 import { Resend } from 'resend';
 import { query, isDbAvailable } from './db.js';
+import { sendTelegram } from './telegram.js';
 
 const VALID_SEVERITIES = new Set(['info', 'warn', 'critical']);
 
@@ -158,6 +159,18 @@ export async function alert({ key, severity = 'warn', title, detail = {}, dedup_
   if (severity === 'critical') {
     sendCriticalPush(row, title, key).catch(e =>
       console.warn('[system-alerts] push failed (non-fatal):', e.message)
+    );
+  }
+
+  // 7. 2026-05-28: also mirror warn+critical alerts to Telegram so user sees them on phone.
+  // 'info' is too chatty for Telegram — those are audit-only (e.g. bot stop/start).
+  if (severity === 'warn' || severity === 'critical') {
+    const icon = severity === 'critical' ? '🚨' : '⚠️';
+    const sevTag = severity.toUpperCase();
+    // Keep Telegram body short — link back to email for full detail.
+    const tgBody = `${icon} <b>${sevTag}</b> ${title}\nkey: <code>${key}</code>\n${os.hostname()} pid ${process.pid}`;
+    sendTelegram(tgBody).catch(e =>
+      console.warn('[system-alerts] telegram mirror failed (non-fatal):', e.message)
     );
   }
 

@@ -23,6 +23,13 @@ import { getActiveBots, tripCircuitBreaker, linkTrade, unlinkTrade, recordTradeC
 import { getFreshestBuyDecision } from '../repositories/bot-decisions-repo.js';
 import { getNewsSentimentForSymbol } from './news-sentiment-modifier.js';
 import { getEarningsProximity } from './bot-indicators.js';
+import { sendTelegram } from './telegram.js';
+
+// 2026-05-28: lightweight, fire-and-forget Telegram alert helper. Never blocks the
+// trade path — if Telegram is misconfigured or rate-limited, we log and move on.
+function _alertAsync(msg) {
+  sendTelegram(msg).catch(e => console.warn('[bot-executor] telegram alert failed:', e.message));
+}
 
 // ─── Broker → account_source normalizer ──────────────────────────────────────
 // DB convention: Alpaca paper trades stored as 'alpaca_paper'.
@@ -190,6 +197,13 @@ export async function processBot(bot) {
 
     if (breakerTrip && bot.status !== 'stopped') {
       await tripCircuitBreaker(bot.id, `Cumulative loss reached max ($${maxLoss.toFixed(2)})`);
+      // 2026-05-28: alert when a breaker first trips — high-priority event.
+      // bot.status is the pre-update value; we know it just flipped to 'stopped'.
+      _alertAsync(
+        `⚠️ <b>CIRCUIT BREAKER</b> bot ${bot.id} (${bot.name})\n` +
+        `Cumulative PnL: $${cumPnl.toFixed(2)} ≤ -$${maxLoss.toFixed(2)} limit\n` +
+        `Bot stopped — no new entries until you re-enable.`
+      );
     }
 
     // Always manage an existing open position (graceful exit even after breaker trip)
@@ -365,6 +379,12 @@ async function _tryOpenPosition(bot) {
   await linkTrade(bot.id, tradeId);
 
   console.log(`[bot-executor] bot ${bot.id} opened ${symbol} x${qty} @ $${fillPrice} via ${bot.broker} (trade ${tradeId})`);
+  // 2026-05-28: real-time alert so user knows immediately, even from phone.
+  _alertAsync(
+    `🟢 <b>OPEN</b> ${symbol} x${qty} @ $${Number(fillPrice).toFixed(2)}\n` +
+    `Bot ${bot.id} (${bot.name}) • ${bot.broker}\n` +
+    `Trade #${tradeId} • $${(Number(fillPrice) * Number(qty)).toFixed(0)}`
+  );
   return { action: 'opened', symbol, trade_id: tradeId, fill_price: fillPrice, qty, broker: bot.broker };
 }
 
@@ -513,6 +533,15 @@ async function _closeTrade(bot, trade, exitPrice, reason) {
   await recordTradeClose(bot.id, { pnlUsd, isWin: pnlUsd > 0 });
 
   console.log(`[bot-executor] bot ${bot.id} CLOSED ${symbol} @ $${exitPrice} reason=${reason} pnl=$${pnlUsd}`);
+  // 2026-05-28: real-time alert. Emoji encodes outcome at a glance (green=win, red=loss, gray=flat).
+  const pnlSign = pnlUsd > 0 ? '+' : '';
+  const icon    = pnlUsd > 0 ? '🟢' : pnlUsd < 0 ? '🔴' : '⚪';
+  const reasonIcon = reason === 'hard_stop' ? '🛑' : reason === 'trail_stop' ? '📉' : reason === 'time_stop' ? '⏰' : '📤';
+  _alertAsync(
+    `${icon} <b>CLOSE</b> ${symbol} @ $${Number(exitPrice).toFixed(2)} ${reasonIcon} ${reason}\n` +
+    `PnL: <b>${pnlSign}$${Number(pnlUsd).toFixed(2)} (${pnlSign}${Number(pnlPct).toFixed(2)}%)</b>\n` +
+    `Bot ${bot.id} (${bot.name})`
+  );
   return { action: 'closed', symbol, reason, exit_price: exitPrice, pnl_usd: pnlUsd, pnl_pct: pnlPct };
 }
 
