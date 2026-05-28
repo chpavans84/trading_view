@@ -134,28 +134,49 @@ function _normalizeOrder(raw, fallbackPrice) {
   };
 }
 
-// ─── Open new position from a would_buy decision ─────────────────────────────
+// ─── Multi-position open logic ───────────────────────────────────────────────
+// User config: bot.rules.sizing.max_concurrent_positions (default 5).
+// Per-symbol dedup uses status IN ('open', 'pending') so an in-flight order
+// blocks a duplicate buy from a parallel tick. The 'pending' row is inserted
+// BEFORE calling the broker and updated to 'open' on success / 'failed' on err.
+const DEFAULT_MAX_POSITIONS = 5;
+
 async function _tryOpenPosition(bot) {
-  // 1. Find freshest would_buy decision for this bot
-  const cutoffMin = DECISION_FRESHNESS_MIN;
+  const maxPositions = Number(bot.rules?.sizing?.max_concurrent_positions) || DEFAULT_MAX_POSITIONS;
+
+  // 1. How many positions does this bot currently hold (open OR pending)?
+  const { rows: openCountRows } = await query(`
+    SELECT COUNT(*)::int AS n
+      FROM bot_advance_trades
+     WHERE bot_id=$1 AND status IN ('open', 'pending')
+  `, [bot.id]);
+  const openCount = openCountRows[0]?.n ?? 0;
+  if (openCount >= maxPositions) {
+    return { action: 'skip_max_positions', open: openCount, cap: maxPositions };
+  }
+
+  // 2. Pull the freshest would_buy decisions for this bot that aren't already
+  //    held / pending. We grab up to (max - open) so we can fill multiple slots
+  //    on one executor tick if multiple rules fired.
+  const slotsAvailable = maxPositions - openCount;
   const { rows: decisions } = await query(`
-    SELECT id, symbol, entry_rule, rule_metadata, composite_score
-      FROM bot_advance_decisions
-     WHERE bot_id=$1 AND action='would_buy'
-       AND scanned_at > NOW() - ($2 * INTERVAL '1 minute')
-     ORDER BY scanned_at DESC LIMIT 1
-  `, [bot.id, cutoffMin]);
-  if (!decisions.length) return { action: 'no_fresh_decision' };
-  const d = decisions[0];
+    SELECT d.id, d.symbol, d.entry_rule, d.rule_metadata, d.composite_score
+      FROM bot_advance_decisions d
+     WHERE d.bot_id=$1 AND d.action='would_buy'
+       AND d.scanned_at > NOW() - ($2 * INTERVAL '1 minute')
+       AND NOT EXISTS (
+         SELECT 1 FROM bot_advance_trades t
+          WHERE t.bot_id = d.bot_id
+            AND t.symbol = UPPER(d.symbol)
+            AND t.status IN ('open', 'pending')
+       )
+     ORDER BY d.scanned_at DESC
+     LIMIT $3
+  `, [bot.id, DECISION_FRESHNESS_MIN, slotsAvailable]);
 
-  // 2. Guard against re-entering same symbol if bot somehow holds it already
-  const { rows: alreadyOpen } = await query(
-    `SELECT id FROM bot_advance_trades WHERE bot_id=$1 AND symbol=$2 AND status='open' LIMIT 1`,
-    [bot.id, d.symbol.toUpperCase()]
-  );
-  if (alreadyOpen.length) return { action: 'skip_already_open', symbol: d.symbol };
+  if (!decisions.length) return { action: 'no_fresh_decision', open: openCount, cap: maxPositions };
 
-  // 3. Load broker creds (will throw clearly if user has wrong broker assigned)
+  // 3. Load broker creds once for the bot
   let creds;
   try { creds = await _loadUserCreds(bot.user_id, bot.broker); }
   catch (e) {
@@ -163,78 +184,129 @@ async function _tryOpenPosition(bot) {
     return { action: 'error', error: e.message };
   }
 
-  // 4. Get live price for sizing
-  const price = await _getLivePrice(bot, creds, d.symbol).catch(() => null);
-  if (!price || price <= 0) return { action: 'skip_no_price', symbol: d.symbol };
+  const results = [];
+  for (const d of decisions) {
+    const r = await _openOneSymbol(bot, creds, d);
+    results.push(r);
+    if (r?.action === 'opened') {
+      // Refresh count — protect against accidentally over-opening if loop races
+      const { rows: countNow } = await query(`
+        SELECT COUNT(*)::int AS n FROM bot_advance_trades
+         WHERE bot_id=$1 AND status IN ('open', 'pending')
+      `, [bot.id]);
+      if ((countNow[0]?.n ?? 0) >= maxPositions) break;
+    }
+  }
 
-  // 5. Look up the rule for its size multiplier + exit config
+  return { action: 'multi_open', count: results.filter(r => r.action === 'opened').length, results };
+}
+
+// Open a single symbol — pre-inserts 'pending' row for dedup safety,
+// then upgrades to 'open' after the broker confirms, or marks 'failed' on error.
+async function _openOneSymbol(bot, creds, d) {
+  const symbol = d.symbol.toUpperCase();
   const rule = getRule(d.entry_rule);
   if (!rule) return { action: 'error', error: `unknown rule ${d.entry_rule}` };
 
-  // 6. Size the position
-  const { qty, dollarsInvested } = _planQty(bot, rule, price);
-  if (qty < 1) return { action: 'skip_insufficient_capital', symbol: d.symbol, price };
-
-  // 7. Place the order
-  let rawOrder;
-  try { rawOrder = await _placeBuyOrder(bot, creds, d.symbol, qty); }
-  catch (e) {
-    console.error(`[bot-advance/exec] bot ${bot.id} ${d.symbol}: order placement failed:`, e.message);
+  // PRE-INSERT pending row to claim the symbol slot. If this conflicts (because
+  // another tick beat us to it), we silently skip — the OTHER tick owns the trade.
+  let pendingId;
+  try {
+    const { rows } = await query(`
+      INSERT INTO bot_advance_trades
+        (bot_id, decision_id, symbol, side, qty, entry_price, dollars_invested,
+         entry_rule, hard_sl_pct, trail_pct, time_stop_days,
+         status, shadow_mode, account_source)
+      SELECT $1::int, $2::bigint, $3::varchar, 'buy', 0, 0, 0,
+             $4::varchar, $5::numeric, $6::numeric, $7::int,
+             'pending', FALSE, $8::varchar
+       WHERE NOT EXISTS (
+         SELECT 1 FROM bot_advance_trades
+          WHERE bot_id=$1::int AND symbol=$3::varchar AND status IN ('open','pending')
+       )
+      RETURNING id
+    `, [
+      bot.id, d.id, symbol, d.entry_rule,
+      rule.exits.hard_sl_pct, rule.exits.trail_pct, rule.exits.time_stop_days,
+      bot.broker === 'alpaca' ? 'alpaca_paper' : bot.broker,
+    ]);
+    if (!rows.length) {
+      // Lost the race — another tick claimed this symbol first. Bail silently.
+      return { action: 'skip_already_pending', symbol };
+    }
+    pendingId = rows[0].id;
+  } catch (e) {
+    console.error(`[bot-advance/exec] bot ${bot.id} ${symbol}: pending insert failed:`, e.message);
     return { action: 'error', error: e.message };
   }
-  if (rawOrder?.action?.startsWith?.('skip_')) return rawOrder;
-  const order = _normalizeOrder(rawOrder, price);
-  if (!(order.fill_price > 0)) {
-    return { action: 'error', error: 'order returned no fill price' };
+
+  // From here on, ALWAYS clean up the pending row on failure (mark 'failed').
+  try {
+    const price = await _getLivePrice(bot, creds, symbol).catch(() => null);
+    if (!price || price <= 0) {
+      await query(`UPDATE bot_advance_trades SET status='failed', exit_reason='no_price' WHERE id=$1`, [pendingId]);
+      return { action: 'skip_no_price', symbol };
+    }
+
+    const { qty, dollarsInvested } = _planQty(bot, rule, price);
+    if (qty < 1) {
+      await query(`UPDATE bot_advance_trades SET status='failed', exit_reason='insufficient_capital' WHERE id=$1`, [pendingId]);
+      return { action: 'skip_insufficient_capital', symbol, price };
+    }
+
+    let rawOrder;
+    try { rawOrder = await _placeBuyOrder(bot, creds, symbol, qty); }
+    catch (e) {
+      console.error(`[bot-advance/exec] bot ${bot.id} ${symbol}: order placement failed:`, e.message);
+      await query(`UPDATE bot_advance_trades SET status='failed', exit_reason=$1 WHERE id=$2`, [String(e.message).slice(0, 60), pendingId]);
+      return { action: 'error', error: e.message };
+    }
+    if (rawOrder?.action?.startsWith?.('skip_')) {
+      await query(`UPDATE bot_advance_trades SET status='failed', exit_reason='broker_skip' WHERE id=$1`, [pendingId]);
+      return rawOrder;
+    }
+    const order = _normalizeOrder(rawOrder, price);
+    if (!(order.fill_price > 0)) {
+      await query(`UPDATE bot_advance_trades SET status='failed', exit_reason='no_fill_price' WHERE id=$1`, [pendingId]);
+      return { action: 'error', error: 'order returned no fill price' };
+    }
+
+    const stopLossPrice = +(order.fill_price * (1 - rule.exits.hard_sl_pct)).toFixed(2);
+
+    // Promote pending → open with full fill data
+    await query(`
+      UPDATE bot_advance_trades
+         SET status='open',
+             order_id=$1,
+             qty=$2, entry_price=$3, dollars_invested=$4,
+             stop_loss_price=$5,
+             opened_at=NOW()
+       WHERE id=$6
+    `, [order.order_id, qty, order.fill_price, +(qty * order.fill_price).toFixed(2), stopLossPrice, pendingId]);
+
+    // For backwards compat / display, set current_trade_id to most-recent open trade
+    await query(`UPDATE bots_advance SET current_trade_id=$1, updated_at=NOW() WHERE id=$2`, [pendingId, bot.id]);
+
+    console.log(`[bot-advance/exec] bot ${bot.id} OPENED ${symbol} x${qty} @ $${order.fill_price} rule=${d.entry_rule} trade=${pendingId}`);
+    sendTelegram(
+      `${ADVANCE_PREFIX} 🟢 <b>OPENED</b> ${symbol} x${qty} @ $${Number(order.fill_price).toFixed(2)}\n` +
+      `Bot ${bot.id} ${bot.name} • rule=<code>${d.entry_rule}</code>\n` +
+      `Stop: $${stopLossPrice} • $${(qty * order.fill_price).toFixed(0)} deployed • broker=${bot.broker}`
+    ).catch(() => {});
+
+    return { action: 'opened', symbol, trade_id: pendingId, qty, fill_price: order.fill_price };
+  } catch (e) {
+    // Catch-all safety net — never leave a 'pending' row stuck.
+    await query(`UPDATE bot_advance_trades SET status='failed', exit_reason=$1 WHERE id=$2 AND status='pending'`,
+      [String(e.message).slice(0, 60), pendingId]).catch(() => {});
+    return { action: 'error', error: e.message };
   }
-
-  // 8. Compute stop price from rule exits
-  const stopLossPrice = +(order.fill_price * (1 - rule.exits.hard_sl_pct)).toFixed(2);
-
-  // 9. Insert into bot_advance_trades + set bot.current_trade_id
-  const { rows: tRows } = await query(`
-    INSERT INTO bot_advance_trades
-      (bot_id, decision_id, order_id, symbol, side, qty, entry_price, dollars_invested,
-       entry_rule, hard_sl_pct, trail_pct, time_stop_days, stop_loss_price,
-       status, shadow_mode, account_source)
-    VALUES ($1, $2, $3, $4, 'buy', $5, $6, $7, $8, $9, $10, $11, $12, 'open', $13, $14)
-    RETURNING id
-  `, [
-    bot.id, d.id, order.order_id, d.symbol.toUpperCase(),
-    qty, order.fill_price, dollarsInvested,
-    d.entry_rule, rule.exits.hard_sl_pct, rule.exits.trail_pct, rule.exits.time_stop_days, stopLossPrice,
-    false,  // shadow_mode=false because this is a real-paper trade
-    bot.broker === 'alpaca' ? 'alpaca_paper' : bot.broker,
-  ]);
-  const tradeId = tRows[0]?.id ?? null;
-
-  await query(`UPDATE bots_advance SET current_trade_id=$1, updated_at=NOW() WHERE id=$2`, [tradeId, bot.id]);
-
-  console.log(`[bot-advance/exec] bot ${bot.id} OPENED ${d.symbol} x${qty} @ $${order.fill_price} rule=${d.entry_rule} trade=${tradeId}`);
-  sendTelegram(
-    `${ADVANCE_PREFIX} 🟢 <b>OPENED</b> ${d.symbol} x${qty} @ $${Number(order.fill_price).toFixed(2)}\n` +
-    `Bot ${bot.id} ${bot.name} • rule=<code>${d.entry_rule}</code>\n` +
-    `Stop: $${stopLossPrice} • $${dollarsInvested} deployed • broker=${bot.broker}`
-  ).catch(() => {});
-
-  return { action: 'opened', symbol: d.symbol, trade_id: tradeId, qty, fill_price: order.fill_price };
 }
 
-// ─── Manage open position ────────────────────────────────────────────────────
-async function _manageOpenPosition(bot) {
-  const { rows } = await query(`SELECT * FROM bot_advance_trades WHERE id=$1`, [bot.current_trade_id]);
-  const trade = rows[0];
-  if (!trade) {
-    // Stale pointer — self-heal
-    console.warn(`[bot-advance/exec] bot ${bot.id}: current_trade_id=${bot.current_trade_id} not found, clearing`);
-    await query(`UPDATE bots_advance SET current_trade_id=NULL WHERE id=$1`, [bot.id]);
-    return { action: 'cleared_stale_pointer' };
-  }
-  if (trade.status !== 'open') {
-    // Trade already closed — clear pointer
-    await query(`UPDATE bots_advance SET current_trade_id=NULL WHERE id=$1`, [bot.id]);
-    return { action: 'cleared_closed_pointer' };
-  }
+// ─── Manage one open position ────────────────────────────────────────────────
+// Called for each open trade on every executor tick.
+async function _manageOnePosition(bot, trade) {
+  if (!trade || trade.status !== 'open') return { action: 'noop' };
 
   // Load creds for price + sell
   let creds;
@@ -292,11 +364,18 @@ async function _manageOpenPosition(bot) {
      WHERE id=$6
   `, [exitPrice, exitReason, pnlUsd, pnlPct, peakPnl, trade.id]);
 
+  // Clear current_trade_id if it pointed at this trade; recompute cumulative PnL
   await query(`
     UPDATE bots_advance
-       SET current_trade_id=NULL, cumulative_pnl_usd=cumulative_pnl_usd + $1, updated_at=NOW()
+       SET current_trade_id = (
+         SELECT id FROM bot_advance_trades
+          WHERE bot_id=$2 AND status='open' AND id != $3
+          ORDER BY id DESC LIMIT 1
+       ),
+       cumulative_pnl_usd = cumulative_pnl_usd + $1,
+       updated_at = NOW()
      WHERE id=$2
-  `, [pnlUsd, bot.id]);
+  `, [pnlUsd, bot.id, trade.id]);
 
   console.log(`[bot-advance/exec] bot ${bot.id} CLOSED ${trade.symbol} @ $${exitPrice} reason=${exitReason} pnl=$${pnlUsd}`);
   const icon = pnlUsd > 0 ? '🟢' : pnlUsd < 0 ? '🔴' : '⚪';
@@ -311,13 +390,31 @@ async function _manageOpenPosition(bot) {
 }
 
 // ─── Per-bot dispatcher ──────────────────────────────────────────────────────
+// Multi-position model: every tick we (1) manage ALL existing open positions,
+// then (2) try to open new positions if there's room under max_concurrent_positions.
+// The "1 position" model has been retired (current_trade_id is now just a
+// display hint pointing at the most recent open trade).
 export async function processBotAdvance(bot) {
   if (_runningBots.has(bot.id)) return { skipped: true, reason: 'inflight' };
   _runningBots.add(bot.id);
   try {
     if (bot.shadow_mode) return { skipped: true, reason: 'shadow_mode' };
-    if (bot.current_trade_id) return await _manageOpenPosition(bot);
-    return await _tryOpenPosition(bot);
+
+    // 1. Manage all currently open positions (exit checks)
+    const { rows: openTrades } = await query(
+      `SELECT * FROM bot_advance_trades WHERE bot_id=$1 AND status='open' ORDER BY id`,
+      [bot.id]
+    );
+    const manageResults = [];
+    for (const trade of openTrades) {
+      const r = await _manageOnePosition(bot, trade).catch(e => ({ action: 'error', error: e.message }));
+      manageResults.push({ trade_id: trade.id, ...r });
+    }
+
+    // 2. After managing, see if there's room to open new positions
+    const openR = await _tryOpenPosition(bot);
+
+    return { manage: manageResults, open: openR };
   } finally {
     _runningBots.delete(bot.id);
   }

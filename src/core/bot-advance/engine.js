@@ -70,15 +70,27 @@ export async function scanBotAdvance(bot) {
   _runningBots.add(bot.id);
 
   try {
-    // 1. If holding a position, log 'hold' and return
-    if (bot.current_trade_id) {
+    // 2026-05-28: multi-position model — scanner ALWAYS scans regardless of how
+    // many positions the bot already holds. Position cap is enforced in the
+    // executor (max_concurrent_positions). The scanner is a pure "interesting
+    // candidates" log; the executor decides what to do with them.
+    //
+    // If the bot is already at the cap, we still log 'hold' so the dashboard's
+    // last_scan timestamp updates (operators can see the bot is alive).
+    const { rows: posRow } = await query(
+      `SELECT COUNT(*)::int AS n FROM bot_advance_trades WHERE bot_id=$1 AND status IN ('open','pending')`,
+      [bot.id]
+    );
+    const openCount = posRow[0]?.n ?? 0;
+    const maxPositions = Number(bot.rules?.sizing?.max_concurrent_positions) || 5;
+    if (openCount >= maxPositions) {
       await logDecision({
         botId:      bot.id,
         action:     'hold',
-        notes:      `holding trade #${bot.current_trade_id}`,
+        notes:      `at position cap (${openCount}/${maxPositions}) — not scanning`,
         shadowMode: bot.shadow_mode,
       });
-      return { action: 'hold' };
+      return { action: 'hold', open: openCount, cap: maxPositions };
     }
 
     const enabledRules = Array.isArray(bot.enabled_rules) ? bot.enabled_rules : [];
