@@ -37,6 +37,7 @@ import crypto from 'crypto';
 import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 import { SP500, NASDAQ100 } from '../research/sp500.js';
+import { sectorOf, SECTOR_COLORS, ETF_EXCLUDE } from '../core/sp500-sectors.js';
 import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades, clearPnlCache } from '../core/trader.js';
 import cron from 'node-cron';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, getDynamicUniverse, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
@@ -282,12 +283,12 @@ async function migrateUsersToDb() {
 
 // 'stats' merged into 'health' (2026-05-25). Both keys accepted for backwards
 // compat — TAB_PAGE_MAP in index.html aliases 'stats' → 'health'.
-const ALL_TABS    = ['dashboard', 'trades', 'scores', 'market', 'news', 'health', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots'];
+const ALL_TABS    = ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'health', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener'];
 const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
 
 const DEFAULT_PERMISSIONS = {
   admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
+  viewer: { tabs: ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
 };
 
 function getPermissions(user) {
@@ -1896,6 +1897,582 @@ app.get('/api/home-earnings', async (req, res) => {
   }
 });
 
+// ── /api/home-feed ─────────────────────────────────────────────────────────
+//
+// Single fat endpoint backing the Home tab's mega-grid. Fans out to 7
+// independent sources in parallel with allSettled — any one source can fail
+// without dragging the rest down. Each panel renders from its own slice of
+// the response.
+//
+// Sources (with TTLs picked to match how often each one actually changes):
+//   • indices   — market sentiment + intraday sparklines (60s)
+//   • hot_news  — categorizer "hot" filtered to last 1h (60s)
+//   • picks     — top conviction_scores grade A/B (5 min)
+//   • portfolio — user's Alpaca + Moomoo glance (30s)
+//   • smart     — recent UW flow + insider mega-buys (60s)
+//   • movers    — top % movers (cached upstream)
+//   • earnings  — next 7d earnings calendar (1h)
+//
+// requireAuth-gated because the portfolio slice reads the session's user.
+app.get('/api/home-feed', requireAuth, async (req, res) => {
+  try {
+    const username = req.session?.username;
+    const dbUser   = isDbAvailable() ? await getDbUser(username).catch(() => null) : null;
+    // Honor the global broker dropdown — when the user selects paper/moomoo/live in the
+    // nav, the Home portfolio panel must follow. Previously this endpoint ignored
+    // `source` and always picked from a fixed priority list, which made admins see
+    // moomoo data on Home even after switching to paper in the dropdown.
+    const rawSrc = req.query.source;
+    const requestedSource = ['moomoo','alpaca','alpaca_live','tiger','tiger_demo'].includes(rawSrc) ? rawSrc : null;
+
+    // ── Sub-fetchers — each wrapped in try/catch via allSettled below ────
+    const indicesP = (async () => {
+      const [sent, sparks] = await Promise.all([
+        getMarketSentiment().catch(() => null),
+        fetch(`http://localhost:${PORT}/api/market/sparklines?symbols=DIA,QQQ,SPY,IWM`, {
+          headers: { Cookie: req.headers.cookie || '' },
+        }).then(r => r.json()).catch(() => null),
+      ]);
+      return { sentiment: sent, sparklines: sparks };
+    })();
+
+    const hotNewsP = (async () => {
+      if (!isDbAvailable()) return [];
+      const { getCategorizedNews } = await import('../core/news-categorizer.js');
+      const r = await getCategorizedNews({ category: 'hot', limit: 30, username });
+      // Tight 1h window — the categorizer's "hot" rule is 6h, we narrow further
+      const oneHourAgo = Date.now() - 60 * 60 * 1000;
+      const fresh = (r.articles || []).filter(a => new Date(a.published_at).getTime() >= oneHourAgo);
+      // If nothing in last hour (off-hours), widen to last 3h so the panel
+      // never looks empty
+      return fresh.length ? fresh.slice(0, 8) : (r.articles || []).slice(0, 8);
+    })();
+
+    const picksP = (async () => {
+      if (!isDbAvailable()) return [];
+      // Smart picks engine — surfaces forward-looking setups, NOT
+      // "already-ripped" high-conviction names. See src/core/home-picks.js
+      // for the full reasoning: insider just bought, smart money positioning,
+      // pullback in uptrend, fresh breakout, earnings catalyst setup.
+      // We pull 15 — the panel shows 6 by default and toggles to reveal the rest.
+      const { getSmartPicks } = await import('../core/home-picks.js');
+      return getSmartPicks({ limit: 15 });
+    })();
+
+    const portfolioP = (async () => {
+      // Honor the global dropdown when set — Home portfolio must match the source
+      // the user picked in the nav. Falls back to priority order when no source
+      // requested (legacy callers, first page-paint before the dropdown wires up).
+      const sources = [];
+      if (requestedSource) {
+        sources.push(requestedSource);
+      } else {
+        if (dbUser?.moomoo_acc_id)         sources.push('moomoo');
+        if (dbUser?.alpaca_live_api_key)   sources.push('alpaca_live');
+        if (dbUser?.alpaca_api_key)        sources.push('alpaca');     // paper
+        // Admin fallback: even without per-user creds, hit moomoo + alpaca env
+        const isAdmin = (await getUser(username))?.role === 'admin';
+        if (isAdmin && !sources.length) sources.push('moomoo', 'alpaca_live', 'alpaca');
+      }
+
+      if (!sources.length) {
+        return { totalValue: null, todayPnL: null, positions: 0, top: null, bottom: null, source: null, holdings: [] };
+      }
+
+      for (const src of sources) {
+        try {
+          const data = await getAccountData(src, username);
+          const account = data?.account;
+          const positions = data?.positions || [];
+          // Skip this source if no account came back — try the next one
+          if (!account) continue;
+
+          const value =
+            Number(account.portfolio_value ?? account.equity ?? 0);
+          const lastEq = Number(account.last_equity ?? 0);
+          // Moomoo: use realized + unrealized today_pl from positions for the
+          // intraday number (Alpaca exposes equity-vs-last_equity directly).
+          let todayPnL = 0;
+          if (src === 'moomoo') {
+            todayPnL = positions.reduce((s, p) => s + Number(p.today_pl || 0), 0);
+          } else {
+            todayPnL = value - lastEq;
+          }
+
+          let top = null, bottom = null;
+          for (const p of positions) {
+            // Each broker uses different field names — try all common ones
+            const dayPct = Number(
+              p.change_today ?? p.unrealized_intraday_plpc ?? p.today_pl_pct ?? 0
+            ) * (Math.abs(p.change_today ?? p.unrealized_intraday_plpc ?? 0) > 1 ? 1 : 100);
+            if (!top || dayPct > top.day_pct) top = { symbol: p.symbol, day_pct: dayPct };
+            if (!bottom || dayPct < bottom.day_pct) bottom = { symbol: p.symbol, day_pct: dayPct };
+          }
+
+          // Enrich the top positions with risk / hedge data so the Home panel
+          // can show "RISK / HEDGE NEEDED" tags without a second round-trip.
+          // Cap at 8 to bound cost — Home is a glance view, not the full advisor.
+          let enriched = [];
+          try {
+            const { enrichPositions } = await import('./portfolio-advisor.js');
+            // Sort by market value desc, take top 8, normalize field names
+            const normalized = positions.map(p => ({
+              ...p,
+              symbol:        p.symbol,
+              qty:           Number(p.qty ?? p.quantity ?? p.position_qty ?? 0),
+              avg_entry:     Number(p.avg_entry_price ?? p.avg_cost ?? p.cost_price ?? 0),
+              current_price: Number(p.current_price ?? p.market_price ?? p.last_price ?? p.price ?? 0),
+              market_val:    Number(p.market_value ?? p.market_val ?? 0),
+              unreal_pl:     Number(p.unrealized_pl ?? p.unrealized_pnl ?? p.pl ?? 0),
+              unreal_plpc:   Number(p.unrealized_plpc ?? p.unrealized_pl_pct ?? 0),
+            })).sort((a, b) => (b.market_val || 0) - (a.market_val || 0)).slice(0, 8);
+            const full = await enrichPositions(normalized, value, query);
+            enriched = full.map(p => ({
+              symbol:        p.symbol,
+              qty:           p.qty,
+              avg_entry:     p.avg_entry,
+              current_price: p.current_price,
+              market_val:    p.market_val,
+              unreal_pl:     p.unreal_pl,
+              unreal_plpc:   Math.abs(p.unreal_plpc) > 1 ? p.unreal_plpc : (p.unreal_plpc * 100), // normalize to %
+              pct_of_port:   p.pct_of_portfolio,
+              risk_score:    p.risk?.score ?? 0,
+              risk_grade:    p.risk?.grade ?? 'unknown',
+              hedge_needed:  !!(p.hedge && p.hedge.suggested),
+            }));
+          } catch (e) {
+            console.warn('[home-feed portfolio] enrich failed:', e.message);
+          }
+
+          return {
+            totalValue: value,
+            todayPnL,
+            positions:  positions.length,
+            top,
+            bottom,
+            source: src,
+            holdings: enriched,
+          };
+        } catch (e) {
+          console.warn(`[home-feed portfolio] ${src} failed:`, e.message);
+          // Fall through to the next source
+        }
+      }
+      return { totalValue: null, todayPnL: null, positions: 0, top: null, bottom: null, source: null, holdings: [] };
+    })();
+
+    const smartP = (async () => {
+      if (!isDbAvailable()) return { flow: [], insider: [] };
+      const [{ rows: flow }, { rows: insider }] = await Promise.all([
+        query(`
+          SELECT ticker, side, premium, sentiment, alerted_at
+          FROM uw_flow_alerts
+          WHERE alerted_at >= NOW() - INTERVAL '24 hours'
+            AND premium >= 200000
+          ORDER BY alerted_at DESC
+          LIMIT 6
+        `),
+        query(`
+          SELECT ticker, insider_name, role, transaction_type, value, filed_at
+          FROM uw_insider_trades
+          WHERE filed_at >= NOW() - INTERVAL '7 days'
+            AND LOWER(transaction_type) LIKE '%buy%'
+            AND value >= 500000
+          ORDER BY filed_at DESC
+          LIMIT 5
+        `),
+      ]);
+      return { flow, insider };
+    })();
+
+    const moversP = getMarketMovers({ limit: 12 }).catch(() => ({ gainers: [], decliners: [] }));
+
+    const earningsP = (async () => {
+      try {
+        // Pull the next 7 weekdays of upcoming earnings. We can't rely on just
+        // `today` because today might be a weekend, holiday, or simply have
+        // zero reporters (e.g. Memorial Day → empty). We use the same per-day
+        // cache as /api/earnings-month so we don't pay the Nasdaq round-trip
+        // twice — they're hot for 6h.
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const dates = [];
+        for (let i = 0; i < 10 && dates.length < 7; i++) {
+          const d = new Date(today.getTime() + i * 86400000);
+          const dow = d.getDay();
+          if (dow === 0 || dow === 6) continue;     // skip weekends
+          dates.push(localYmd(d));   // local date — see localYmd note above
+        }
+        const dayResults = await Promise.allSettled(
+          dates.map(ds => ttlCache(`earnings:cal:${ds}`, 6 * 60 * 60 * 1000,
+            () => fetchNasdaqEarningsDay(ds)))
+        );
+        const flat = [];
+        dayResults.forEach((r, i) => {
+          if (r.status !== 'fulfilled' || !Array.isArray(r.value)) return;
+          for (const e of r.value) flat.push({ ...e, date: dates[i] });
+        });
+        // Order: nearest date first, biggest market cap within each date.
+        // fetchNasdaqEarningsDay already sorts by market cap desc per day, so
+        // a stable sort by date is enough.
+        flat.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+        const raw = flat.slice(0, 8);
+        if (!raw.length) return [];
+
+        // Enrich each ticker with UW options-flow conviction (Strong Bull /
+        // Bull / Mixed / Bear / Strong Bear). Tells the user the smart-money
+        // bias *going into* the print. uw-conviction.js has its own per-symbol
+        // 5-min cache so this is cheap on repeat.
+        try {
+          const { getUwConvictionForSymbols } = await import('../core/uw-conviction.js');
+          const syms = raw.map(e => e.symbol).filter(Boolean);
+          const biasMap = await getUwConvictionForSymbols(syms);
+          return raw.map(e => {
+            const conv = biasMap.get(String(e.symbol || '').toUpperCase());
+            return {
+              ...e,
+              bias: conv?.composite
+                ? { label: conv.composite.label, score: conv.composite.score }
+                : { label: 'no_data', score: null },
+            };
+          });
+        } catch (biasErr) {
+          console.warn('[home-feed earnings] bias enrichment skipped:', biasErr.message);
+          return raw;
+        }
+      } catch (e) {
+        console.warn('[home-feed earnings] failed:', e.message);
+        return [];
+      }
+    })();
+
+    // Per-fetcher timeout — wraps each promise so a slow one (e.g. Yahoo
+    // throttle, broker API) can't gate the entire home page. Any fetcher
+    // exceeding budget falls back to its empty default; the panel will
+    // poll-refresh on its own clock and pick up data later.
+    const withTimeout = (p, ms, fallback) => Promise.race([
+      p,
+      new Promise(resolve => setTimeout(() => resolve(fallback), ms)),
+    ]).catch(() => fallback);
+
+    const [indices, hotNews, picks, portfolio, smart, movers, earnings] = await Promise.all([
+      withTimeout(indicesP,   4000, null),
+      withTimeout(hotNewsP,   4000, []),
+      withTimeout(picksP,     5000, []),
+      withTimeout(portfolioP, 6000, { totalValue: null, todayPnL: null, positions: 0, top: null, bottom: null, source: null, holdings: [] }),
+      withTimeout(smartP,     3000, { flow: [], insider: [] }),
+      withTimeout(moversP,    3000, { gainers: [], decliners: [] }),
+      withTimeout(earningsP,  4000, []),
+    ]);
+
+    res.json({
+      indices, hot_news: hotNews, picks, portfolio, smart, movers, earnings,
+      asOf: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error('[home-feed]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Extracts the most-important driver from a conviction_scores.signals JSON
+// blob. Best-effort — if the shape is unfamiliar, return null and the UI
+// just doesn't render a "why" line.
+function _topDriverFromSignals(signals) {
+  if (!signals || typeof signals !== 'object') return null;
+  if (signals.top_driver)   return String(signals.top_driver).slice(0, 80);
+  if (signals.setup_thesis) return String(signals.setup_thesis).slice(0, 80);
+  if (signals.thesis)       return String(signals.thesis).slice(0, 80);
+  if (signals.catalyst)     return String(signals.catalyst).slice(0, 80);
+  return null;
+}
+
+// ─── Screener — Finviz-style filterable stock universe ───────────────────────
+// Backed by `tradable_universe` (~8.3K tickers from Alpaca) + `screener_technicals`
+// (RSI, SMA, 52w, returns). Sectors/fundamentals filled by the screener-backfill
+// crons. All filters are optional — pass `?sector=Technology&minMcap=10000000000`
+// etc. Sorted + paginated server-side so the UI stays responsive even with 8K rows.
+
+// ─── Momentum Race — live top gainers + decliners with smooth animation ────
+// Returns two ranked lists used by the 🌊 Momentum tab. The frontend animates
+// bar widths + position swaps as ranks change. We constrain to liquid stocks
+// (price ≥ $5, market cap ≥ $1B, volume ≥ 500K) so noise pennies don't crowd
+// the race. Cached 5 s — the race poll cadence is 6 s.
+app.get('/api/momentum', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(20, Math.max(5, Number(req.query.limit) || 10));
+    const data = await ttlCache(`momentum:race:${limit}`, 5000, async () => {
+      const cols = `symbol, company_name, last_price, day_change_pct, day_volume, market_cap_usd, sector`;
+      const filter = `last_price >= 5 AND market_cap_usd >= 1000000000 AND day_volume >= 500000 AND day_change_pct IS NOT NULL`;
+      const [{ rows: gainers }, { rows: decliners }] = await Promise.all([
+        query(`SELECT ${cols} FROM tradable_universe WHERE ${filter} ORDER BY day_change_pct DESC LIMIT $1`, [limit]),
+        query(`SELECT ${cols} FROM tradable_universe WHERE ${filter} ORDER BY day_change_pct ASC  LIMIT $1`, [limit]),
+      ]);
+      const mapRow = (r) => ({
+        symbol:        r.symbol,
+        name:          r.company_name,
+        price:         r.last_price        != null ? Number(r.last_price)        : null,
+        chg_pct:       r.day_change_pct    != null ? Number(r.day_change_pct)    : null,
+        volume:        r.day_volume        != null ? Number(r.day_volume)        : null,
+        market_cap:    r.market_cap_usd    != null ? Number(r.market_cap_usd)    : null,
+        sector:        r.sector,
+      });
+      return {
+        gainers:   gainers.map(mapRow),
+        decliners: decliners.map(mapRow),
+        as_of:     new Date().toISOString(),
+      };
+    });
+    res.json(data);
+  } catch (e) {
+    console.error('[momentum]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/screener/meta', requireAuth, async (req, res) => {
+  // Lightweight: just the distinct sectors + industries + counts. Used to populate
+  // the filter dropdowns. Cached 1h since this rarely changes.
+  try {
+    const result = await ttlCache('screener:meta', 60 * 60 * 1000, async () => {
+      const [{ rows: sectors }, { rows: industries }, { rows: exch }, { rows: total }] = await Promise.all([
+        query(`SELECT sector, COUNT(*) AS n FROM tradable_universe WHERE sector IS NOT NULL GROUP BY sector ORDER BY sector`),
+        query(`SELECT industry, COUNT(*) AS n FROM tradable_universe WHERE industry IS NOT NULL GROUP BY industry ORDER BY industry`),
+        query(`SELECT exchange, COUNT(*) AS n FROM tradable_universe WHERE exchange IS NOT NULL GROUP BY exchange ORDER BY exchange`),
+        query(`SELECT COUNT(*) AS total,
+                      COUNT(sector) AS with_sector,
+                      COUNT(pe_ratio) AS with_pe,
+                      COUNT(last_price) AS with_price
+               FROM tradable_universe`),
+      ]);
+      return {
+        sectors:    sectors.map(r => ({ value: r.sector, count: Number(r.n) })),
+        industries: industries.map(r => ({ value: r.industry, count: Number(r.n) })),
+        exchanges:  exch.map(r => ({ value: r.exchange, count: Number(r.n) })),
+        coverage:   total[0] ? {
+          total:       Number(total[0].total),
+          with_sector: Number(total[0].with_sector),
+          with_pe:     Number(total[0].with_pe),
+          with_price:  Number(total[0].with_price),
+        } : null,
+      };
+    });
+    res.json(result);
+  } catch (e) {
+    console.error('[screener/meta]', e);
+    res.status(500).json({ error: 'Failed to load screener meta' });
+  }
+});
+
+app.get('/api/screener', requireAuth, async (req, res) => {
+  try {
+    // Spread into a mutable copy so presets can layer on without leaking.
+    const q = { ...req.query };
+
+    // Quick presets (single param `preset`) — saves the user from constructing
+    // complex filters. We layer the preset values UNDER the explicit query,
+    // so an explicit minPe still wins over a preset's minPe.
+    const PRESETS = {
+      // ── Finviz-style baseline presets ──
+      mega_caps:        { minMcap: 200_000_000_000 },
+      large_caps:       { minMcap: 10_000_000_000, maxMcap: 200_000_000_000 },
+      mid_caps:         { minMcap: 2_000_000_000,  maxMcap: 10_000_000_000 },
+      small_caps:       { minMcap: 300_000_000,    maxMcap: 2_000_000_000 },
+      oversold:         { maxRsi: 30 },
+      overbought:       { minRsi: 70 },
+      near_52w_high:    { minFromHigh: -3 },
+      golden_cross:     { goldenCross: '1' },
+      momentum_winners: { minRet1m: 10, aboveSma50: '1' },
+      value:            { maxPe: 15, minDiv: 1 },
+      high_growth:      { minRet1m: 5, minRet3m: 15 },
+
+      // ── Smart-setup presets — leverage our edge tables ──
+      insider_clusters:  { signalTag: 'insider', sort: 'insider_net_30d', dir: 'desc' },
+      insider_xl:        { signalTag: 'insider_xl', sort: 'insider_net_30d', dir: 'desc' },
+      smart_money:       { signalTag: 'flow', sort: 'flow_premium_7d', dir: 'desc' },
+      smart_money_xl:    { signalTag: 'flow_xl', sort: 'flow_premium_7d', dir: 'desc' },
+      congress_buys:     { signalTag: 'congress', sort: 'congress_count_90d', dir: 'desc' },
+      bot_grade_a:       { signalTag: 'grade_a', sort: 'conviction_score', dir: 'desc' },
+      bot_grade_ab:      { minConviction: 60 },
+      mean_reversion:    { signalTag: 'mean_reversion', sort: 'rsi_14', dir: 'asc' },
+      volume_spike:      { signalTag: 'volume_spike', sort: 'day_change_pct', dir: 'desc' },
+      hot_setups:        { minSignalScore: 30, sort: 'signal_score', dir: 'desc' },  // 2+ signals
+    };
+    if (q.preset && PRESETS[q.preset]) {
+      for (const [k, v] of Object.entries(PRESETS[q.preset])) {
+        if (q[k] === undefined) q[k] = v;
+      }
+    }
+
+    // ── Build a WHERE clause from query params ─────────────────────────────
+    const where = [];
+    const args  = [];
+    const add = (clause, val) => {
+      if (val !== undefined && val !== '' && val !== null) {
+        args.push(val);
+        where.push(clause.replace('$$', `$${args.length}`));
+      }
+    };
+
+    // Text search — symbol or company name
+    if (q.search && String(q.search).trim()) {
+      const term = `%${String(q.search).trim().toUpperCase()}%`;
+      args.push(term);
+      where.push(`(u.symbol ILIKE $${args.length} OR UPPER(u.company_name) ILIKE $${args.length})`);
+    }
+
+    // Categorical filters
+    add('u.sector   = $$', q.sector);
+    add('u.industry = $$', q.industry);
+    add('u.exchange = $$', q.exchange);
+
+    // Numeric filters — accept "min" and "max" for each
+    add('u.market_cap_usd >= $$', q.minMcap   ? Number(q.minMcap)   : undefined);
+    add('u.market_cap_usd <= $$', q.maxMcap   ? Number(q.maxMcap)   : undefined);
+    add('u.last_price     >= $$', q.minPrice  ? Number(q.minPrice)  : undefined);
+    add('u.last_price     <= $$', q.maxPrice  ? Number(q.maxPrice)  : undefined);
+    add('u.day_change_pct >= $$', q.minChg    ? Number(q.minChg)    : undefined);
+    add('u.day_change_pct <= $$', q.maxChg    ? Number(q.maxChg)    : undefined);
+    add('u.day_volume     >= $$', q.minVolume ? Number(q.minVolume) : undefined);
+    add('u.pe_ratio       >= $$', q.minPe     ? Number(q.minPe)     : undefined);
+    add('u.pe_ratio       <= $$', q.maxPe     ? Number(q.maxPe)     : undefined);
+    add('u.dividend_yield >= $$', q.minDiv    ? Number(q.minDiv) / 100 : undefined);   // user enters % we store decimal
+    add('u.beta           >= $$', q.minBeta   ? Number(q.minBeta)   : undefined);
+    add('u.beta           <= $$', q.maxBeta   ? Number(q.maxBeta)   : undefined);
+
+    // Technical filters (joined from screener_technicals via t)
+    add('t.rsi_14            >= $$', q.minRsi      ? Number(q.minRsi)   : undefined);
+    add('t.rsi_14            <= $$', q.maxRsi      ? Number(q.maxRsi)   : undefined);
+    add('t.pct_from_52w_high >= $$', q.minFromHigh ? Number(q.minFromHigh) : undefined);
+    add('t.pct_from_52w_high <= $$', q.maxFromHigh ? Number(q.maxFromHigh) : undefined);
+    add('t.ret_1m            >= $$', q.minRet1m    ? Number(q.minRet1m) : undefined);
+    add('t.ret_1m            <= $$', q.maxRet1m    ? Number(q.maxRet1m) : undefined);
+    if (q.aboveSma50  === '1' || q.aboveSma50  === 'true') where.push('t.above_sma_50  = true');
+    if (q.aboveSma200 === '1' || q.aboveSma200 === 'true') where.push('t.above_sma_200 = true');
+    if (q.goldenCross === '1' || q.goldenCross === 'true') where.push('t.golden_cross  = true');
+
+    // Edge-signal filters (use the indexed signal_tags array)
+    if (q.signalTag) {
+      args.push(q.signalTag);
+      where.push(`u.signal_tags @> ARRAY[$${args.length}]::text[]`);
+    }
+    add('u.signal_score   >= $$', q.minSignalScore ? Number(q.minSignalScore) : undefined);
+    add('u.signal_count   >= $$', q.minSignals     ? Number(q.minSignals)     : undefined);
+    add('u.conviction_score >= $$', q.minConviction ? Number(q.minConviction) : undefined);
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    // Sort — includes both `tradable_universe` cols and `screener_technicals` cols
+    const SORTABLE = new Set([
+      'symbol','company_name','sector','industry',
+      'market_cap_usd','last_price','day_change_pct','day_volume',
+      'pe_ratio','forward_pe','eps_ttm','dividend_yield','beta','roe',
+      'profit_margin','revenue_growth','earnings_growth',
+      'rsi_14','pct_from_52w_high','pct_from_52w_low','ret_5d','ret_1m','ret_3m','ret_6m','ret_ytd',
+      // Edge signals
+      'signal_score','signal_count','conviction_score','insider_net_30d','flow_premium_7d','congress_count_90d',
+    ]);
+    let sort = String(q.sort || 'market_cap_usd');
+    if (!SORTABLE.has(sort)) sort = 'market_cap_usd';
+    const dir = String(q.dir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // Pagination
+    const limit  = Math.min(500, Math.max(1, Number(q.limit)  || 50));
+    const offset = Math.max(0, Number(q.offset) || 0);
+
+    // The two key columns for sorting could live in either table; pick the source.
+    // Technicals live on `t`, everything else (incl. edge signal cols) on `u`.
+    const sortFromTech = /^(rsi_14|pct_from_52w|ret_|sma_|atr_|rvol_|above_)/.test(sort);
+    const sortCol = sortFromTech ? `t.${sort}` : `u.${sort}`;
+
+    args.push(limit);  const limitIdx  = args.length;
+    args.push(offset); const offsetIdx = args.length;
+
+    const sql = `
+      SELECT
+        u.symbol, u.company_name, u.exchange, u.sector, u.industry, u.country,
+        u.market_cap_usd, u.last_price, u.day_change_pct, u.day_volume,
+        u.week_52_high, u.week_52_low,
+        u.pe_ratio, u.forward_pe, u.eps_ttm, u.dividend_yield, u.beta,
+        u.roe, u.profit_margin, u.revenue_growth, u.earnings_growth,
+        u.sparkline, u.signal_tags, u.signal_count, u.signal_score,
+        u.conviction_grade, u.conviction_score, u.insider_net_30d,
+        u.flow_premium_7d, u.flow_sentiment, u.congress_count_90d,
+        t.rsi_14, t.sma_20, t.sma_50, t.sma_200,
+        t.pct_from_52w_high, t.pct_from_52w_low,
+        t.ret_5d, t.ret_1m, t.ret_3m, t.ret_6m, t.ret_ytd,
+        t.above_sma_50, t.above_sma_200, t.golden_cross, t.rvol_30d, t.atr_14_pct
+      FROM tradable_universe u
+      LEFT JOIN screener_technicals t ON t.symbol = u.symbol
+      ${whereSql}
+      ORDER BY ${sortCol} ${dir} NULLS LAST, u.symbol ASC
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}
+    `;
+
+    const countSql = `
+      SELECT COUNT(*) AS n
+      FROM tradable_universe u
+      LEFT JOIN screener_technicals t ON t.symbol = u.symbol
+      ${whereSql}
+    `;
+    const countArgs = args.slice(0, args.length - 2);
+
+    const [{ rows }, { rows: countRows }] = await Promise.all([
+      query(sql, args),
+      query(countSql, countArgs),
+    ]);
+
+    res.json({
+      total: Number(countRows[0]?.n || 0),
+      count: rows.length,
+      limit, offset, sort, dir,
+      rows: rows.map(r => ({
+        ...r,
+        // Numeric fields come back as Pg numeric strings — normalize to JS numbers
+        market_cap_usd:    r.market_cap_usd    != null ? Number(r.market_cap_usd)    : null,
+        last_price:        r.last_price        != null ? Number(r.last_price)        : null,
+        day_change_pct:    r.day_change_pct    != null ? Number(r.day_change_pct)    : null,
+        day_volume:        r.day_volume        != null ? Number(r.day_volume)        : null,
+        pe_ratio:          r.pe_ratio          != null ? Number(r.pe_ratio)          : null,
+        forward_pe:        r.forward_pe        != null ? Number(r.forward_pe)        : null,
+        eps_ttm:           r.eps_ttm           != null ? Number(r.eps_ttm)           : null,
+        dividend_yield:    r.dividend_yield    != null ? Number(r.dividend_yield) * 100 : null, // → % for display
+        beta:              r.beta              != null ? Number(r.beta)              : null,
+        roe:               r.roe               != null ? Number(r.roe) * 100         : null,
+        profit_margin:     r.profit_margin     != null ? Number(r.profit_margin) * 100 : null,
+        revenue_growth:    r.revenue_growth    != null ? Number(r.revenue_growth) * 100 : null,
+        earnings_growth:   r.earnings_growth   != null ? Number(r.earnings_growth) * 100 : null,
+        rsi_14:            r.rsi_14            != null ? Number(r.rsi_14)            : null,
+        sma_20:            r.sma_20            != null ? Number(r.sma_20)            : null,
+        sma_50:            r.sma_50            != null ? Number(r.sma_50)            : null,
+        sma_200:           r.sma_200           != null ? Number(r.sma_200)           : null,
+        pct_from_52w_high: r.pct_from_52w_high != null ? Number(r.pct_from_52w_high) : null,
+        pct_from_52w_low:  r.pct_from_52w_low  != null ? Number(r.pct_from_52w_low)  : null,
+        ret_5d:            r.ret_5d            != null ? Number(r.ret_5d)            : null,
+        ret_1m:            r.ret_1m            != null ? Number(r.ret_1m)            : null,
+        ret_3m:            r.ret_3m            != null ? Number(r.ret_3m)            : null,
+        ret_6m:            r.ret_6m            != null ? Number(r.ret_6m)            : null,
+        ret_ytd:           r.ret_ytd           != null ? Number(r.ret_ytd)           : null,
+        rvol_30d:          r.rvol_30d          != null ? Number(r.rvol_30d)          : null,
+        atr_14_pct:        r.atr_14_pct        != null ? Number(r.atr_14_pct)        : null,
+        // Edge signals (already proper JS types from JSONB / arrays / ints)
+        sparkline:         Array.isArray(r.sparkline) ? r.sparkline.map(Number) : null,
+        signal_tags:       Array.isArray(r.signal_tags) ? r.signal_tags : [],
+        signal_count:      Number(r.signal_count || 0),
+        signal_score:      Number(r.signal_score || 0),
+        conviction_grade:  r.conviction_grade   || null,
+        conviction_score:  r.conviction_score   != null ? Number(r.conviction_score)  : null,
+        insider_net_30d:   r.insider_net_30d    != null ? Number(r.insider_net_30d)   : null,
+        flow_premium_7d:   r.flow_premium_7d    != null ? Number(r.flow_premium_7d)   : null,
+        flow_sentiment:    r.flow_sentiment     || null,
+        congress_count_90d:Number(r.congress_count_90d || 0),
+      })),
+    });
+  } catch (e) {
+    console.error('[screener]', e);
+    res.status(500).json({ error: 'Screener query failed: ' + e.message });
+  }
+});
+
 // Legacy combined endpoint — kept for backward compat
 app.get('/api/home', async (req, res) => {
   try {
@@ -2058,6 +2635,15 @@ const NASDAQ_CAL_HEADERS = {
   'Referer': 'https://www.nasdaq.com/market-activity/earnings',
 };
 
+// Local-time YYYY-MM-DD formatter. The naive `.toISOString().split('T')[0]`
+// silently converts to UTC, which off-by-ones every calendar date when the
+// server runs in a non-UTC timezone (e.g. +08 turns "today midnight" into
+// "yesterday 16:00 UTC"). The earnings calendars are US-business-day keyed,
+// so we always want the server's *local* calendar date, never UTC.
+function localYmd(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function parseMarketCapNum(str) {
   if (!str) return 0;
   const s = String(str).replace(/[$,\s]/g, '');
@@ -2096,6 +2682,86 @@ async function fetchNasdaqEarningsDay(dateStr) {
   } catch { return null; }
 }
 
+// ─── Yahoo-aggregate earnings fallback ────────────────────────────────────────
+// Nasdaq (Akamai) regularly 403s us. When that happens, fall back to looping
+// the S&P 500 + Nasdaq-100 ticker list against Yahoo Finance `calendarEvents`
+// and bucketing each symbol's next earnings date. Cached for 4h via the
+// promise itself — we don't want 8 concurrent dashboard panels each kicking
+// off a 500-symbol Yahoo crawl.
+let _yahooEarningsByDate     = null;
+let _yahooEarningsByDateAt   = 0;
+const YAHOO_EARN_TTL_MS      = 4 * 60 * 60 * 1000;
+async function getYahooEarningsByDate() {
+  const now = Date.now();
+  if (_yahooEarningsByDate && (now - _yahooEarningsByDateAt) < YAHOO_EARN_TTL_MS) {
+    return _yahooEarningsByDate;
+  }
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const cutoff = new Date(today.getTime() + 35 * 86400000);
+  const byDate = new Map();
+  const BATCH = 20;
+  let totalOk = 0, totalErr = 0, withFuture = 0, withoutFuture = 0;
+  let firstErr = null;
+  console.log(`[earnings-fallback] starting Yahoo aggregate; list size=${EARNINGS_FALLBACK_LIST.length}`);
+  for (let i = 0; i < EARNINGS_FALLBACK_LIST.length; i += BATCH) {
+    const batch = EARNINGS_FALLBACK_LIST.slice(i, i + BATCH);
+    const yfResults = await Promise.allSettled(
+      batch.map(sym => _yf.quoteSummary(sym, { modules: ['calendarEvents', 'price'] }))
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const sym = batch[j];
+      const r = yfResults[j];
+      if (r.status !== 'fulfilled' || !r.value) {
+        totalErr++;
+        if (!firstErr && r.status === 'rejected') firstErr = r.reason?.message || String(r.reason);
+        continue;
+      }
+      totalOk++;
+      const rawDates = r.value.calendarEvents?.earnings?.earningsDate ?? [];
+      const future = rawDates
+        .map(d => (d instanceof Date ? d : new Date(d)))
+        .filter(d => !isNaN(d) && d >= today && d <= cutoff)
+        .sort((a, b) => a - b);
+      if (!future.length) { withoutFuture++; continue; }
+      withFuture++;
+      const dateStr = future[0].toISOString().split('T')[0];
+      const mcap = r.value.price?.marketCap;
+      const entry = {
+        symbol:        sym.toUpperCase(),
+        company:       r.value.price?.longName || r.value.price?.shortName || sym,
+        call_time:     '?',
+        eps_estimate:  null,
+        market_cap:    mcap ? `$${(mcap / 1e9).toFixed(1)}B` : null,
+        market_cap_n:  Number(mcap) || 0,
+        source:        'yahoo',
+      };
+      if (!byDate.has(dateStr)) byDate.set(dateStr, []);
+      byDate.get(dateStr).push(entry);
+    }
+  }
+  // Sort each day's entries by market cap desc (matches Nasdaq behavior)
+  for (const arr of byDate.values()) arr.sort((a, b) => b.market_cap_n - a.market_cap_n);
+  _yahooEarningsByDate   = byDate;
+  _yahooEarningsByDateAt = now;
+  console.log(`[earnings-fallback] Yahoo done: ok=${totalOk} err=${totalErr} withFuture=${withFuture} withoutFuture=${withoutFuture} days=${byDate.size} entries=${[...byDate.values()].reduce((s, a) => s + a.length, 0)}${firstErr ? ` firstErr="${firstErr.slice(0,80)}"` : ''}`);
+  return byDate;
+}
+
+// Resilient single-day fetch: Nasdaq first, Yahoo aggregate on failure/empty.
+// All three Earnings Hub endpoints + the Home feed should use THIS, not the
+// raw Nasdaq function — otherwise an Akamai 403 wipes the whole panel.
+async function fetchEarningsForDay(dateStr) {
+  const nasdaq = await fetchNasdaqEarningsDay(dateStr);
+  if (Array.isArray(nasdaq) && nasdaq.length > 0) return nasdaq;
+  try {
+    const yMap = await getYahooEarningsByDate();
+    return yMap.get(dateStr) || [];
+  } catch (e) {
+    console.warn('[fetchEarningsForDay] Yahoo fallback failed:', e.message);
+    return [];
+  }
+}
+
 app.get('/api/earnings-month', requireAuth, async (req, res) => {
   try {
     const todayLocal = new Date();
@@ -2110,7 +2776,7 @@ app.get('/api/earnings-month', requireAuth, async (req, res) => {
         const d = new Date(today.getTime() + i * 86400000);
         const dow = d.getDay();
         if (dow === 0 || dow === 6) continue; // skip weekends
-        dates.push(d.toISOString().split('T')[0]);
+        dates.push(localYmd(d));   // local date — see localYmd note above
       }
 
       // ── Primary: Nasdaq Calendar API (parallel, one request per day) ──
@@ -2256,7 +2922,7 @@ app.get('/api/earnings-calendar', requireAuth, async (req, res) => {
 
     // ── Primary: Nasdaq Calendar API (per-day, 6h TTL) ──
     const nasdaqResults = await Promise.allSettled(
-      dates.map(d => ttlCache(`earnings:cal:${d}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(d)))
+      dates.map(d => ttlCache(`earnings:cal:${d}`, 6 * 60 * 60 * 1000, () => fetchEarningsForDay(d)))
     );
 
     const earnings = [];
@@ -2343,7 +3009,7 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
   try {
     const now   = new Date();
     const today = new Date(now); today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = localYmd(today);   // local date — see localYmd note above
     const cacheKey = `tomorrow:catalysts:${todayStr}`;
     if (req.query.force === '1') _cache.delete(cacheKey);
 
@@ -2352,13 +3018,13 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
       const dates = [];
       let d = new Date(today);
       while (dates.length < 6) {
-        if (d.getDay() !== 0 && d.getDay() !== 6) dates.push(d.toISOString().split('T')[0]);
+        if (d.getDay() !== 0 && d.getDay() !== 6) dates.push(localYmd(d));
         d = new Date(d.getTime() + 86400000);
       }
 
       // Fetch calendar for all dates in parallel (reuses Nasdaq cache)
       const calResults = await Promise.allSettled(
-        dates.map(ds => ttlCache(`earnings:cal:${ds}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(ds)))
+        dates.map(ds => ttlCache(`earnings:cal:${ds}`, 6 * 60 * 60 * 1000, () => fetchEarningsForDay(ds)))
       );
 
       // Build flat list with date + day offset
@@ -2368,9 +3034,13 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
         items.forEach(e => allEntries.push({ ...e, date: dates[i], day_offset: i }));
       });
 
-      // Categorise
-      const amc_raw   = allEntries.filter(e => e.day_offset === 0 && e.call_time === 'AMC');
-      const bmo_raw   = allEntries.filter(e => e.day_offset === 1 && e.call_time === 'BMO');
+      // Categorise. When Nasdaq is up we get exact AMC/BMO tags. When we
+      // fall back to Yahoo, call_time is '?' (Yahoo doesn't expose it) — so
+      // bucket by day_offset alone: today → AMC tonight, tomorrow → BMO
+      // tomorrow. Otherwise the entire AMC + BMO sections render blank
+      // whenever Nasdaq is 403'd.
+      const amc_raw   = allEntries.filter(e => e.day_offset === 0 && (e.call_time === 'AMC' || e.call_time === '?'));
+      const bmo_raw   = allEntries.filter(e => e.day_offset === 1 && (e.call_time === 'BMO' || e.call_time === '?'));
       const drift_raw = allEntries.filter(e => e.day_offset >= 2 && e.day_offset <= 5);
 
       // Sort each bucket by market cap descending, cap at 12 each
@@ -2484,18 +3154,68 @@ app.get('/api/tomorrow-catalysts', requireAuth, async (req, res) => {
         };
       };
 
+      // Batched enrichment — 6 symbols at a time so we don't blow past Yahoo's
+      // rate limits and end up with every card showing "—" for every field.
+      // Previously we fired 36 parallel symbols × 5 parallel sub-calls = 180
+      // concurrent Yahoo hits, which triggered throttling.
+      async function batchedEnrich(list, batchSize = 6) {
+        const results = [];
+        for (let i = 0; i < list.length; i += batchSize) {
+          const batch = list.slice(i, i + batchSize);
+          const settled = await Promise.allSettled(batch.map(enrich));
+          for (const r of settled) results.push(r);
+        }
+        return results;
+      }
       const [amcEnriched, bmoEnriched, driftEnriched] = await Promise.all([
-        Promise.allSettled(amcList.map(enrich)),
-        Promise.allSettled(bmoList.map(enrich)),
-        Promise.allSettled(driftList.map(enrich)),
+        batchedEnrich(amcList),
+        batchedEnrich(bmoList),
+        batchedEnrich(driftList),
       ]);
 
       const ok = arr => arr.filter(r => r.status === 'fulfilled').map(r => r.value);
+      const amcOk = ok(amcEnriched), bmoOk = ok(bmoEnriched), driftOk = ok(driftEnriched);
+      const allRows = [...amcOk, ...bmoOk, ...driftOk];
+
+      // ── DB backfill: Yahoo's crumb expires every few hours and when it does
+      // the enrichment returns mostly nulls. Fill the gaps from
+      // tradable_universe + screener_technicals so the cards don't all show
+      // "—" for every field. Analyst target/consensus require UW (live API,
+      // not DB) — those stay null when Yahoo is dead and UW is throttled.
+      const symsNeedingFill = allRows
+        .filter(r => r.price == null || r.eps_estimate == null)
+        .map(r => r.symbol);
+      if (symsNeedingFill.length && isDbAvailable()) {
+        try {
+          const { rows: dbRows } = await query(`
+            SELECT u.symbol, u.last_price, u.day_change_pct, u.eps_ttm, u.pe_ratio,
+                   u.dividend_yield, u.beta, u.market_cap_usd, u.company_name, u.sector,
+                   t.rsi_14, t.ret_1m, t.pct_from_52w_high
+            FROM tradable_universe u
+            LEFT JOIN screener_technicals t ON t.symbol = u.symbol
+            WHERE u.symbol = ANY($1::text[])
+          `, [symsNeedingFill]);
+          const dbMap = {};
+          for (const r of dbRows) dbMap[r.symbol] = r;
+          for (const row of allRows) {
+            const d = dbMap[row.symbol];
+            if (!d) continue;
+            if (row.price == null && d.last_price != null)        row.price = Number(d.last_price);
+            if (row.eps_estimate == null && d.eps_ttm != null)    row.eps_estimate = Number(d.eps_ttm);
+            if (row.market_cap == null && d.market_cap_usd != null) row.market_cap = d.market_cap_usd >= 1e9 ? `$${(d.market_cap_usd/1e9).toFixed(1)}B` : `$${(d.market_cap_usd/1e6).toFixed(0)}M`;
+            if (!row.company || row.company === row.symbol) {
+              if (d.company_name) row.company = d.company_name;
+            }
+          }
+        } catch (e) {
+          console.warn('[tomorrow-catalysts] DB backfill failed:', e.message);
+        }
+      }
 
       return {
-        amc_tonight:  ok(amcEnriched),
-        bmo_tomorrow: ok(bmoEnriched),
-        pre_drift:    ok(driftEnriched),
+        amc_tonight:  amcOk,
+        bmo_tomorrow: bmoOk,
+        pre_drift:    driftOk,
         generated_at: new Date().toISOString(),
       };
     });
@@ -2517,7 +3237,7 @@ app.get('/api/earnings-preview', requireAuth, async (req, res) => {
     const dow = today.getDay(); // 0=Sun,1=Mon,...,6=Sat
     const daysToNextMon = dow === 0 ? 1 : 8 - dow; // days until next Monday
     const nextMon = new Date(today.getTime() + daysToNextMon * 86400000);
-    const weekStr = nextMon.toISOString().split('T')[0];
+    const weekStr = localYmd(nextMon);   // local date — see localYmd note above
     const cacheKey = `earnings:preview:week:${weekStr}`;
 
     if (req.query.force === '1') _cache.delete(cacheKey);
@@ -2527,10 +3247,10 @@ app.get('/api/earnings-preview', requireAuth, async (req, res) => {
       const dates = [];
       for (let i = 0; i < 5; i++) {
         const d = new Date(nextMon.getTime() + i * 86400000);
-        dates.push(d.toISOString().split('T')[0]);
+        dates.push(localYmd(d));
       }
       const nasdaqResults = await Promise.allSettled(
-        dates.map(d => ttlCache(`earnings:cal:${d}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(d)))
+        dates.map(d => ttlCache(`earnings:cal:${d}`, 6 * 60 * 60 * 1000, () => fetchEarningsForDay(d)))
       );
 
       // Flatten to unique symbols, sort by market cap (most tradable first), cap at 12
@@ -2641,6 +3361,46 @@ app.get('/api/earnings-preview', requireAuth, async (req, res) => {
         .filter(r => r.status === 'fulfilled')
         .map(r => r.value)
         .sort((a, b) => b.trend_score - a.trend_score);  // strongest first
+
+      // ── DB backfill: Yahoo's crumb expires regularly and the per-symbol
+      // quoteSummary calls then return null for everything, leaving cards
+      // showing "—" everywhere. Fill price + EPS + company from the daily
+      // tradable_universe snapshot so the cards stay useful even when
+      // Yahoo is throttled. (Same pattern as /api/tomorrow-catalysts.)
+      const needFill = stocks.filter(s => s.price == null || s.eps_estimate == null).map(s => s.symbol);
+      if (needFill.length && isDbAvailable()) {
+        try {
+          const { rows: dbRows } = await query(`
+            SELECT u.symbol, u.last_price, u.day_change_pct, u.eps_ttm, u.pe_ratio,
+                   u.dividend_yield, u.beta, u.market_cap_usd, u.company_name, u.sector, u.industry,
+                   t.rsi_14, t.ret_1m, t.pct_from_52w_high
+            FROM tradable_universe u
+            LEFT JOIN screener_technicals t ON t.symbol = u.symbol
+            WHERE u.symbol = ANY($1::text[])
+          `, [needFill]);
+          const dbMap = {};
+          for (const r of dbRows) dbMap[r.symbol] = r;
+          for (const s of stocks) {
+            const d = dbMap[s.symbol];
+            if (!d) continue;
+            if (s.price == null && d.last_price != null)         s.price = Number(d.last_price);
+            if (s.change_pct == null && d.day_change_pct != null) s.change_pct = Number(d.day_change_pct);
+            if (s.eps_estimate == null && d.eps_ttm != null)     s.eps_estimate = Number(d.eps_ttm);
+            if (s.forward_pe == null && d.pe_ratio != null)      s.forward_pe = Number(d.pe_ratio);
+            if (!s.market_cap && d.market_cap_usd != null) {
+              const mc = Number(d.market_cap_usd);
+              s.market_cap = mc >= 1e9 ? `$${(mc/1e9).toFixed(1)}B` : `$${(mc/1e6).toFixed(0)}M`;
+            }
+            if (!s.company || s.company === s.symbol) {
+              if (d.company_name) s.company = d.company_name;
+            }
+            if (!s.sector  && d.sector)   s.sector   = d.sector;
+            if (!s.industry && d.industry) s.industry = d.industry;
+          }
+        } catch (e) {
+          console.warn('[earnings-preview] DB backfill failed:', e.message);
+        }
+      }
 
       return { stocks, generated_at: new Date().toISOString() };
     });
@@ -4153,6 +4913,100 @@ app.get('/api/market/sparklines', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/market/sp500-heatmap
+//
+// Stock-level S&P 500 heatmap data: one row per SP500 ticker with last close,
+// 1-day % change, volume (size proxy), and GICS sector. Frontend renders a
+// Bloomberg-style treemap grouped by sector.
+//
+// Data source: backtest_prices (nightly Yahoo cron, ~3yr history). We pull the
+// last two closes per symbol to compute chg_pct — no live API calls so this
+// stays fast and rate-limit-safe.
+//
+// Why backtest_prices and not Moomoo quotes?
+//   - 500 Moomoo subscriptions would blow past the OpenD batch limit (30/req)
+//   - The heatmap is overview-grade, not trade-grade; previous close is fine
+//   - Cached 10 min, refresh once intraday is enough for visual structure
+//
+// Why volume as size proxy?
+//   - tradable_universe.market_cap_usd has only ~15% coverage today
+//   - Volume correlates strongly with mcap for SP500 mega-caps
+//   - Avoids a separate mcap backfill blocking this feature
+//
+// Response: { stocks: [{symbol, sector, lastPrice, chgPct, volume}, ...],
+//             sectors: {Tech: '#58a6ff', ...}, asOf: '2026-05-25', count }
+app.get('/api/market/sp500-heatmap', requireAuth, async (req, res) => {
+  try {
+    if (!isDbAvailable()) {
+      return res.status(503).json({ error: 'Database not available' });
+    }
+    const data = await ttlCache('market:sp500-heatmap', 10 * 60 * 1000, async () => {
+      // For each SP500 symbol, fetch the most recent 2 closes (today + prior).
+      // Using DISTINCT ON keeps it to one row per symbol; CTE gets prior close
+      // via window function for the chg_pct calc.
+      const { rows } = await query(`
+        WITH ranked AS (
+          SELECT symbol, price_date, close, volume,
+                 ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+          FROM backtest_prices
+          WHERE symbol = ANY($1::text[])
+            AND price_date >= CURRENT_DATE - INTERVAL '14 days'
+        )
+        SELECT
+          curr.symbol,
+          curr.price_date   AS as_of,
+          curr.close        AS last_price,
+          curr.volume       AS volume,
+          prev.close        AS prev_close,
+          CASE WHEN prev.close > 0
+               THEN ((curr.close - prev.close) / prev.close) * 100
+               ELSE 0
+          END AS chg_pct
+        FROM ranked curr
+        LEFT JOIN ranked prev
+          ON prev.symbol = curr.symbol AND prev.rn = 2
+        WHERE curr.rn = 1
+        ORDER BY curr.symbol
+      `, [SP500]);
+
+      const stocks = rows
+        .filter(r => !ETF_EXCLUDE.has(r.symbol))   // hide ETFs/funds — stock-only heatmap
+        .map(r => {
+          const price  = Number(r.last_price) || 0;
+          const volume = Number(r.volume) || 0;
+          return {
+            symbol:       r.symbol,
+            sector:       sectorOf(r.symbol),
+            lastPrice:    price,
+            chgPct:       Number(r.chg_pct) || 0,
+            volume,
+            // Dollar volume = price × shares traded — used as tile-size weight
+            // in the treemap. Correlates well with market cap for liquid names
+            // and covers 100% of stocks (vs ~15% mcap coverage today).
+            dollarVolume: price * volume,
+            asOf:         r.as_of,
+          };
+        });
+
+      // Latest date in the result set — used for the "as of" label in the UI
+      const asOf = stocks.length
+        ? stocks.map(s => s.asOf).sort().pop()
+        : null;
+
+      return {
+        stocks,
+        sectors: SECTOR_COLORS,
+        asOf,
+        count: stocks.length,
+      };
+    });
+    res.json(data);
+  } catch (e) {
+    console.error('[sp500-heatmap]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/market/top-stocks', async (req, res) => {
   try {
     const index  = req.query.index === 'nasdaq' ? 'nasdaq' : 'sp500';
@@ -4550,37 +5404,145 @@ app.post('/api/trade/move-stop', requireAuth, async (req, res, next) => {
 app.get('/api/quote/:symbol', requireAuth, async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase().trim();
-    const [qRes, yfRes] = await Promise.allSettled([
+    // Fan out: live quote (Yahoo via fetchCurrentPrice), Yahoo summary modules,
+    // AND our DB snapshot (always available, ~daily fresh). Merge so Yahoo wins
+    // when fresh; DB fills the gaps when Yahoo throttles.
+    const [qRes, yfRes, dbRes] = await Promise.allSettled([
       fetchCurrentPrice(symbol),
-      _yf.quoteSummary(symbol, { modules: ['price', 'summaryDetail'] }),
+      _yf.quoteSummary(symbol, { modules: ['price', 'summaryDetail', 'defaultKeyStatistics', 'financialData', 'assetProfile'] }),
+      isDbAvailable() ? query(`
+        SELECT u.last_price, u.day_change_pct, u.day_volume, u.market_cap_usd,
+               u.pe_ratio, u.forward_pe, u.eps_ttm, u.dividend_yield, u.beta,
+               u.week_52_high, u.week_52_low, u.company_name, u.sector, u.industry,
+               t.rsi_14, t.atr_14_pct, t.rvol_30d, t.sma_50, t.sma_200,
+               t.pct_from_52w_high, t.ret_1m, t.ret_3m, t.ret_ytd
+        FROM tradable_universe u
+        LEFT JOIN screener_technicals t ON t.symbol = u.symbol
+        WHERE u.symbol = $1
+      `, [symbol]).then(r => r.rows[0] || null) : Promise.resolve(null),
     ]);
     const q   = qRes.status  === 'fulfilled' ? qRes.value  : null;
     const yfd = yfRes.status === 'fulfilled' ? yfRes.value : null;
+    const db  = dbRes.status === 'fulfilled' ? dbRes.value : null;
     const p   = yfd?.price;
     const sd  = yfd?.summaryDetail;
-    if (q) return res.json({
+    const ks  = yfd?.defaultKeyStatistics;
+    const fd  = yfd?.financialData;
+    const ap  = yfd?.assetProfile;
+
+    // Pick first non-null across the 3 sources for each field
+    const pick = (...vals) => { for (const v of vals) if (v != null && !(typeof v === 'object' && Object.keys(v).length === 0)) return v; return null; };
+
+    const price = q?.price ?? p?.regularMarketPrice ?? (db?.last_price != null ? Number(db.last_price) : null);
+
+    res.json({
       symbol,
-      mid: q.price, price: q.price,
-      change: q.change ?? null, change_pct: q.change_pct ?? null,
-      session: q.session ?? 'regular',
-      pre_price: q.pre_price ?? null, pre_change: q.pre_change ?? null, pre_change_pct: q.pre_change_pct ?? null,
-      post_price: q.post_price ?? null, post_change: q.post_change ?? null, post_change_pct: q.post_change_pct ?? null,
-      name:        p?.longName                   ?? p?.shortName              ?? null,
-      high:        p?.regularMarketDayHigh        ?? null,
-      low:         p?.regularMarketDayLow         ?? null,
-      open:        p?.regularMarketOpen           ?? null,
-      prev_close:  p?.regularMarketPreviousClose  ?? null,
-      volume:      p?.regularMarketVolume         ?? null,
-      market_cap:  p?.marketCap                   ?? null,
-      pe:          sd?.trailingPE                 ?? p?.trailingPE            ?? null,
-      week52_high: sd?.fiftyTwoWeekHigh           ?? p?.fiftyTwoWeekHigh      ?? null,
-      week52_low:  sd?.fiftyTwoWeekLow            ?? p?.fiftyTwoWeekLow       ?? null,
+      mid: price, price,
+      change:        q?.change ?? null,
+      change_pct:    q?.change_pct ?? (db?.day_change_pct != null ? Number(db.day_change_pct) : null),
+      session:       q?.session ?? 'snapshot',
+      pre_price:     q?.pre_price ?? null,
+      pre_change:    q?.pre_change ?? null,
+      pre_change_pct:q?.pre_change_pct ?? null,
+      post_price:    q?.post_price ?? null,
+      post_change:   q?.post_change ?? null,
+      post_change_pct:q?.post_change_pct ?? null,
+      name:        pick(p?.longName, p?.shortName, db?.company_name),
+      sector:      pick(ap?.sector, db?.sector),
+      industry:    pick(ap?.industry, db?.industry),
+      high:        p?.regularMarketDayHigh ?? null,
+      low:         p?.regularMarketDayLow ?? null,
+      open:        p?.regularMarketOpen ?? null,
+      prev_close:  p?.regularMarketPreviousClose ?? (price != null && q?.change_pct ? +(price / (1 + q.change_pct / 100)).toFixed(4) : null),
+      volume:      p?.regularMarketVolume ?? (db?.day_volume != null ? Number(db.day_volume) : null),
+      avg_volume:  sd?.averageDailyVolume10Day ?? sd?.averageVolume ?? null,
+      market_cap:  pick(p?.marketCap, db?.market_cap_usd != null ? Number(db.market_cap_usd) : null),
+      pe:          pick(sd?.trailingPE, p?.trailingPE, ks?.trailingPE, db?.pe_ratio != null ? Number(db.pe_ratio) : null),
+      forward_pe:  pick(sd?.forwardPE, ks?.forwardPE, db?.forward_pe != null ? Number(db.forward_pe) : null),
+      eps:         pick(ks?.trailingEps, db?.eps_ttm != null ? Number(db.eps_ttm) : null),
+      dividend_yield: pick(sd?.dividendYield != null ? sd.dividendYield * 100 : null, db?.dividend_yield != null ? Number(db.dividend_yield) * 100 : null),
+      beta:        pick(sd?.beta, ks?.beta, db?.beta != null ? Number(db.beta) : null),
+      week52_high: pick(sd?.fiftyTwoWeekHigh, p?.fiftyTwoWeekHigh, db?.week_52_high != null ? Number(db.week_52_high) : null),
+      week52_low:  pick(sd?.fiftyTwoWeekLow,  p?.fiftyTwoWeekLow,  db?.week_52_low  != null ? Number(db.week_52_low)  : null),
+      pct_from_52w_high: db?.pct_from_52w_high != null ? Number(db.pct_from_52w_high) : null,
+      // Technicals (from DB only — Yahoo doesn't return these directly)
+      rsi_14:    db?.rsi_14   != null ? Number(db.rsi_14)   : null,
+      atr_pct:   db?.atr_14_pct != null ? Number(db.atr_14_pct) : null,
+      rvol_30d:  db?.rvol_30d != null ? Number(db.rvol_30d) : null,
+      sma_50:    db?.sma_50   != null ? Number(db.sma_50)   : null,
+      sma_200:   db?.sma_200  != null ? Number(db.sma_200)  : null,
+      ret_1m:    db?.ret_1m   != null ? Number(db.ret_1m)   : null,
+      ret_3m:    db?.ret_3m   != null ? Number(db.ret_3m)   : null,
+      ret_ytd:   db?.ret_ytd  != null ? Number(db.ret_ytd)  : null,
+      // Profitability (Yahoo only)
+      profit_margin: fd?.profitMargins != null ? fd.profitMargins * 100 : null,
+      roe:           fd?.returnOnEquity != null ? fd.returnOnEquity * 100 : null,
+      revenue_growth: fd?.revenueGrowth != null ? fd.revenueGrowth * 100 : null,
     });
-    const alpaca = await getLatestPrice(symbol);
-    res.json(alpaca);
   } catch (err) {
     console.error('[quote]', err);
     res.status(400).json({ error: 'Unable to fetch quote. Check the symbol and try again.' });
+  }
+});
+
+// Ticker hover preview — small popup card data when user mouses over a ticker chip.
+// Pulls from the already-populated tradable_universe + screener_technicals tables
+// so we don't hit Yahoo on hover (would be flaky + rate-limit-prone). 60s ttl
+// per symbol — the underlying data is refreshed daily anyway.
+app.get('/api/ticker-hover/:symbol', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.params.symbol || '').toUpperCase();
+    if (!symbol) return res.status(400).json({ error: 'symbol required' });
+    const cacheKey = `ticker-hover:${symbol}`;
+    const data = await ttlCache(cacheKey, 60 * 1000, async () => {
+      const { rows } = await query(`
+        SELECT u.symbol, u.company_name, u.sector, u.industry,
+               u.last_price, u.day_change_pct, u.day_volume,
+               u.market_cap_usd, u.pe_ratio, u.beta, u.dividend_yield,
+               u.week_52_high, u.week_52_low,
+               u.sparkline, u.signal_tags, u.signal_score,
+               u.conviction_grade, u.insider_net_30d,
+               u.flow_premium_7d, u.flow_sentiment,
+               t.rsi_14, t.ret_1m, t.ret_3m, t.ret_ytd,
+               t.pct_from_52w_high
+        FROM tradable_universe u
+        LEFT JOIN screener_technicals t ON t.symbol = u.symbol
+        WHERE u.symbol = $1
+      `, [symbol]);
+      const r = rows[0];
+      if (!r) return null;
+      return {
+        symbol:        r.symbol,
+        name:          r.company_name,
+        sector:        r.sector,
+        price:         r.last_price        != null ? Number(r.last_price)        : null,
+        day_change_pct:r.day_change_pct    != null ? Number(r.day_change_pct)    : null,
+        volume:        r.day_volume        != null ? Number(r.day_volume)        : null,
+        market_cap:    r.market_cap_usd    != null ? Number(r.market_cap_usd)    : null,
+        pe_ratio:      r.pe_ratio          != null ? Number(r.pe_ratio)          : null,
+        beta:          r.beta              != null ? Number(r.beta)              : null,
+        div_yield:     r.dividend_yield    != null ? Number(r.dividend_yield) * 100 : null,
+        week_52_high:  r.week_52_high      != null ? Number(r.week_52_high)      : null,
+        week_52_low:   r.week_52_low       != null ? Number(r.week_52_low)       : null,
+        sparkline:     Array.isArray(r.sparkline) ? r.sparkline.map(Number) : null,
+        signal_tags:   Array.isArray(r.signal_tags) ? r.signal_tags : [],
+        signal_score:  Number(r.signal_score || 0),
+        conviction_grade: r.conviction_grade || null,
+        insider_net_30d:  r.insider_net_30d != null ? Number(r.insider_net_30d) : null,
+        flow_premium_7d:  r.flow_premium_7d != null ? Number(r.flow_premium_7d) : null,
+        flow_sentiment:   r.flow_sentiment || null,
+        rsi_14:           r.rsi_14         != null ? Number(r.rsi_14)         : null,
+        ret_1m:           r.ret_1m         != null ? Number(r.ret_1m)         : null,
+        ret_3m:           r.ret_3m         != null ? Number(r.ret_3m)         : null,
+        ret_ytd:          r.ret_ytd        != null ? Number(r.ret_ytd)        : null,
+        pct_from_52w_high:r.pct_from_52w_high != null ? Number(r.pct_from_52w_high) : null,
+      };
+    });
+    if (!data) return res.status(404).json({ error: 'not found' });
+    res.json(data);
+  } catch (e) {
+    console.error('[ticker-hover]', e);
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -4600,6 +5562,65 @@ app.get('/api/quotes/batch', requireAuth, async (req, res) => {
             post_price: r.value.post_price ?? null, post_change: r.value.post_change ?? null, post_change_pct: r.value.post_change_pct ?? null }
         : null;
     });
+
+    // ── DB fallback: when Yahoo's crumb expires or rate-limits, every fetchCurrentPrice
+    // returns null and the ticker bar / pulse chips go blank. Fall back to the
+    // last-close snapshot already in tradable_universe (refreshed nightly).
+    // For ETFs not in tradable_universe (SPY/DIA/IWM/VIX etc.), look at the
+    // most recent close in backtest_prices. Marks session='snapshot' so the
+    // client can show a "last close" hint.
+    const missing = symbols.filter(s => !quotes[s]);
+    if (missing.length && isDbAvailable()) {
+      try {
+        const { rows } = await query(
+          `SELECT symbol, last_price, day_change_pct
+           FROM tradable_universe
+           WHERE symbol = ANY($1::text[]) AND last_price IS NOT NULL`,
+          [missing]
+        );
+        for (const r of rows) {
+          quotes[r.symbol] = {
+            price:      Number(r.last_price),
+            change:     null,
+            change_pct: r.day_change_pct != null ? Number(r.day_change_pct) : null,
+            session:    'snapshot',
+          };
+        }
+      } catch (e) {
+        console.warn('[quotes/batch] tradable_universe fallback failed:', e.message);
+      }
+
+      // Still missing? Last resort — backtest_prices latest close + day-over-day
+      const stillMissing = symbols.filter(s => !quotes[s]);
+      if (stillMissing.length) {
+        try {
+          const { rows } = await query(`
+            WITH latest AS (
+              SELECT symbol, close, price_date,
+                     LAG(close) OVER (PARTITION BY symbol ORDER BY price_date) AS prev_close,
+                     ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS rn
+              FROM backtest_prices
+              WHERE symbol = ANY($1::text[])
+            )
+            SELECT symbol, close, prev_close
+            FROM latest WHERE rn = 1
+          `, [stillMissing]);
+          for (const r of rows) {
+            const close = Number(r.close);
+            const prev  = r.prev_close != null ? Number(r.prev_close) : null;
+            quotes[r.symbol] = {
+              price:      close,
+              change:     prev != null ? +(close - prev).toFixed(4) : null,
+              change_pct: prev ? +((close - prev) / prev * 100).toFixed(2) : null,
+              session:    'snapshot',
+            };
+          }
+        } catch (e) {
+          console.warn('[quotes/batch] backtest_prices fallback failed:', e.message);
+        }
+      }
+    }
+
     res.json({ quotes });
   } catch (err) {
     console.error('[quotes/batch]', err);
@@ -5310,6 +6331,75 @@ app.post('/api/chat/clear', requireAuth, (req, res) => {
   const username = req.session?.username;
   if (username) clearHistory(userChatId(username));
   res.json({ ok: true });
+});
+
+// ── /api/chat/desktop — uses Claude Code CLI (Max sub, no API cost) ──────────
+// Spawns `claude -p` as a subprocess. MCP tools (bot_verdict, portfolio_advisor,
+// why_didnt_bot_buy, signal_edge_report, etc.) are inherited from ~/.claude/.mcp.json.
+// ANTHROPIC_API_KEY is stripped from the child env so the CLI uses Max-sub OAuth.
+// Trades off: ~2-5s startup per request (vs ~500ms first-token on the API path),
+// but ZERO incremental cost — uses Pavan's existing Claude Max subscription.
+//
+// Persistence: saves user message + assistant reply to conversation_history via
+// `pushHistory()` so /api/chat/history returns both API-mode AND desktop-mode
+// turns. Without this, closing the chat widget mid-response and reopening it
+// silently deleted desktop-mode turns (server-side history overwrote localStorage).
+app.post('/api/chat/desktop', requireAuth, chatLimiter, async (req, res) => {
+  try {
+    const { message, history } = req.body || {};
+    if (!message || typeof message !== 'string' || message.trim().length < 1) {
+      return res.status(400).json({ error: 'message required' });
+    }
+    if (message.length > 4000) {
+      return res.status(400).json({ error: 'message too long (max 4000 chars)' });
+    }
+    const username = req.session?.username;
+    const chatId = username ? userChatId(username) : null;
+    const trimmed = message.trim();
+
+    // Save user message BEFORE the long-running call. If claude CLI crashes or
+    // user closes the browser, at least the question is preserved server-side
+    // so the next /api/chat/history fetch shows it.
+    if (chatId) {
+      try {
+        const { pushHistory } = await import('../core/ai-chat.js');
+        pushHistory(chatId, { role: 'user', content: trimmed });
+      } catch (e) { console.warn('[chat/desktop] save user msg failed:', e.message); }
+    }
+
+    const { chatViaClaude } = await import('../core/claude-desktop-chat.js');
+    const result = await chatViaClaude({
+      message: trimmed,
+      history: Array.isArray(history) ? history.slice(-10) : [],   // last 5 turns max
+    });
+    if (!result.ok) {
+      return res.status(500).json({ error: result.error || 'Claude CLI failed', text: '', duration_ms: result.ms });
+    }
+
+    // Save assistant reply
+    if (chatId) {
+      try {
+        const { pushHistory } = await import('../core/ai-chat.js');
+        pushHistory(chatId, { role: 'assistant', content: result.text });
+      } catch (e) { console.warn('[chat/desktop] save assistant msg failed:', e.message); }
+    }
+
+    res.json({ text: result.text, duration_ms: result.ms, mode: 'claude_desktop_cli' });
+  } catch (err) {
+    console.error('[chat/desktop]', err);
+    res.status(500).json({ error: err.message || 'Internal error' });
+  }
+});
+
+// Health check for the desktop chat path — admin only
+app.get('/api/chat/desktop/ping', requireAdmin, async (req, res) => {
+  try {
+    const { pingClaudeCli } = await import('../core/claude-desktop-chat.js');
+    const result = await pingClaudeCli();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 app.get('/api/chat/history', requireAuth, async (req, res) => {
@@ -7094,6 +8184,72 @@ app.get('/api/news/feed', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/news/categorized?category=hot|bullish|bearish|smart_money|earnings|holdings|congress&limit=50
+//
+// Returns articles in the requested category, each enriched with our edge
+// data (bot verdict / UW flow / insider / congress / earnings chips).
+//
+// The categorizer module does its own batched SQL — 5 enrichment queries
+// per request regardless of article count. Cached for 90s per (category,
+// username) since these queries hit several tables.
+app.get('/api/news/categorized', requireAuth, async (req, res) => {
+  if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const { CATEGORIES, getCategorizedNews } = await import('../core/news-categorizer.js');
+    const category = String(req.query.category || 'hot').toLowerCase();
+    const limit    = Math.min(Math.max(parseInt(req.query.limit, 10) || 40, 1), 100);
+    if (!CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: 'invalid category', valid: CATEGORIES });
+    }
+
+    const username = req.session?.username;
+    const cacheKey = `news:cat:${category}:${username || 'anon'}:${limit}`;
+    const result = await ttlCache(cacheKey, 90 * 1000, async () => {
+      // Holdings category needs the user's actual positions — defer until needed
+      const positionsProvider = (category !== 'holdings') ? null : async () => {
+        const set = new Set();
+        // Best-effort: try Alpaca paper, Alpaca live, and Moomoo. Failure on
+        // any source isn't fatal — we just return what we can.
+        try {
+          const dbU = await getDbUser(username);
+          if (dbU?.alpaca_api_key) {
+            const ps = await getUserPositions({
+              key: dbU.alpaca_api_key, secret: dbU.alpaca_secret_key, paper: true,
+            }).catch(() => []);
+            for (const p of (ps || [])) set.add(String(p.symbol).toUpperCase());
+          }
+          if (dbU?.moomoo_acc_id) {
+            const mp = await getMoomooPositions({ acc_id: dbU.moomoo_acc_id }).catch(() => ({ positions: [] }));
+            for (const p of (mp?.positions || [])) set.add(String(p.symbol).toUpperCase());
+          }
+        } catch (e) {
+          console.warn('[news/categorized] holdings provider:', e.message);
+        }
+        return set;
+      };
+
+      return getCategorizedNews({ category, limit, username, positionsProvider });
+    });
+
+    // Mark which articles the user has saved (mirrors /api/news/feed behaviour)
+    let savedSet = new Set();
+    if (username && result.articles.length) {
+      const ids = result.articles.map(a => a.article_id);
+      const { rows: savedRows } = await query(
+        `SELECT article_id FROM news_saved WHERE username = $1 AND article_id = ANY($2)`,
+        [username, ids]
+      );
+      savedSet = new Set(savedRows.map(r => r.article_id));
+    }
+    for (const a of result.articles) a.is_saved = savedSet.has(a.article_id);
+
+    res.json(result);
+  } catch (e) {
+    console.error('[news/categorized]', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/api/news/sources', requireAuth, async (req, res) => {
   if (!isDbAvailable()) return res.status(503).json({ error: 'DB unavailable' });
   try {
@@ -7495,13 +8651,15 @@ app.get('/api/uw/flow-alerts-history', requireAuth, async (req, res) => {
     const hours = Math.min(parseInt(req.query.hours || '24', 10), 168);
     const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
     const minPremium = parseInt(req.query.min_premium || '0', 10);
+    const symbol = String(req.query.symbol || req.query.ticker || '').toUpperCase().trim();
     const { rows } = await query(
       `SELECT ticker, alert_type, side, strike, expiry, premium, volume, open_interest, sentiment, alerted_at
        FROM uw_flow_alerts
        WHERE alerted_at > NOW() - ($1 * INTERVAL '1 hour')
          AND ($2 = 0 OR premium >= $2)
+         AND ($4 = '' OR ticker = $4)
        ORDER BY alerted_at DESC LIMIT $3`,
-      [hours, minPremium, limit]
+      [hours, minPremium, limit, symbol]
     );
     res.json({ alerts: rows, count: rows.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -7818,13 +8976,13 @@ app.get('/api/bot-indicators/:symbol', requireAuth, async (req, res) => {
 
 const BOT_DEFAULT_RULES = {
   entry_filters: {
-    min_composite_score: 60,
+    min_composite_score: 70,            // raised 2026-05-27 from 60 — 90d backtest: score 70+ has 10% avg 10d return / ~70% win rate; 40-49 = 46% (worse than coin flip)
     conviction_grade_min: 'C',
     strategy: 'composite',       // 'composite' | 'catalyst' | 'breakout' | 'momentum' | 'value_contrarian' | 'mean_reversion'
     sectors_excluded: [],
     market_cap_min_b: 5,
     price_min: 5,
-    price_max: 500,
+    price_max: 2500,            // raised 2026-05-27 (500→1500→2500) — KLAC $2011, fractionable=TRUE means dollar-sized orders
     min_adv_dollar_vol: 5000000,
     avoid_earnings_within_days: 3,
     vix_min: 15,
@@ -8263,6 +9421,74 @@ app.post('/api/bots/reconcile', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('[reconcile] error:', e);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── BOT-ADVANCE (challenger) — read-only state endpoint ─────────────────────
+// Used by /bot-advance.html monitoring page. Returns bot configs, open trades,
+// recent decisions, and per-rule activity counters. Read-only — no writes.
+app.get('/api/bot-advance/state', requireAuth, async (req, res) => {
+  try {
+    // 1. Bot configs
+    const { rows: bots } = await query(`
+      SELECT id, name, status, broker, shadow_mode, capital_usd, cumulative_pnl_usd,
+             current_trade_id, enabled_rules, created_at, updated_at
+        FROM bots_advance
+       WHERE deleted_at IS NULL
+       ORDER BY id`);
+
+    // 2. Open trades
+    const { rows: openTrades } = await query(`
+      SELECT id, bot_id, symbol, qty, entry_price, entry_rule, hard_sl_pct,
+             stop_loss_price, opened_at, peak_pnl_usd, shadow_mode
+        FROM bot_advance_trades
+       WHERE status='open'
+       ORDER BY opened_at`);
+
+    // 3. Per-rule activity counters (last 24h + last 7d)
+    const { rows: ruleCounts } = await query(`
+      SELECT entry_rule,
+             COUNT(*) FILTER (WHERE action='would_buy' AND scanned_at > NOW() - INTERVAL '24 hours')::int AS buys_24h,
+             COUNT(*) FILTER (WHERE action='would_buy' AND scanned_at > NOW() - INTERVAL '7 days')::int  AS buys_7d
+        FROM bot_advance_decisions
+       WHERE entry_rule IS NOT NULL
+       GROUP BY entry_rule
+       ORDER BY entry_rule`);
+
+    // 4. Action breakdown last 24h (what is the bot mostly doing?)
+    const { rows: actionCounts } = await query(`
+      SELECT action, COUNT(*)::int AS n
+        FROM bot_advance_decisions
+       WHERE scanned_at > NOW() - INTERVAL '24 hours'
+       GROUP BY action
+       ORDER BY n DESC`);
+
+    // 5. Recent WOULD_BUY decisions (last 50, most recent first)
+    const { rows: recentBuys } = await query(`
+      SELECT id, bot_id, scanned_at, symbol, entry_rule, composite_score,
+             also_matched, rule_metadata, signals, notes, shadow_mode
+        FROM bot_advance_decisions
+       WHERE action='would_buy'
+       ORDER BY scanned_at DESC
+       LIMIT 50`);
+
+    // 6. Last scan time (when did the cron last fire for any advance bot?)
+    const { rows: lastScan } = await query(`
+      SELECT MAX(scanned_at) AS last_scan FROM bot_advance_decisions`);
+
+    res.json({
+      ok: true,
+      generated_at:  new Date().toISOString(),
+      last_scan_at:  lastScan[0]?.last_scan ?? null,
+      bots,
+      open_trades:   openTrades,
+      rule_activity: ruleCounts,
+      action_counts: actionCounts,
+      recent_buys:   recentBuys,
+    });
+  } catch (e) {
+    console.error('[bot-advance/state] error:', e);
+    res.status(500).json({ error: 'Internal server error', message: e.message });
   }
 });
 
@@ -8993,6 +10219,42 @@ app.post('/api/near-miss/run', requireAdmin, async (req, res) => {
 // ─── Tradable Universe Sync — 8:00 AM ET Mon–Fri ─────────────────────────────
 cron.schedule('0 8 * * 1-5', () => syncTradableUniverse(), { timezone: 'America/New_York' });
 
+// ─── Screener data refresh crons ────────────────────────────────────────────
+// All gated to PROD only (staging skips). All run via the same backfill script
+// in subprocess form so they share the throttling/retry logic and don't fight
+// the dashboard's main event loop. Logs go to ~/.pm2/logs/trading-dashboard-out.log
+if (!_IS_STAGING_DASHBOARD) {
+  const { spawn } = await import('node:child_process'); // ESM top-level await ok here
+  const runScreenerMode = (mode) => {
+    const log = `[screener-cron:${mode}]`;
+    console.log(`${log} starting`);
+    const child = spawn('node', ['--env-file=.env', 'src/research/screener-backfill.js', mode], {
+      cwd: process.cwd(),
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.stdout.on('data', d => process.stdout.write(`${log} ${d}`));
+    child.stderr.on('data', d => process.stderr.write(`${log} ${d}`));
+    child.on('exit', code => console.log(`${log} done (exit ${code})`));
+  };
+  // Daily: snapshot (price/mcap/volume/52w) — 6:00 PM ET after close
+  cron.schedule('0 18 * * 1-5', () => runScreenerMode('snapshot'),   { timezone: 'America/New_York' });
+  // ── Intraday snapshot — every 5 min during US market hours (9:30 AM → 4:00 PM ET)
+  // Keeps the 🌊 Momentum Race bars moving with fresh prices throughout the
+  // session. snapshot mode is ~30s per run; well under the 5-min budget.
+  cron.schedule('*/5 9-15 * * 1-5', () => runScreenerMode('snapshot'), { timezone: 'America/New_York' });
+  cron.schedule('0,5,10,15,20,25,30 16 * * 1-5', () => runScreenerMode('snapshot'), { timezone: 'America/New_York' });
+  // Daily: technicals (RSI/SMA/returns) — 6:30 PM ET after snapshot finishes
+  cron.schedule('30 18 * * 1-5', () => runScreenerMode('technicals'), { timezone: 'America/New_York' });
+  // Daily: signals (sparklines + edge tags from UW + conviction tables) — 6:45 PM ET
+  cron.schedule('45 18 * * 1-5', () => runScreenerMode('signals'), { timezone: 'America/New_York' });
+  // Weekly: fundamentals — Sunday 8 AM ET (fundamentals don't change often)
+  cron.schedule('0 8 * * 0',     () => runScreenerMode('fundamentals'), { timezone: 'America/New_York' });
+  // Monthly: sector refresh — 1st of month 7 AM ET (new IPOs + classification updates)
+  cron.schedule('0 7 1 * *',     () => runScreenerMode('sectors'),     { timezone: 'America/New_York' });
+  console.log('[screener-crons] registered: snapshot 18:00, technicals 18:30 ET daily; fundamentals Sun 08:00; sectors 1st-of-month 07:00');
+}
+
 // ─── Pre-market News Scanner — 4:00 AM ET Mon–Fri ────────────────────────────
 cron.schedule('0 4 * * 1-5', async () => {
   try {
@@ -9516,6 +10778,40 @@ cron.schedule('15 16 * * 1-5', async () => {
   } catch (err) { console.error('[forecast] EOD fill cron error:', err.message); }
 }, { timezone: 'America/New_York' });
 
+// 2026-05-28: Daily bot digest at 4:30 PM ET — 15 min after EOD fill so latest P&L is in the data.
+// One per-bot summary email + short Telegram. User in Singapore reads ~4-5 AM SGT next morning.
+// Mon-Fri only (no trading on weekends → no digest).
+cron.schedule('30 16 * * 1-5', async () => {
+  try {
+    const { sendDigest } = await import('../core/bot-digest.js');
+    const result = await sendDigest();
+    console.log(`[bot-digest] cron fired:`, JSON.stringify(result?.channels || {}));
+  } catch (err) { console.error('[bot-digest] cron error:', err.message); }
+}, { timezone: 'America/New_York' });
+
+// 2026-05-28: Daily price refresh at 5:00 PM ET. Pulls latest daily bars for the whole
+// tradable_universe via Alpaca's multi-symbol bars endpoint (~75 sec for 12K symbols).
+// Without this, backtest_prices goes stale and gateLiquidityStale blocks all entries.
+// Mon-Fri only (no new bars on weekends).
+cron.schedule('0 17 * * 1-5', async () => {
+  try {
+    const { refreshPrices } = await import('../research/refresh-prices.js');
+    const result = await refreshPrices({ daysBack: 5 });
+    console.log('[refresh-prices] cron done:', JSON.stringify(result));
+  } catch (err) { console.error('[refresh-prices] cron error:', err.message); }
+}, { timezone: 'America/New_York' });
+
+// 2026-05-28: Bot-advance challenger crons. Completely isolated from the existing bot
+// engine — own scanner, own tables, own scripts. Defaults to shadow mode (logs would_buy
+// decisions but doesn't place trades). Gated on BOT_CRON_OWNER so it only runs on the
+// cron-owner process.
+try {
+  const { startBotAdvanceCrons } = await import('../core/bot-advance/engine.js');
+  startBotAdvanceCrons();
+} catch (err) {
+  console.warn('[bot-advance] failed to wire crons (module not loaded):', err.message);
+}
+
 // ─── Catalyst Scanner Crons ───────────────────────────────────────────────────
 // 9:00 AM ET Mon-Fri — pre-market sweep (market opens at 9:30, this runs 30 min early)
 cron.schedule('0 9 * * 1-5', async () => {
@@ -9582,8 +10878,8 @@ async function computeCatalystPerf(tradeDate) {
 
   // AMC stocks from tradeDate (reported after close) + BMO stocks from earningsDate (reported before open)
   const [amcRes, bmoRes] = await Promise.allSettled([
-    ttlCache(`earnings:cal:${tradeDate}`,    6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(tradeDate)),
-    ttlCache(`earnings:cal:${earningsDate}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(earningsDate)),
+    ttlCache(`earnings:cal:${tradeDate}`,    6 * 60 * 60 * 1000, () => fetchEarningsForDay(tradeDate)),
+    ttlCache(`earnings:cal:${earningsDate}`, 6 * 60 * 60 * 1000, () => fetchEarningsForDay(earningsDate)),
   ]);
   const amc = (amcRes.status === 'fulfilled' ? amcRes.value : []).filter(e => e.call_time === 'AMC');
   const bmo = (bmoRes.status === 'fulfilled' ? bmoRes.value : []).filter(e => e.call_time === 'BMO');
@@ -9887,8 +11183,8 @@ async function _scanEarningsGap(etDate) {
   const setups  = [];
   try {
     const [amcRes, bmoRes] = await Promise.allSettled([
-      ttlCache(`earnings:cal:${etDate}`,  6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(etDate)),
-      ttlCache(`earnings:cal:${nextDay}`, 6 * 60 * 60 * 1000, () => fetchNasdaqEarningsDay(nextDay)),
+      ttlCache(`earnings:cal:${etDate}`,  6 * 60 * 60 * 1000, () => fetchEarningsForDay(etDate)),
+      ttlCache(`earnings:cal:${nextDay}`, 6 * 60 * 60 * 1000, () => fetchEarningsForDay(nextDay)),
     ]);
     const amcList = ((amcRes.status === 'fulfilled' ? amcRes.value : []) || [])
       .filter(e => e.call_time === 'AMC')
@@ -10371,15 +11667,28 @@ cron.schedule('*/15 * * * 1-5', async () => {
     const result = await getInsiderTrades({ limit: 100 });
     if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
     for (const t of result) {
-      const insiderName = t.owner_name ?? '';
-      const txType      = t.side ?? '';
-      const filedAt     = t.transaction_date ? new Date(t.transaction_date) : new Date('1900-01-01');
+      const insiderName  = t.owner_name ?? '';
+      // Use SEC transaction code (P=purchase, S=sale, F=tax withholding, A=award, M=exercise)
+      const txType       = t.transaction_code ?? (t.amount < 0 ? 'S' : 'P');
+      const filedAt      = t.transaction_date ? new Date(t.transaction_date) : new Date('1900-01-01');
+      // Derive role string from is_director / is_officer booleans
+      const roleParts    = [];
+      if (t.is_director)           roleParts.push('Director');
+      if (t.is_officer)            roleParts.push('Officer');
+      if (t.is_ten_percent_owner)  roleParts.push('10% Owner');
+      const role         = roleParts.length ? roleParts.join('/') : null;
+      // amount = share count (negative for sells); value = dollars
+      const sharesAbs    = t.amount != null ? Math.abs(t.amount) : null;
+      const priceNum     = t.price   != null ? parseFloat(t.price) : null;
+      const valueDollars = sharesAbs != null && priceNum != null
+        ? Math.round(sharesAbs * priceNum * 100) / 100
+        : null;
       await query(
         `INSERT INTO uw_insider_trades (ticker, insider_name, role, transaction_type, shares, price, value, filed_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (ticker, COALESCE(insider_name,''), COALESCE(filed_at,'1900-01-01'::timestamptz), COALESCE(transaction_type,'')) DO NOTHING`,
-        [t.ticker, insiderName, t.role ?? null, txType,
-         t.shares ?? null, t.price ?? null, t.amount ?? null, filedAt]
+        [t.ticker, insiderName, role, txType,
+         sharesAbs, priceNum, valueDollars, filedAt]
       ).catch(() => {});
     }
   } catch (e) {
@@ -10388,24 +11697,67 @@ cron.schedule('*/15 * * * 1-5', async () => {
   }
 }, { timezone: 'America/New_York' });
 
-// Every hour weekdays — persist congressional trades
+// Every hour weekdays — persist congressional trades + email alert on new buys
 cron.schedule('0 * * * 1-5', async () => {
   if (!isUWConfigured()) return;
   try {
     const result = await getCongressionalTrades({ limit: 100 });
     if (!Array.isArray(result) || !result.length || !isDbAvailable()) return;
+
+    const newBuys = []; // collect newly inserted buy trades for email
+
     for (const t of result) {
       const memberName = t.member_name ?? '';
       const txType     = t.transaction_type ?? '';
       const tradedAt   = t.transaction_date ? new Date(t.transaction_date) : new Date('1900-01-01');
-      await query(
-        `INSERT INTO uw_congressional_trades (ticker, member_name, party, chamber, transaction_type, amount_range, traded_at, filed_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (ticker, COALESCE(member_name,''), COALESCE(traded_at,'1900-01-01'::date), COALESCE(transaction_type,'')) DO NOTHING`,
-        [t.ticker, memberName, t.party ?? null, t.chamber ?? null, txType,
-         t.amount_range ?? null, tradedAt,
-         t.filed_at ? new Date(t.filed_at) : null]
-      ).catch(() => {});
+      let res;
+      try {
+        res = await query(
+          `INSERT INTO uw_congressional_trades (ticker, member_name, party, chamber, transaction_type, amount_range, traded_at, filed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (ticker, COALESCE(member_name,''), COALESCE(traded_at,'1900-01-01'::date), COALESCE(transaction_type,'')) DO NOTHING`,
+          [t.ticker, memberName, t.party ?? null, t.chamber ?? null, txType,
+           t.amount_range ?? null, tradedAt,
+           t.filed_at ? new Date(t.filed_at) : null]
+        );
+      } catch (_) { continue; }
+
+      // Track newly inserted buy trades for email alert
+      // Only alert on buys ≥ $15K (small $1K-$15K trades have weak signal per backtest)
+      if (res.rowCount > 0 && txType === 'Buy' && t.ticker) {
+        const amt = t.amount_range ?? '';
+        const isSmall = amt === '$1,001 - $15,000';
+        if (!isSmall) {
+          newBuys.push({
+            ticker:    t.ticker.toUpperCase(),
+            member:    memberName || 'Unknown',
+            chamber:   t.chamber ?? '?',
+            amount:    amt || 'undisclosed',
+            tradedAt:  t.transaction_date ?? '?',
+            filedAt:   t.filed_at ? t.filed_at.slice(0, 10) : '?',
+            lagDays:   t.transaction_date && t.filed_at
+              ? Math.round((new Date(t.filed_at) - new Date(t.transaction_date)) / 86400000)
+              : null,
+          });
+        }
+      }
+    }
+
+    // Send one email if any new meaningful buys were detected
+    if (newBuys.length > 0) {
+      const chamberLabel = { house: 'House', senate: 'Senate' };
+      const lines = newBuys.map(b => {
+        const lag = b.lagDays != null ? ` (filed ${b.lagDays}d after trade)` : '';
+        const ch  = chamberLabel[b.chamber] ?? b.chamber;
+        return `*${b.ticker}* — ${b.member} [${ch}]\n  Amount: ${b.amount}\n  Traded: ${b.tradedAt}  Filed: ${b.filedAt}${lag}`;
+      });
+      const subject = `🏛️ Congress Buy Alert — ${newBuys.map(b => b.ticker).join(', ')}`;
+      const body = `New congressional BUY filings detected:\n\n${lines.join('\n\n')}\n\n` +
+        `Backtest edge: +0.44% 5d vs SPY (57.6% win rate). ` +
+        `≥$100K buys: 66.1% win. Quick filers (<5d lag): +2.34% 5d.\n\n` +
+        `Check dashboard → 🏛️ Congressional tab for full context.`;
+      await sendEmailAlert(subject, body).catch(e => console.error('[congress-email]', e.message));
+      console.log(`[uw-cron/congress] emailed ${newBuys.length} new buy(s): ${newBuys.map(b => b.ticker).join(', ')}`);
     }
   } catch (e) {
     console.error('[uw-cron/congress]', e.message);
@@ -10564,21 +11916,92 @@ cron.schedule('0 8 * * *', async () => {
   }
 }, { timezone: 'America/New_York' });
 
-// Start options flow WebSocket stream on server startup (if UW configured)
+// Start options flow WebSocket stream on server startup (if UW configured AND opt-in).
+// Hotfix 2026-05-27: UW's WS endpoint has been returning 503 all night, so the
+// dashboard was reconnecting every 30s and the onFlap handler was firing fresh
+// "CRITICAL UW WebSocket down" emails on every single attempt (DB-based dedup
+// works but the alert was set to dedup_window=360min — implementation may have
+// a bug, or the WS lib is re-instantiating between attempts, resetting state).
+// Either way, while UW's server is flaky, the flow-alerts cron (every 2 min)
+// already ingests the same data with at most 2-min latency. Keep WS opt-in via
+// UW_WS_ENABLED=true. Default off until UW's WS comes back up.
+// ── UW WebSocket lifecycle + recovery probe (hotfix 2026-05-27) ──────────────
+// State machine:
+//   • At boot: try to start WS. If repeatedly flaps → stop trying, mark uwWsDown=true.
+//   • Probe cron every 15 min: cheap HTTP health check (UW REST). When down→up
+//     transition detected, fire ONE recovery email (dedup 24h) and re-instantiate
+//     the WS stream automatically. Pavan gets notified the moment it's back.
+//
+// Why: UW's WS endpoint returned 503 all night, the reconnect loop fired 30s after
+// 30s, and each onFlap fired a fresh "CRITICAL" email because dedup state wasn't
+// holding through library reset. Net = ~120 emails. We now bound it to ≤1 email
+// per outage + ≤1 email per recovery.
+let _uwWsHandle    = null;
+let _uwWsDown      = false;
+let _uwWsAlertedDown = false;
+
+function _startUwWsStream() {
+  if (_uwWsHandle) return;
+  try {
+    _uwWsHandle = streamOptionsFlow({
+      onTrade: (flowAlert) => {
+        console.log('[uw-ws] flow alert:', flowAlert?.ticker, flowAlert?.sentiment);
+      },
+      onError: (e) => console.error('[uw-ws]', e),
+      onFlap: ({ attempts, last_error }) => {
+        // Persistent failure — stop trying, mark down, fire ONE alert.
+        if (!_uwWsAlertedDown) {
+          _uwWsAlertedDown = true;
+          sysAlert({
+            key: 'uw-ws/down', severity: 'warn',
+            title: 'UW WebSocket unreachable — flow stream paused, will auto-recover',
+            detail: { attempts, last_error, recovery: 'probe cron will re-enable when UW is back' },
+            dedup_window_minutes: 1440,
+          }).catch(() => {});
+        }
+        _uwWsDown = true;
+        try { _uwWsHandle?.close?.(); } catch {}
+        _uwWsHandle = null;
+      },
+    });
+  } catch (e) {
+    console.error('[uw-ws] startup error:', e.message);
+    _uwWsDown = true;
+  }
+}
+
 if (isUWConfigured()) {
-  setTimeout(() => {
+  // Initial boot — try WS unless explicitly disabled
+  if (process.env.UW_WS_ENABLED !== 'false') {
+    setTimeout(() => _startUwWsStream(), 5000);
+  } else {
+    _uwWsDown = true;
+    console.log('[uw-ws] startup skipped (UW_WS_ENABLED=false)');
+  }
+
+  // Recovery probe — every 15 min, cheap HTTP health check.
+  // When down→up transition is detected, re-enable WS and notify ONCE.
+  cron.schedule('*/15 * * * *', async () => {
+    if (!_uwWsDown) return;        // up → nothing to do
     try {
-      streamOptionsFlow({
-        onTrade: (flowAlert) => {
-          console.log('[uw-ws] flow alert:', flowAlert?.ticker, flowAlert?.sentiment);
-        },
-        onError: (e) => console.error('[uw-ws]', e),
-        onFlap: ({ attempts, last_error }) => {
-          sysAlert({ key: 'uw-ws/down', severity: 'critical', title: 'UW WebSocket repeatedly failing to reconnect', detail: { attempts, last_error }, dedup_window_minutes: 360 }).catch(() => {});
-        },
-      });
-    } catch (e) { console.error('[uw-ws] startup error:', e.message); }
-  }, 5000);
+      const tide = await getMarketTide();
+      if (tide) {
+        // UW HTTP is responsive — assume WS is too. Reset state and re-establish.
+        console.log('[uw-ws] recovery probe succeeded — UW HTTP back online, re-enabling WS');
+        _uwWsDown = false;
+        _uwWsAlertedDown = false;
+        sysAlert({
+          key: 'uw-ws/recovered', severity: 'info',
+          title: 'UW back online — flow stream re-enabled',
+          detail: { probe_endpoint: 'getMarketTide', at: new Date().toISOString() },
+          dedup_window_minutes: 1440,
+        }).catch(() => {});
+        _startUwWsStream();
+      }
+    } catch {
+      // Probe failed → still down. Silent (we already alerted once on the down).
+    }
+  }, { timezone: 'America/New_York' });
 }
 
 // GET /api/guardian/check — manual trigger (any authenticated user)

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>🧪 Bot Advance — Challenger Monitor</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --bg:        #0e1117;
+    --panel:    #161b22;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #58a6ff;
+    --green:    #3fb950;
+    --red:      #f85149;
+    --amber:    #d29922;
+    --shadow-tag: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Display", sans-serif;
+    margin: 0; padding: 0; font-size: 14px;
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  header .meta strong { color: var(--accent); }
+  main { padding: 16px 24px; max-width: 1400px; margin: 0 auto; }
+  .panels {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    margin-bottom: 20px;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .panel h2 {
+    margin: 0 0 10px 0; font-size: 13px; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--muted); font-weight: 600;
+  }
+  .kv { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); }
+  .kv .v { font-family: ui-monospace, SFMono-Regular, monospace; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+  }
+  .pill.active   { background: rgba(63,185,80,0.15); color: var(--green); }
+  .pill.stopped  { background: rgba(248,81,73,0.15); color: var(--red); }
+  .pill.paused   { background: rgba(210,153,34,0.15); color: var(--amber); }
+  .pill.shadow   { background: rgba(110,118,129,0.2); color: var(--shadow-tag); }
+  .pill.live     { background: rgba(248,81,73,0.18); color: var(--red); }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-family: ui-monospace, SFMono-Regular, monospace; }
+  td.symbol { font-weight: 600; color: var(--accent); }
+  td.rule code { background: rgba(88,166,255,0.1); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--accent); }
+  .rule-bar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .rule-bar:last-child { border-bottom: none; }
+  .rule-bar .name { flex: 1; }
+  .rule-bar .name code { background: rgba(88,166,255,0.1); padding: 2px 6px; border-radius: 4px; font-size: 11px; color: var(--accent); }
+  .rule-bar .bar {
+    height: 6px; background: rgba(88,166,255,0.15); border-radius: 3px;
+    flex: 2; overflow: hidden; max-width: 200px;
+  }
+  .rule-bar .bar > div { height: 100%; background: var(--accent); transition: width 0.3s; }
+  .rule-bar .count { font-family: ui-monospace, monospace; min-width: 30px; text-align: right; color: var(--muted); }
+  .controls {
+    display: flex; gap: 10px; margin-bottom: 20px; font-size: 12px; color: var(--muted);
+  }
+  .controls code {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 4px 10px; border-radius: 6px; color: var(--text);
+  }
+  .empty { color: var(--muted); font-style: italic; padding: 20px; text-align: center; }
+  .footer-note { color: var(--muted); font-size: 11px; margin-top: 20px; padding: 12px 0; border-top: 1px solid var(--border); }
+  .signals-row td { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); padding: 0 10px 8px; }
+  .refresh-btn {
+    background: var(--accent); color: white; border: none; padding: 6px 14px;
+    border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;
+  }
+  .refresh-btn:hover { opacity: 0.85; }
+  .grade {
+    display: inline-block; width: 22px; height: 22px; line-height: 22px;
+    text-align: center; border-radius: 50%; font-weight: 700; font-size: 11px;
+  }
+  .grade.high { background: rgba(63,185,80,0.2); color: var(--green); }
+  .grade.medium { background: rgba(210,153,34,0.2); color: var(--amber); }
+  .grade.low { background: rgba(248,81,73,0.2); color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🧪 Bot Advance — Challenger Monitor</h1>
+    <div class="meta">Parallel ensemble bot, <strong>shadow mode</strong> by default. Updates every 30s. Last refresh: <strong id="last-refresh">—</strong></div>
+  </div>
+  <button class="refresh-btn" onclick="loadState()">Refresh</button>
+</header>
+
+<main>
+  <div class="controls">
+    <span>Operator commands (run in terminal):</span>
+    <code>npm run bot-advance:status</code>
+    <code>npm run bot-advance:scan</code>
+    <code>npm run bot-advance:stop</code>
+    <code>npm run bot-advance:set-mode live</code>
+  </div>
+
+  <div class="panels" id="bot-panels">
+    <div class="panel empty">Loading…</div>
+  </div>
+
+  <div class="panel" style="margin-bottom: 20px;">
+    <h2>📊 Per-Rule Activity</h2>
+    <div id="rule-activity"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="panel" style="margin-bottom: 20px;">
+    <h2>📈 Action Breakdown (Last 24h)</h2>
+    <div id="action-breakdown"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="panel" style="margin-bottom: 20px;">
+    <h2>🟢 Open Trades</h2>
+    <div id="open-trades"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>🎯 Recent WOULD_BUY Decisions (last 50)</h2>
+    <div id="recent-buys"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="footer-note">
+    Existing bots (19, 25, 27, 28) are completely untouched and continue running their composite strategy.
+    Bot-advance is an isolated challenger. Per-rule P&amp;L will accumulate once shadow mode flips to live and trades close.
+  </div>
+</main>
+
+<script>
+function fmt(n, decimals = 2) {
+  if (n == null || n === '') return '—';
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return v.toFixed(decimals);
+}
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false });
+}
+function confidenceClass(conf) {
+  if (conf === 'high') return 'high';
+  if (conf === 'medium') return 'medium';
+  return 'low';
+}
+
+async function loadState() {
+  try {
+    const r = await fetch('/api/bot-advance/state', { credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    document.getElementById('last-refresh').textContent = fmtTime(data.generated_at);
+    renderBots(data.bots, data.last_scan_at);
+    renderRuleActivity(data.rule_activity);
+    renderActions(data.action_counts);
+    renderOpenTrades(data.open_trades);
+    renderRecentBuys(data.recent_buys);
+  } catch (e) {
+    document.getElementById('bot-panels').innerHTML =
+      '<div class="panel empty">Failed to load: ' + e.message + '. Make sure you\'re logged in to the dashboard first.</div>';
+  }
+}
+
+function renderBots(bots, lastScan) {
+  if (!bots?.length) {
+    document.getElementById('bot-panels').innerHTML = '<div class="panel empty">No advance bots configured. Run <code>npm run bot-advance:migrate</code> first.</div>';
+    return;
+  }
+  document.getElementById('bot-panels').innerHTML = bots.map(b => `
+    <div class="panel">
+      <h2>${b.name} <span class="pill ${b.status}">${b.status}</span> <span class="pill ${b.shadow_mode ? 'shadow' : 'live'}">${b.shadow_mode ? '🧪 shadow' : '🔴 live-paper'}</span></h2>
+      <div class="kv"><span class="k">Bot ID</span><span class="v">#${b.id}</span></div>
+      <div class="kv"><span class="k">Broker</span><span class="v">${b.broker}</span></div>
+      <div class="kv"><span class="k">Capital</span><span class="v">$${fmt(b.capital_usd, 0)}</span></div>
+      <div class="kv"><span class="k">Cumulative P&amp;L</span><span class="v" style="color:${Number(b.cumulative_pnl_usd) > 0 ? 'var(--green)' : Number(b.cumulative_pnl_usd) < 0 ? 'var(--red)' : 'var(--muted)'}">$${fmt(b.cumulative_pnl_usd)}</span></div>
+      <div class="kv"><span class="k">Current trade</span><span class="v">${b.current_trade_id ?? '—'}</span></div>
+      <div class="kv"><span class="k">Last scan</span><span class="v">${fmtTime(lastScan)}</span></div>
+      <div class="kv"><span class="k">Enabled rules</span><span class="v" style="font-size:11px">${(b.enabled_rules ?? []).length}</span></div>
+    </div>`).join('');
+}
+
+function renderRuleActivity(rules) {
+  if (!rules?.length) {
+    document.getElementById('rule-activity').innerHTML = '<div class="empty">No rule activity yet. Run <code>npm run bot-advance:scan</code> to generate decisions.</div>';
+    return;
+  }
+  const max7d = Math.max(...rules.map(r => r.buys_7d), 1);
+  document.getElementById('rule-activity').innerHTML = rules.map(r => `
+    <div class="rule-bar">
+      <div class="name"><code>${r.entry_rule}</code></div>
+      <div class="bar"><div style="width:${(r.buys_7d/max7d*100).toFixed(0)}%"></div></div>
+      <div class="count">${r.buys_24h}/24h</div>
+      <div class="count">${r.buys_7d}/7d</div>
+    </div>`).join('');
+}
+
+function renderActions(actions) {
+  if (!actions?.length) {
+    document.getElementById('action-breakdown').innerHTML = '<div class="empty">No actions logged in last 24h.</div>';
+    return;
+  }
+  document.getElementById('action-breakdown').innerHTML =
+    '<table><thead><tr><th>Action</th><th class="num">Count</th></tr></thead><tbody>' +
+    actions.map(a => `<tr><td><code>${a.action}</code></td><td class="num">${a.n}</td></tr>`).join('') +
+    '</tbody></table>';
+}
+
+function renderOpenTrades(trades) {
+  if (!trades?.length) {
+    document.getElementById('open-trades').innerHTML = '<div class="empty">No open trades (expected — shadow mode does not place real trades).</div>';
+    return;
+  }
+  document.getElementById('open-trades').innerHTML =
+    '<table><thead><tr><th>#</th><th>Symbol</th><th>Rule</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Stop</th><th>Opened</th><th>Mode</th></tr></thead><tbody>' +
+    trades.map(t => `<tr>
+      <td>${t.id}</td>
+      <td class="symbol">${t.symbol}</td>
+      <td class="rule"><code>${t.entry_rule ?? '—'}</code></td>
+      <td class="num">${fmt(t.qty, 4)}</td>
+      <td class="num">$${fmt(t.entry_price)}</td>
+      <td class="num">$${fmt(t.stop_loss_price)}</td>
+      <td>${fmtTime(t.opened_at)}</td>
+      <td><span class="pill ${t.shadow_mode ? 'shadow' : 'live'}">${t.shadow_mode ? 'shadow' : 'live'}</span></td>
+    </tr>`).join('') +
+    '</tbody></table>';
+}
+
+function renderRecentBuys(buys) {
+  if (!buys?.length) {
+    document.getElementById('recent-buys').innerHTML = '<div class="empty">No would-buy decisions yet.</div>';
+    return;
+  }
+  document.getElementById('recent-buys').innerHTML =
+    '<table><thead><tr><th>Time</th><th>Symbol</th><th>Rule</th><th>Backtest</th><th>Also matched</th><th>Mode</th></tr></thead><tbody>' +
+    buys.map(d => {
+      const meta = d.rule_metadata ?? {};
+      const be   = meta.backtest_evidence ?? {};
+      const conf = be.confidence || 'medium';
+      const winPct = be.win_rate != null ? (be.win_rate * 100).toFixed(0) + '%' : '—';
+      const ret5d  = be.avg_return_5d != null ? '+' + (be.avg_return_5d * 100).toFixed(1) + '%' : '—';
+      const n      = be.sample_size != null ? 'N=' + be.sample_size : '';
+      const also   = (d.also_matched || []).join(', ') || '<span style="color:var(--muted)">—</span>';
+      return `<tr>
+        <td>${fmtTime(d.scanned_at)}</td>
+        <td class="symbol">${d.symbol}</td>
+        <td class="rule"><code>${d.entry_rule}</code></td>
+        <td><span class="grade ${confidenceClass(conf)}" title="confidence: ${conf}">${winPct[0] === '—' ? '?' : winPct[0]}</span> ${winPct} / ${ret5d} ${n}</td>
+        <td style="font-size:11px;color:var(--muted)">${also}</td>
+        <td><span class="pill ${d.shadow_mode ? 'shadow' : 'live'}">${d.shadow_mode ? 'shadow' : 'live'}</span></td>
+      </tr>`;
+    }).join('') +
+    '</tbody></table>';
+}
+
+loadState();
+setInterval(loadState, 30_000);
+</script>
+</body>
+</html>
