@@ -33,13 +33,22 @@ if (!u.length) {
 }
 const user = u[0];
 
+// 2026-05-28: admin users get broker access via process.env (system-wide creds),
+// not via per-user columns. This matches the existing dashboard's isAdmin pattern
+// in src/web/server.js (line ~688).
+const isAdmin = user.role === 'admin';
+
 const brokers = [];
-if (user.alpaca_api_key) brokers.push('alpaca');
-if (user.tiger_demo_id && user.tiger_demo_account && user.tiger_demo_private_key) brokers.push('tiger_demo');
+if (user.alpaca_api_key || (isAdmin && process.env.ALPACA_API_KEY)) {
+  brokers.push('alpaca');
+}
+if (user.tiger_demo_id && user.tiger_demo_account && user.tiger_demo_private_key) {
+  brokers.push('tiger_demo');
+}
 
 if (!brokers.length) {
   console.error(`User '${username}' has no paper-broker credentials configured.`);
-  console.error('Bot-advance needs alpaca paper or tiger_demo credentials.');
+  console.error('Need either per-user alpaca/tiger_demo cred columns OR admin role + ALPACA_API_KEY env.');
   process.exit(3);
 }
 

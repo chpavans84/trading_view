@@ -38,22 +38,36 @@ async function getActiveAdvanceBots() {
 }
 
 // ─── Broker credential loaders ───────────────────────────────────────────────
+// Admin users (role='admin') fall back to process.env creds — matches the existing
+// dashboard's isAdmin pattern in src/web/server.js (line ~688).
 async function _loadUserCreds(userId, broker) {
   const { rows } = await query(`SELECT * FROM users WHERE id=$1`, [userId]);
   const u = rows[0];
   if (!u) throw new Error(`user ${userId} not found`);
+  const isAdmin = u.role === 'admin';
+
   if (broker === 'alpaca') {
-    if (!u.alpaca_api_key) throw new Error(`user ${userId} has no alpaca credentials`);
-    return {
-      apiKey:    u.alpaca_api_key,
-      secretKey: u.alpaca_secret_key,
-      baseUrl:   u.alpaca_base_url || 'https://paper-api.alpaca.markets',
-    };
+    if (u.alpaca_api_key && u.alpaca_secret_key) {
+      return {
+        apiKey:    u.alpaca_api_key,
+        secretKey: u.alpaca_secret_key,
+        baseUrl:   u.alpaca_base_url || 'https://paper-api.alpaca.markets',
+      };
+    }
+    if (isAdmin && process.env.ALPACA_API_KEY && process.env.ALPACA_SECRET_KEY) {
+      return {
+        apiKey:    process.env.ALPACA_API_KEY,
+        secretKey: process.env.ALPACA_SECRET_KEY,
+        baseUrl:   process.env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets',
+      };
+    }
+    throw new Error(`user ${userId} (${u.username}) has no alpaca credentials (no user row, no admin env)`);
   }
+
   if (broker === 'tiger_demo') {
     const pkey = u.tiger_demo_private_key;
     if (!u.tiger_demo_id || !u.tiger_demo_account || !pkey) {
-      throw new Error(`user ${userId} has no tiger_demo credentials`);
+      throw new Error(`user ${userId} (${u.username}) has no tiger_demo credentials`);
     }
     return {
       tiger_id:    u.tiger_demo_id,
