@@ -9425,25 +9425,43 @@ app.post('/api/bots/reconcile', requireAuth, async (req, res) => {
 });
 
 // ─── BOT-ADVANCE (challenger) — read-only state endpoint ─────────────────────
-// Used by /bot-advance.html monitoring page. Returns bot configs, open trades,
-// recent decisions, and per-rule activity counters. Read-only — no writes.
+// Used by the 🧪 Bot Advance dashboard tab. Returns bot configs, open trades,
+// recent decisions, and per-rule activity counters. SCOPED TO LOGGED-IN USER —
+// pavan_acct2 sees only pavan_acct2's bots.
 app.get('/api/bot-advance/state', requireAuth, async (req, res) => {
   try {
-    // 1. Bot configs
+    const userId = await _currentUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    // 1. Bot configs (filtered to current user)
     const { rows: bots } = await query(`
       SELECT id, name, status, broker, shadow_mode, capital_usd, cumulative_pnl_usd,
              current_trade_id, enabled_rules, created_at, updated_at
         FROM bots_advance
-       WHERE deleted_at IS NULL
-       ORDER BY id`);
+       WHERE deleted_at IS NULL AND user_id = $1
+       ORDER BY id`, [userId]);
+    if (!bots.length) {
+      return res.json({
+        ok: true,
+        generated_at: new Date().toISOString(),
+        last_scan_at: null,
+        bots: [],
+        open_trades: [],
+        rule_activity: [],
+        action_counts: [],
+        recent_buys: [],
+        empty_state_message: 'No bot-advance bots configured for your account. Run `npm run bot-advance:provision ' + (req.session?.username || '<username>') + '` to create one.',
+      });
+    }
+    const botIds = bots.map(b => b.id);
 
-    // 2. Open trades
+    // 2. Open trades (scoped to user's bots)
     const { rows: openTrades } = await query(`
       SELECT id, bot_id, symbol, qty, entry_price, entry_rule, hard_sl_pct,
              stop_loss_price, opened_at, peak_pnl_usd, shadow_mode
         FROM bot_advance_trades
-       WHERE status='open'
-       ORDER BY opened_at`);
+       WHERE status='open' AND bot_id = ANY($1::int[])
+       ORDER BY opened_at`, [botIds]);
 
     // 3. Per-rule activity counters (last 24h + last 7d)
     const { rows: ruleCounts } = await query(`
@@ -9451,30 +9469,30 @@ app.get('/api/bot-advance/state', requireAuth, async (req, res) => {
              COUNT(*) FILTER (WHERE action='would_buy' AND scanned_at > NOW() - INTERVAL '24 hours')::int AS buys_24h,
              COUNT(*) FILTER (WHERE action='would_buy' AND scanned_at > NOW() - INTERVAL '7 days')::int  AS buys_7d
         FROM bot_advance_decisions
-       WHERE entry_rule IS NOT NULL
+       WHERE entry_rule IS NOT NULL AND bot_id = ANY($1::int[])
        GROUP BY entry_rule
-       ORDER BY entry_rule`);
+       ORDER BY entry_rule`, [botIds]);
 
-    // 4. Action breakdown last 24h (what is the bot mostly doing?)
+    // 4. Action breakdown last 24h (what are these bots mostly doing?)
     const { rows: actionCounts } = await query(`
       SELECT action, COUNT(*)::int AS n
         FROM bot_advance_decisions
-       WHERE scanned_at > NOW() - INTERVAL '24 hours'
+       WHERE scanned_at > NOW() - INTERVAL '24 hours' AND bot_id = ANY($1::int[])
        GROUP BY action
-       ORDER BY n DESC`);
+       ORDER BY n DESC`, [botIds]);
 
     // 5. Recent WOULD_BUY decisions (last 50, most recent first)
     const { rows: recentBuys } = await query(`
       SELECT id, bot_id, scanned_at, symbol, entry_rule, composite_score,
              also_matched, rule_metadata, signals, notes, shadow_mode
         FROM bot_advance_decisions
-       WHERE action='would_buy'
+       WHERE action='would_buy' AND bot_id = ANY($1::int[])
        ORDER BY scanned_at DESC
-       LIMIT 50`);
+       LIMIT 50`, [botIds]);
 
-    // 6. Last scan time (when did the cron last fire for any advance bot?)
+    // 6. Last scan time (most recent decision for any of this user's bots)
     const { rows: lastScan } = await query(`
-      SELECT MAX(scanned_at) AS last_scan FROM bot_advance_decisions`);
+      SELECT MAX(scanned_at) AS last_scan FROM bot_advance_decisions WHERE bot_id = ANY($1::int[])`, [botIds]);
 
     res.json({
       ok: true,
@@ -10808,6 +10826,9 @@ cron.schedule('0 17 * * 1-5', async () => {
 try {
   const { startBotAdvanceCrons } = await import('../core/bot-advance/engine.js');
   startBotAdvanceCrons();
+  // Executor cron — places orders when bots are out of shadow_mode
+  const { startBotAdvanceExecutorCron } = await import('../core/bot-advance/executor.js');
+  startBotAdvanceExecutorCron();
 } catch (err) {
   console.warn('[bot-advance] failed to wire crons (module not loaded):', err.message);
 }
