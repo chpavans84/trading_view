@@ -18,6 +18,7 @@
     "bot:test-alert": "node --env-file=.env -e \"import('./src/core/telegram.js').then(m => m.sendTelegram('🧪 <b>Test alert</b> from bot:test-alert at ' + new Date().toLocaleString('en-US',{timeZone:'America/New_York'})).then(r => { console.log(r); process.exit(r.sent ? 0 : 1); }))\"",
     "bot:digest": "node --env-file=.env scripts/bot-digest-run.mjs",
     "bot:digest:preview": "node --env-file=.env scripts/bot-digest-run.mjs --preview",
+    "bot:refresh-prices": "node --env-file=.env scripts/refresh-prices-run.mjs",
     "start": "node src/server.js",
     "dev": "nodemon --env-file=.env src/web/server.js",
     "tv": "node src/cli/index.js",
