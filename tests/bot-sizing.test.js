@@ -202,6 +202,52 @@ describe('planEntry', () => {
     assert.equal(planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: NaN }).dollarBudget, 9500);
     assert.equal(planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: 'abc' }).dollarBudget, 9500);
   });
+
+  // ─── 2026-05-28: hardSlPct overrides legacy stopLossUsd ────────────────────
+  it('uses hardSlPct when provided (overrides legacy dollar-amount stop)', () => {
+    // Setup: 8% hard stop from EXIT_RULES_BY_SETUP['price_breakout']
+    const r = planEntry({ capitalUsd: 10000, price: 100, maxPositionUsd: 1000, hardSlPct: 0.08 });
+    assert.equal(r.dollarBudget, 1000);
+    assert.equal(r.qty, 10);
+    assert.equal(r.dollarsInvested, 1000);
+    assert.equal(r.stopPct, 8.00);              // 8% — matches the setup rule
+    assert.equal(r.stopPrice, 92.00);           // 100 * (1 - 0.08)
+  });
+
+  it('hardSlPct preserves precision to 2 decimals', () => {
+    const r = planEntry({ capitalUsd: 10000, price: 50, maxPositionUsd: 1000, hardSlPct: 0.0567 });
+    assert.equal(r.stopPct, 5.67);
+    // 50 * (1 - 0.0567) = 47.164999... → toFixed(2) → 47.16
+    // (JS float: 50 * 0.9433 = 47.16499999..., NOT 47.165)
+    assert.equal(r.stopPrice, 47.16);
+  });
+
+  it('falls back to legacy stopLossUsd when hardSlPct is null/undefined', () => {
+    const r1 = planEntry({ capitalUsd: 1000, price: 10, hardSlPct: null });
+    // 1000 capital → $950 budget → 95 shares → $950 invested → $50 stop / $950 = 5.26%
+    assert.equal(r1.stopPct, 5.26);
+    const r2 = planEntry({ capitalUsd: 1000, price: 10 });  // no hardSlPct at all
+    assert.equal(r2.stopPct, 5.26);
+  });
+
+  it('falls back to legacy when hardSlPct is 0, negative, NaN, or non-finite', () => {
+    const r1 = planEntry({ capitalUsd: 1000, price: 10, hardSlPct: 0 });
+    assert.equal(r1.stopPct, 5.26);             // fell back to legacy
+    const r2 = planEntry({ capitalUsd: 1000, price: 10, hardSlPct: -0.5 });
+    assert.equal(r2.stopPct, 5.26);
+    const r3 = planEntry({ capitalUsd: 1000, price: 10, hardSlPct: NaN });
+    assert.equal(r3.stopPct, 5.26);
+    const r4 = planEntry({ capitalUsd: 1000, price: 10, hardSlPct: 'foo' });
+    assert.equal(r4.stopPct, 5.26);
+  });
+
+  it('hardSlPct works with no maxPositionUsd', () => {
+    // 5000 capital, 95% → 4750 budget → 47 shares @ $100 → $4700 invested → 8% stop = $92
+    const r = planEntry({ capitalUsd: 5000, price: 100, hardSlPct: 0.08 });
+    assert.equal(r.qty, 47);
+    assert.equal(r.stopPct, 8.00);
+    assert.equal(r.stopPrice, 92.00);
+  });
 });
 
 // ─── isCircuitBreakerTripped ─────────────────────────────────────────────────

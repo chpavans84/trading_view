@@ -90,11 +90,26 @@ export function computeStopPrice(fillPrice, stopPct) {
  *                                       If set and >0, dollarBudget = min(dollarBudget, floor(maxPositionUsd)).
  *                                       Used to bound losses while win rate is still proving out;
  *                                       leave null to disable the cap.
+ * @param {number|null} [args.hardSlPct] Setup-specific hard stop, as a DECIMAL (e.g. 0.08 for 8%).
+ *                                       When provided, this is the source of truth for the stored
+ *                                       stop and supersedes the dollar-amount `stopLossUsd` path.
+ *                                       The runtime exit logic in bot-executor.js uses the same
+ *                                       EXIT_RULES_BY_SETUP[setup_type].hard_sl_pct value — passing
+ *                                       it here keeps the stored DB value aligned with what the bot
+ *                                       will actually trigger on (added 2026-05-28 review fix).
+ *                                       Pass null/undefined to fall back to dollar-amount stop.
  * @returns {{ skip: 'no_capital' | 'no_price' | 'insufficient_capital' } |
  *           { qty: number, dollarBudget: number, dollarsInvested: number,
  *             stopPct: number, stopPrice: number }}
  */
-export function planEntry({ capitalUsd, price, sizePct = DEFAULT_SIZE_PCT, stopLossUsd = DEFAULT_STOP_LOSS_USD, maxPositionUsd = null }) {
+export function planEntry({
+  capitalUsd,
+  price,
+  sizePct        = DEFAULT_SIZE_PCT,
+  stopLossUsd    = DEFAULT_STOP_LOSS_USD,
+  maxPositionUsd = null,
+  hardSlPct      = null,
+}) {
   let dollarBudget = computeDollarBudget(capitalUsd, sizePct);
   // 2026-05-28: cap per-trade dollar size so losses stay bounded while win rate is still proving out.
   // Set sizing.max_position_usd in bot rules (e.g. 1000) to enforce a hard ceiling.
@@ -112,7 +127,16 @@ export function planEntry({ capitalUsd, price, sizePct = DEFAULT_SIZE_PCT, stopL
     return { skip: 'insufficient_capital', dollarBudget, qty: 0, dollarsInvested: 0, stopPct: 0, stopPrice: 0 };
   }
   const dollarsInvested = +(Number(price) * qty).toFixed(2);
-  const stopPct  = computeStopPct(stopLossUsd, dollarsInvested);
+  // 2026-05-28 review fix: prefer setup-specific hard_sl_pct when supplied (caller passes the
+  // value from EXIT_RULES_BY_SETUP). This keeps the stored stop_loss aligned with the runtime
+  // exit logic. Falls back to the legacy stopLossUsd/dollar-amount path when not supplied so
+  // older callers don't break.
+  let stopPct;
+  if (Number.isFinite(Number(hardSlPct)) && Number(hardSlPct) > 0) {
+    stopPct = +(Number(hardSlPct) * 100).toFixed(2);
+  } else {
+    stopPct = computeStopPct(stopLossUsd, dollarsInvested);
+  }
   const stopPrice = computeStopPrice(price, stopPct);
   return { qty, dollarBudget, dollarsInvested, stopPct, stopPrice };
 }

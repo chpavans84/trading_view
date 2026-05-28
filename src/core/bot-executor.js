@@ -321,7 +321,21 @@ async function _tryOpenPosition(bot) {
   const sizePct        = bot.rules?.sizing?.position_size_pct ?? 95;
   const stopLossUsd0   = bot.rules?.exit_rules?.stop_loss_usd  ?? 50;
   const maxPositionUsd = bot.rules?.sizing?.max_position_usd   ?? null;  // 2026-05-28: hard dollar cap per trade
-  const plan           = planEntry({ capitalUsd: bot.capital_usd, price, sizePct, stopLossUsd: stopLossUsd0, maxPositionUsd });
+  // 2026-05-28 review fix: align stored stop_loss with runtime hard stop.
+  // _manageOpenPosition uses EXIT_RULES_BY_SETUP[setup_type].hard_sl_pct — same source here so
+  // the trades.stop_loss column reflects what the bot will actually trigger on (not the legacy
+  // dollar-amount stop). Falls back to legacy path when setup_type is unknown.
+  const setupType    = decision.setup_type ?? null;
+  const setupRules   = setupType ? EXIT_RULES_BY_SETUP[setupType] : null;
+  const hardSlPct    = setupRules?.hard_sl_pct ?? null;
+  const plan         = planEntry({
+    capitalUsd:    bot.capital_usd,
+    price,
+    sizePct,
+    stopLossUsd:   stopLossUsd0,
+    maxPositionUsd,
+    hardSlPct,
+  });
   if (plan.skip === 'no_capital')          return { action: 'skip_no_capital', symbol };
   if (plan.skip === 'no_price')            return { action: 'skip_bad_price', symbol, price };
   if (plan.skip === 'insufficient_capital') return { action: 'skip_insufficient_capital', symbol, price, budget: plan.dollarBudget };
