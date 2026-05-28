@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=v29">
+<link rel="stylesheet" href="/css/dashboard.css?v=v62">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -162,7 +162,8 @@
 
 <nav>
   <div class="nav-tabs">
-    <button class="tab active" id="tab-dashboard" onclick="showPage('dashboard',this)">P&amp;L Dashboard</button>
+    <button class="tab active" id="tab-home" onclick="showPage('home',this)">🏠 Home</button>
+    <button class="tab" id="tab-dashboard" onclick="showPage('dashboard',this)">P&amp;L Dashboard</button>
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
@@ -171,6 +172,8 @@
     <button class="tab" id="tab-trading-desk" onclick="showPage('trading-desk',this)">Trading Desk</button>
     <button class="tab" id="tab-uw" onclick="showPage('uw',this)" title="Unusual Whales — flow / insider / congress / correlations / history">🐋 UW</button>
     <button class="tab" id="tab-bots" onclick="showPage('bots',this)">🤖 Bots</button>
+    <button class="tab" id="tab-bot-advance" onclick="showPage('bot-advance',this)" title="Challenger bot — entry-rule ensemble in shadow mode">🧪 Bot Advance</button>
+    <button class="tab" id="tab-screener" onclick="showPage('screener',this)" title="Finviz-style screener over 8K+ US stocks">🔎 Screener</button>
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
     <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
     <button class="tab" id="tab-backtests" onclick="showPage('backtests',this)" title="Strategy replay results" style="display:none">📊 Backtests</button>
@@ -207,7 +210,18 @@
 
 <!-- ── DAILY P&L ──────────────────────────────────────── -->
 <!-- ── DASHBOARD ─────────────────────────────────────── -->
-<div class="page active" id="page-dashboard">
+<!-- ═══════════════════════ HOME PAGE (default landing, 2026-05-25) ═══════════════════════
+     loadHome() rebuilds the inner HTML on every refresh from /api/home-feed.
+     Bloomberg-style mega-grid with 7 panels: indices · hot news · suggested
+     stocks · portfolio · smart money · top movers · upcoming earnings. -->
+<div class="page active" id="page-home">
+  <div class="home-loading" id="homeInitialLoading">
+    <div class="home-loading-pulse"></div>
+    <div style="margin-top:14px;font-size:0.8rem;color:#8b949e;letter-spacing:0.05em">LOADING HOME FEED…</div>
+  </div>
+</div>
+
+<div class="page" id="page-dashboard">
   <div class="pnl-layout">
 
     <!-- ── LEFT SIDEBAR: account metrics ──────────────── -->
@@ -427,7 +441,10 @@
     <div class="mkt-index-card mkt-index-skeleton">RUSSELL 2000</div>
   </div>
 
-  <!-- ── 3. Two-column: Top Movers (left) + Sector Heatmap (right) ─────── -->
+  <!-- ── 3. Two-column: Top Movers (left) + Sector strip (right) ─────────── -->
+  <!-- The right column is the compact 11-tile GICS sector strip. The big
+       stock-level heatmap moved to its own full-width section below (so it
+       has room to lay out as a real Bloomberg-style treemap). -->
   <div class="mkt-2col">
 
     <!-- LEFT — Top Movers table -->
@@ -443,16 +460,50 @@
       </div>
     </div>
 
-    <!-- RIGHT — S&P 500 / Sector heatmap -->
+    <!-- RIGHT — Sector strip (compact 11-sector view) -->
     <div class="table-wrap">
       <div class="table-head">
-        <h3>S&amp;P 500 Sector Heatmap
-          <span style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px">1-day performance, sized by weight</span>
+        <h3>Sectors Today
+          <span style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px">1-day GICS performance</span>
           <button class="doc-btn" onclick="openResearchDoc('market_sectors')" title="How this works">?</button>
         </h3>
       </div>
       <div class="mkt-heatmap" id="sectorBars">
         <div class="loading" style="padding:20px">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3b. Full-width S&P 500 stock-level heatmap (Finviz-style treemap) ─── -->
+  <div class="table-wrap" style="margin-top:16px">
+    <div class="table-head">
+      <h3>S&amp;P 500 Heatmap
+        <span id="mktHeatHint" style="font-size:0.72rem;font-weight:400;color:#6e7681;margin-left:6px">Sized by $-volume · color = 1-day chg · click to expand</span>
+        <button class="doc-btn" onclick="openResearchDoc('market_sectors')" title="How this works">?</button>
+      </h3>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button onclick="openHeatmapModal()" title="Expand to full screen"
+          style="background:#238636;border:none;border-radius:6px;color:#fff;padding:3px 12px;font-size:0.72rem;font-weight:600;cursor:pointer">⤢ Expand</button>
+      </div>
+    </div>
+    <!-- Compact treemap — click to expand to modal -->
+    <div id="sp500HeatBox" class="mkt-treemap-compact" onclick="openHeatmapModal()" title="Click to expand">
+      <div class="loading" style="padding:20px">Loading S&amp;P 500 grid…</div>
+    </div>
+  </div>
+
+  <!-- ── Full-screen treemap modal (rendered when ⤢ Expand / box is clicked) ── -->
+  <div id="mktHeatModal" class="mkt-heat-modal" style="display:none" onclick="closeHeatmapModal(event)">
+    <div class="mkt-heat-modal-inner" onclick="event.stopPropagation()">
+      <div class="mkt-heat-modal-head">
+        <h3 style="margin:0;font-size:0.95rem">S&amp;P 500 Heatmap
+          <span id="mktHeatModalAsOf" style="font-size:0.7rem;font-weight:400;color:#8b949e;margin-left:8px"></span>
+        </h3>
+        <button onclick="closeHeatmapModal()" title="Close (Esc)"
+          style="background:none;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:4px 12px;font-size:0.8rem;cursor:pointer">✕ Close</button>
+      </div>
+      <div id="mktHeatModalBody" class="mkt-treemap-full">
+        <div class="loading" style="padding:40px;text-align:center">Loading…</div>
       </div>
     </div>
   </div>
@@ -623,6 +674,20 @@
 <div class="page" id="page-discover">
   <div class="disc-header">
     <h2 class="disc-title">🔥 Discover <span class="disc-stats" id="discStats"></span></h2>
+
+    <!-- Category tabs — Hot / Bullish / Bearish / Smart Money / Earnings / Holdings / Congress
+         Each tab fetches /api/news/categorized?category=X with our edge data baked in. -->
+    <div class="disc-cat-strip" id="discCatStrip">
+      <button class="disc-cat-tab is-active" data-cat="hot"         onclick="discSetCategory('hot')">🔥 Hot</button>
+      <button class="disc-cat-tab"           data-cat="bullish"     onclick="discSetCategory('bullish')">🟢 Bullish</button>
+      <button class="disc-cat-tab"           data-cat="bearish"     onclick="discSetCategory('bearish')">🔴 Bearish</button>
+      <button class="disc-cat-tab"           data-cat="smart_money" onclick="discSetCategory('smart_money')">💰 Smart Money</button>
+      <button class="disc-cat-tab"           data-cat="earnings"    onclick="discSetCategory('earnings')">📊 Earnings</button>
+      <button class="disc-cat-tab"           data-cat="holdings"    onclick="discSetCategory('holdings')">🎯 Your Holdings</button>
+      <button class="disc-cat-tab"           data-cat="congress"    onclick="discSetCategory('congress')">🏛️ Congress</button>
+      <button class="disc-cat-tab"           data-cat="all"         onclick="discSetCategory('all')">📰 All News</button>
+    </div>
+
     <div class="disc-filter-bar">
       <input id="discSearch" class="disc-search" type="text" placeholder="Search headlines &amp; teasers…"
              oninput="discDebounceReload()">
@@ -1522,6 +1587,18 @@
       <div id="td-chart-box" class="td-chart-box">
         <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#484f58;font-size:0.82rem">Select a symbol from the watchlist</div>
       </div>
+
+      <!-- ── Info tabs below chart — News, Earnings, Company, Financials ── -->
+      <div class="td-info-tabs">
+        <button class="td-info-tab active" data-tab="overview"  onclick="tdSelectInfoTab('overview', this)">Overview</button>
+        <button class="td-info-tab"        data-tab="news"      onclick="tdSelectInfoTab('news',     this)">📰 News</button>
+        <button class="td-info-tab"        data-tab="earnings"  onclick="tdSelectInfoTab('earnings', this)">📊 Earnings</button>
+        <button class="td-info-tab"        data-tab="company"   onclick="tdSelectInfoTab('company',  this)">🏢 Company</button>
+        <button class="td-info-tab"        data-tab="financials" onclick="tdSelectInfoTab('financials', this)">💰 Financials</button>
+      </div>
+      <div id="td-info-body" class="td-info-body">
+        <div style="color:#484f58;font-size:0.82rem;padding:20px;text-align:center">Select a symbol to see news, earnings, and company info.</div>
+      </div>
     </div>
 
     <!-- Right: Stats + signals -->
@@ -2049,6 +2126,257 @@
         <button class="bot-drilldown-close" onclick="botsDrilldownClose()" aria-label="Close">✕</button>
       </div>
       <div id="bot-drilldown-body" class="bot-drilldown-body">Loading…</div>
+    </div>
+  </div>
+</div>
+<!-- ══════════════════════════════════════════════════════════ -->
+
+<!-- ── 🧪 Bot Advance Tab (challenger ensemble in shadow mode) ───────────── -->
+<div class="page" id="page-bot-advance">
+  <style>
+    #page-bot-advance .ba-wrap { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+    #page-bot-advance .ba-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border, #30363d); }
+    #page-bot-advance .ba-header h2 { margin:0; font-size:20px; }
+    #page-bot-advance .ba-meta { color: var(--muted, #8b949e); font-size:12px; }
+    #page-bot-advance .ba-refresh-btn { background: var(--accent, #58a6ff); color: white; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; }
+    #page-bot-advance .ba-cmds { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; font-size:11px; color:var(--muted, #8b949e); }
+    #page-bot-advance .ba-cmds code { background: var(--panel, #161b22); border:1px solid var(--border, #30363d); padding:4px 10px; border-radius:6px; color: var(--text, #e6edf3); font-family: ui-monospace, monospace; }
+    #page-bot-advance .ba-panels { display:grid; gap:14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-bottom:18px; }
+    #page-bot-advance .ba-card { background: var(--panel, #161b22); border:1px solid var(--border, #30363d); border-radius:8px; padding:14px 16px; }
+    #page-bot-advance .ba-card h3 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted, #8b949e); font-weight:600; }
+    #page-bot-advance .ba-kv { display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid var(--border, #30363d); font-size:13px; }
+    #page-bot-advance .ba-kv:last-child { border-bottom:none; }
+    #page-bot-advance .ba-kv .k { color: var(--muted, #8b949e); }
+    #page-bot-advance .ba-kv .v { font-family: ui-monospace, monospace; }
+    #page-bot-advance .ba-pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; text-transform:uppercase; margin-left:6px; }
+    #page-bot-advance .ba-pill.active { background: rgba(63,185,80,0.15); color: #3fb950; }
+    #page-bot-advance .ba-pill.stopped { background: rgba(248,81,73,0.15); color: #f85149; }
+    #page-bot-advance .ba-pill.paused { background: rgba(210,153,34,0.15); color: #d29922; }
+    #page-bot-advance .ba-pill.shadow { background: rgba(110,118,129,0.2); color: #8b949e; }
+    #page-bot-advance .ba-pill.live { background: rgba(248,81,73,0.18); color: #f85149; }
+    #page-bot-advance .ba-section { background: var(--panel, #161b22); border:1px solid var(--border, #30363d); border-radius:8px; padding:14px 16px; margin-bottom:14px; }
+    #page-bot-advance .ba-section h3 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted, #8b949e); font-weight:600; }
+    #page-bot-advance table.ba-table { width:100%; border-collapse:collapse; font-size:12px; }
+    #page-bot-advance table.ba-table th, #page-bot-advance table.ba-table td { padding:7px 10px; text-align:left; border-bottom:1px solid var(--border, #30363d); }
+    #page-bot-advance table.ba-table th { font-weight:600; color:var(--muted, #8b949e); text-transform:uppercase; font-size:10px; letter-spacing:0.05em; }
+    #page-bot-advance table.ba-table tr:last-child td { border-bottom:none; }
+    #page-bot-advance table.ba-table td.num, #page-bot-advance table.ba-table th.num { text-align:right; font-family: ui-monospace, monospace; }
+    #page-bot-advance .ba-symbol { font-weight:600; color: var(--accent, #58a6ff); }
+    #page-bot-advance code.ba-rule { background: rgba(88,166,255,0.1); padding:2px 6px; border-radius:4px; font-size:11px; color: var(--accent, #58a6ff); font-family: ui-monospace, monospace; }
+    #page-bot-advance .ba-rule-bar { display:flex; align-items:center; gap:10px; padding:7px 8px; border-bottom:1px solid var(--border, #30363d); }
+    #page-bot-advance .ba-rule-bar:last-child { border-bottom:none; }
+    #page-bot-advance .ba-rule-bar .name { flex:1; }
+    #page-bot-advance .ba-rule-bar .bar { height:5px; background: rgba(88,166,255,0.15); border-radius:3px; flex:2; max-width:200px; overflow:hidden; }
+    #page-bot-advance .ba-rule-bar .bar > div { height:100%; background: var(--accent, #58a6ff); transition: width 0.3s; }
+    #page-bot-advance .ba-rule-bar .count { font-family: ui-monospace, monospace; min-width:60px; text-align:right; color: var(--muted, #8b949e); font-size:11px; }
+    #page-bot-advance .ba-empty { color: var(--muted, #8b949e); font-style: italic; padding: 18px; text-align: center; font-size: 12px; }
+    #page-bot-advance .ba-grade { display:inline-block; width:20px; height:20px; line-height:20px; text-align:center; border-radius:50%; font-weight:700; font-size:10px; }
+    #page-bot-advance .ba-grade.high { background: rgba(63,185,80,0.2); color: #3fb950; }
+    #page-bot-advance .ba-grade.medium { background: rgba(210,153,34,0.2); color: #d29922; }
+    #page-bot-advance .ba-grade.low { background: rgba(248,81,73,0.2); color: #f85149; }
+    #page-bot-advance .ba-foot { color: var(--muted, #8b949e); font-size:11px; margin-top:18px; padding:12px 0; border-top:1px solid var(--border, #30363d); }
+  </style>
+
+  <div class="ba-wrap">
+    <div class="ba-header">
+      <div>
+        <h2>🧪 Bot Advance — Challenger Monitor</h2>
+        <div class="ba-meta">Parallel ensemble bot in <strong>shadow mode</strong> (no real trades). Refreshes every 30s. Last update: <strong id="ba-last-refresh">—</strong></div>
+      </div>
+      <button class="ba-refresh-btn" onclick="loadBotAdvance(true)">Refresh now</button>
+    </div>
+
+    <div class="ba-cmds">
+      <span style="align-self:center;">Operator commands:</span>
+      <code>npm run bot-advance:status</code>
+      <code>npm run bot-advance:scan</code>
+      <code>npm run bot-advance:stop</code>
+      <code>npm run bot-advance:set-mode live</code>
+    </div>
+
+    <div class="ba-panels" id="ba-bot-panels">
+      <div class="ba-card ba-empty">Loading…</div>
+    </div>
+
+    <div class="ba-section">
+      <h3>📊 Per-Rule Activity</h3>
+      <div id="ba-rule-activity"><div class="ba-empty">Loading…</div></div>
+    </div>
+
+    <div class="ba-section">
+      <h3>📈 Action Breakdown (Last 24h)</h3>
+      <div id="ba-action-breakdown"><div class="ba-empty">Loading…</div></div>
+    </div>
+
+    <div class="ba-section">
+      <h3>🟢 Open Trades</h3>
+      <div id="ba-open-trades"><div class="ba-empty">Loading…</div></div>
+    </div>
+
+    <div class="ba-section">
+      <h3>🎯 Recent WOULD_BUY Decisions (last 50)</h3>
+      <div id="ba-recent-buys"><div class="ba-empty">Loading…</div></div>
+    </div>
+
+    <div class="ba-foot">
+      Existing bots (19, 25, 27, 28) are completely untouched and continue running their composite strategy.
+      Bot-advance is an isolated challenger. Per-rule P&amp;L accumulates once shadow flips to live-paper.
+    </div>
+  </div>
+</div>
+
+<!-- ── Screener Tab (Finviz-style 8K+ stock filter) ─────────────────────── -->
+<div class="page" id="page-screener">
+  <div class="screener-wrap">
+    <div class="screener-head">
+      <h2 style="margin:0;font-size:1.15rem;color:#e6edf3">🔎 Stock Screener
+        <span class="screener-coverage" id="screenerCoverage" style="font-size:0.72rem;color:#8b949e;margin-left:8px"></span>
+      </h2>
+      <div class="screener-preset-groups">
+        <!-- Smart-setup presets — use our edge tables (UW flow + insider + conviction + earnings) -->
+        <div class="screener-preset-group screener-preset-group-smart">
+          <div class="screener-preset-group-label">🎯 Smart setups</div>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('hot_setups')" title="Stocks with composite signal score ≥ 30 (2+ bullish signals stacked)">🔥 Hot setups</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('insider_xl')" title="Insiders bought ≥ $1M in the last 30 days">👤 Insider $1M+</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('insider_clusters')" title="Any insider buying ≥ $250K in the last 30 days">👤 Insider buys</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('smart_money_xl')" title="UW bullish options flow ≥ $1M premium in the last 7 days">🐋 Smart money $1M+</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('smart_money')" title="UW bullish options flow ≥ $200K premium in the last 7 days">🐋 Smart money</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('congress_buys')" title="Congressional members traded this in the last 90 days">🏛️ Congress active</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('bot_grade_a')" title="Bot conviction grade A (composite score ≥ 80)">🐂 Bot grade A</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('mean_reversion')" title="RSI &lt; 30 AND above 200-day MA — dip in confirmed uptrend">📉 Mean reversion</button>
+          <button class="screener-preset screener-preset-smart" onclick="screenerApplyPreset('volume_spike')" title="Day move ≥ +5% on relative volume ≥ 1.5×">⚡ Volume spike</button>
+        </div>
+        <!-- Classic Finviz-style presets -->
+        <div class="screener-preset-group">
+          <div class="screener-preset-group-label">📐 Classic</div>
+          <button class="screener-preset" onclick="screenerApplyPreset('mega_caps')">Mega caps</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('large_caps')">Large</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('mid_caps')">Mid</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('small_caps')">Small</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('oversold')">Oversold</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('overbought')">Overbought</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('near_52w_high')">Near 52w hi</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('golden_cross')">Golden cross</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('momentum_winners')">Momentum</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('value')">Value</button>
+          <button class="screener-preset" onclick="screenerApplyPreset('high_growth')">High growth</button>
+          <button class="screener-preset screener-preset-reset" onclick="screenerReset()">↺ Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter row 1: search + categorical -->
+    <div class="screener-filter-row">
+      <input id="scrSearch" placeholder="🔍 Search ticker or company…" class="screener-input" oninput="screenerDebounced()" />
+      <select id="scrSector" class="screener-input" onchange="screenerReload()">
+        <option value="">All sectors</option>
+      </select>
+      <select id="scrIndustry" class="screener-input" onchange="screenerReload()">
+        <option value="">All industries</option>
+      </select>
+      <select id="scrExchange" class="screener-input" onchange="screenerReload()">
+        <option value="">All exchanges</option>
+      </select>
+    </div>
+
+    <!-- Filter row 2: numeric ranges -->
+    <div class="screener-filter-row screener-filter-row-numeric">
+      <div class="scr-range">
+        <label>Market cap ($B)</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinMcap" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+          <input id="scrMaxMcap" placeholder="max" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+      <div class="scr-range">
+        <label>Price ($)</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinPrice" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+          <input id="scrMaxPrice" placeholder="max" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+      <div class="scr-range">
+        <label>Day change (%)</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinChg" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+          <input id="scrMaxChg" placeholder="max" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+      <div class="scr-range">
+        <label>P/E ratio</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinPe" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+          <input id="scrMaxPe" placeholder="max" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+      <div class="scr-range">
+        <label>RSI(14)</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinRsi" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+          <input id="scrMaxRsi" placeholder="max" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+      <div class="scr-range">
+        <label>% from 52w high</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinFromHigh" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+          <input id="scrMaxFromHigh" placeholder="max" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+      <div class="scr-range">
+        <label>1mo return (%)</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinRet1m" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+          <input id="scrMaxRet1m" placeholder="max" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+      <div class="scr-range">
+        <label>Min div yield (%)</label>
+        <div class="scr-range-inputs">
+          <input id="scrMinDiv" placeholder="min" class="screener-input scr-mini" oninput="screenerDebounced()" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Result count + saved-screens + column toggle + density + export -->
+    <div class="screener-toolbar">
+      <div class="screener-toolbar-count">
+        <span id="screenerCount" style="font-weight:700;color:#e6edf3">0</span>
+        <span style="color:#6e7681">matches</span>
+        <span id="screenerLoading" style="display:none;color:#79c0ff;margin-left:8px">· loading…</span>
+      </div>
+      <div class="screener-toolbar-actions">
+        <select id="scrSavedScreens" class="screener-input" style="min-width:160px" onchange="screenerLoadSaved(this.value); this.selectedIndex=0">
+          <option value="">📋 Saved screens…</option>
+        </select>
+        <button class="screener-preset" onclick="screenerSaveCurrent()" title="Save current filters as a named screen">💾 Save</button>
+        <button class="screener-preset" onclick="screenerToggleColumns()" title="Show/hide columns">⚙ Columns</button>
+        <button class="screener-preset" onclick="screenerToggleDensity()" title="Compact vs comfortable row height" id="scrDensityBtn">📏 Compact</button>
+        <button class="screener-preset" onclick="screenerExportCsv()">📥 CSV</button>
+      </div>
+    </div>
+
+    <!-- Hidden column-toggle drawer -->
+    <div class="screener-col-drawer" id="scrColDrawer" style="display:none">
+      <div class="screener-col-drawer-head">Show columns:</div>
+      <div class="screener-col-drawer-grid" id="scrColDrawerGrid"></div>
+    </div>
+
+    <!-- Results table — column visibility is JS-driven (see SCR_COLUMNS) -->
+    <div class="screener-table-wrap">
+      <table class="screener-table" id="screenerTable">
+        <thead id="screenerThead"></thead>
+        <tbody id="screenerTbody">
+          <tr><td style="padding:30px;text-align:center;color:#6e7681">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="screener-pagination">
+      <button class="screener-preset" onclick="screenerPagePrev()" id="scrPrev">◀ Prev</button>
+      <span id="screenerPageInfo" style="color:#8b949e;font-size:0.82rem">Page 1</span>
+      <button class="screener-preset" onclick="screenerPageNext()" id="scrNext">Next ▶</button>
     </div>
   </div>
 </div>
@@ -5295,6 +5623,7 @@ erDiagram
         <button class="chat-size-btn" onclick="setChatSize('lg')"  title="Large">L</button>
         <button class="chat-size-btn" onclick="setChatSize('xl')"  title="Full">⛶</button>
       </div>
+      <button id="chatModeBtn" class="voice-tts-btn" onclick="toggleChatMode()" title="Switch chat backend">🌐 API</button>
       <button id="voiceTTSBtn" class="voice-tts-btn" onclick="toggleTTS()" title="Read responses aloud">🔇</button>
       <button id="voiceSessionBtn" class="voice-session-btn" onclick="toggleVoiceSession()" title="Start interactive voice conversation">🎙 Voice Chat</button>
       <button class="chat-report-btn" onclick="openReportModal()" title="Report an issue with the bot">🚩</button>
@@ -5501,6 +5830,7 @@ const ASSET_VERSION = 'v25';
 // ── Permissions ───────────────────────────────────────
 // Map permission key → page name used in showPage()
 const TAB_PAGE_MAP = {
+  home:      'home',          // Home is the new default landing page (2026-05-25)
   dashboard: 'dashboard', trades: 'trades',
   // Stats merged into Health (2026-05-25). Old 'stats' permission key
   // routes to the merged tab so existing users keep working.
@@ -5510,6 +5840,7 @@ const TAB_PAGE_MAP = {
   signal_center: 'signal-center',
   trading_desk:  'trading-desk',
   bots:          'bots',
+  screener:      'screener',
 };
 
 function _rebuildSourceDropdown() {
@@ -5537,48 +5868,65 @@ function applyPermissions(perms) {
   const tabs    = perms?.tabs    || [];
   const widgets = perms?.widgets || [];
 
+  // Each block is independent — wrap so one bad DOM lookup can't skip the rest.
+  // The source dropdown rebuild is the most user-visible casualty when this
+  // function throws partway, so it gets called first and again at the end.
+  try { _rebuildSourceDropdown(); } catch (e) { console.warn('[perm] dropdown(early)', e); }
+
   // Show/hide nav tabs based on allowed tabs
-  Object.entries(TAB_PAGE_MAP).forEach(([perm, page]) => {
-    const btn = document.querySelector(`button.tab[onclick*="showPage('${page}'"]`);
-    if (btn) btn.style.display = tabs.includes(perm) ? '' : 'none';
-  });
+  try {
+    Object.entries(TAB_PAGE_MAP).forEach(([perm, page]) => {
+      const btn = document.querySelector(`button.tab[onclick*="showPage('${page}'"]`);
+      if (btn) btn.style.display = tabs.includes(perm) ? '' : 'none';
+    });
+  } catch (e) { console.warn('[perm] tabs', e); }
 
   // If the currently active page is no longer allowed, jump to first allowed tab
-  const activePage = document.querySelector('.page.active')?.id?.replace('page-', '');
-  const activePerm = Object.entries(TAB_PAGE_MAP).find(([,pg]) => pg === activePage)?.[0];
-  if (activePerm && !tabs.includes(activePerm) && tabs.length) {
-    const firstPage = TAB_PAGE_MAP[tabs[0]];
-    const firstBtn  = document.querySelector(`button.tab[onclick*="showPage('${firstPage}'"]`);
-    if (firstBtn) showPage(firstPage, firstBtn);
-  }
-
-  // Rebuild source dropdown — gated by widget permissions AND admin-imposed source locks
-  _rebuildSourceDropdown();
+  try {
+    const activePage = document.querySelector('.page.active')?.id?.replace('page-', '');
+    const activePerm = Object.entries(TAB_PAGE_MAP).find(([,pg]) => pg === activePage)?.[0];
+    if (activePerm && !tabs.includes(activePerm) && tabs.length) {
+      const firstPage = TAB_PAGE_MAP[tabs[0]];
+      const firstBtn  = document.querySelector(`button.tab[onclick*="showPage('${firstPage}'"]`);
+      if (firstBtn) showPage(firstPage, firstBtn);
+    }
+  } catch (e) { console.warn('[perm] active-page', e); }
 
   // Force Trade button
-  document.querySelectorAll('.force-btn').forEach(b => {
-    b.style.display = widgets.includes('force_trade') ? '' : 'none';
-  });
+  try {
+    document.querySelectorAll('.force-btn').forEach(b => {
+      b.style.display = widgets.includes('force_trade') ? '' : 'none';
+    });
+  } catch (e) { console.warn('[perm] force-trade', e); }
 
   // AI Chat bot
-  const chatFab    = document.getElementById('chatFab');
-  const chatWidget = document.getElementById('chatWidget');
-  const showChat   = widgets.includes('chat');
-  if (chatFab)    chatFab.style.display = showChat ? '' : 'none';
-  if (!showChat && chatWidget?.classList.contains('open')) toggleChat();
-  if (chatWidget) chatWidget.style.display = showChat ? '' : 'none';
+  try {
+    const chatFab    = document.getElementById('chatFab');
+    const chatWidget = document.getElementById('chatWidget');
+    const showChat   = widgets.includes('chat');
+    if (chatFab)    chatFab.style.display = showChat ? '' : 'none';
+    if (!showChat && chatWidget?.classList.contains('open')) toggleChat();
+    if (chatWidget) chatWidget.style.display = showChat ? '' : 'none';
+  } catch (e) { console.warn('[perm] chat', e); }
 
   // Stock Explorer floating widget
-  const explorerTab = document.getElementById('tab-explorer');
-  const showExplorer = widgets.includes('stock_explorer');
-  if (explorerTab) explorerTab.style.display = showExplorer ? '' : 'none';
-  if (!showExplorer) closeFloatExplorer();
+  try {
+    const explorerTab = document.getElementById('tab-explorer');
+    const showExplorer = widgets.includes('stock_explorer');
+    if (explorerTab) explorerTab.style.display = showExplorer ? '' : 'none';
+    if (!showExplorer) closeFloatExplorer();
+  } catch (e) { console.warn('[perm] explorer', e); }
 
   // AI Notifications
-  const notifBtn = document.getElementById('navNotifBtn');
-  const showNotif = widgets.includes('notifications');
-  if (notifBtn) notifBtn.style.display = showNotif ? '' : 'none';
-  if (!showNotif) closeNotifPanel();
+  try {
+    const notifBtn = document.getElementById('navNotifBtn');
+    const showNotif = widgets.includes('notifications');
+    if (notifBtn) notifBtn.style.display = showNotif ? '' : 'none';
+    if (!showNotif) closeNotifPanel();
+  } catch (e) { console.warn('[perm] notifications', e); }
+
+  // Final rebuild — safety net in case anything above swapped DOM nodes.
+  try { _rebuildSourceDropdown(); } catch (e) { console.warn('[perm] dropdown(late)', e); }
 }
 
 // ── Auth check ────────────────────────────────────────
@@ -5588,6 +5936,26 @@ fetch('/auth/check').then(r => r.json()).then(d => {
   _currentUser = d;
   // Remember this username so next page load can read the right per-user source key instantly
   localStorage.setItem('lastUsername', d.username);
+
+  // ── Update the nav chip FIRST ─────────────────────────────────────────────
+  // Previously this lived at the bottom of the handler. If anything between
+  // here and the chip update threw (applyPermissions, setSource, etc.), the
+  // top-right name stayed "Loading…" and the source dropdown never rebuilt —
+  // confusing the user about whether they're actually logged in. Doing it
+  // first means the chip always reflects the authenticated user, even if a
+  // downstream step blows up. Keep this block side-effect-free.
+  try {
+    const _u0 = d.username || 'User';
+    const _chip0 = document.getElementById('userNameChip');
+    const _av0   = document.getElementById('userAvatar');
+    const _dn0   = document.getElementById('userDropName');
+    const _dr0   = document.getElementById('userDropRole');
+    if (_chip0) _chip0.textContent = _u0;
+    if (_av0)   _av0.textContent   = _u0.slice(0, 2).toUpperCase();
+    if (_dn0)   _dn0.textContent   = _u0;
+    if (_dr0)   { _dr0.textContent = d.role || 'user'; _dr0.style.color = d.role === 'admin' ? '#f0883e' : '#58a6ff'; }
+  } catch (e) { console.warn('[auth-check] chip update failed:', e); }
+
   if (d.role === 'admin') {
     document.getElementById('tab-users').style.display = '';
     document.getElementById('tab-admin').style.display = '';
@@ -5595,9 +5963,16 @@ fetch('/auth/check').then(r => r.json()).then(d => {
     document.getElementById('tab-health').style.display = '';
     document.getElementById('tab-advisor').style.display = '';
   }
-  applyPermissions(d.permissions);
-  updateCreditsDisplay(d.credits, d.role);
-  loadUserWatchlist();
+  // Each step wrapped so a single throw can't leave the dropdown un-rebuilt
+  // and the rest of the page bricked. Previously pavan_acct2 reported "Loading…"
+  // chip + stale dropdown — symptom of one of these throwing silently.
+  try { applyPermissions(d.permissions); }       catch (e) { console.warn('[auth-check] applyPermissions failed:', e); }
+  // Belt-and-suspenders: rebuild the source dropdown directly even if
+  // applyPermissions threw partway through. Without this, pavan_acct2 (Tiger-only
+  // user) saw the static HTML defaults (Paper/Live/Moomoo) instead of Tiger options.
+  try { _rebuildSourceDropdown(); }              catch (e) { console.warn('[auth-check] _rebuildSourceDropdown failed:', e); }
+  try { updateCreditsDisplay(d.credits, d.role); } catch (e) { console.warn('[auth-check] credits failed:', e); }
+  try { loadUserWatchlist(); }                    catch (e) { console.warn('[auth-check] watchlist failed:', e); }
 
   // Restore per-user saved source, validate it's still available for this user
   // Migrate from old shared key on first login with new key scheme
@@ -5625,7 +6000,7 @@ fetch('/auth/check').then(r => r.json()).then(d => {
   const wantedSource = (savedSource && isValidSource(savedSource)) ? savedSource : _defaultSource;
   // Always call setSource so loaders (loadDashboard, loadPnl, etc.) run on every page load,
   // even when the source hasn't changed from what was stored in localStorage.
-  setSource(wantedSource);
+  try { setSource(wantedSource); } catch (e) { console.warn('[auth-check] setSource failed:', e); }
   if (!d.has_alpaca && !d.has_tiger) showAlpacaSetup();
   // Update broker settings badge in user menu
   const badge = document.getElementById('brokerSettingsBadge');
@@ -5634,19 +6009,18 @@ fetch('/auth/check').then(r => r.json()).then(d => {
     badge.textContent = p && l ? '2 connected' : p ? 'Paper only' : l ? 'Live only' : 'Not set up';
     badge.style.color = (p || l) ? '#3fb950' : '#f85149';
   }
-  // Populate user dropdown chip
-  const uname = d.username || 'User';
-  const initials = uname.slice(0, 2).toUpperCase();
-  const chip = document.getElementById('userNameChip');
-  const avatar = document.getElementById('userAvatar');
-  const dropName = document.getElementById('userDropName');
-  const dropRole = document.getElementById('userDropRole');
-  if (chip) chip.textContent = uname;
-  if (avatar) avatar.textContent = initials;
-  if (dropName) dropName.textContent = uname;
-  if (dropRole) { dropRole.textContent = d.role || 'user'; dropRole.style.color = d.role === 'admin' ? '#f0883e' : '#58a6ff'; }
+  // Chip / avatar / dropdown name already updated at the top of this handler
+  // so the user sees their name even if any later step throws. No need to
+  // re-set them here.
   // Boot real-time price feed once authenticated
-  startLiveFeed?.();
+  try { startLiveFeed?.(); } catch (e) { console.warn('[auth-check] startLiveFeed failed:', e); }
+}).catch(err => {
+  // Network error or JSON parse failure on /auth/check — without this catch
+  // the chip stays "Loading…" forever with zero diagnostics. Log loudly so
+  // the next time it breaks we can see what happened in the console.
+  console.error('[auth-check] failed:', err);
+  const chip = document.getElementById('userNameChip');
+  if (chip && chip.textContent === 'Loading…') chip.textContent = 'Auth error';
 });
 
 function updateBrandPnl(value) {
@@ -7053,7 +7427,7 @@ async function loadTopPicks() {
     tbody.innerHTML = (d.picks || []).map((p,i) => `
       <tr style="border-top:1px solid #21262d;cursor:pointer" onclick="exploreStock('${p.symbol}')">
         <td style="padding:8px 16px">
-          <strong>${p.symbol}</strong>
+          <strong>${tickerLogo(p.symbol, { size: 'sm' })}</strong>
           <div style="font-size:0.7rem;color:#8b949e">${p.occurrences} signals</div>
         </td>
         <td style="padding:8px 8px;text-align:right;color:${parseFloat(p.avg_return)>=0?'#3fb950':'#f85149'};font-weight:600">
@@ -7246,7 +7620,7 @@ function renderExplorerDropdown(items, q) {
   dd.innerHTML = items.map((r, i) => `
     <div class="explorer-drop-item" data-idx="${i}" data-sym="${r.symbol}"
          onmousedown="explorerSelect('${r.symbol}')">
-      <span class="explorer-drop-sym">${explorerHighlight(r.symbol, q)}</span>
+      <span class="explorer-drop-sym">${tickerLogo(r.symbol, { size: 'sm', withSym: false })} ${explorerHighlight(r.symbol, q)}</span>
       <span class="explorer-drop-name">${explorerHighlight(r.name || '—', q)}${r.notInDb ? ' <span style="font-size:0.68rem;color:#484f58">(not yet scored)</span>' : ''}</span>
     </div>`).join('');
   dd.classList.add('open');
@@ -8504,7 +8878,7 @@ async function runSimulator() {
 
     const pickRow = (p, color) =>
       `<div style="display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid #21262d;font-size:0.8rem">
-        <span><strong>${p.symbol}</strong> <span style="color:#8b949e;font-size:0.72rem">${p.date?.slice?.(0,10)||''}</span></span>
+        <span><strong>${tickerLogo(p.symbol, { size: 'sm' })}</strong> <span style="color:#8b949e;font-size:0.72rem">${p.date?.slice?.(0,10)||''}</span></span>
         <span style="color:${color};font-weight:600">${p.ret>=0?'+':''}${parseFloat(p.ret).toFixed(1)}%</span>
       </div>`;
     document.getElementById('simBest').innerHTML  = (d.best5||[]).map(p=>pickRow(p,'#3fb950')).join('');
@@ -8886,7 +9260,7 @@ function _wlRow(item) {
 function symCell(symbol, nameOverride) {
   const name = nameOverride || KNOWN_NAMES[symbol?.toUpperCase()] || '';
   return `<td>
-    <strong><span class="sym-link" data-symbol="${symbol}">${symbol}</span></strong>
+    <strong><span class="sym-link" data-symbol="${symbol}">${tickerLogo(symbol, { size: 'sm' })}</span></strong>
     ${name ? `<div style="font-size:0.72rem;color:#8b949e;margin-top:2px">${name}</div>` : ''}
   </td>`;
 }
@@ -8925,6 +9299,14 @@ function setSource(src) {
   loadTomorrowCatalysts();
   loadIntradayPicks();
   loadPnl();
+  // Home portfolio panel reads the same broker — must reload when the dropdown
+  // changes. Without this, switching paper↔moomoo on Home leaves the previous
+  // broker's positions on screen. Force-bypass the per-panel hash skip so the
+  // portfolio panel re-renders even when totals coincidentally match.
+  if (typeof loadHome === 'function') {
+    try { if (typeof _homeDataSig !== 'undefined') delete _homeDataSig.portfolio; } catch {}
+    if (document.getElementById('page-home')?.classList.contains('active')) loadHome(true);
+  }
   // Portfolio Advisor: only reload if currently visible (saves a Moomoo rate-limit call otherwise).
   // Source-change must propagate here too — without this, switching broker leaves the Advisor
   // showing stale data from the previous source. Reset the picker's user-set flag so the new
@@ -9057,7 +9439,7 @@ async function loadMoomooRisk() {
       const sign = p.unrealized_pl >= 0 ? '+' : '';
       const col  = isWin ? '#3fb950' : '#f85149';
       return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #21262d">
-        <span style="font-weight:600;color:#e6edf3">${p.symbol}</span>
+        <span style="font-weight:600;color:#e6edf3">${tickerLogo(p.symbol, { size: 'sm' })}</span>
         <span style="color:${col}">${sign}$${p.unrealized_pl.toFixed(2)} (${sign}${(p.unrealized_pl_pct||0).toFixed(1)}%)</span>
       </div>`;
     };
@@ -9344,6 +9726,7 @@ function showPage(name, btn) {
   if (_showPageCurrent === 'discover' && name !== 'discover') discOnHide?.();
   if (_showPageCurrent === 'signal-center' && name !== 'signal-center') scStopSpikePolling?.();
   if (_showPageCurrent === 'bots' && name !== 'bots') _botStopFeedPoll?.();
+  if (_showPageCurrent === 'bot-advance' && name !== 'bot-advance') _baStopPoll?.();
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   if (name !== 'trading-desk') _tdClearHeight?.();
@@ -9351,8 +9734,128 @@ function showPage(name, btn) {
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
   _showPageCurrent = name;
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadHome(); loadBzOptions(); }, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, /* Stats merged into Health (2026-05-25): one tab loads both */ health: () => { loadHealth(); loadStats(); }, stats: () => { showPage('health'); }, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadBzOptions(); }, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, 'bot-advance': () => { loadBotAdvance(true); _baStartPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, /* Stats merged into Health (2026-05-25): one tab loads both */ health: () => { loadHealth(); loadStats(); }, stats: () => { showPage('health'); }, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); }, screener: () => { if (typeof loadScreener === 'function') loadScreener(); } };
   loaders[name]?.();
+}
+
+// ─── Bot Advance tab — challenger monitor (2026-05-28) ─────────────────────
+let _baPollTimer = null;
+function _baStartPoll() { _baStopPoll(); _baPollTimer = setInterval(() => loadBotAdvance(false), 30_000); }
+function _baStopPoll()  { if (_baPollTimer) { clearInterval(_baPollTimer); _baPollTimer = null; } }
+
+function _baFmt(n, decimals = 2) {
+  if (n == null || n === '') return '—';
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toFixed(decimals) : '—';
+}
+function _baFmtTime(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false }); }
+  catch { return iso; }
+}
+function _baConfClass(c) { return c === 'high' ? 'high' : c === 'medium' ? 'medium' : 'low'; }
+function _baEsc(s) { return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
+
+async function loadBotAdvance(silent) {
+  try {
+    const r = await fetch('/api/bot-advance/state', { credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    document.getElementById('ba-last-refresh').textContent = _baFmtTime(data.generated_at);
+    _baRenderBots(data.bots, data.last_scan_at);
+    _baRenderRuleActivity(data.rule_activity);
+    _baRenderActions(data.action_counts);
+    _baRenderOpenTrades(data.open_trades);
+    _baRenderRecentBuys(data.recent_buys);
+  } catch (e) {
+    if (!silent) console.error('[bot-advance] load failed', e);
+    document.getElementById('ba-bot-panels').innerHTML =
+      '<div class="ba-card ba-empty">Failed to load: ' + _baEsc(e.message) + '. Trading-dashboard may need a restart to pick up the new endpoint.</div>';
+  }
+}
+
+function _baRenderBots(bots, lastScan) {
+  const el = document.getElementById('ba-bot-panels');
+  if (!bots?.length) {
+    el.innerHTML = '<div class="ba-card ba-empty">No advance bots configured. Run <code>npm run bot-advance:migrate</code>.</div>';
+    return;
+  }
+  el.innerHTML = bots.map(b => {
+    const pnl = Number(b.cumulative_pnl_usd) || 0;
+    const pnlColor = pnl > 0 ? '#3fb950' : pnl < 0 ? '#f85149' : 'inherit';
+    return `<div class="ba-card">
+      <h3>${_baEsc(b.name)} <span class="ba-pill ${_baEsc(b.status)}">${_baEsc(b.status)}</span> <span class="ba-pill ${b.shadow_mode ? 'shadow' : 'live'}">${b.shadow_mode ? '🧪 shadow' : '🔴 live-paper'}</span></h3>
+      <div class="ba-kv"><span class="k">Bot ID</span><span class="v">#${b.id}</span></div>
+      <div class="ba-kv"><span class="k">Broker</span><span class="v">${_baEsc(b.broker)}</span></div>
+      <div class="ba-kv"><span class="k">Capital</span><span class="v">$${_baFmt(b.capital_usd, 0)}</span></div>
+      <div class="ba-kv"><span class="k">Cumulative P&amp;L</span><span class="v" style="color:${pnlColor}">$${_baFmt(b.cumulative_pnl_usd)}</span></div>
+      <div class="ba-kv"><span class="k">Current trade</span><span class="v">${b.current_trade_id ?? '—'}</span></div>
+      <div class="ba-kv"><span class="k">Last scan</span><span class="v">${_baFmtTime(lastScan)}</span></div>
+      <div class="ba-kv"><span class="k">Rules enabled</span><span class="v">${(b.enabled_rules ?? []).length}</span></div>
+    </div>`;
+  }).join('');
+}
+
+function _baRenderRuleActivity(rules) {
+  const el = document.getElementById('ba-rule-activity');
+  if (!rules?.length) { el.innerHTML = '<div class="ba-empty">No rule activity yet.</div>'; return; }
+  const max7d = Math.max(...rules.map(r => r.buys_7d || 0), 1);
+  el.innerHTML = rules.map(r => `
+    <div class="ba-rule-bar">
+      <div class="name"><code class="ba-rule">${_baEsc(r.entry_rule)}</code></div>
+      <div class="bar"><div style="width:${((r.buys_7d || 0) / max7d * 100).toFixed(0)}%"></div></div>
+      <div class="count">${r.buys_24h || 0}/24h</div>
+      <div class="count">${r.buys_7d || 0}/7d</div>
+    </div>`).join('');
+}
+
+function _baRenderActions(actions) {
+  const el = document.getElementById('ba-action-breakdown');
+  if (!actions?.length) { el.innerHTML = '<div class="ba-empty">No actions logged in last 24h.</div>'; return; }
+  el.innerHTML = '<table class="ba-table"><thead><tr><th>Action</th><th class="num">Count</th></tr></thead><tbody>' +
+    actions.map(a => `<tr><td><code class="ba-rule">${_baEsc(a.action)}</code></td><td class="num">${a.n}</td></tr>`).join('') +
+    '</tbody></table>';
+}
+
+function _baRenderOpenTrades(trades) {
+  const el = document.getElementById('ba-open-trades');
+  if (!trades?.length) { el.innerHTML = '<div class="ba-empty">No open trades (shadow mode does not place trades).</div>'; return; }
+  el.innerHTML = '<table class="ba-table"><thead><tr><th>#</th><th>Symbol</th><th>Rule</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Stop</th><th>Opened</th><th>Mode</th></tr></thead><tbody>' +
+    trades.map(t => `<tr>
+      <td>${t.id}</td>
+      <td class="ba-symbol">${_baEsc(t.symbol)}</td>
+      <td><code class="ba-rule">${_baEsc(t.entry_rule || '—')}</code></td>
+      <td class="num">${_baFmt(t.qty, 4)}</td>
+      <td class="num">$${_baFmt(t.entry_price)}</td>
+      <td class="num">$${_baFmt(t.stop_loss_price)}</td>
+      <td>${_baFmtTime(t.opened_at)}</td>
+      <td><span class="ba-pill ${t.shadow_mode ? 'shadow' : 'live'}">${t.shadow_mode ? 'shadow' : 'live'}</span></td>
+    </tr>`).join('') +
+    '</tbody></table>';
+}
+
+function _baRenderRecentBuys(buys) {
+  const el = document.getElementById('ba-recent-buys');
+  if (!buys?.length) { el.innerHTML = '<div class="ba-empty">No would-buy decisions yet. Wait for the next cron tick or run <code>npm run bot-advance:scan</code>.</div>'; return; }
+  el.innerHTML = '<table class="ba-table"><thead><tr><th>Time (ET)</th><th>Symbol</th><th>Rule</th><th>Backtest</th><th>Also matched</th><th>Mode</th></tr></thead><tbody>' +
+    buys.map(d => {
+      const meta = d.rule_metadata ?? {};
+      const be = meta.backtest_evidence ?? {};
+      const conf = be.confidence || 'medium';
+      const winPct = be.win_rate != null ? (be.win_rate * 100).toFixed(0) + '%' : '—';
+      const ret5d = be.avg_return_5d != null ? '+' + (be.avg_return_5d * 100).toFixed(1) + '%' : '—';
+      const n = be.sample_size != null ? 'N=' + be.sample_size : '';
+      const also = (d.also_matched || []).join(', ') || '—';
+      return `<tr>
+        <td>${_baFmtTime(d.scanned_at)}</td>
+        <td class="ba-symbol">${_baEsc(d.symbol)}</td>
+        <td><code class="ba-rule">${_baEsc(d.entry_rule)}</code></td>
+        <td><span class="ba-grade ${_baConfClass(conf)}" title="confidence: ${conf}">${winPct.charAt(0)}</span> ${winPct} / ${ret5d} <span style="color:#8b949e">${n}</span></td>
+        <td style="font-size:11px;color:#8b949e">${_baEsc(also)}</td>
+        <td><span class="ba-pill ${d.shadow_mode ? 'shadow' : 'live'}">${d.shadow_mode ? 'shadow' : 'live'}</span></td>
+      </tr>`;
+    }).join('') +
+    '</tbody></table>';
 }
 
 // ── Widget inner-tab switcher ─────────────────────────
@@ -9688,7 +10191,7 @@ async function loadStrongBuys(force = false) {
               <div style="display:flex;align-items:center;gap:8px">
                 <span style="width:8px;height:8px;border-radius:50%;background:${gColor};flex-shrink:0;display:inline-block"></span>
                 <div>
-                  <strong><span class="sym-link" data-symbol="${p.symbol}">${p.symbol}</span></strong>
+                  <strong><span class="sym-link" data-symbol="${p.symbol}">${tickerLogo(p.symbol, { size: 'sm' })}</span></strong>
                   ${p.name ? `<div style="font-size:0.73rem;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px">${p.name}</div>` : ''}
                 </div>
               </div>
@@ -9803,7 +10306,7 @@ function renderTomorrowCatalysts(data) {
       <div class="tc-card-head">
         <div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <div class="tc-sym sym-link" data-symbol="${s.symbol}">${s.symbol}</div>
+            <div class="tc-sym sym-link" data-symbol="${s.symbol}">${tickerLogo(s.symbol, { size: 'md' })}</div>
             ${convChip}
           </div>
           <div class="tc-co">${s.company || ''}</div>
@@ -10089,7 +10592,7 @@ async function loadIntradayPicks(force = false) {
           const rvolColor = (p.rvol ?? 0) >= 2 ? '#3fb950' : (p.rvol ?? 0) >= 1.5 ? '#e3b341' : '#8b949e';
           const rrColor   = (p.rr ?? 0) >= 2.5 ? '#3fb950' : (p.rr ?? 0) >= 1.5 ? '#e3b341' : '#8b949e';
           return `<tr>
-            <td><strong><span class="sym-link" data-symbol="${p.symbol}">${p.symbol}</span></strong></td>
+            <td><strong><span class="sym-link" data-symbol="${p.symbol}">${tickerLogo(p.symbol, { size: 'sm' })}</span></strong></td>
             <td><span style="background:${sColor}22;color:${sColor};border:1px solid ${sColor}55;border-radius:20px;padding:2px 9px;font-size:0.73rem;white-space:nowrap">${p.setup}</span></td>
             <td style="font-size:0.85rem">
               $${(p.price ?? 0).toFixed(2)}
@@ -10832,7 +11335,7 @@ function _ecalDayInner(stocks, dateStr) {
     const convChip = renderConvictionChip(_ecalConvMap[s.symbol] || null);
     return `<div class="ecal-chip ecal-chip-link${catCls}" title="${s.company||s.symbol}${s.call_time&&s.call_time!=='?'?' · '+s.call_time:''}${s.eps_estimate!=null?' · EPS est $'+s.eps_estimate:''}"
          onclick="calEarningClick('${s.symbol}')">
-      <span class="ecal-chip-sym">${s.symbol}${badge}</span>
+      <span class="ecal-chip-sym">${tickerLogo(s.symbol, { size: 'sm' })}${badge}</span>
       <span class="ecal-chip-name">${s.company||''}</span>
       ${desc}
       ${convChip ? `<span onclick="event.stopPropagation();showUwConvictionDetail('${s.symbol}')" style="display:inline-block;margin-top:3px">${convChip}</span>` : ''}
@@ -10939,7 +11442,7 @@ function renderEarningsPreview(data) {
     html += `<div class="ep-card${cardCls}">
       <div class="ep-card-head">
         <div>
-          <div class="ep-sym" onclick="openExplorerForSymbol('${s.symbol}')">${s.symbol}</div>
+          <div class="ep-sym" onclick="openExplorerForSymbol('${s.symbol}')">${tickerLogo(s.symbol, { size: 'md' })}</div>
           <div class="ep-co">${s.company || ''}</div>
           ${industryLine}
           ${boomBadge}
@@ -11188,22 +11691,45 @@ function _discBuildQuery({ beforeTs, beforeId, since } = {}) {
   return '/api/news/feed?' + p.toString();
 }
 
+// Active category for the Discover tab. 'all' falls back to the original
+// /api/news/feed endpoint; everything else hits /api/news/categorized.
+let _discCategory = 'hot';
+
+function discSetCategory(cat) {
+  _discCategory = cat;
+  // Visual tab highlight
+  document.querySelectorAll('.disc-cat-tab').forEach(el => {
+    el.classList.toggle('is-active', el.dataset.cat === cat);
+  });
+  // Disable Load Older + new-article polling for category views — they're
+  // category-specific snapshots, not a chronological feed.
+  document.getElementById('discLoadMore').style.display = 'none';
+  discReload(true);
+}
+
 async function discReload(showLoading) {
   const feed = document.getElementById('discFeed');
   if (!feed) return;
   if (showLoading) feed.innerHTML = '<div class="disc-empty">Loading…</div>';
   try {
-    const path = _discFilters.saved
-      ? '/api/news/saved?limit=' + DISC_PAGE_SIZE
-      : _discBuildQuery();
+    let path;
+    if (_discFilters.saved) {
+      path = '/api/news/saved?limit=' + DISC_PAGE_SIZE;
+    } else if (_discCategory && _discCategory !== 'all') {
+      // Category endpoint — enriches each article with bot/flow/insider chips
+      path = `/api/news/categorized?category=${encodeURIComponent(_discCategory)}&limit=${DISC_PAGE_SIZE}`;
+    } else {
+      path = _discBuildQuery();
+    }
     const data = await api(path, 15000);
     _discArticles = data?.articles || [];
     _discLatestSeen = _discArticles[0]?.published_at || null;
     _discPendingNew = [];
     document.getElementById('discNewPill').style.display = 'none';
     _discRender();
+    // Load Older only makes sense for the 'all' chronological feed
     document.getElementById('discLoadMore').style.display =
-      (_discArticles.length === DISC_PAGE_SIZE) ? '' : 'none';
+      (_discCategory === 'all' && _discArticles.length === DISC_PAGE_SIZE) ? '' : 'none';
     discLoadStats();
   } catch (e) {
     feed.innerHTML = `<div class="disc-error">Error loading news: ${e.message}</div>`;
@@ -11289,14 +11815,25 @@ function _discRenderCard(a) {
     : '';
   const tickers = Array.isArray(a.tickers) ? a.tickers : [];
   const tickerChips = tickers.slice(0, 6).map(t =>
-    `<span class="disc-ticker-chip" onclick="event.stopPropagation();exploreSymbol('${esc(t)}')">${esc(t)}</span>`
+    `<span class="disc-ticker-chip" onclick="event.stopPropagation();exploreSymbol('${esc(t)}')">${tickerLogo(t, { size: 'sm' })}</span>`
   ).join('');
+
+  // Edge chips — bot verdict / UW flow / insider / congress / earnings.
+  // Comes from /api/news/categorized. Plain feed (no category) returns no chips.
+  const edgeChips = Array.isArray(a.chips) ? a.chips : [];
+  const edgeRow = edgeChips.length
+    ? `<div class="disc-edge-row">${edgeChips.map(c =>
+        `<span class="disc-edge-chip disc-edge-${esc(c.tone)} disc-edge-kind-${esc(c.kind)}" title="${esc(c.ticker || '')}">${esc(c.label)}</span>`
+      ).join('')}</div>`
+    : '';
+
   const url = a.url || '#';
   return `<article class="disc-card" onclick="window.open('${esc(url)}','_blank','noopener')">
     ${thumb}
     <div class="disc-card-body">
       <h3 class="disc-card-headline">${esc(a.title)}</h3>
       ${a.teaser ? `<p class="disc-card-teaser">${esc(a.teaser)}</p>` : ''}
+      ${edgeRow}
       <div class="disc-card-footer">
         <span class="disc-card-source">${esc(a.source || 'Unknown')}</span>
         <span class="disc-card-time">${esc(timeAgo(a.published_at))}</span>
@@ -11438,7 +11975,10 @@ function discToggleChannel(channel) {
 }
 
 function discOnShow() {
-  discReload(true);
+  // Default to the Hot category on first visit (and re-visits) — categorized
+  // view is the new primary experience; the chronological 'All News' tab is
+  // still available for users who want the flat feed.
+  discSetCategory(_discCategory || 'hot');
   discLoadSources();
   discLoadChannels();
   discStartPolling();
@@ -11686,6 +12226,17 @@ function scStopSpikePolling() {
 function scOnShow() {
   loadSignalCenter();
   scStartSpikePolling();
+  // Auto-show the Historical Impact table on first open so the panel isn't
+  // blank. We pull the default ticker from the lookup input (NVDA by default).
+  // Skip if it's already showing — don't thrash the request on tab toggles.
+  try {
+    const panel = document.getElementById('sc-node-impact');
+    const symInp = document.getElementById('sc-impact-lookup-sym');
+    if (panel && symInp && panel.style.display === 'none') {
+      const sym = (symInp.value || 'NVDA').trim().toUpperCase();
+      if (sym) loadNodeImpact(sym);
+    }
+  } catch {}
 }
 
 // ── EOD Next-Day Setups ───────────────────────────────────────────────────────
@@ -12381,6 +12932,311 @@ function _renderSparkline(closes, { width = 130, height = 36 } = {}) {
   </svg>`;
 }
 
+// Heatmap state — persists across loadMarket() refreshes
+let _mktSectorData    = [];          // last 11-sector payload from /api/market
+let _mktStockData     = null;        // last /api/market/sp500-heatmap payload (cached)
+let _mktStockDataTs   = 0;
+let _mktMarketOffline = false;
+
+// ── Squarified treemap (Bruls/Huijsen/van Wijk 2000) ─────────────────────────
+//
+// Lays out weighted rectangles so each tile's area is proportional to its
+// weight and the aspect ratios stay close to 1:1 (square-ish). Used for the
+// Finviz-style stock heatmap — sector boxes laid out at the top level, then
+// individual stocks laid out inside each sector box.
+//
+// Input:  items = [{ weight: number, ...payload }], plus bounding rect {x,y,w,h}
+// Output: [{ x, y, w, h, ...payload }]  (one rect per input item)
+function squarify(items, x, y, w, h) {
+  if (!items.length || w <= 0 || h <= 0) return [];
+  const totalW = items.reduce((s, i) => s + i.weight, 0);
+  if (totalW <= 0) return [];
+  const area = w * h;
+  const scaled = items
+    .map(i => ({ ...i, _area: (i.weight / totalW) * area }))
+    .sort((a, b) => b._area - a._area);
+  const out = [];
+  _squarifyStep(scaled, [], _shortSide(w, h), { x, y, w, h }, out);
+  return out;
+}
+
+function _shortSide(w, h) { return Math.min(w, h); }
+
+function _worstRatio(row, side) {
+  if (!row.length) return Infinity;
+  const sum = row.reduce((s, r) => s + r._area, 0);
+  let min = Infinity, max = -Infinity;
+  for (const r of row) { if (r._area < min) min = r._area; if (r._area > max) max = r._area; }
+  const s2 = side * side;
+  const sum2 = sum * sum;
+  return Math.max((s2 * max) / sum2, sum2 / (s2 * min));
+}
+
+function _squarifyStep(items, row, side, rect, out) {
+  if (!items.length) {
+    if (row.length) _layoutRow(row, rect, out);
+    return;
+  }
+  const next = [...row, items[0]];
+  if (row.length === 0 || _worstRatio(next, side) <= _worstRatio(row, side)) {
+    _squarifyStep(items.slice(1), next, side, rect, out);
+  } else {
+    const newRect = _layoutRow(row, rect, out);
+    _squarifyStep(items, [], _shortSide(newRect.w, newRect.h), newRect, out);
+  }
+}
+
+// Lays out one row along the SHORT side of `rect` and returns the leftover.
+//
+// Per the Bruls/Huijsen/van Wijk algorithm, items are stacked along the
+// SHORT dimension (so they're as square as possible), and the strip
+// extends along the long dimension. Get this orientation wrong and tiles
+// degenerate into 9:1 horizontal sliverbars.
+function _layoutRow(row, rect, out) {
+  const sum = row.reduce((s, r) => s + r._area, 0);
+  const wIsLong = rect.w >= rect.h;
+  if (wIsLong) {
+    // Short side = height. Items stacked vertically along h. Strip width = sum/h.
+    const stripW = sum / rect.h;
+    let cursor = rect.y;
+    for (const r of row) {
+      const tileH = r._area / stripW;
+      out.push({ ...r, x: rect.x, y: cursor, w: stripW, h: tileH });
+      cursor += tileH;
+    }
+    return { x: rect.x + stripW, y: rect.y, w: rect.w - stripW, h: rect.h };
+  } else {
+    // Short side = width. Items stacked horizontally along w. Strip height = sum/w.
+    const stripH = sum / rect.w;
+    let cursor = rect.x;
+    for (const r of row) {
+      const tileW = r._area / stripH;
+      out.push({ ...r, x: cursor, y: rect.y, w: tileW, h: stripH });
+      cursor += tileW;
+    }
+    return { x: rect.x, y: rect.y + stripH, w: rect.w, h: rect.h - stripH };
+  }
+}
+
+// ── Color from chg_pct (clamped at ±5%) ──────────────────────────────────────
+function _heatTileColor(chg) {
+  if (chg == null || !isFinite(chg)) return 'rgba(33, 38, 45, 0.85)';
+  const CLAMP = 5;
+  const intensity = Math.min(Math.abs(chg) / CLAMP, 1);
+  const opacity = 0.35 + intensity * 0.60;     // 0.35..0.95
+  const base = chg >= 0 ? '63,185,80' : '248,81,73';
+  return `rgba(${base}, ${opacity})`;
+}
+
+// Render the treemap into `boxEl` at the given pixel size. `compact=true`
+// shrinks label sizes + hides labels on tiny tiles.
+function _renderTreemap(boxEl, stocks, sectorColors, width, height, compact = false) {
+  if (!stocks?.length) {
+    boxEl.innerHTML = '<div style="color:#8b949e;padding:20px;text-align:center">No data</div>';
+    return;
+  }
+
+  // 1) Aggregate to sector level (weight = sum of $-volume)
+  const groups = {};
+  for (const s of stocks) {
+    (groups[s.sector] ||= []).push(s);
+  }
+  const sectorItems = Object.entries(groups).map(([sector, members]) => ({
+    sector,
+    weight:  members.reduce((acc, m) => acc + (m.dollarVolume || m.volume || 1), 0),
+    members,
+  }));
+
+  // 2) Lay out sectors as a treemap (outer)
+  const sectorRects = squarify(sectorItems, 0, 0, width, height);
+
+  // 3) For each sector rect, lay out its member stocks as an inner treemap
+  const PAD     = compact ? 0   : 2;      // px between sector blocks
+  const HEAD_H  = compact ? 12  : 18;     // px sector-name banner inside each block
+  const tilesHtml = [];
+
+  for (const sr of sectorRects) {
+    const innerX = sr.x + PAD;
+    const innerY = sr.y + PAD + HEAD_H;
+    const innerW = Math.max(0, sr.w - PAD * 2);
+    const innerH = Math.max(0, sr.h - PAD * 2 - HEAD_H);
+
+    // Sector background + header banner
+    const accent = sectorColors?.[sr.sector] || '#8b949e';
+    tilesHtml.push(`<div class="mkt-tm-sector" style="left:${sr.x}px;top:${sr.y}px;width:${sr.w}px;height:${sr.h}px;border-color:${accent}"></div>`);
+    if (!compact || sr.w > 80) {
+      tilesHtml.push(`<div class="mkt-tm-sector-label" style="left:${sr.x + 4}px;top:${sr.y + 2}px;max-width:${sr.w - 8}px;color:${accent};font-size:${compact ? 8 : 10}px">${sr.sector.toUpperCase()}</div>`);
+    }
+
+    // Inner stocks
+    const memberItems = sr.members
+      .map(m => ({ ...m, weight: m.dollarVolume || m.volume || 1 }))
+      .filter(m => m.weight > 0);
+    const stockRects = squarify(memberItems, innerX, innerY, innerW, innerH);
+
+    for (const t of stockRects) {
+      if (t.w < 6 || t.h < 6) continue;  // skip invisible slivers
+      const bg = _heatTileColor(t.chgPct);
+      const showLabel = compact ? (t.w >= 26 && t.h >= 18) : (t.w >= 32 && t.h >= 22);
+      const showChg   = compact ? (t.w >= 36 && t.h >= 28) : (t.w >= 44 && t.h >= 32);
+      // Show logo only when there's room (avoid covering the ticker text)
+      const showLogo  = compact ? (t.w >= 48 && t.h >= 44) : (t.w >= 60 && t.h >= 50);
+      const fontSym   = compact
+        ? Math.max(7, Math.min(10, Math.floor(Math.min(t.w, t.h) / 4)))
+        : Math.max(8, Math.min(16, Math.floor(Math.min(t.w, t.h) / 4)));
+      const fontChg   = Math.max(6, fontSym - 2);
+      const logoSize  = showLogo ? Math.max(14, Math.min(28, Math.floor(Math.min(t.w, t.h) / 3))) : 0;
+      const sign = (t.chgPct ?? 0) >= 0 ? '+' : '';
+      const tip = `${t.symbol} · ${t.sector} · $${(t.lastPrice ?? 0).toFixed(2)} · ${sign}${(t.chgPct ?? 0).toFixed(2)}%`;
+      // Compact monogram fallback inline (we don't have access to the global helper inside this hot path)
+      const logoHtml = showLogo
+        ? `<img class="mkt-tm-logo" src="https://financialmodelingprep.com/image-stock/${encodeURIComponent(t.symbol)}.png" alt="" loading="lazy"
+              style="width:${logoSize}px;height:${logoSize}px;border-radius:3px;margin-bottom:2px;padding:1px;background:#fff;object-fit:contain"
+              onerror="this.style.display='none'">`
+        : '';
+      const labelHtml = showLabel
+        ? `${logoHtml}<div class="mkt-tm-sym" style="font-size:${fontSym}px">${t.symbol}</div>${
+            showChg ? `<div class="mkt-tm-chg" style="font-size:${fontChg}px">${sign}${(t.chgPct ?? 0).toFixed(1)}%</div>` : ''
+          }`
+        : '';
+      tilesHtml.push(`<div class="mkt-tm-tile sym-link" data-symbol="${t.symbol}" title="${tip}"
+        onclick="event.stopPropagation();exploreSymbol('${t.symbol}')"
+        style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;background:${bg}">${labelHtml}</div>`);
+    }
+  }
+
+  boxEl.innerHTML = `<div class="mkt-tm-canvas" style="width:${width}px;height:${height}px">${tilesHtml.join('')}</div>`;
+}
+
+// ── Modal open / close ──────────────────────────────────────────────────────
+function openHeatmapModal() {
+  const m = document.getElementById('mktHeatModal');
+  if (!m) return;
+  // Move modal to body so it escapes any parent stacking context (the .page
+  // div forms its own context, which would otherwise trap the modal below
+  // the sticky nav even with z-index 9000).
+  if (m.parentNode !== document.body) document.body.appendChild(m);
+  m.style.display = '';
+  document.body.style.overflow = 'hidden';
+  // Render now using the modal body's actual viewport size
+  requestAnimationFrame(() => renderStockHeatmap({ modal: true }));
+  // ESC key handler
+  if (!_mktHeatEscBound) {
+    _mktHeatEscBound = true;
+    document.addEventListener('keydown', _mktHeatEscHandler);
+  }
+}
+
+function closeHeatmapModal() {
+  // The HTML has `onclick="event.stopPropagation()"` on the inner content
+  // box, so backdrop clicks never bubble from inside — this is called only
+  // from explicit close, ESC, or backdrop click. Always close.
+  const m = document.getElementById('mktHeatModal');
+  if (!m) return;
+  m.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+let _mktHeatEscBound = false;
+function _mktHeatEscHandler(e) {
+  if (e.key === 'Escape') closeHeatmapModal();
+}
+
+function renderSectorHeatmap() {
+  const heatEl = document.getElementById('sectorBars');
+  if (!heatEl) return;
+  const sectors = _mktSectorData;
+  if (!sectors || sectors.length === 0) {
+    heatEl.innerHTML = `<div style="color:#8b949e;padding:20px">${_mktMarketOffline ? '📡 No internet — sector data unavailable' : 'No sector data — market may be closed'}</div>`;
+    return;
+  }
+  const maxAbs = Math.max(...sectors.map(x => Math.abs(x.chg_pct ?? 0)), 1);
+  const tileBg = chg => {
+    if (chg == null) return '#21262d';
+    const intensity = Math.min(Math.abs(chg) / maxAbs, 1);
+    const opacity = 0.35 + intensity * 0.55;     // 0.35..0.90
+    const base = chg >= 0 ? '63,185,80' : '248,81,73';
+    return `rgba(${base}, ${opacity})`;
+  };
+  heatEl.innerHTML = sectors.slice(0, 12).map(sec => {
+    const sym = (sec.symbol || sec.proxy || sec.sector.slice(0, 4)).toUpperCase();
+    return `
+    <div class="mkt-heat-tile" style="background:${tileBg(sec.chg_pct)}" title="${sec.sector} — ${fmtPct(sec.chg_pct)}">
+      <img class="tile-logo" src="https://financialmodelingprep.com/image-stock/${encodeURIComponent(sym)}.png" alt="" loading="lazy" onerror="this.style.display='none'">
+      <div class="tile-symbol">${sym}</div>
+      <div class="tile-name">${sec.sector}</div>
+      <div class="tile-chg">${sec.chg_pct != null ? (sec.chg_pct >= 0 ? '+' : '') + sec.chg_pct.toFixed(2) + '%' : '—'}</div>
+    </div>`;
+  }).join('');
+}
+
+// Renders the Finviz-style squarified treemap. Used for both the compact
+// preview on the Market tab and the expanded modal view.
+//
+// Options:
+//   - modal: true  → renders into #mktHeatModalBody at viewport-sized dims
+//   - default      → renders into #sp500HeatBox at compact dims
+async function renderStockHeatmap(opts = {}) {
+  const isModal = !!opts.modal;
+  const compactBox = document.getElementById('sp500HeatBox');
+  const modalBox   = document.getElementById('mktHeatModalBody');
+  const boxEl      = isModal ? modalBox : compactBox;
+  if (!boxEl) return;
+
+  // Cache the heatmap payload for 5 min — the endpoint caches 10 min anyway,
+  // so this avoids re-fetching when the user opens the modal right after load.
+  const STALE_MS = 5 * 60_000;
+  if (!_mktStockData || (Date.now() - _mktStockDataTs > STALE_MS)) {
+    boxEl.innerHTML = '<div class="loading" style="padding:20px">Loading S&amp;P 500 grid…</div>';
+    try {
+      const d = await api('/api/market/sp500-heatmap', 12000);
+      if (!d || !d.stocks) {
+        boxEl.innerHTML = '<div style="color:#8b949e;padding:20px">S&amp;P 500 heatmap unavailable</div>';
+        return;
+      }
+      _mktStockData = d;
+      _mktStockDataTs = Date.now();
+    } catch (e) {
+      boxEl.innerHTML = `<div style="color:#8b949e;padding:20px">Failed to load heatmap: ${e.message}</div>`;
+      return;
+    }
+  }
+
+  const { stocks, sectors: sectorColors, asOf } = _mktStockData;
+  if (!stocks?.length) {
+    boxEl.innerHTML = '<div style="color:#8b949e;padding:20px">No price data available</div>';
+    return;
+  }
+
+  // Update modal subtitle with the as-of date
+  if (isModal) {
+    const asOfEl = document.getElementById('mktHeatModalAsOf');
+    if (asOfEl && asOf) asOfEl.textContent = `as of ${asOf} · ${stocks.length} stocks`;
+  }
+
+  // Measure the available render area — defaults if the box hasn't laid out yet
+  const rect = boxEl.getBoundingClientRect();
+  const width  = Math.max(200, Math.floor(rect.width || (isModal ? 1200 : 800)));
+  const height = isModal ? Math.max(400, Math.floor((window.innerHeight || 800) * 0.78))
+                         : 320;       // compact preview height
+  if (!isModal) boxEl.style.height = `${height}px`;
+
+  _renderTreemap(boxEl, stocks, sectorColors, width, height, !isModal);
+}
+
+// Re-render on window resize so the treemap fills the viewport. Debounced.
+let _heatResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_heatResizeTimer);
+  _heatResizeTimer = setTimeout(() => {
+    if (document.getElementById('page-market')?.classList.contains('active')) {
+      renderStockHeatmap();
+      const modal = document.getElementById('mktHeatModal');
+      if (modal && modal.style.display !== 'none') renderStockHeatmap({ modal: true });
+    }
+  }, 200);
+});
+
 async function loadMarket() {
   const [d, news, sparks] = await Promise.all([
     api('/api/market'),
@@ -12480,32 +13336,12 @@ async function loadMarket() {
     ].join('');
   }
 
-  // ── Sector Heatmap (replaces horizontal bars) ────────────────────────────
-  //
-  // Tiles colored by chg_pct intensity. Brighter = stronger move. Sized
-  // equally for the Phase 1 simple grid; Phase 2 will size by market-cap weight.
-  const sectors = d.sectors?.all_sectors ?? [];
-  const heatEl = document.getElementById('sectorBars');
-  if (sectors.length === 0) {
-    heatEl.innerHTML = `<div style="color:#8b949e;padding:20px">${offline ? '📡 No internet — sector data unavailable' : 'No sector data — market may be closed'}</div>`;
-  } else {
-    const maxAbs = Math.max(...sectors.map(x => Math.abs(x.chg_pct ?? 0)), 1);
-    const tileBg = chg => {
-      if (chg == null) return '#21262d';
-      const intensity = Math.min(Math.abs(chg) / maxAbs, 1);
-      // Greens for up, reds for down — luminance scales with intensity
-      const opacity = 0.35 + intensity * 0.55;     // 0.35..0.90
-      const base = chg >= 0 ? '63,185,80' : '248,81,73';
-      return `rgba(${base}, ${opacity})`;
-    };
-    heatEl.innerHTML = sectors.slice(0, 12).map(sec => `
-      <div class="mkt-heat-tile" style="background:${tileBg(sec.chg_pct)}" title="${sec.sector} — ${fmtPct(sec.chg_pct)}">
-        <div class="tile-symbol">${(sec.symbol || sec.proxy || sec.sector.slice(0, 4)).toUpperCase()}</div>
-        <div class="tile-name">${sec.sector}</div>
-        <div class="tile-chg">${sec.chg_pct != null ? (sec.chg_pct >= 0 ? '+' : '') + sec.chg_pct.toFixed(2) + '%' : '—'}</div>
-      </div>
-    `).join('');
-  }
+  // ── Two heatmaps: compact 11-sector strip (right column) + full-width
+  // stock-level treemap (its own section below the 2-col).
+  _mktSectorData    = d.sectors?.all_sectors ?? [];
+  _mktMarketOffline = offline;
+  renderSectorHeatmap();
+  renderStockHeatmap();   // compact preview — modal renders on click
 
   // ── Top Movers (restyled as a table) ────────────────────────────────────
   const movers = d.movers?.gainers ?? [];
@@ -12519,7 +13355,7 @@ async function loadMarket() {
       const sign = chg >= 0 ? '+' : '';
       return `
         <tr>
-          <td><span class="mkt-movers-ticker sym-link" data-symbol="${m.symbol}">${m.symbol}</span></td>
+          <td><span class="mkt-movers-ticker sym-link" data-symbol="${m.symbol}">${tickerLogo(m.symbol, { size: 'sm' })}</span></td>
           <td class="right">${fmtDollar(m.price)}</td>
           <td class="right ${cls}">${sign}${chg.toFixed(2)}%</td>
           <td class="right" style="color:#8b949e">${m.volume ? fmtVol(m.volume) : '—'}</td>
@@ -12605,7 +13441,7 @@ async function loadTopStocks(index, forceRefresh) {
   const mkRow = s => `
     <tr>
       <td style="padding:8px 12px;font-weight:700;white-space:nowrap">
-        <span class="sym-link" data-symbol="${s.symbol}">${s.symbol}</span>
+        <span class="sym-link" data-symbol="${s.symbol}">${tickerLogo(s.symbol, { size: 'sm' })}</span>
       </td>
       <td style="padding:8px 12px;color:#8b949e;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
         ${s.name || ''}
@@ -13472,7 +14308,14 @@ document.addEventListener('dblclick', e => {
 });
 
 // ── Init ──────────────────────────────────────────────
-loadDashboard();
+// Defer to the next microtask: loadHome() references `let _homeShellBuilt`
+// and other variables declared LATER in this file. Calling it inline here
+// would hit a Temporal Dead Zone error and silently throw — the home page
+// would stay blank until the user switched tabs and back. queueMicrotask
+// runs after the whole <script> has finished parsing, so every let/const
+// is initialized by then.
+queueMicrotask(loadHome);      // Home is the default landing tab
+loadDashboard();               // dashboard still loads in bg so 2nd-tab click is instant
 loadTomorrowCatalysts();       // initial load (1h cache on server)
 loadIntradayPicks();           // initial load (uses 10-min cache on server)
 initTicker(); // loads news in background for the ticker strip
@@ -13720,6 +14563,36 @@ async function stopChat() {
   document.getElementById('chatInput').focus();
 }
 
+// Chat backend mode: 'api' (default) uses Anthropic API path (streaming).
+// 'desktop' uses claude CLI subprocess (Max sub, no per-token cost, no streaming).
+// Toggle from chat header button. Persists in localStorage.
+function getChatMode() { try { return localStorage.getItem('chat_mode') || 'api'; } catch { return 'api'; } }
+function toggleChatMode() {
+  const next = getChatMode() === 'api' ? 'desktop' : 'api';
+  try { localStorage.setItem('chat_mode', next); } catch {}
+  _refreshChatModeBtn();
+  // Toast so the user knows what changed
+  const msgs = document.getElementById('chatMessages');
+  if (msgs) {
+    msgs.innerHTML += `<div class="chat-msg assistant" style="border-left:3px solid #58a6ff;padding-left:10px;color:#8b949e;font-size:0.85rem">
+      Chat mode switched to <strong>${next === 'desktop' ? '🖥 Claude Desktop (Max sub, no API cost — slower, no streaming)' : '🌐 API (default — faster, streaming)'}</strong>
+    </div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+function _refreshChatModeBtn() {
+  const btn = document.getElementById('chatModeBtn');
+  if (!btn) return;
+  const mode = getChatMode();
+  btn.textContent = mode === 'desktop' ? '🖥 Desktop' : '🌐 API';
+  btn.title = mode === 'desktop'
+    ? 'Claude Desktop (Max subscription, no per-token cost). Click to switch to API.'
+    : 'Anthropic API (faster, streaming, costs per token). Click to switch to Desktop.';
+  btn.style.background = mode === 'desktop' ? '#1f6feb' : '';
+}
+// Initialize button state on load
+queueMicrotask(_refreshChatModeBtn);
+
 async function sendChat() {
   const input = document.getElementById('chatInput');
   const message = input.value.trim();
@@ -13736,10 +14609,73 @@ async function sendChat() {
   const assistantId = 'msg_' + Date.now();
   msgs.innerHTML += `<div class="chat-msg assistant" id="${assistantId}"><span style="color:#8b949e;animation:pulse 1s ease-in-out infinite">●●●</span></div>`;
   msgs.scrollTop = msgs.scrollHeight;
+  // Persist user message + placeholder IMMEDIATELY so the question survives
+  // even if the user closes the chat widget mid-response, refreshes the page,
+  // or the network drops. Without this, saveChatHistory only ran in the finally
+  // block AFTER the response — closing mid-stream silently lost the question.
+  try { saveChatHistory(); } catch {}
 
   _chatAbort = new AbortController();
-  // 90-second hard timeout
-  const timeoutId = setTimeout(() => _chatAbort?.abort(), 90_000);
+  // 120s hard timeout — extra headroom for Desktop mode (Max-sub subprocess is slower)
+  const chatMode = getChatMode();
+  const timeoutMs = chatMode === 'desktop' ? 130_000 : 90_000;
+  const timeoutId = setTimeout(() => _chatAbort?.abort(), timeoutMs);
+
+  // ── Desktop mode: one-shot non-streaming call to /api/chat/desktop ──────
+  // Uses Claude Code CLI subprocess with Max-sub auth. Returns full text once.
+  if (chatMode === 'desktop') {
+    try {
+      const el = document.getElementById(assistantId);
+      if (el) el.innerHTML = `<span style="color:#8b949e;animation:pulse 1s ease-in-out infinite">🖥 Asking Claude Desktop (no streaming — ~10-30s)…</span>`;
+      // Build a small history payload from the rendered messages (last 10)
+      const history = [...msgs.querySelectorAll('.chat-msg')].slice(-12, -2).map(div => ({
+        role: div.classList.contains('user') ? 'user' : 'assistant',
+        content: div.textContent.trim().slice(0, 2000),
+      }));
+      const resp = await fetch('/api/chat/desktop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, history }),
+        signal: _chatAbort.signal,
+      });
+      const data = await resp.json().catch(() => ({}));
+      const el2 = document.getElementById(assistantId);
+      if (!resp.ok) {
+        if (el2) el2.innerHTML = `<span style="color:#f85149">⚠ Desktop chat error: ${(data.error || resp.statusText).slice(0, 200)}</span>`;
+      } else {
+        if (el2) {
+          // Render markdown (headers, bold, bullets, tables) just like the API
+          // path does. Without this, Claude Desktop responses come back as raw
+          // text with **literal asterisks**, hash-marks, and pipe-tables that
+          // never get formatted — matched the user's "not structured" complaint.
+          const renderedHtml = (typeof renderMarkdown === 'function')
+            ? renderMarkdown(data.text || '(empty)')
+            : (data.text || '(empty)').replace(/</g,'&lt;');
+          el2.innerHTML = renderedHtml
+            + `<div style="margin-top:8px;font-size:0.7rem;color:#6e7681;border-top:1px solid #21262d;padding-top:6px">via Claude Desktop · ${(data.duration_ms/1000).toFixed(1)}s</div>`;
+          // Hyperlink any ticker symbols in the response. typeof check guards
+          // against ReferenceError — optional-chaining (?.()) doesn't save us
+          // when the identifier itself isn't in scope; it only handles
+          // null/undefined values on a defined identifier.
+          try { if (typeof _linkifyTickers === 'function') _linkifyTickers(el2); } catch (e) { console.warn('[chat-desktop] linkify failed:', e); }
+        }
+        try { if (_ttsEnabled && typeof speakText === 'function') speakText(data.text); } catch (e) { console.warn('[chat-desktop] tts failed:', e); }
+      }
+    } catch (e) {
+      const el = document.getElementById(assistantId);
+      if (el) el.innerHTML = `<span style="color:#f85149">⚠ ${e.name === 'AbortError' ? 'Timed out / cancelled' : e.message}</span>`;
+    } finally {
+      clearTimeout(timeoutId);
+      _chatAbort = null;
+      _setChatBusy(false);
+      saveChatHistory();
+      msgs.scrollTop = msgs.scrollHeight;
+      input.focus();
+    }
+    return;
+  }
+
+  // ── API mode (default): streaming SSE call to /api/chat ──────────────────
 
   let fullText = '';
   let toolIndicatorId = null;
@@ -15278,7 +16214,7 @@ function renderHomeNews(news) {
 
   el.innerHTML = news.slice(0, 30).map(a => {
     const ago = timeAgo(a.published);
-    const tickers = (a.tickers||[]).slice(0,4).map(t=>`<span class="story-ticker">${t}</span>`).join('');
+    const tickers = (a.tickers||[]).slice(0,4).map(t=>`<span class="story-ticker">${tickerLogo(t, { size: 'sm' })}</span>`).join('');
     const sent = a.source === 'benzinga' ? sentimentBadge(a.sentiment) : '';
     return `<a class="story-card" href="${escHtml(a.url||'#')}" target="_blank" rel="noopener">
       <div class="story-card-meta">
@@ -15305,11 +16241,610 @@ function filterHome(cat) {
   renderHomeNews(filtered);
 }
 
+// ── NEW Home page (Bloomberg-style mega-grid) — 2026-05-25 ──────────────────
+// Renders 7 panels from a single /api/home-feed call: hero pulse strip,
+// Hot News (1h), Suggested Stocks, Portfolio Glance, Smart Money Pulse,
+// Top Movers, Upcoming Earnings. Auto-refreshes every 60s while Home is
+// the visible tab.
+let _homeRefreshTimer = null;
+let _homeShellBuilt   = false;       // track whether the outer shell HTML exists
+const _homeDataSig    = {};          // last-rendered hash per panel → skip re-renders when data is unchanged
+
+// Cheap hash for diff-skipping. Stringify + cap length.
+function _homeSig(x) { try { return JSON.stringify(x).slice(0, 4000); } catch { return ''; } }
+function _homeChanged(key, data) {
+  const sig = _homeSig(data);
+  if (_homeDataSig[key] === sig) return false;
+  _homeDataSig[key] = sig;
+  return true;
+}
+
 async function loadHome(force = false) {
+  const el = document.getElementById('page-home');
+  if (!el) return;
+  // Build the shell ONLY on first load or after an error wiped it.
+  // The 60s auto-refresh used to call innerHTML = _homeShellHtml() unconditionally
+  // which made the whole page blink. Now we just re-render individual panels.
+  if (!_homeShellBuilt || !el.querySelector('#homeBody')) {
+    el.innerHTML = _homeShellHtml();
+    _homeShellBuilt = true;
+  }
+
+  let feed;
+  try {
+    // Pass the global source so the Home portfolio panel honors the dropdown.
+    // Without this the portfolio sub-fetcher falls back to its priority order
+    // (moomoo first for admin) and ignores the user's broker selection.
+    const srcQS = (typeof currentSource !== 'undefined' && currentSource) ? `?source=${encodeURIComponent(currentSource)}` : '';
+    feed = await api('/api/home-feed' + srcQS, 9000);   // server has 4-6s per-fetcher caps; 9s outer is plenty
+  } catch (e) {
+    feed = null;   // api() doesn't throw, but defensive in case it ever does
+  }
+  // api() returns null on any failure (timeout, network, parse). Show retry UI
+  // instead of crashing the rest of the function trying to read feed.indices.
+  if (!feed) {
+    document.getElementById('homeBody').innerHTML =
+      `<div style="grid-column:1/-1;padding:40px;color:#f85149;text-align:center">
+        Couldn't load home feed.
+        <button onclick="loadHome(true)" style="margin-left:12px;padding:5px 14px;background:#238636;border:none;border-radius:6px;color:#fff;cursor:pointer">Retry</button>
+       </div>`;
+    _homeShellBuilt = false;        // force rebuild on next manual reload
+    return;
+  }
+
+  // Render each panel — failures are isolated per panel (try/catch inside).
+  // Each renderer only replaces innerHTML of ITS panel, so the visible
+  // flash is constrained to the panel that's updating (not the whole page).
+  // Skip re-rendering panels where the data hash is unchanged.
+  try { if (_homeChanged('hero',      feed.indices))   _renderHomeHero(feed.indices);            } catch (e) { console.warn('[home] hero', e); }
+  try { if (_homeChanged('news',      feed.hot_news))  _renderHomeHotNews(feed.hot_news);        } catch (e) { console.warn('[home] news', e); }
+  try { if (_homeChanged('picks',     feed.picks))     _renderHomePicks(feed.picks);             } catch (e) { console.warn('[home] picks', e); }
+  try { if (_homeChanged('portfolio', feed.portfolio)) _renderHomePortfolio(feed.portfolio);     } catch (e) { console.warn('[home] portfolio', e); }
+  try { if (_homeChanged('smart',     feed.smart))     _renderHomeSmartMoney(feed.smart);        } catch (e) { console.warn('[home] smart', e); }
+  try { if (_homeChanged('movers',    feed.movers))    _renderHomeMovers(feed.movers);           } catch (e) { console.warn('[home] movers', e); }
+  try { if (_homeChanged('earnings',  feed.earnings))  _renderHomeEarnings(feed.earnings);       } catch (e) { console.warn('[home] earnings', e); }
+
+  // Stamp the as-of timestamp
+  const asOfEl = document.getElementById('homeAsOf');
+  if (asOfEl && feed.asOf) {
+    const d = new Date(feed.asOf);
+    asOfEl.textContent = `Updated ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+  }
+
+  // Auto-refresh while Home is the active tab
+  clearTimeout(_homeRefreshTimer);
+  _homeRefreshTimer = setTimeout(() => {
+    if (document.getElementById('page-home')?.classList.contains('active')) loadHome(true);
+  }, 60_000);
+
+  // Start the fast 6s momentum poll — keeps the race bars moving while Home
+  // is open without re-fetching the whole home-feed (which is expensive).
+  _homeStartMomPoll();
+}
+
+// ── Home page momentum race — fast 6s polling so bars actually move ──────
+let _homeMomTimer = null;
+function _homeStartMomPoll() {
+  clearInterval(_homeMomTimer);
+  _homeMomTimer = setInterval(async () => {
+    // Pause when Home is hidden or tab is in background — saves bandwidth
+    if (document.visibilityState !== 'visible') return;
+    if (!document.getElementById('page-home')?.classList.contains('active')) return;
+    try {
+      const r = await fetch('/api/momentum?limit=10', { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      _renderHomeMovers({
+        gainers:   (d.gainers   || []).map(g => ({ symbol: g.symbol, chg_pct: g.chg_pct, price: g.price })),
+        decliners: (d.decliners || []).map(g => ({ symbol: g.symbol, chg_pct: g.chg_pct, price: g.price })),
+      });
+    } catch (e) { /* silent — next poll will retry */ }
+  }, 6000);
+}
+
+function _homeShellHtml() {
+  const now = new Date();
+  const dateLabel = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  return `
+    <div class="home-bar">
+      <div class="home-bar-left">
+        <span class="home-mkt-pill" id="homeMktPill">
+          <span class="home-mkt-dot"></span> CHECKING
+        </span>
+        <span class="home-bar-sep">·</span>
+        <span class="home-bar-date">${dateLabel}</span>
+      </div>
+      <div class="home-bar-right">
+        <span class="home-bar-asof" id="homeAsOf">·</span>
+        <button class="home-bar-refresh" onclick="loadHome(true)" title="Refresh">↻</button>
+      </div>
+    </div>
+
+    <!-- Hero pulse strip — 4 index cards + sparklines + VIX/BTC -->
+    <div id="homeHero" class="home-hero">
+      <div class="home-hero-card home-hero-skel">DOW</div>
+      <div class="home-hero-card home-hero-skel">NASDAQ</div>
+      <div class="home-hero-card home-hero-skel">S&amp;P 500</div>
+      <div class="home-hero-card home-hero-skel">RUSSELL</div>
+      <div class="home-hero-card home-hero-skel">VIX</div>
+      <div class="home-hero-card home-hero-skel">BTC</div>
+    </div>
+
+    <!-- Mega-grid: 12-col responsive. Panel order (top → bottom):
+         Row 1  picks (8) + portfolio (4)
+         Row 2  momentum race (12) — full width gives the race bars room to breathe
+         Row 3  hot news (12) — full width so headlines have horizontal space
+         Row 4  smart money (6) + upcoming earnings (6) — side by side -->
+    <div id="homeBody" class="home-grid">
+
+      <!-- Row 1 — Suggested Stocks + Portfolio -->
+      <section class="home-panel home-panel-picks" style="grid-column:span 8" id="homePanelPicks">
+        <div class="home-panel-head">
+          <h3>🎯 Suggested Stocks <span class="home-panel-sub">Forward-looking setups · refreshed hourly</span></h3>
+          <a class="home-panel-link" id="homePicksToggle" href="javascript:void(0)" onclick="toggleHomePicks()" style="display:none">Show all →</a>
+        </div>
+        <div class="home-picks-stack" id="homePicksStack">
+          <div class="home-skel-line"></div><div class="home-skel-line"></div><div class="home-skel-line"></div>
+        </div>
+      </section>
+
+      <section class="home-panel home-panel-portfolio" style="grid-column:span 4" id="homePanelPortfolio">
+        <div class="home-panel-head">
+          <h3>💼 Portfolio <span class="home-panel-sub">Today</span></h3>
+          <a class="home-panel-link" href="javascript:void(0)" onclick="showPage('dashboard',document.getElementById('tab-dashboard'))">Open →</a>
+        </div>
+        <div id="homePortfolioCard"><div class="home-skel-line"></div><div class="home-skel-line"></div></div>
+      </section>
+
+      <!-- Row 2 — Momentum Race full-width: 6-col gainers · 6-col decliners -->
+      <section class="home-panel home-panel-momentum" style="grid-column:span 12" id="homePanelMovers">
+        <div class="home-panel-head">
+          <h3>🌊 Momentum Race <span class="home-panel-sub">Live race · top 10 each · bars and ranks update every 6s</span></h3>
+        </div>
+        <div class="home-mom-grid" id="homeMoversGrid">
+          <div class="home-skel-line"></div><div class="home-skel-line"></div>
+        </div>
+      </section>
+
+      <!-- Row 3 — Hot News full-width -->
+      <section class="home-panel home-panel-news" style="grid-column:span 12" id="homePanelNews">
+        <div class="home-panel-head">
+          <h3>🔥 Hot News <span class="home-panel-sub" id="homeNewsSub">Last hour</span></h3>
+          <a class="home-panel-link" href="javascript:void(0)" onclick="showPage('discover',document.getElementById('tab-discover'))">All news →</a>
+        </div>
+        <div class="home-news-list" id="homeNewsList">
+          <div class="home-skel-line"></div><div class="home-skel-line"></div><div class="home-skel-line"></div>
+        </div>
+      </section>
+
+      <!-- Row 4 — Smart Money + Upcoming Earnings side-by-side -->
+      <section class="home-panel home-panel-smart" style="grid-column:span 6" id="homePanelSmart">
+        <div class="home-panel-head">
+          <h3>🐋 Smart Money <span class="home-panel-sub">Last 24h</span></h3>
+          <a class="home-panel-link" href="javascript:void(0)" onclick="showPage('uw',document.getElementById('tab-uw'))">UW →</a>
+        </div>
+        <div id="homeSmartList"><div class="home-skel-line"></div><div class="home-skel-line"></div></div>
+      </section>
+
+      <section class="home-panel home-panel-earnings" style="grid-column:span 6" id="homePanelEarnings">
+        <div class="home-panel-head">
+          <h3>📅 Upcoming Earnings <span class="home-panel-sub">Next 7 days</span></h3>
+          <a class="home-panel-link" href="javascript:void(0)" onclick="showPage('signal-center',document.getElementById('tab-signal-center'))">Calendar →</a>
+        </div>
+        <div class="home-earnings-list" id="homeEarningsList">
+          <div class="home-skel-line"></div><div class="home-skel-line"></div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+// ── Panel renderers ──────────────────────────────────────────────────────────
+
+function _renderHomeHero(indices) {
+  const heroEl = document.getElementById('homeHero');
+  if (!heroEl) return;
+  const s = indices?.sentiment;
+  const sparks = indices?.sparklines || {};
+  if (!s) { heroEl.innerHTML = '<div style="grid-column:1/-1;padding:18px;color:#8b949e">Market data unavailable</div>'; return; }
+
+  // Update the market-open pill
+  const pill = document.getElementById('homeMktPill');
+  if (pill && s.market_status) {
+    pill.className = `home-mkt-pill ${s.market_status === 'open' ? 'open' : 'closed'}`;
+    pill.innerHTML = `<span class="home-mkt-dot"></span> ${s.market_status === 'open' ? 'MARKET OPEN' : 'MARKET CLOSED'}`;
+  }
+
+  const cards = [
+    ['DOW',         'DIA', s?.indices?.dow,     '$'],
+    ['NASDAQ',      'QQQ', s?.indices?.nasdaq,  '$'],
+    ['S&P 500',     'SPY', s?.indices?.sp500,   '$'],
+    ['RUSSELL 2K',  'IWM', s?.indices?.russell, '$'],
+    ['VIX',         null,  s?.vix ? { price: s.vix.value, chg_pct: s.vix.chg_pct } : null, ''],
+    ['BTC',         null,  s?.indices?.btc || s?.crypto?.btc, '$'],
+  ];
+
+  heroEl.innerHTML = cards.map(([name, proxy, info, prefix]) => {
+    const price = info?.price ?? info?.value;
+    const chg   = info?.chg_pct;
+    const tone  = chg == null ? 'flat' : chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
+    const sign  = chg == null ? '' : chg >= 0 ? '+' : '';
+    const arrow = chg == null ? '·' : chg >= 0 ? '▲' : '▼';
+    const priceStr = price != null ? Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—';
+    const sparkSvg = proxy && sparks[proxy]?.closes && typeof _renderSparkline === 'function'
+      ? _renderSparkline(sparks[proxy].closes, { width: 70, height: 22 })
+      : '';
+    return `
+      <div class="home-hero-card hero-${tone}">
+        <div class="home-hero-name">${name}</div>
+        <div class="home-hero-row">
+          <div class="home-hero-price">${prefix}${priceStr}</div>
+          <div class="home-hero-spark">${sparkSvg}</div>
+        </div>
+        <div class="home-hero-chg hero-${tone}">${arrow} ${chg != null ? sign + Number(chg).toFixed(2) + '%' : 'n/a'}</div>
+      </div>`;
+  }).join('');
+}
+
+function _renderHomeHotNews(articles) {
+  const el = document.getElementById('homeNewsList');
+  const sub = document.getElementById('homeNewsSub');
+  if (!el) return;
+  if (!articles?.length) {
+    el.innerHTML = '<div class="home-empty">No fresh headlines.</div>';
+    return;
+  }
+  if (sub) sub.textContent = `${articles.length} stories · last hour`;
+  el.innerHTML = articles.map(a => {
+    const tickers = Array.isArray(a.tickers) ? a.tickers.slice(0, 3) : [];
+    const chips = (a.chips || []).slice(0, 3).map(c =>
+      `<span class="home-chip home-chip-${escHtml(c.tone)}" title="${escHtml(c.ticker || '')}">${escHtml(c.label)}</span>`
+    ).join('');
+    const tickerLine = tickers.map(t =>
+      `<span class="home-news-ticker sym-link" data-symbol="${escHtml(t)}">${escHtml(t)}</span>`
+    ).join('');
+    return `
+      <article class="home-news-item" onclick="window.open('${escHtml(a.url || '#')}','_blank','noopener')">
+        <div class="home-news-top">
+          <div class="home-news-headline">${escHtml(a.title)}</div>
+          <div class="home-news-meta">${escHtml(a.source || '')} · ${escHtml(timeAgo(a.published_at))}</div>
+        </div>
+        ${chips ? `<div class="home-news-chips">${chips}</div>` : ''}
+        ${tickerLine ? `<div class="home-news-tickers">${tickerLine}</div>` : ''}
+      </article>`;
+  }).join('');
+}
+
+// Color/icon scheme per reason_type — each pick category gets its own
+// visual identity so the user can tell at a glance WHY a stock is suggested.
+const HOME_REASON_META = {
+  fresh_insider:     { color: '#56d364', icon: '👤', label: 'INSIDER BUY' },
+  smart_money:       { color: '#58a6ff', icon: '🐋', label: 'SMART MONEY' },
+  earnings_setup:    { color: '#a371f7', icon: '📊', label: 'EARNINGS' },
+  pullback_in_trend: { color: '#d29922', icon: '📉', label: 'PULLBACK' },
+  fresh_breakout:    { color: '#ff7b72', icon: '🚀', label: 'BREAKOUT' },
+};
+
+// Tiny inline sparkline — same shape as _renderSparkline but tuned for the
+// pick row's compact width (90×26 vs 70×22 for the hero).
+function _homePickSparkline(closes, chgPct) {
+  if (!closes || closes.length < 2) return '';
+  const w = 90, h = 26;
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min || 1;
+  const stroke = chgPct >= 0 ? '#56d364' : '#ff7b72';
+  const fill   = chgPct >= 0 ? 'rgba(63,185,80,0.16)' : 'rgba(248,81,73,0.16)';
+  const pts = closes.map((c, i) => {
+    const x = (i / (closes.length - 1)) * w;
+    const y = h - ((c - min) / range) * h;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const areaPts = `0,${h} ${pts} ${w},${h}`;
+  return `<svg class="home-pick-spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" preserveAspectRatio="none">
+    <polygon points="${areaPts}" fill="${fill}"/>
+    <polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+// Show this many picks collapsed; rest revealed via toggleHomePicks()
+const HOME_PICKS_COLLAPSED = 6;
+let   _homePicksExpanded   = false;
+let   _homePicksCached     = [];
+
+function _renderHomePicks(picks) {
+  const el = document.getElementById('homePicksStack');
+  if (!el) return;
+  _homePicksCached = Array.isArray(picks) ? picks : [];
+  if (!_homePicksCached.length) {
+    el.innerHTML = '<div class="home-empty">No actionable setups right now. Bot is scanning.</div>';
+    const tog = document.getElementById('homePicksToggle');
+    if (tog) tog.style.display = 'none';
+    return;
+  }
+  const visible = _homePicksExpanded ? _homePicksCached : _homePicksCached.slice(0, HOME_PICKS_COLLAPSED);
+  el.innerHTML = visible.map(p => {
+    const meta = HOME_REASON_META[p.reason_type] || { color: '#8b949e', icon: '·', label: 'PICK' };
+    const chg1d = p.chg1dPct;
+    const chg5d = p.chg5dPct;
+    const oneDayCls  = chg1d == null ? 'flat' : chg1d > 0 ? 'up' : chg1d < 0 ? 'down' : 'flat';
+    const fiveDayCls = chg5d == null ? 'flat' : chg5d > 0 ? 'up' : chg5d < 0 ? 'down' : 'flat';
+    const fmt = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+    return `
+      <div class="home-pick sym-link" data-symbol="${escHtml(p.symbol)}" title="Click to open ${escHtml(p.symbol)}">
+        <div class="home-pick-tag" style="background:${meta.color}1f;color:${meta.color};border-color:${meta.color}66">
+          <span class="home-pick-tag-icon">${meta.icon}</span>
+          <span class="home-pick-tag-lbl">${meta.label}</span>
+        </div>
+        <div class="home-pick-id">
+          <div class="home-pick-sym">${tickerLogo(p.symbol, { size: 'md' })}</div>
+          <div class="home-pick-name">${escHtml(p.name || '')}</div>
+          <div class="home-pick-reason">${escHtml(p.reason)}</div>
+        </div>
+        <div class="home-pick-chart">
+          ${_homePickSparkline(p.sparkline, chg5d)}
+          <div class="home-pick-chart-lbl">30d</div>
+        </div>
+        <div class="home-pick-stats">
+          <div class="home-pick-price">$${p.lastPrice != null ? Number(p.lastPrice).toFixed(2) : '—'}</div>
+          <div class="home-pick-rets">
+            <span class="home-pick-ret ret-${oneDayCls}">1d ${fmt(chg1d)}</span>
+            <span class="home-pick-ret ret-${fiveDayCls}">5d ${fmt(chg5d)}</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  // Show/hide the "Show all / Show less" toggle based on count
+  const tog = document.getElementById('homePicksToggle');
+  if (tog) {
+    if (_homePicksCached.length > HOME_PICKS_COLLAPSED) {
+      tog.style.display = '';
+      tog.textContent = _homePicksExpanded
+        ? `Show top ${HOME_PICKS_COLLAPSED} ↑`
+        : `Show all ${_homePicksCached.length} →`;
+    } else {
+      tog.style.display = 'none';
+    }
+  }
+}
+
+function toggleHomePicks() {
+  _homePicksExpanded = !_homePicksExpanded;
+  _renderHomePicks(_homePicksCached);
+}
+
+// Map risk_score [0..100] → tier label + tone (matches Portfolio Advisor scale)
+function _homeRiskTier(score) {
+  if (score == null || isNaN(score)) return { label: '—', tone: 'flat' };
+  if (score >= 70) return { label: 'HIGH', tone: 'down' };
+  if (score >= 45) return { label: 'MED',  tone: 'mid'  };
+  if (score >= 20) return { label: 'LOW',  tone: 'up'   };
+  return                  { label: 'OK',   tone: 'up'   };
+}
+
+function _renderHomePortfolio(p) {
+  const el = document.getElementById('homePortfolioCard');
+  if (!el) return;
+  if (!p || p.error) {
+    el.innerHTML = `<div class="home-empty">${p?.error ? `Couldn't load: ${escHtml(p.error)}` : 'Connect a broker on the Admin tab to see your portfolio here.'}</div>`;
+    return;
+  }
+  if (p.totalValue == null) {
+    el.innerHTML = '<div class="home-empty">No broker connected.<br><span style="font-size:0.7rem;opacity:0.7">Add Moomoo or Alpaca credentials in Admin → Connections.</span></div>';
+    return;
+  }
+  // Show which broker the data came from (matches dashboard source selector)
+  const sourceLabels = { moomoo: '💰 Moomoo', alpaca_live: '🔴 Alpaca Live', alpaca: '📄 Alpaca Paper' };
+  const sourceLabel = sourceLabels[p.source] || p.source || '';
+
+  const pnl = Number(p.todayPnL || 0);
+  const tone = pnl > 0 ? 'up' : pnl < 0 ? 'down' : 'flat';
+  const sign = pnl > 0 ? '+' : pnl < 0 ? '−' : '';
+  const totalStr = '$' + Number(p.totalValue).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const pnlStr   = sign + '$' + Math.abs(pnl).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+  // ── Open positions list (top 8 by market value, enriched server-side)
+  const holdings = Array.isArray(p.holdings) ? p.holdings : [];
+  const fmtMoney = (v) => v == null ? '—' : '$' + Number(v).toFixed(Math.abs(v) >= 100 ? 0 : 2);
+  const fmtPct   = (v) => v == null || isNaN(v) ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+  const rowsHtml = holdings.length ? holdings.map(h => {
+    const plTone = h.unreal_pl > 0 ? 'up' : h.unreal_pl < 0 ? 'down' : 'flat';
+    const riskT  = _homeRiskTier(h.risk_score);
+    const hedge  = h.hedge_needed
+      ? `<span class="home-port-tag tag-hedge" title="Risk score ≥ 60 — covered-call hedge suggested. Open the Advisor tab for the trade.">⚠ HEDGE</span>`
+      : '';
+    return `
+      <div class="home-port-row sym-link" data-symbol="${escHtml(h.symbol)}" title="Click to open ${escHtml(h.symbol)}">
+        <div class="home-port-row-l">
+          <div class="home-port-row-sym">${tickerLogo(h.symbol, { size: 'md' })}</div>
+          <div class="home-port-row-qty">${Number(h.qty || 0).toLocaleString()} sh · cost ${fmtMoney(h.avg_entry)}</div>
+        </div>
+        <div class="home-port-row-m">
+          <div class="home-port-row-price">${fmtMoney(h.current_price)}</div>
+          <div class="home-port-row-pl pl-${plTone}">${fmtPct(h.unreal_plpc)}</div>
+        </div>
+        <div class="home-port-row-r">
+          <span class="home-port-tag tag-risk-${riskT.tone}" title="Risk score ${Math.round(h.risk_score || 0)}/100">${riskT.label}</span>
+          ${hedge}
+        </div>
+      </div>`;
+  }).join('') : `<div class="home-port-empty">No open positions.</div>`;
+
+  el.innerHTML = `
+    ${sourceLabel ? `<div class="home-port-src">${escHtml(sourceLabel)} · ${p.positions} position${p.positions === 1 ? '' : 's'}</div>` : ''}
+    <div class="home-port-headline">
+      <div class="home-port-big">${totalStr}</div>
+      <div class="home-port-pnl port-${tone}" title="Today's P&L (account equity vs prior close)">${pnlStr} today</div>
+    </div>
+    <div class="home-port-list">${rowsHtml}</div>`;
+}
+
+function _renderHomeSmartMoney(smart) {
+  const el = document.getElementById('homeSmartList');
+  if (!el) return;
+  const flow = smart?.flow || [];
+  const insider = smart?.insider || [];
+  if (!flow.length && !insider.length) {
+    el.innerHTML = '<div class="home-empty">No major smart-money signals.</div>';
+    return;
+  }
+  const flowItems = flow.slice(0, 4).map(f => {
+    const m = Math.round((Number(f.premium) || 0) / 1000);
+    const premStr = m >= 1000 ? `$${(m/1000).toFixed(1)}M` : `$${m}K`;
+    const tone = f.sentiment === 'bullish' ? 'up' : f.sentiment === 'bearish' ? 'down' : 'flat';
+    return `<div class="home-smart-item sym-link" data-symbol="${escHtml(f.ticker)}">
+      <span class="home-smart-emoji">🐋</span>
+      <span class="home-smart-sym">${tickerLogo(f.ticker, { size: 'sm' })}</span>
+      <span class="home-smart-mid smart-${tone}">${premStr} ${escHtml(f.side || '')}</span>
+      <span class="home-smart-time">${escHtml(timeAgo(f.alerted_at))}</span>
+    </div>`;
+  }).join('');
+  const insiderItems = insider.slice(0, 3).map(i => {
+    const v = Number(i.value) || 0;
+    const m = v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${Math.round(v/1000)}K`;
+    return `<div class="home-smart-item sym-link" data-symbol="${escHtml(i.ticker)}">
+      <span class="home-smart-emoji">👤</span>
+      <span class="home-smart-sym">${tickerLogo(i.ticker, { size: 'sm' })}</span>
+      <span class="home-smart-mid smart-up">${m} buy</span>
+      <span class="home-smart-time">${escHtml(timeAgo(i.filed_at))}</span>
+    </div>`;
+  }).join('');
+  el.innerHTML = flowItems + insiderItems;
+}
+
+function _renderHomeMovers(m) {
+  const el = document.getElementById('homeMoversGrid');
+  if (!el) return;
+  const gainers   = (m?.gainers   || []).slice(0, 10);
+  const decliners = (m?.decliners || []).slice(0, 10);
+  if (!gainers.length && !decliners.length) {
+    el.innerHTML = '<div class="home-empty">No mover data right now.</div>';
+    return;
+  }
+  const maxAbs = Math.max(
+    ...gainers.map(x => Math.abs(Number(x.chg_pct) || 0)),
+    ...decliners.map(x => Math.abs(Number(x.chg_pct) || 0)),
+    1
+  );
+  const track = (arr, side) => {
+    if (!arr.length) return '<div class="home-empty">—</div>';
+    return arr.map((x, i) => {
+      const chg   = Number(x.chg_pct) || 0;
+      const price = x.price != null ? Number(x.price) : null;
+      const prevClose = price && Math.abs(chg) > 0.001 ? price / (1 + chg / 100) : null;
+      const dollarChg = price != null && prevClose != null ? price - prevClose : null;
+      const sign = chg >= 0 ? '+' : '';
+      // Bar fills toward the right-anchored runner pill (the "finish line").
+      // Cap at 70% so the bar never grows UNDER the pill (which sits at the
+      // right edge of the lane). Min 16% so inside text stays readable.
+      const w = Math.max(16, Math.min(70, (Math.abs(chg) / maxAbs) * 70));
+      return `
+        <div class="mom-bar mom-bar-${side}" data-symbol="${escHtml(x.symbol)}"
+             onclick="exploreSymbol('${escHtml(x.symbol)}')" title="Click to open ${escHtml(x.symbol)}">
+          <div class="mom-bar-rank">${i + 1}</div>
+          <div class="mom-bar-lane">
+            <div class="mom-bar-fill" style="width:${w}%">
+              <div class="mom-bar-inner">
+                <span class="mom-bar-inner-pct">${sign}${Math.abs(chg).toFixed(2)}%</span>
+                ${dollarChg != null ? `<span class="mom-bar-inner-dollar">${dollarChg >= 0 ? '+' : ''}$${Math.abs(dollarChg).toFixed(2)}</span>` : ''}
+              </div>
+            </div>
+            <div class="mom-bar-runner">
+              ${tickerLogo(x.symbol, { size: 'sm', withSym: false })}
+              <div class="mom-bar-runner-text">
+                <div class="mom-bar-runner-top">
+                  <span class="mom-bar-sym">${escHtml(x.symbol)}</span>
+                  <span class="mom-bar-price">${price != null ? price.toFixed(2) : '—'}</span>
+                </div>
+                ${dollarChg != null ? `<div class="mom-bar-runner-bot"><span class="mom-bar-dollar">${dollarChg >= 0 ? '▲' : '▼'} ${Math.abs(dollarChg).toFixed(2)}</span> <span class="mom-bar-pct">(${sign}${Math.abs(chg).toFixed(2)}%)</span></div>` : ''}
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  };
+  // ── Capture pre-render positions for FLIP rank-swap animation ─────────
+  const prevTops = new Map();
+  el.querySelectorAll('.mom-bar[data-symbol]').forEach(b => {
+    prevTops.set(b.dataset.symbol, b.getBoundingClientRect().top);
+  });
+
+  el.innerHTML = `
+    <div class="home-mom-side">
+      <div class="home-mom-side-head home-mom-side-head-up">▲ GAINERS</div>
+      <div class="mom-bars">${track(gainers, 'up')}</div>
+    </div>
+    <div class="home-mom-side">
+      <div class="home-mom-side-head home-mom-side-head-down">▼ DECLINERS</div>
+      <div class="mom-bars">${track(decliners, 'down')}</div>
+    </div>`;
+
+  // ── FLIP: slide bars from their old positions to their new ones ────────
+  requestAnimationFrame(() => {
+    el.querySelectorAll('.mom-bar[data-symbol]').forEach(b => {
+      const oldTop = prevTops.get(b.dataset.symbol);
+      if (oldTop == null) return;
+      const newTop = b.getBoundingClientRect().top;
+      const delta = oldTop - newTop;
+      if (Math.abs(delta) < 1) return;
+      b.style.transition = 'none';
+      b.style.transform  = `translateY(${delta}px)`;
+      requestAnimationFrame(() => {
+        b.style.transition = 'transform 0.55s cubic-bezier(.4,.2,.2,1)';
+        b.style.transform  = 'translateY(0)';
+      });
+    });
+  });
+}
+
+// UW options-flow bias chip → "Strong Bull / Bull / Mixed / Bear / Strong Bear".
+// Same labels as the Stock Explorer conviction chip (see _UW_CHIP_COLORS above).
+const _HOME_BIAS_META = {
+  strong_bullish: { label: '🐂 Strong Bull', cls: 'bias-strong-bull' },
+  bullish:        { label: '🐂 Bull',         cls: 'bias-bull'        },
+  neutral:        { label: '⚖️ Mixed',        cls: 'bias-mixed'       },
+  bearish:        { label: '🐻 Bear',         cls: 'bias-bear'        },
+  strong_bearish: { label: '🐻 Strong Bear',  cls: 'bias-strong-bear' },
+  no_data:        { label: '· no flow',       cls: 'bias-none'        },
+};
+
+function _renderHomeEarnings(earnings) {
+  const el = document.getElementById('homeEarningsList');
+  if (!el) return;
+  if (!earnings?.length) {
+    el.innerHTML = '<div class="home-empty">No upcoming earnings in the next few days.</div>';
+    return;
+  }
+  el.innerHTML = earnings.slice(0, 8).map(e => {
+    const ct = e.call_time || e.time || '';
+    const isBMO = ct === 'BMO', isAMC = ct === 'AMC';
+    const timeLabel = isBMO ? 'PRE' : isAMC ? 'POST' : (ct && ct !== '?') ? ct : 'TBD';
+    const dateStr = e.date ? new Date(e.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+    // UW conviction bias going into the print (server attached e.bias)
+    const biasLabel = e.bias?.label || 'no_data';
+    const biasMeta  = _HOME_BIAS_META[biasLabel] || _HOME_BIAS_META.no_data;
+    const biasScore = e.bias?.score != null ? ` ${Number(e.bias.score).toFixed(2)}` : '';
+    const biasTitle = biasLabel === 'no_data'
+      ? 'No recent options-flow data for this ticker.'
+      : `UW options-flow conviction going into the print · score ${biasScore.trim() || '—'}`;
+    return `<div class="home-earn-row sym-link" data-symbol="${escHtml(e.symbol)}">
+      <div class="home-earn-sym">${tickerLogo(e.symbol || '?', { size: 'md' })}</div>
+      <div class="home-earn-name">${escHtml((e.company || '').slice(0, 30))}</div>
+      <div class="home-earn-bias ${biasMeta.cls}" title="${escHtml(biasTitle)}">${biasMeta.label}${biasScore}</div>
+      <div class="home-earn-when">
+        <span class="home-earn-date">${escHtml(dateStr)}</span>
+        <span class="home-earn-time earn-${isBMO ? 'pre' : isAMC ? 'post' : 'na'}">${timeLabel}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Old loadHome below (orphan) — kept for reference but never called.
+async function _loadHomeOldOrphan(force = false) {
   if (homeLoaded && !force) return;
   homeLoaded = false; // reset so errors allow retry
 
-  const el = document.getElementById('page-home');
+  const el = document.getElementById('page-home-OLD');
   const now = new Date();
   el.innerHTML = `
     <div class="home-statusbar" id="homeStatusBar">
@@ -15437,7 +16972,7 @@ async function loadHome(force = false) {
         return `<div class="earn-item earn-item-link" id="earn-row-${sym}-${dateStr}" onclick="calEarningClick('${sym}')">
           <div class="earn-row-top">
             <div>
-              <div class="earn-sym">${sym}${mcap}</div>
+              <div class="earn-sym">${tickerLogo(sym, { size: 'md' })}${mcap}</div>
               <div class="earn-name">${escHtml(e.company||'')}</div>
             </div>
             <span class="earn-time ${isBMO?'earn-pre':isAMC?'earn-post':'earn-na'}">${timeLabel}</span>
@@ -15534,6 +17069,37 @@ function earnShowMore(dateStr, moreItems) {
 }
 
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ─── Universal ticker-with-logo helper ───────────────────────────────────────
+// Used everywhere we render a stock symbol — keeps look consistent across the
+// dashboard. Logo source: Financial Modeling Prep's free image CDN
+// (https://financialmodelingprep.com/image-stock/<SYM>.png). On 404 / non-logo
+// (e.g. VIX) the onerror handler swaps in a colored monogram badge.
+//
+//   tickerLogo('AAPL')                  → 16px logo + bold symbol
+//   tickerLogo('NVDA', { size:'md' })   → 22px logo + bold symbol
+//   tickerLogo('TSLA', { size:'lg' })   → 32px logo + bold symbol
+//   tickerLogo('PLTR', { withSym:false })→ logo only (for icon-only cells)
+//
+const _TK_MONO_COLORS = ['#2563eb','#0891b2','#059669','#16a34a','#ca8a04','#dc2626','#c026d3','#7c3aed','#1e40af','#0e7490'];
+function _tkMonoColor(sym) {
+  let h = 0;
+  for (let i = 0; i < sym.length; i++) h = ((h << 5) - h + sym.charCodeAt(i)) | 0;
+  return _TK_MONO_COLORS[Math.abs(h) % _TK_MONO_COLORS.length];
+}
+function tickerLogo(sym, { size = 'sm', withSym = true } = {}) {
+  if (!sym) return '';
+  const s = String(sym).toUpperCase();
+  const sizeCls = `tk-logo-${size}`;
+  const monoCls = `tk-mono tk-mono-${size}`;
+  const fallback = `<span class='${monoCls}' style='background:${_tkMonoColor(s)}'>${escHtml(s.slice(0,2))}</span>`;
+  // Replace single quotes inside onerror with HTML-safe equivalents
+  const onerr = `this.outerHTML='${fallback.replace(/'/g, "\\'")}'`;
+  const img = `<img class="tk-logo ${sizeCls}" src="https://financialmodelingprep.com/image-stock/${encodeURIComponent(s)}.png" alt="" loading="lazy" onerror="${onerr}">`;
+  if (!withSym) return img;
+  return `<span class="tk-with-logo">${img}<span class="tk-sym">${escHtml(s)}</span></span>`;
+}
+window.tickerLogo = tickerLogo;
 function miniSparkline(score) {
   const pts = []; const h = 22; const w = 56; const n = 12;
   let v = 12 + (score / 100) * 8;
@@ -16397,7 +17963,7 @@ function setChatSize(size) {
     sm: { width: '360px',  height: '500px'  },
     md: { width: '480px',  height: '620px'  },
     lg: { width: '640px',  height: '780px'  },
-    xl: { width: 'min(900px, calc(100vw - 32px))', height: 'calc(100vh - 120px)' },
+    xl: { width: 'min(900px, calc(100vw - 32px))', height: 'calc(100vh - 210px)' },  /* leave 98px clear at top for the nav header */
   };
   const s = sizes[size] || sizes.md;
   w.style.width  = s.width;
@@ -18514,7 +20080,7 @@ function renderMarketPulse() {
     const pctStr = pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
     const priceStr = price != null ? `$${parseFloat(price).toFixed(2)}` : '';
     return `<div class="pulse-chip" data-sym="${sym}" onclick="${onClick}" title="${sym}">
-      <span class="pulse-chip-sym">${sym}</span>
+      <span class="pulse-chip-sym">${tickerLogo(sym, { size: 'sm' })}</span>
       <span class="pulse-chip-price">${priceStr}</span>
       <span class="pulse-chip-pct" style="color:${c}">${pctStr}</span>
     </div>`;
@@ -18642,7 +20208,7 @@ function renderBrowseList() {
     }
     return `<div class="browse-row" onclick="explorerSelectAndLoad('${item.symbol}')">
       ${badge}
-      <span class="browse-row-sym">${item.symbol}</span>
+      <span class="browse-row-sym">${tickerLogo(item.symbol, { size: 'sm' })}</span>
       <span class="browse-row-name">${item.name || ''}</span>
       <span class="browse-row-price">${price}</span>
       <span class="browse-row-pct" style="color:${pctCol}">${pctStr}</span>
@@ -19902,10 +21468,36 @@ function _updateTickerColors() {
 }
 _mkInterval(_updateTickerColors, 60_000);
 
-// ── Stock price ticker ────────────────────────────────────────────────────────
-const _stkSyms = ['SPY','QQQ','NVDA','AAPL','TSLA','MSFT','AMZN','META','PLTR','MRVL','AMD','GOOGL','NFLX','AVGO','SMCI','SOXL'];
+// ── Stock price ticker — momentum-aware, hover-preview, real-time blinks ────
+// Visual scale per chip is driven by |% change|:
+//   < 1%  → calm, baseline weight
+//   1–3%  → bold (700)
+//   3–5%  → extra-bold (800) with thin border
+//   5–10% → hot — glowing border + larger font
+//   ≥ 10% → "MOON" / "CRATER" — pronounced glow, animated pulse
+// On hover the chip pauses the marquee and shows a 240×170 preview card with a
+// 30-day sparkline + key stats. Data comes from `/api/ticker-hover/:sym` which
+// reads from `tradable_universe` (no Yahoo round-trip on hover).
+
+// Logo rendering for the ticker chips uses the universal `tickerLogo()` helper
+// defined near `escHtml` — single source of truth across the dashboard.
+
+const _stkSyms = [
+  // Mega-caps + most-traded — the canonical macro pulse
+  'SPY','QQQ','DIA','IWM',
+  'NVDA','AAPL','MSFT','GOOGL','AMZN','META','TSLA','AVGO',
+  // High-beta retail favorites & momentum names
+  'PLTR','AMD','NFLX','SMCI','SOXL','MRVL','COIN','MSTR','IREN',
+  // Earnings-week + Bot-grade-A leaders
+  'CRM','SNOW','MDB','OKTA','PANW','GTLB','HPE','DELL','ADSK','NTAP',
+  // Macro/safety
+  'VIX','GLD','TLT','XLE','XLF',
+];
 const _stkLastPrice = {};
-let _stkBuilt = false;
+let   _stkBuilt = false;
+let   _stkHoverTimer = null;
+let   _stkActiveTooltip = null;
+let   _stkActiveSym = null;
 
 async function refreshStockTicker() {
   const track = document.getElementById('stockTickerTrack');
@@ -19919,16 +21511,19 @@ async function refreshStockTicker() {
       const items = _stkSyms.map(sym => {
         const q = quotes[sym];
         const price = q?.price != null ? q.price.toFixed(2) : '--';
-        const pct = q?.change_pct ?? null;
-        const dir = pct == null ? '' : pct >= 0 ? 'up' : 'down';
+        const pct   = q?.change_pct ?? null;
+        const dir   = pct == null ? '' : pct >= 0 ? 'up' : 'down';
         const arrow = pct == null ? '' : pct >= 0 ? '▲' : '▼';
-        const pctStr = pct != null ? `${arrow}${Math.abs(pct).toFixed(2)}%` : '';
-        return `<span class="stk-chip" data-sym="${sym}" onclick="openExplorerForSymbol('${sym}')">` +
+        const pctStr  = pct != null ? `${arrow}${Math.abs(pct).toFixed(2)}%` : '';
+        const heatCls = _stkHeatClass(pct);
+        return `<span class="stk-chip ${heatCls}" data-sym="${sym}" onclick="openExplorerForSymbol('${sym}')">` +
+          tickerLogo(sym, { size: 'md', withSym: false }) +
           `<span class="stk-sym">${sym}</span>` +
           `<span class="stk-price">$${price}</span>` +
           (pct != null ? `<span class="stk-chg ${dir}">${pctStr}</span>` : '') +
           `</span>`;
       });
+      // 2× content so the scroll loop is seamless
       const html = items.join('');
       track.innerHTML = html + html;
       requestAnimationFrame(() => {
@@ -19938,6 +21533,7 @@ async function refreshStockTicker() {
       });
       _stkBuilt = true;
       _stkSyms.forEach(sym => { if (quotes[sym]?.price != null) _stkLastPrice[sym] = quotes[sym].price; });
+      _stkAttachHoverHandlers(track);
     } else {
       track.querySelectorAll('.stk-chip[data-sym]').forEach(chip => {
         const sym = chip.dataset.sym;
@@ -19953,6 +21549,9 @@ async function refreshStockTicker() {
           chgEl.textContent = (pct >= 0 ? '▲' : '▼') + Math.abs(pct).toFixed(2) + '%';
           chgEl.className = `stk-chg ${dir}`;
         }
+        // Update heat class as % moves
+        chip.classList.remove('stk-calm','stk-warm','stk-hot','stk-moon','stk-crater');
+        chip.classList.add(_stkHeatClass(pct));
         if (prev != null && Math.abs(q.price - prev) > 0.001) {
           chip.classList.remove('blink-up', 'blink-down');
           void chip.offsetWidth;
@@ -19962,6 +21561,147 @@ async function refreshStockTicker() {
       });
     }
   } catch (_) { /* ignore */ }
+}
+
+// ── Momentum heat class based on |% change| ──────────────────────────────────
+function _stkHeatClass(pct) {
+  if (pct == null) return 'stk-calm';
+  const abs = Math.abs(pct);
+  if (abs >= 10) return pct > 0 ? 'stk-moon'   : 'stk-crater';
+  if (abs >= 5)  return 'stk-hot';
+  if (abs >= 3)  return 'stk-warm';
+  return 'stk-calm';
+}
+
+// ── Hover preview tooltip ────────────────────────────────────────────────────
+function _stkAttachHoverHandlers(track) {
+  // Delegated handlers — one listener for the whole track regardless of clones
+  track.addEventListener('mouseover', (e) => {
+    const chip = e.target.closest('.stk-chip[data-sym]');
+    if (!chip) return;
+    const sym = chip.dataset.sym;
+    if (_stkActiveSym === sym) return;
+    clearTimeout(_stkHoverTimer);
+    _stkHoverTimer = setTimeout(() => _stkShowTooltip(sym, chip), 200);
+  });
+  track.addEventListener('mouseout', (e) => {
+    const chip = e.target.closest('.stk-chip[data-sym]');
+    if (!chip) return;
+    clearTimeout(_stkHoverTimer);
+    // Tiny grace period in case the user is moving to the tooltip itself
+    _stkHoverTimer = setTimeout(() => _stkHideTooltip(), 120);
+  });
+}
+
+async function _stkShowTooltip(sym, chip) {
+  _stkActiveSym = sym;
+  let tip = document.getElementById('stkTooltip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'stkTooltip';
+    tip.className = 'stk-tooltip';
+    document.body.appendChild(tip);
+    // Keep tooltip open while mouse is over it
+    tip.addEventListener('mouseenter', () => clearTimeout(_stkHoverTimer));
+    tip.addEventListener('mouseleave', () => { _stkHoverTimer = setTimeout(_stkHideTooltip, 100); });
+  }
+  // Skeleton while we fetch
+  tip.innerHTML = `<div class="stk-tt-head"><div class="stk-tt-sym">${escHtml(sym)}</div><div class="stk-tt-loading">loading…</div></div>`;
+  _stkPositionTooltip(tip, chip);
+  tip.classList.add('stk-tt-show');
+
+  try {
+    const r = await fetch('/api/ticker-hover/' + encodeURIComponent(sym));
+    if (!r.ok) { tip.innerHTML = `<div class="stk-tt-head"><div class="stk-tt-sym">${escHtml(sym)}</div><div class="stk-tt-loading">no data</div></div>`; return; }
+    const d = await r.json();
+    if (_stkActiveSym !== sym) return;  // raced to another chip
+
+    const chg = d.day_change_pct;
+    const chgCls   = chg == null ? '' : chg >= 0 ? 'pos' : 'neg';
+    const chgSign  = chg == null ? ''  : chg >= 0 ? '+' : '';
+    const sparkSvg = _stkSparkSvg(d.sparkline, chg ?? d.ret_1m);
+
+    // Signal chips
+    const sigChips = (d.signal_tags || []).slice(0, 4).map(t => {
+      const m = (typeof SCR_TAG_META !== 'undefined' && SCR_TAG_META[t]) || { icon: '·', label: t.toUpperCase() };
+      return `<span class="stk-tt-tag" title="${escHtml(m.label)}">${m.icon}</span>`;
+    }).join('');
+
+    const fmtMcap = (n) => n == null ? '—' : n >= 1e12 ? `$${(n/1e12).toFixed(2)}T` : n >= 1e9 ? `$${(n/1e9).toFixed(1)}B` : `$${(n/1e6).toFixed(0)}M`;
+    const fmtVol  = (n) => n == null ? '—' : n >= 1e9 ? `${(n/1e9).toFixed(2)}B` : n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(0)}K` : String(Math.round(n));
+    const fmtP    = (v, d=1) => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(d) + '%';
+
+    tip.innerHTML = `
+      <div class="stk-tt-head">
+        <div class="stk-tt-id">
+          ${tickerLogo(d.symbol, { size: 'lg', withSym: false })}
+          <div>
+            <div class="stk-tt-sym">${escHtml(d.symbol)} ${sigChips}</div>
+            <div class="stk-tt-name">${escHtml((d.name || '').slice(0, 32))}</div>
+            ${d.sector ? `<div class="stk-tt-sec">${escHtml(d.sector)}</div>` : ''}
+          </div>
+        </div>
+        <div class="stk-tt-price-block">
+          <div class="stk-tt-price">${d.price != null ? '$' + Number(d.price).toFixed(2) : '—'}</div>
+          <div class="stk-tt-chg ${chgCls}">${chgSign}${chg != null ? chg.toFixed(2) + '%' : '—'}</div>
+        </div>
+      </div>
+      <div class="stk-tt-chart">${sparkSvg}</div>
+      <div class="stk-tt-stats">
+        <div><span class="stk-tt-lbl">1mo</span><span class="${d.ret_1m >= 0 ? 'pos' : 'neg'}">${fmtP(d.ret_1m)}</span></div>
+        <div><span class="stk-tt-lbl">3mo</span><span class="${d.ret_3m >= 0 ? 'pos' : 'neg'}">${fmtP(d.ret_3m)}</span></div>
+        <div><span class="stk-tt-lbl">YTD</span><span class="${d.ret_ytd >= 0 ? 'pos' : 'neg'}">${fmtP(d.ret_ytd)}</span></div>
+        <div><span class="stk-tt-lbl">RSI</span><span>${d.rsi_14 != null ? d.rsi_14.toFixed(0) : '—'}</span></div>
+        <div><span class="stk-tt-lbl">Mcap</span><span>${fmtMcap(d.market_cap)}</span></div>
+        <div><span class="stk-tt-lbl">Vol</span><span>${fmtVol(d.volume)}</span></div>
+        <div><span class="stk-tt-lbl">P/E</span><span>${d.pe_ratio != null ? d.pe_ratio.toFixed(1) : '—'}</span></div>
+        <div title="% from 52-week high"><span class="stk-tt-lbl">52WH</span><span>${fmtP(d.pct_from_52w_high, 1)}</span></div>
+      </div>
+      ${d.signal_tags?.length ? `<div class="stk-tt-foot">Click to open Stock Explorer →</div>` : ''}
+    `;
+    _stkPositionTooltip(tip, chip);
+  } catch (e) {
+    tip.innerHTML = `<div class="stk-tt-head"><div class="stk-tt-sym">${escHtml(sym)}</div><div class="stk-tt-loading">error</div></div>`;
+  }
+}
+
+function _stkPositionTooltip(tip, chip) {
+  const rect = chip.getBoundingClientRect();
+  const tipW = 280, tipH = 200;   // approximate; clamp into viewport
+  let left = rect.left + (rect.width / 2) - (tipW / 2);
+  let top  = rect.bottom + 8;       // below the ticker bar
+  // Clamp into viewport
+  left = Math.max(8, Math.min(left, window.innerWidth  - tipW - 8));
+  top  = Math.max(8, Math.min(top,  window.innerHeight - tipH - 8));
+  tip.style.left = left + 'px';
+  tip.style.top  = top  + 'px';
+}
+
+function _stkHideTooltip() {
+  _stkActiveSym = null;
+  const tip = document.getElementById('stkTooltip');
+  if (tip) tip.classList.remove('stk-tt-show');
+}
+
+function _stkSparkSvg(closes, chgPct) {
+  if (!closes || closes.length < 2) return '<div class="stk-tt-nodata">no chart</div>';
+  const w = 260, h = 64;
+  const min = Math.min(...closes), max = Math.max(...closes);
+  const range = max - min || 1;
+  const stroke = chgPct == null ? '#79c0ff' : chgPct >= 0 ? '#56d364' : '#ff7b72';
+  const fill   = chgPct == null ? 'rgba(121,192,255,0.15)' : chgPct >= 0 ? 'rgba(63,185,80,0.18)' : 'rgba(248,81,73,0.18)';
+  const pts = closes.map((c, i) => {
+    const x = (i / (closes.length - 1)) * w;
+    const y = h - ((c - min) / range) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  // Endpoint dot
+  const lastX = w, lastY = h - ((closes[closes.length-1] - min) / range) * (h - 4) - 2;
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" preserveAspectRatio="none">
+    <polygon points="0,${h} ${pts} ${w},${h}" fill="${fill}"/>
+    <polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${lastX - 1}" cy="${lastY}" r="2.5" fill="${stroke}" stroke="rgba(0,0,0,0.7)" stroke-width="0.5"/>
+  </svg>`;
 }
 
 refreshStockTicker();
@@ -21625,7 +23365,7 @@ function _tdRenderPositions() {
     const name = _tdNameCache[p.symbol] || '';
     return `<div class="td-wl-row${active}" onclick="tdSelectSym('${p.symbol}')" data-td-sym="${p.symbol}">
       <div>
-        <div class="td-wl-sym">${escHtml(p.symbol)}</div>
+        <div class="td-wl-sym">${tickerLogo(p.symbol, { size: 'sm' })}</div>
         ${name ? `<div class="td-wl-name">${escHtml(name)}</div>` : ''}
         <div style="font-size:0.62rem;color:#8b949e;margin-top:1px">${p.qty} sh</div>
       </div>
@@ -21704,7 +23444,7 @@ function _tdRenderWatchlist(syms) {
     const name = _tdNameCache[sym] || '';
     return `<div class="td-wl-row${active}" onclick="tdSelectSym('${sym}')" data-td-sym="${sym}">
       <div>
-        <div class="td-wl-sym">${escHtml(sym)}</div>
+        <div class="td-wl-sym">${tickerLogo(sym, { size: 'sm' })}</div>
         ${name ? `<div class="td-wl-name">${escHtml(name)}</div>` : ''}
       </div>
       <div class="td-wl-right">
@@ -21791,6 +23531,10 @@ async function _tdSelectSymbol(sym) {
 
   _tdRenderHeader(sym, quote, extras);
   _tdRenderRight(sym, quote, extras);
+
+  // Refresh the info-tabs section (overview/news/earnings/company/financials)
+  // for the newly-selected symbol — uses whichever tab is currently active.
+  _tdRenderInfoTab(sym, _tdInfoTab);
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────
@@ -21798,7 +23542,7 @@ function _tdSetHeaderLoading(sym) {
   const h = document.getElementById('td-header');
   if (!h) return;
   h.innerHTML = `
-    <div class="td-hdr-sym">${escHtml(sym)}</div>
+    <div class="td-hdr-sym">${tickerLogo(sym, { size: 'lg' })}</div>
     <div class="td-hdr-price-wrap">
       <div class="td-hdr-price td-skeleton" style="width:140px;height:40px;border-radius:6px"></div>
     </div>`;
@@ -21842,7 +23586,7 @@ function _tdRenderHeader(sym, q, extras) {
 
   h.innerHTML = `
     <div class="td-hdr-top">
-      <div class="td-hdr-sym">${escHtml(sym)}</div>
+      <div class="td-hdr-sym">${tickerLogo(sym, { size: 'lg' })}</div>
       <div class="td-hdr-price-wrap">
         <span class="td-hdr-price" id="td-live-price">${pStr}</span>
         <span class="td-hdr-chg ${cCls}" id="td-live-chg">${cStr}</span>
@@ -21998,14 +23742,30 @@ function _tdRenderRight(sym, q, extras) {
     return v.toLocaleString();
   };
 
-  // Stats grid
+  // Expanded stats grid — pulls from /api/quote which merges Yahoo + DB so
+  // stays populated even when Yahoo is throttled.
+  const fmtP = (v, d=2) => v == null || isNaN(v) ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(d) + '%';
   const stats = [
     { l: 'Market Cap',  v: fmtMktCap(q?.market_cap) },
     { l: 'P/E Ratio',   v: q?.pe != null ? q.pe.toFixed(1) : '—' },
-    { l: '52W High',    v: q?.week52_high != null ? '$'+q.week52_high.toFixed(2) : '—' },
-    { l: '52W Low',     v: q?.week52_low  != null ? '$'+q.week52_low.toFixed(2)  : '—' },
+    { l: 'Fwd P/E',     v: q?.forward_pe != null ? q.forward_pe.toFixed(1) : '—' },
+    { l: 'EPS (ttm)',   v: q?.eps != null ? '$' + q.eps.toFixed(2) : '—' },
+    { l: 'Beta',        v: q?.beta != null ? q.beta.toFixed(2) : '—' },
+    { l: 'Div Yield',   v: q?.dividend_yield != null && q.dividend_yield > 0 ? q.dividend_yield.toFixed(2) + '%' : '—' },
+    { l: 'Open',        v: q?.open != null ? '$' + q.open.toFixed(2) : '—' },
+    { l: 'Prev Close',  v: q?.prev_close != null ? '$' + q.prev_close.toFixed(2) : '—' },
+    { l: 'Day High',    v: q?.high != null ? '$' + q.high.toFixed(2) : '—' },
+    { l: 'Day Low',     v: q?.low  != null ? '$' + q.low.toFixed(2)  : '—' },
+    { l: '52W High',    v: q?.week52_high != null ? '$' + q.week52_high.toFixed(2) : '—' },
+    { l: '52W Low',     v: q?.week52_low  != null ? '$' + q.week52_low.toFixed(2)  : '—' },
+    { l: '% from 52W H',v: fmtP(q?.pct_from_52w_high, 1) },
     { l: 'Volume',      v: fmtVol(q?.volume) },
-    { l: 'Open',        v: q?.open  != null ? '$'+q.open.toFixed(2)  : '—' },
+    { l: 'Avg Vol',     v: fmtVol(q?.avg_volume) },
+    { l: 'ATR %',       v: q?.atr_pct != null ? q.atr_pct.toFixed(2) + '%' : '—' },
+    { l: '1mo return',  v: fmtP(q?.ret_1m, 1) },
+    { l: '3mo return',  v: fmtP(q?.ret_3m, 1) },
+    { l: 'YTD return',  v: fmtP(q?.ret_ytd, 1) },
+    { l: 'Profit Margin', v: q?.profit_margin != null ? q.profit_margin.toFixed(1) + '%' : '—' },
   ];
 
   // Signals
@@ -22094,11 +23854,314 @@ function _tdRenderRight(sym, q, extras) {
       </div>
     </div>
 
+    <!-- Options Flow (UW) — recent bullish/bearish bets for this ticker -->
+    <div class="td-section-label" style="margin-top:10px">🐋 Options Flow <span style="font-weight:400;color:#6e7681;font-size:0.7rem">· last 24h</span></div>
+    <div id="td-options-flow" class="td-options-flow">
+      <div class="td-skeleton" style="height:16px;border-radius:4px"></div>
+    </div>
+
     <!-- Quick Trade -->
     <div class="td-section-label" style="margin-top:10px">Quick Trade</div>
     <div class="td-trade-row">
       <button class="td-btn-trade" onclick="tdOpenTrade(null)">Trade</button>
     </div>`;
+
+  // Lazy-fetch options flow after the panel is in the DOM
+  _tdLoadOptionsFlow(sym);
+}
+
+// ── Options Flow loader for Trading Desk ────────────────────────────────────
+async function _tdLoadOptionsFlow(sym) {
+  const el = document.getElementById('td-options-flow');
+  if (!el) return;
+  try {
+    const r = await fetch(`/api/uw/flow-alerts-history?symbol=${encodeURIComponent(sym)}&hours=24&limit=8`);
+    const d = await r.json();
+    const alerts = d.alerts || [];
+    // If different symbol got selected meanwhile, bail
+    if (sym !== _tdSym) return;
+    if (!alerts.length) {
+      el.innerHTML = '<div class="td-flow-empty">No unusual flow in the last 24h.</div>';
+      return;
+    }
+    // Aggregate: total premium, bull vs bear bias
+    let bullPrem = 0, bearPrem = 0;
+    for (const a of alerts) {
+      const prem = Number(a.premium || 0);
+      const sentiment = (a.sentiment || '').toLowerCase();
+      const side = (a.side || '').toLowerCase();
+      const isBull = sentiment === 'bullish' || /call|buy/.test(side);
+      const isBear = sentiment === 'bearish' || /put|sell/.test(side);
+      if (isBull) bullPrem += prem;
+      else if (isBear) bearPrem += prem;
+    }
+    const totalPrem = bullPrem + bearPrem;
+    const bullPct = totalPrem ? Math.round((bullPrem / totalPrem) * 100) : 50;
+    const fmtP = (v) => v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${Math.round(v/1000)}K`;
+    const summary = `
+      <div class="td-flow-summary">
+        <div class="td-flow-bias-bar">
+          <div class="td-flow-bias-bull" style="width:${bullPct}%" title="Bullish premium: ${fmtP(bullPrem)}"></div>
+          <div class="td-flow-bias-bear" style="width:${100-bullPct}%" title="Bearish premium: ${fmtP(bearPrem)}"></div>
+        </div>
+        <div class="td-flow-bias-labels">
+          <span class="td-flow-bull-lbl">🟢 ${bullPct}% calls · ${fmtP(bullPrem)}</span>
+          <span class="td-flow-bear-lbl">🔴 ${100-bullPct}% puts · ${fmtP(bearPrem)}</span>
+        </div>
+      </div>`;
+    const rows = alerts.slice(0, 6).map(a => {
+      const prem = Number(a.premium || 0);
+      const isBull = (a.sentiment || '').toLowerCase() === 'bullish' || /call|buy/i.test(a.side || '');
+      const cls = isBull ? 'td-flow-row-bull' : 'td-flow-row-bear';
+      const ts = a.alerted_at ? new Date(a.alerted_at) : null;
+      const ago = ts ? _tdTimeAgo(ts) : '';
+      return `
+        <div class="td-flow-row ${cls}">
+          <span class="td-flow-row-side">${isBull ? '🟢' : '🔴'} ${escHtml(a.side || a.alert_type || '—')}</span>
+          <span class="td-flow-row-strike">$${a.strike != null ? Number(a.strike).toFixed(2) : '—'}</span>
+          <span class="td-flow-row-prem">${fmtP(prem)}</span>
+          <span class="td-flow-row-time">${ago}</span>
+        </div>`;
+    }).join('');
+    el.innerHTML = summary + `<div class="td-flow-list">${rows}</div>`;
+  } catch (e) {
+    el.innerHTML = '<div class="td-flow-empty">Unable to load flow.</div>';
+  }
+}
+
+// Short relative-time formatter for flow rows
+function _tdTimeAgo(d) {
+  const sec = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+  if (sec < 60)   return sec + 's';
+  if (sec < 3600) return Math.round(sec / 60) + 'm';
+  if (sec < 86400) return Math.round(sec / 3600) + 'h';
+  return Math.round(sec / 86400) + 'd';
+}
+
+// ── Info tabs below chart — news, earnings, company profile, financials ─────
+// Mirrors the Stock Explorer's deep-dive sections, surfaced inline so users
+// don't have to open a separate floating panel to read about the ticker.
+let _tdInfoTab     = 'overview';
+const _tdInfoCache = {};   // key: `${sym}:${tab}` → HTML, so re-clicking a tab is instant
+
+function tdSelectInfoTab(tab, btnEl) {
+  _tdInfoTab = tab;
+  // Visual: mark active tab
+  document.querySelectorAll('.td-info-tab').forEach(b => b.classList.toggle('active', b === btnEl));
+  _tdRenderInfoTab(_tdSym, tab);
+}
+
+async function _tdRenderInfoTab(sym, tab) {
+  const body = document.getElementById('td-info-body');
+  if (!body) return;
+  if (!sym) {
+    body.innerHTML = '<div style="color:#484f58;font-size:0.82rem;padding:20px;text-align:center">Select a symbol first.</div>';
+    return;
+  }
+  const cacheKey = `${sym}:${tab}`;
+  if (_tdInfoCache[cacheKey]) { body.innerHTML = _tdInfoCache[cacheKey]; return; }
+  body.innerHTML = '<div class="td-info-loading"><div class="td-skeleton" style="height:24px;border-radius:5px;margin:8px 0"></div><div class="td-skeleton" style="height:60px;border-radius:5px"></div></div>';
+
+  let html = '';
+  try {
+    if (tab === 'overview')     html = await _tdInfoOverview(sym);
+    else if (tab === 'news')    html = await _tdInfoNews(sym);
+    else if (tab === 'earnings')html = await _tdInfoEarnings(sym);
+    else if (tab === 'company') html = await _tdInfoCompany(sym);
+    else if (tab === 'financials') html = await _tdInfoFinancials(sym);
+  } catch (e) {
+    html = `<div style="color:#f85149;padding:20px;text-align:center">Couldn't load ${tab}: ${escHtml(e.message)}</div>`;
+  }
+  // Skip cache write if a different symbol was clicked while we were loading
+  if (sym === _tdSym && _tdInfoTab === tab) {
+    _tdInfoCache[cacheKey] = html;
+    body.innerHTML = html;
+  }
+}
+
+// ── Overview tab — TL;DR: bot verdict + key signals + recent headline ───────
+async function _tdInfoOverview(sym) {
+  const [quoteR, extrasR, newsR] = await Promise.allSettled([
+    fetch(`/api/quote/${sym}`).then(r => r.json()),
+    fetch(`/api/explorer/extras?symbol=${sym}`).then(r => r.json()),
+    fetch(`/api/benzinga/news?symbol=${sym}&limit=3`).then(r => r.json()).catch(() => null),
+  ]);
+  const q  = quoteR.status  === 'fulfilled' ? quoteR.value  : null;
+  const ex = extrasR.status === 'fulfilled' ? extrasR.value : null;
+  const news = newsR.status === 'fulfilled' ? (newsR.value?.articles || []) : [];
+
+  const score   = ex?.scores?.[0]?.score ?? null;
+  const grade   = ex?.scores?.[0]?.grade ?? null;
+  const sig     = ex?.scores?.[0]?.signals || ex?.signals || {};
+  const consensus = sig.analyst_consensus || null;
+  const target    = sig.analyst_target    || null;
+  const newsItem  = news[0] || null;
+
+  const gradeColor = { A:'#3fb950', B:'#58a6ff', C:'#e3b341', F:'#f85149' };
+  const gColor = grade ? gradeColor[grade] || '#8b949e' : '#8b949e';
+
+  return `
+    <div class="td-info-overview">
+      <div class="td-info-card">
+        <div class="td-info-card-h">🤖 Bot verdict</div>
+        <div class="td-info-card-b">
+          ${grade ? `<span class="td-info-grade" style="background:${gColor}33;color:${gColor};border-color:${gColor}66">${grade}</span>` : '—'}
+          <div>
+            <div class="td-info-grade-score">${score != null ? `${score}<span style="font-size:0.7rem;color:#8b949e">/100</span>` : '—'}</div>
+            <div class="td-info-grade-label">Conviction score</div>
+          </div>
+        </div>
+      </div>
+      <div class="td-info-card">
+        <div class="td-info-card-h">📈 Analyst</div>
+        <div class="td-info-card-b">
+          <div>
+            <div class="td-info-line">Target: <b>${target != null ? '$' + Number(target).toFixed(2) : '—'}</b></div>
+            <div class="td-info-line">Consensus: <b>${escHtml(consensus || '—')}</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="td-info-card">
+        <div class="td-info-card-h">⚡ Now</div>
+        <div class="td-info-card-b">
+          <div>
+            <div class="td-info-line">Price: <b>${q?.price != null ? '$' + Number(q.price).toFixed(2) : '—'}</b></div>
+            <div class="td-info-line">RSI: <b style="color:${q?.rsi_14 > 70 ? '#ff7b72' : q?.rsi_14 < 30 ? '#56d364' : '#c9d1d9'}">${q?.rsi_14 != null ? Number(q.rsi_14).toFixed(0) : '—'}</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    ${newsItem ? `
+      <div class="td-section-label" style="margin-top:14px">📰 Latest headline</div>
+      <a class="td-info-news-top" href="${escHtml(newsItem.url || '#')}" target="_blank" rel="noopener">
+        <div class="td-info-news-title">${escHtml(newsItem.title || '')}</div>
+        <div class="td-info-news-meta">${escHtml(newsItem.source || newsItem.publisher || '')} · ${escHtml(_tdTimeAgo(new Date(newsItem.published || newsItem.published_at || Date.now())))} ago</div>
+      </a>
+    ` : ''}
+  `;
+}
+
+// ── News tab — recent articles, Benzinga primary ───────────────────────────
+async function _tdInfoNews(sym) {
+  const r = await fetch(`/api/benzinga/news?symbol=${sym}&limit=20`);
+  const d = await r.json();
+  const articles = d?.articles || [];
+  if (!articles.length) return '<div style="padding:20px;color:#6e7681;text-align:center">No news in the last week.</div>';
+  return `<div class="td-info-news-list">${articles.map(a => `
+    <a class="td-info-news-row" href="${escHtml(a.url || '#')}" target="_blank" rel="noopener">
+      <div class="td-info-news-title">${escHtml(a.title || '')}</div>
+      <div class="td-info-news-meta">
+        ${escHtml(a.source || a.publisher || '')} ·
+        ${escHtml(_tdTimeAgo(new Date(a.published || a.published_at || Date.now())))} ago
+        ${a.sentiment ? `<span class="td-info-sent td-info-sent-${escHtml(a.sentiment.toLowerCase())}">${escHtml(a.sentiment)}</span>` : ''}
+      </div>
+      ${a.teaser ? `<div class="td-info-news-teaser">${escHtml(String(a.teaser).slice(0, 180))}…</div>` : ''}
+    </a>`).join('')}</div>`;
+}
+
+// ── Earnings tab — quarterly history with beat/miss + reactions ────────────
+async function _tdInfoEarnings(sym) {
+  const [trendR, reactR] = await Promise.allSettled([
+    fetch(`/api/earnings-trend?symbols=${sym}`).then(r => r.json()),
+    fetch(`/api/earnings-reaction?symbol=${sym}`).then(r => r.json()).catch(() => null),
+  ]);
+  const trend = trendR.status === 'fulfilled' ? (trendR.value?.[sym] || []) : [];
+  if (!trend.length) return '<div style="padding:20px;color:#6e7681;text-align:center">No earnings history available.</div>';
+  const rows = trend.slice(0, 12).map(q => {
+    const beat = q.beat;
+    const cls  = beat === true ? 'td-info-beat' : beat === false ? 'td-info-miss' : '';
+    const icon = beat === true ? '▲' : beat === false ? '▼' : '·';
+    return `<tr class="${cls}">
+      <td>${escHtml(q.period || '?')} ${q.end_date ? `<span style="color:#6e7681">'${q.end_date.slice(2,4)}</span>` : ''}</td>
+      <td class="td-info-num">${q.eps_estimate != null ? '$' + Number(q.eps_estimate).toFixed(2) : '—'}</td>
+      <td class="td-info-num">${q.eps_actual != null ? '$' + Number(q.eps_actual).toFixed(2) : '—'}</td>
+      <td class="td-info-num td-info-icon">${icon}</td>
+      <td class="td-info-num">${q.surprise_pct != null ? (q.surprise_pct >= 0 ? '+' : '') + Number(q.surprise_pct).toFixed(1) + '%' : '—'}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <table class="td-info-earn-table">
+      <thead><tr><th>Quarter</th><th>Est</th><th>Actual</th><th></th><th>Surprise</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+// ── Company tab — profile, sector, business summary ────────────────────────
+async function _tdInfoCompany(sym) {
+  const r = await fetch(`/api/explorer/company?symbol=${sym}`);
+  const d = await r.json();
+  const c = d?.company || d || {};
+  if (!c.summary && !c.sector) {
+    return '<div style="padding:20px;color:#6e7681;text-align:center">Company profile unavailable.</div>';
+  }
+  return `
+    <div class="td-info-company">
+      <div class="td-info-company-meta">
+        ${c.sector    ? `<div><span class="td-info-lbl">Sector</span><b>${escHtml(c.sector)}</b></div>` : ''}
+        ${c.industry  ? `<div><span class="td-info-lbl">Industry</span><b>${escHtml(c.industry)}</b></div>` : ''}
+        ${c.country   ? `<div><span class="td-info-lbl">Country</span><b>${escHtml(c.country)}</b></div>` : ''}
+        ${c.employees ? `<div><span class="td-info-lbl">Employees</span><b>${Number(c.employees).toLocaleString()}</b></div>` : ''}
+        ${c.website   ? `<div><span class="td-info-lbl">Website</span><a href="${escHtml(c.website)}" target="_blank" rel="noopener" style="color:#58a6ff">${escHtml(c.website.replace(/^https?:\/\//,''))}</a></div>` : ''}
+      </div>
+      ${c.summary ? `<div class="td-info-company-summary">${escHtml(c.summary)}</div>` : ''}
+    </div>
+  `;
+}
+
+// ── Financials tab — fundamentals from /api/quote ──────────────────────────
+async function _tdInfoFinancials(sym) {
+  const q = await fetch(`/api/quote/${sym}`).then(r => r.json());
+  const fmt = (v, suffix = '', dec = 2) => v == null ? '—' : Number(v).toFixed(dec) + suffix;
+  const fmtMcap = v => v == null ? '—' : v >= 1e12 ? `$${(v/1e12).toFixed(2)}T` : v >= 1e9 ? `$${(v/1e9).toFixed(1)}B` : `$${(v/1e6).toFixed(0)}M`;
+  const groups = [
+    {
+      title: 'Valuation',
+      rows: [
+        ['Market Cap', fmtMcap(q?.market_cap)],
+        ['P/E (ttm)', fmt(q?.pe)],
+        ['Forward P/E', fmt(q?.forward_pe)],
+        ['EPS (ttm)', q?.eps != null ? '$' + Number(q.eps).toFixed(2) : '—'],
+        ['Dividend Yield', q?.dividend_yield != null && q.dividend_yield > 0 ? fmt(q.dividend_yield, '%') : '—'],
+        ['Beta', fmt(q?.beta)],
+      ],
+    },
+    {
+      title: 'Performance',
+      rows: [
+        ['Today',      q?.change_pct != null ? (q.change_pct >= 0 ? '+' : '') + Number(q.change_pct).toFixed(2) + '%' : '—'],
+        ['1 Month',    fmt(q?.ret_1m, '%', 1)],
+        ['3 Month',    fmt(q?.ret_3m, '%', 1)],
+        ['YTD',        fmt(q?.ret_ytd, '%', 1)],
+        ['52W High',   q?.week52_high != null ? '$' + Number(q.week52_high).toFixed(2) : '—'],
+        ['52W Low',    q?.week52_low  != null ? '$' + Number(q.week52_low).toFixed(2)  : '—'],
+        ['% from 52W H', fmt(q?.pct_from_52w_high, '%', 1)],
+      ],
+    },
+    {
+      title: 'Profitability',
+      rows: [
+        ['Profit Margin',  q?.profit_margin != null ? fmt(q.profit_margin, '%', 1) : '—'],
+        ['ROE',            q?.roe != null ? fmt(q.roe, '%', 1) : '—'],
+        ['Revenue Growth', q?.revenue_growth != null ? fmt(q.revenue_growth, '%', 1) : '—'],
+      ],
+    },
+    {
+      title: 'Volume / Volatility',
+      rows: [
+        ['Volume',      q?.volume != null ? (q.volume >= 1e6 ? (q.volume/1e6).toFixed(1)+'M' : Math.round(q.volume).toLocaleString()) : '—'],
+        ['Avg Volume',  q?.avg_volume != null ? (q.avg_volume >= 1e6 ? (q.avg_volume/1e6).toFixed(1)+'M' : Math.round(q.avg_volume).toLocaleString()) : '—'],
+        ['RVOL (30d)',  q?.rvol_30d != null ? fmt(q.rvol_30d, 'x') : '—'],
+        ['ATR %',       fmt(q?.atr_pct, '%')],
+        ['RSI (14)',    q?.rsi_14 != null ? fmt(q.rsi_14, '', 0) : '—'],
+      ],
+    },
+  ];
+  return `<div class="td-info-fin">${groups.map(g => `
+    <div class="td-info-fin-group">
+      <div class="td-info-fin-h">${escHtml(g.title)}</div>
+      ${g.rows.map(([l, v]) => `<div class="td-info-fin-row"><span>${escHtml(l)}</span><b>${escHtml(String(v))}</b></div>`).join('')}
+    </div>`).join('')}</div>`;
 }
 
 function tdQuickBuy()  { tdOpenTrade('buy');  }
@@ -22712,7 +24775,7 @@ const BOT_FORM_DEFAULTS = {
   name: '',
   capital_usd: 5000,
   broker: 'alpaca',
-  min_composite_score: 60,
+  min_composite_score: 70,            // raised 2026-05-27 from 60 — backtest evidence
   conviction_grade_min: 'C',
   strategy: 'composite',
   vix_max: 60,
@@ -22724,6 +24787,535 @@ const BOT_FORM_DEFAULTS = {
   allow_outside_rth: true,
   limit_offset_bps: 30,
 };
+
+// Standalone 🌊 Momentum tab was removed 2026-05-26 — the Home page Movers
+// panel (_renderHomeMovers + _homeStartMomPoll) is the only consumer of
+// /api/momentum now. Kept the API endpoint and the .mom-* CSS so the home
+// panel still renders the race-bar style.
+
+
+// ─── Screener Tab — Smart screener over 8K+ US stocks ─────────────────────
+// Goes beyond Finviz by stacking our edge data: UW options flow + insider
+// trades + congressional trades + bot conviction grade + earnings calendar.
+// Each row carries a `signal_score` (sum of weighted bullish signals) and a
+// `signal_tags` array we render as chips.
+
+const SCREENER_PAGE_SIZE = 50;
+let _screenerSort   = { col: 'signal_score', dir: 'desc' };  // default: most-signal-rich first
+let _screenerPage   = 0;
+let _screenerReloadTimer = null;
+let _screenerMetaLoaded  = false;
+let _screenerLastQuery   = '';
+let _screenerLastTotal   = 0;
+let _screenerDensity     = localStorage.getItem('scrDensity') || 'compact';   // 'compact' | 'comfy'
+let _screenerLastRows    = [];
+
+// ── Column definitions — single source of truth for what's shown.
+// Toggleable by the user; persists in localStorage.
+const SCR_COLUMNS = [
+  { id: 'symbol',          label: 'Symbol',  align: 'left',  sort: 'symbol',           on: true },
+  { id: 'signals',         label: 'Signals', align: 'left',  sort: 'signal_score',     on: true },
+  { id: 'spark',           label: '30d',     align: 'left',  sort: null,               on: true },
+  { id: 'company_name',    label: 'Company', align: 'left',  sort: 'company_name',     on: true },
+  { id: 'sector',          label: 'Sector',  align: 'left',  sort: 'sector',           on: true },
+  { id: 'market_cap_usd',  label: 'Mkt Cap', align: 'right', sort: 'market_cap_usd',   on: true },
+  { id: 'last_price',      label: 'Price',   align: 'right', sort: 'last_price',       on: true },
+  { id: 'day_change_pct',  label: 'Day %',   align: 'right', sort: 'day_change_pct',   on: true },
+  { id: 'day_volume',      label: 'Volume',  align: 'right', sort: 'day_volume',       on: true },
+  { id: 'rsi_14',          label: 'RSI',     align: 'right', sort: 'rsi_14',           on: true },
+  { id: 'pct_from_52w_high',label:'%52w hi', align: 'right', sort: 'pct_from_52w_high',on: true },
+  { id: 'ret_1m',          label: '1mo',     align: 'right', sort: 'ret_1m',           on: true },
+  { id: 'ret_3m',          label: '3mo',     align: 'right', sort: 'ret_3m',           on: true },
+  { id: 'ret_ytd',         label: 'YTD',     align: 'right', sort: 'ret_ytd',          on: true },
+  { id: 'pe_ratio',        label: 'P/E',     align: 'right', sort: 'pe_ratio',         on: false },
+  { id: 'eps_ttm',         label: 'EPS',     align: 'right', sort: 'eps_ttm',          on: false },
+  { id: 'dividend_yield',  label: 'Div %',   align: 'right', sort: 'dividend_yield',   on: false },
+  { id: 'beta',            label: 'Beta',    align: 'right', sort: 'beta',             on: false },
+  { id: 'conviction_grade',label: 'Grade',   align: 'center',sort: 'conviction_score', on: false },
+  { id: 'insider_net_30d', label: 'Insider', align: 'right', sort: 'insider_net_30d',  on: false },
+  { id: 'flow_premium_7d', label: 'Flow',    align: 'right', sort: 'flow_premium_7d',  on: false },
+  { id: 'rvol_30d',        label: 'RVOL',    align: 'right', sort: null,               on: false },
+];
+
+// Load column visibility from localStorage
+(function _scrInitCols() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('scrCols') || 'null');
+    if (saved && typeof saved === 'object') {
+      for (const c of SCR_COLUMNS) if (c.id in saved) c.on = !!saved[c.id];
+    }
+  } catch {}
+})();
+function _scrSaveCols() {
+  const map = {};
+  for (const c of SCR_COLUMNS) map[c.id] = c.on;
+  localStorage.setItem('scrCols', JSON.stringify(map));
+}
+
+// ── Signal-tag chip definitions ─────────────────────────────────────────────
+const SCR_TAG_META = {
+  insider_xl:     { icon: '👤', label: 'INSIDER $1M+', cls: 'tag-pos' },
+  insider:        { icon: '👤', label: 'INSIDER',      cls: 'tag-pos' },
+  flow_xl:        { icon: '🐋', label: 'FLOW $1M+',    cls: 'tag-pos' },
+  flow:           { icon: '🐋', label: 'FLOW',         cls: 'tag-pos' },
+  congress:       { icon: '🏛️', label: 'CONGRESS',     cls: 'tag-neu' },
+  grade_a:        { icon: '🐂', label: 'GRADE A',      cls: 'tag-pos' },
+  grade_b:        { icon: '🐂', label: 'GRADE B',      cls: 'tag-warm' },
+  near_52w_high:  { icon: '🚀', label: '52w HI',       cls: 'tag-pos' },
+  mean_reversion: { icon: '📉', label: 'MEAN REV',     cls: 'tag-warm' },
+  volume_spike:   { icon: '⚡', label: 'VOL SPIKE',    cls: 'tag-warm' },
+};
+
+function _scrInputs() {
+  return {
+    search:      document.getElementById('scrSearch')?.value || '',
+    sector:      document.getElementById('scrSector')?.value || '',
+    industry:    document.getElementById('scrIndustry')?.value || '',
+    exchange:    document.getElementById('scrExchange')?.value || '',
+    minMcap:     document.getElementById('scrMinMcap')?.value || '',
+    maxMcap:     document.getElementById('scrMaxMcap')?.value || '',
+    minPrice:    document.getElementById('scrMinPrice')?.value || '',
+    maxPrice:    document.getElementById('scrMaxPrice')?.value || '',
+    minChg:      document.getElementById('scrMinChg')?.value || '',
+    maxChg:      document.getElementById('scrMaxChg')?.value || '',
+    minPe:       document.getElementById('scrMinPe')?.value || '',
+    maxPe:       document.getElementById('scrMaxPe')?.value || '',
+    minRsi:      document.getElementById('scrMinRsi')?.value || '',
+    maxRsi:      document.getElementById('scrMaxRsi')?.value || '',
+    minFromHigh: document.getElementById('scrMinFromHigh')?.value || '',
+    maxFromHigh: document.getElementById('scrMaxFromHigh')?.value || '',
+    minRet1m:    document.getElementById('scrMinRet1m')?.value || '',
+    maxRet1m:    document.getElementById('scrMaxRet1m')?.value || '',
+    minDiv:      document.getElementById('scrMinDiv')?.value || '',
+  };
+}
+
+function _scrBuildQuery({ forCsv = false } = {}) {
+  const v = _scrInputs();
+  const p = new URLSearchParams();
+  for (const [k, val] of Object.entries(v)) {
+    if (!val || String(val).trim() === '') continue;
+    // Market cap input is in $B; convert to raw USD before sending
+    if (k === 'minMcap' || k === 'maxMcap') p.set(k, String(Number(val) * 1e9));
+    else p.set(k, String(val));
+  }
+  p.set('sort',   _screenerSort.col);
+  p.set('dir',    _screenerSort.dir);
+  p.set('limit',  forCsv ? '500' : String(SCREENER_PAGE_SIZE));
+  p.set('offset', String(_screenerPage * SCREENER_PAGE_SIZE));
+  return p.toString();
+}
+
+async function _scrLoadMeta() {
+  if (_screenerMetaLoaded) return;
+  try {
+    const r = await fetch('/api/screener/meta');
+    if (!r.ok) return;
+    const d = await r.json();
+    // Populate sector dropdown
+    const secEl = document.getElementById('scrSector');
+    if (secEl && d.sectors) {
+      secEl.innerHTML = '<option value="">All sectors</option>' + d.sectors.map(s =>
+        `<option value="${escHtml(s.value)}">${escHtml(s.value)} (${s.count})</option>`).join('');
+    }
+    const indEl = document.getElementById('scrIndustry');
+    if (indEl && d.industries) {
+      // Cap to top 60 industries by count to keep the dropdown usable
+      const top = [...d.industries].sort((a,b) => b.count - a.count).slice(0, 60);
+      indEl.innerHTML = '<option value="">All industries</option>' + top.map(s =>
+        `<option value="${escHtml(s.value)}">${escHtml(s.value)} (${s.count})</option>`).join('');
+    }
+    const excEl = document.getElementById('scrExchange');
+    if (excEl && d.exchanges) {
+      excEl.innerHTML = '<option value="">All exchanges</option>' + d.exchanges.map(s =>
+        `<option value="${escHtml(s.value)}">${escHtml(s.value)} (${s.count})</option>`).join('');
+    }
+    const covEl = document.getElementById('screenerCoverage');
+    if (covEl && d.coverage) {
+      covEl.textContent = `· ${d.coverage.total.toLocaleString()} tickers · sector ${d.coverage.with_sector.toLocaleString()} · P/E ${d.coverage.with_pe.toLocaleString()}`;
+    }
+    _screenerMetaLoaded = true;
+  } catch (e) { console.warn('[screener] meta failed', e); }
+}
+
+function _fmtMcap(n) {
+  if (n == null) return '—';
+  if (n >= 1e12) return `$${(n/1e12).toFixed(2)}T`;
+  if (n >= 1e9)  return `$${(n/1e9).toFixed(2)}B`;
+  if (n >= 1e6)  return `$${(n/1e6).toFixed(1)}M`;
+  return `$${Math.round(n).toLocaleString()}`;
+}
+function _fmtVol(n) {
+  if (n == null) return '—';
+  if (n >= 1e9) return `${(n/1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `${(n/1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n/1e3).toFixed(0)}K`;
+  return String(Math.round(n));
+}
+function _fmtPct(n, decimals = 2) {
+  if (n == null || isNaN(n)) return '—';
+  return (n >= 0 ? '+' : '') + Number(n).toFixed(decimals) + '%';
+}
+function _fmtNum(n, decimals = 2) {
+  if (n == null || isNaN(n)) return '—';
+  return Number(n).toFixed(decimals);
+}
+function _pctColor(n) {
+  if (n == null || isNaN(n)) return '#8b949e';
+  return n > 0 ? '#56d364' : n < 0 ? '#ff7b72' : '#8b949e';
+}
+function _rsiColor(n) {
+  if (n == null) return '#8b949e';
+  if (n >= 70) return '#ff7b72';        // overbought
+  if (n <= 30) return '#56d364';        // oversold (buy candidate)
+  if (n >= 60) return '#d29922';        // warm
+  return '#c9d1d9';
+}
+
+async function loadScreener() {
+  await _scrLoadMeta();
+  _scrApplyDensityClass();
+  _scrRenderColDrawer();
+  await screenerReload();
+}
+
+function _scrApplyDensityClass() {
+  const wrap = document.getElementById('screenerTable');
+  if (!wrap) return;
+  wrap.classList.toggle('scr-density-compact', _screenerDensity === 'compact');
+  wrap.classList.toggle('scr-density-comfy',   _screenerDensity === 'comfy');
+  const btn = document.getElementById('scrDensityBtn');
+  if (btn) btn.textContent = _screenerDensity === 'compact' ? '📏 Compact' : '📐 Comfy';
+}
+
+function screenerToggleDensity() {
+  _screenerDensity = (_screenerDensity === 'compact') ? 'comfy' : 'compact';
+  localStorage.setItem('scrDensity', _screenerDensity);
+  _scrApplyDensityClass();
+}
+
+function screenerToggleColumns() {
+  const d = document.getElementById('scrColDrawer');
+  if (d) d.style.display = (d.style.display === 'none' || !d.style.display) ? '' : 'none';
+}
+
+function _scrRenderColDrawer() {
+  const grid = document.getElementById('scrColDrawerGrid');
+  if (!grid) return;
+  grid.innerHTML = SCR_COLUMNS.map((c, i) => `
+    <label class="scr-col-toggle">
+      <input type="checkbox" data-col-idx="${i}" ${c.on ? 'checked' : ''}>
+      <span>${escHtml(c.label)}</span>
+    </label>`).join('');
+  grid.querySelectorAll('input[type=checkbox]').forEach(inp => {
+    inp.addEventListener('change', e => {
+      const idx = Number(e.target.dataset.colIdx);
+      SCR_COLUMNS[idx].on = e.target.checked;
+      _scrSaveCols();
+      _scrRenderHeader();
+      _scrRenderRows(_screenerLastRows);
+    });
+  });
+}
+
+function _scrRenderHeader() {
+  const thead = document.getElementById('screenerThead');
+  if (!thead) return;
+  thead.innerHTML = '<tr>' + SCR_COLUMNS.filter(c => c.on).map(c => {
+    const sortAttr = c.sort ? `class="scr-sort scr-th-${c.align}" onclick="screenerSort('${c.sort}')"` : `class="scr-th-${c.align}"`;
+    const arrow = (c.sort && c.sort === _screenerSort.col) ? (_screenerSort.dir === 'desc' ? ' ▼' : ' ▲') : '';
+    return `<th ${sortAttr}>${escHtml(c.label)}${arrow}</th>`;
+  }).join('') + '</tr>';
+}
+
+function _scrSparklineSvg(closes, chgPct) {
+  if (!closes || closes.length < 2) return '<span style="color:#484f58">—</span>';
+  const w = 80, h = 22;
+  const min = Math.min(...closes), max = Math.max(...closes);
+  const range = max - min || 1;
+  const stroke = chgPct >= 0 ? '#56d364' : '#ff7b72';
+  const fill   = chgPct >= 0 ? 'rgba(63,185,80,0.18)' : 'rgba(248,81,73,0.18)';
+  const pts = closes.map((c, i) => {
+    const x = (i / (closes.length - 1)) * w;
+    const y = h - ((c - min) / range) * h;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" preserveAspectRatio="none" class="scr-spark">
+    <polygon points="0,${h} ${pts} ${w},${h}" fill="${fill}"/>
+    <polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+function _scrRenderSignalChips(tags) {
+  if (!Array.isArray(tags) || !tags.length) return '<span class="scr-no-signal">—</span>';
+  return tags.map(t => {
+    const meta = SCR_TAG_META[t] || { icon: '·', label: String(t).toUpperCase(), cls: 'tag-neu' };
+    return `<span class="scr-chip scr-chip-${meta.cls}" title="${escHtml(meta.label)}">${meta.icon}<span class="scr-chip-lbl">${escHtml(meta.label)}</span></span>`;
+  }).join('');
+}
+
+function _scrCellHtml(col, r) {
+  switch (col.id) {
+    case 'symbol':          return `<td class="scr-cell scr-sym">${tickerLogo(r.symbol, { size: 'sm' })}</td>`;
+    case 'signals':         return `<td class="scr-cell scr-signals">${_scrRenderSignalChips(r.signal_tags)}</td>`;
+    case 'spark':           return `<td class="scr-cell">${_scrSparklineSvg(r.sparkline, r.ret_5d ?? r.day_change_pct ?? 0)}</td>`;
+    case 'company_name':    return `<td class="scr-cell scr-co"><span title="${escHtml(r.company_name || '')}">${escHtml((r.company_name || '').slice(0, 28))}</span></td>`;
+    case 'sector':          return `<td class="scr-cell scr-sec">${escHtml(r.sector || '—')}<div class="scr-ind">${escHtml((r.industry || '').slice(0, 22))}</div></td>`;
+    case 'market_cap_usd':  return `<td class="scr-cell scr-num">${_fmtMcap(r.market_cap_usd)}</td>`;
+    case 'last_price':      return `<td class="scr-cell scr-num">${r.last_price != null ? '$' + Number(r.last_price).toFixed(2) : '—'}</td>`;
+    case 'day_change_pct':  return `<td class="scr-cell scr-num" style="color:${_pctColor(r.day_change_pct)}">${_fmtPct(r.day_change_pct, 2)}</td>`;
+    case 'day_volume':      return `<td class="scr-cell scr-num">${_fmtVol(r.day_volume)}</td>`;
+    case 'rsi_14':          return `<td class="scr-cell scr-num" style="color:${_rsiColor(r.rsi_14)}">${_fmtNum(r.rsi_14, 1)}</td>`;
+    case 'pct_from_52w_high': return `<td class="scr-cell scr-num">${_fmtPct(r.pct_from_52w_high, 1)}</td>`;
+    case 'ret_1m':          return `<td class="scr-cell scr-num" style="color:${_pctColor(r.ret_1m)}">${_fmtPct(r.ret_1m, 1)}</td>`;
+    case 'ret_3m':          return `<td class="scr-cell scr-num" style="color:${_pctColor(r.ret_3m)}">${_fmtPct(r.ret_3m, 1)}</td>`;
+    case 'ret_ytd':         return `<td class="scr-cell scr-num" style="color:${_pctColor(r.ret_ytd)}">${_fmtPct(r.ret_ytd, 1)}</td>`;
+    case 'pe_ratio':        return `<td class="scr-cell scr-num">${_fmtNum(r.pe_ratio, 1)}</td>`;
+    case 'eps_ttm':         return `<td class="scr-cell scr-num">${_fmtNum(r.eps_ttm, 2)}</td>`;
+    case 'dividend_yield':  return `<td class="scr-cell scr-num">${r.dividend_yield != null ? Number(r.dividend_yield).toFixed(2) : '—'}</td>`;
+    case 'beta':            return `<td class="scr-cell scr-num">${_fmtNum(r.beta, 2)}</td>`;
+    case 'conviction_grade':{
+      const g = r.conviction_grade;
+      const col = g === 'A' ? '#56d364' : g === 'B' ? '#79c0ff' : g === 'C' ? '#d29922' : g === 'F' ? '#ff7b72' : '#8b949e';
+      return `<td class="scr-cell" style="text-align:center"><span class="scr-grade" style="background:${col}22;color:${col};border:1px solid ${col}55">${g || '—'}</span></td>`;
+    }
+    case 'insider_net_30d': {
+      const v = r.insider_net_30d;
+      if (!v) return '<td class="scr-cell scr-num">—</td>';
+      const m = Math.abs(v) >= 1e6 ? `$${(Math.abs(v)/1e6).toFixed(1)}M` : `$${Math.round(Math.abs(v)/1000)}K`;
+      const col = v > 0 ? '#56d364' : '#ff7b72';
+      return `<td class="scr-cell scr-num" style="color:${col}">${v > 0 ? '+' : '−'}${m}</td>`;
+    }
+    case 'flow_premium_7d': {
+      const v = r.flow_premium_7d;
+      if (!v) return '<td class="scr-cell scr-num">—</td>';
+      const m = v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${Math.round(v/1000)}K`;
+      const col = r.flow_sentiment === 'bullish' ? '#56d364' : r.flow_sentiment === 'bearish' ? '#ff7b72' : '#c9d1d9';
+      return `<td class="scr-cell scr-num" style="color:${col}">${m}</td>`;
+    }
+    case 'rvol_30d':        return `<td class="scr-cell scr-num">${_fmtNum(r.rvol_30d, 1)}×</td>`;
+    default:                return `<td class="scr-cell">—</td>`;
+  }
+}
+
+function _scrRenderRows(rows) {
+  const tbody = document.getElementById('screenerTbody');
+  if (!tbody) return;
+  const onCols = SCR_COLUMNS.filter(c => c.on);
+  if (!rows?.length) {
+    tbody.innerHTML = `<tr><td colspan="${onCols.length}" style="padding:30px;text-align:center;color:#6e7681">No matches. Loosen your filters.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const sc = Number(r.signal_score || 0);
+    const rowClass = sc >= 50 ? 'scr-row scr-row-hot sym-link'
+                   : sc >= 25 ? 'scr-row scr-row-warm sym-link'
+                   : 'scr-row sym-link';
+    return `<tr class="${rowClass}" data-symbol="${escHtml(r.symbol)}">${
+      onCols.map(c => _scrCellHtml(c, r)).join('')
+    }</tr>`;
+  }).join('');
+}
+
+function screenerDebounced() {
+  clearTimeout(_screenerReloadTimer);
+  _screenerReloadTimer = setTimeout(() => {
+    _screenerPage = 0;
+    screenerReload();
+  }, 350);
+}
+
+async function screenerReload({ presetOverride = null } = {}) {
+  const tbody  = document.getElementById('screenerTbody');
+  const countEl = document.getElementById('screenerCount');
+  const loadEl  = document.getElementById('screenerLoading');
+  if (!tbody) return;
+  if (loadEl) loadEl.style.display = '';
+
+  _scrRenderHeader();
+
+  let qs = _scrBuildQuery();
+  if (presetOverride) {
+    const p = new URLSearchParams({
+      preset: presetOverride,
+      sort:   _screenerSort.col,
+      dir:    _screenerSort.dir,
+      limit:  String(SCREENER_PAGE_SIZE),
+      offset: '0',
+    });
+    qs = p.toString();
+  }
+  if (qs === _screenerLastQuery && !presetOverride) { if (loadEl) loadEl.style.display = 'none'; return; }
+  _screenerLastQuery = qs;
+  try {
+    const r = await fetch('/api/screener?' + qs);
+    const d = await r.json();
+    if (d.error) {
+      tbody.innerHTML = `<tr><td colspan="${SCR_COLUMNS.filter(c=>c.on).length}" style="padding:20px;color:#f85149">${escHtml(d.error)}</td></tr>`;
+      return;
+    }
+    _screenerLastTotal = d.total || 0;
+    _screenerLastRows  = d.rows || [];
+    if (countEl) countEl.textContent = (d.total || 0).toLocaleString();
+    _scrRenderRows(_screenerLastRows);
+    // Pagination
+    const pageInfo = document.getElementById('screenerPageInfo');
+    const totalPages = Math.max(1, Math.ceil((d.total || 0) / SCREENER_PAGE_SIZE));
+    if (pageInfo) pageInfo.textContent = `Page ${_screenerPage + 1} / ${totalPages}`;
+    const prev = document.getElementById('scrPrev'), next = document.getElementById('scrNext');
+    if (prev) prev.disabled = _screenerPage === 0;
+    if (next) next.disabled = (_screenerPage + 1) >= totalPages;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="${SCR_COLUMNS.filter(c=>c.on).length}" style="padding:20px;color:#f85149">Load failed: ${escHtml(e.message)}</td></tr>`;
+  } finally {
+    if (loadEl) loadEl.style.display = 'none';
+  }
+}
+
+function screenerSort(col) {
+  if (_screenerSort.col === col) {
+    _screenerSort.dir = _screenerSort.dir === 'desc' ? 'asc' : 'desc';
+  } else {
+    _screenerSort = { col, dir: 'desc' };
+  }
+  _screenerLastQuery = '';
+  screenerReload();
+}
+
+function screenerPageNext() {
+  const totalPages = Math.max(1, Math.ceil(_screenerLastTotal / SCREENER_PAGE_SIZE));
+  if (_screenerPage + 1 >= totalPages) return;
+  _screenerPage++;
+  _screenerLastQuery = '';
+  screenerReload();
+}
+function screenerPagePrev() {
+  if (_screenerPage === 0) return;
+  _screenerPage--;
+  _screenerLastQuery = '';
+  screenerReload();
+}
+
+function screenerReset() {
+  document.querySelectorAll('#page-screener .screener-input').forEach(el => {
+    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+    else el.value = '';
+  });
+  _screenerSort = { col: 'signal_score', dir: 'desc' };
+  _screenerPage = 0;
+  _screenerLastQuery = '';
+  screenerReload();
+}
+
+function screenerApplyPreset(presetName) {
+  // Clear input state, then issue a request with `preset=<name>` — the server
+  // applies that preset's filter map.
+  document.querySelectorAll('#page-screener .screener-input').forEach(el => {
+    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+    else el.value = '';
+  });
+  _screenerPage = 0;
+  _screenerLastQuery = '';
+  screenerReload({ presetOverride: presetName });
+}
+
+// ── Saved screens (localStorage) ────────────────────────────────────────────
+function _scrLoadSavedList() {
+  try { return JSON.parse(localStorage.getItem('scrSavedScreens') || '{}'); }
+  catch { return {}; }
+}
+function _scrSaveSavedList(map) {
+  localStorage.setItem('scrSavedScreens', JSON.stringify(map));
+  _scrRefreshSavedDropdown();
+}
+function _scrRefreshSavedDropdown() {
+  const sel = document.getElementById('scrSavedScreens');
+  if (!sel) return;
+  const list = _scrLoadSavedList();
+  const names = Object.keys(list).sort();
+  sel.innerHTML = `<option value="">📋 Saved screens (${names.length})…</option>` +
+    names.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('') +
+    (names.length ? '<option value="__delete__">— Delete a screen…</option>' : '');
+}
+
+function screenerSaveCurrent() {
+  const name = prompt('Save this screen as:');
+  if (!name || !name.trim()) return;
+  const list = _scrLoadSavedList();
+  list[name.trim()] = {
+    inputs: _scrInputs(),
+    sort:   _screenerSort,
+    savedAt: new Date().toISOString(),
+  };
+  _scrSaveSavedList(list);
+  alert(`✅ Saved as "${name.trim()}"`);
+}
+
+function screenerLoadSaved(name) {
+  if (!name) return;
+  if (name === '__delete__') {
+    const list = _scrLoadSavedList();
+    const toDel = prompt('Delete which screen? (type the exact name)\n\nSaved:\n' + Object.keys(list).join('\n'));
+    if (toDel && list[toDel]) { delete list[toDel]; _scrSaveSavedList(list); }
+    return;
+  }
+  const list = _scrLoadSavedList();
+  const s = list[name];
+  if (!s) return;
+  for (const [k, v] of Object.entries(s.inputs || {})) {
+    const el = document.getElementById('scr' + k.charAt(0).toUpperCase() + k.slice(1));
+    if (el) el.value = v || '';
+  }
+  _screenerSort = s.sort || { col: 'signal_score', dir: 'desc' };
+  _screenerPage = 0;
+  _screenerLastQuery = '';
+  screenerReload();
+}
+_scrRefreshSavedDropdown();
+
+async function screenerExportCsv() {
+  const qs = _scrBuildQuery({ forCsv: true });
+  try {
+    const r = await fetch('/api/screener?' + qs);
+    const d = await r.json();
+    if (!d.rows?.length) { alert('No rows to export.'); return; }
+    const cols = ['symbol','company_name','sector','industry','exchange','market_cap_usd','last_price','day_change_pct','day_volume','pe_ratio','forward_pe','eps_ttm','dividend_yield','beta','roe','profit_margin','revenue_growth','rsi_14','pct_from_52w_high','ret_1m','ret_3m','ret_6m','ret_ytd'];
+    const header = cols.join(',');
+    const lines = d.rows.map(row =>
+      cols.map(c => {
+        const v = row[c];
+        if (v == null) return '';
+        if (typeof v === 'string' && (v.includes(',') || v.includes('"'))) return `"${v.replace(/"/g,'""')}"`;
+        return v;
+      }).join(',')
+    );
+    const csv = header + '\n' + lines.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `screener_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+  }
+}
+
+window.screenerReload       = screenerReload;
+window.screenerDebounced    = screenerDebounced;
+window.screenerSort         = screenerSort;
+window.screenerApplyPreset  = screenerApplyPreset;
+window.screenerReset        = screenerReset;
+window.screenerPageNext     = screenerPageNext;
+window.screenerPagePrev     = screenerPagePrev;
+window.screenerExportCsv    = screenerExportCsv;
+window.screenerToggleColumns= screenerToggleColumns;
+window.screenerToggleDensity= screenerToggleDensity;
+window.screenerSaveCurrent  = screenerSaveCurrent;
+window.screenerLoadSaved    = screenerLoadSaved;
+window.loadScreener         = loadScreener;
+// ─── End Screener Tab ──────────────────────────────────────────────────────
+
 
 async function loadBots() {
   const grid = document.getElementById('bots-grid');
@@ -22883,7 +25475,7 @@ function botsEdit(id) {
     name: bot.name,
     capital_usd: bot.capital_usd,
     broker: bot.broker ?? 'alpaca',
-    min_composite_score: ef.min_composite_score ?? 60,
+    min_composite_score: ef.min_composite_score ?? 70,
     conviction_grade_min: ef.conviction_grade_min ?? 'C',
     strategy: ef.strategy ?? 'composite',
     vix_max: ef.vix_max ?? 60,
