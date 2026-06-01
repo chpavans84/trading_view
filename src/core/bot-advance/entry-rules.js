@@ -20,24 +20,83 @@
 
 import { query } from '../db.js';
 
+// ─── ML v2 probability cache (per-scan) ──────────────────────────────────────
+// The ml_v2_intelligence rule's candidate_generator runs scoreUniverse() and
+// stashes the per-symbol probability here so the rule's detect() can validate
+// each candidate without re-scoring. Cleared at the start of every scan.
+const _v2ProbCache = new Map();   // symbol → prob (0..1)
+
 // ─── Rule definitions ────────────────────────────────────────────────────────
 
 export const ENTRY_RULES = [
+  // ── 0. ML v2 INTELLIGENCE (NEW — Phase B5 + Quality Filter) ────────────────
+  // Logistic-regression model trained on 22 features (intraday momentum + sector
+  // regime + earnings proximity + UW flow + insider clusters). Stored weights
+  // live in `model_results` row id=12 (version 'v2-phaseB5'), AUC 0.5816.
+  //
+  // Backtest (4-month out-of-sample, top-10/day = +3.42%/5d / 49.6% win):
+  //   With quality filter applied (excludes Healthcare/Financials/CommSvcs/Defensive
+  //   sectors + UW bullish_pct 20-65 range) → 63% win, +9.7% avg in 30-trade slice.
+  //
+  // 2026-06-01: priority 1 (top of cascade) so the ML model picks BEFORE the
+  // single-signal rules. Single-signal rules remain as fall-throughs.
+  {
+    id: 'ml_v2_intelligence',
+    priority: 1,
+    backtest_evidence: {
+      win_rate:        0.63,
+      avg_return_5d:   0.097,
+      sample_size:     30,
+      confidence:      'medium',     // small live-window N; honest acknowledgement
+      source:          'Phase B5 v2 ML + quality filter (out-of-sample 4mo)',
+    },
+    position_size_multiplier: 1.0,
+    exits: {
+      hard_sl_pct:    0.06,
+      trail_pct:      30,
+      time_stop_days: 5,   // matches model's 5-day forward-return horizon
+    },
+    candidate_generator: async () => {
+      try {
+        // Dynamic import so cyclic-dep / startup-init isn't a concern.
+        const { scoreUniverse, POOR_SECTORS_DEFAULT } = await import('../model-v2-scorer.js');
+        const r = await scoreUniverse({
+          limit: 30,
+          minPrice: 5,
+          minVolume: 1_000_000,
+          excludeSectors: POOR_SECTORS_DEFAULT,
+          bullishMin: 20,
+          bullishMax: 65,
+        });
+        // Refresh cache so detect() can validate per-symbol probability.
+        _v2ProbCache.clear();
+        for (const p of r.results) _v2ProbCache.set(p.symbol.toUpperCase(), Number(p.prob));
+        return r.results.map(p => p.symbol);
+      } catch (e) {
+        console.warn(`[bot-advance/rules] ml_v2_intelligence generator failed: ${e.message}`);
+        return [];
+      }
+    },
+    detect: (ctx) => {
+      // Require model probability >= 0.55 (top of empirical distribution; corresponds
+      // to the high-decile picks that drove the +9.7% avg in the quality-filter backtest).
+      const sym  = (ctx?.symbol || '').toUpperCase();
+      const prob = _v2ProbCache.get(sym);
+      return prob != null && prob >= 0.55;
+    },
+  },
+
   // ── 1. INSIDER DIRECTOR CLUSTER ─────────────────────────────────────────────
   // Cluster of ≥2 Director/10%-Owner purchases ≥$100K in last 30 days.
   // Backtest (your own data, BOT_DESIGN.md): N=436, win=73.2%, +3.79%/5d
   //
-  // 2026-05-29: PRIORITY LOWERED from 1 → 3.
-  //   Insider has highest WIN RATE (73.2%) but smallest avg RETURN (+3.79%).
-  //   Under single-pick arbitration, this rule monopolised every scan (12 of 13
-  //   picks on 2026-05-29 were insider), leaving 52w_high (+9.00%/76.6%, N=2,172)
-  //   and composite_70 (live data: +6.84%/69.4%, N=76K) dormant.
-  //   New order = 52w_high (1) → momentum_flip (2) → insider (3) → congress (4)
-  //   → composite_70 (99 fallback). Multi-pick fix still lets all 5 rules fire
-  //   simultaneously when slots permit; this just breaks the single-slot monopoly.
+  // 2026-06-01: priority 3 → 4 (shifted down by 1 after ml_v2_intelligence was
+  //   added at priority 1). Insider still fires when its specific cluster pattern
+  //   appears but no longer monopolises (multi-pick lets ML pick + insider pick
+  //   coexist in one scan).
   {
     id: 'insider_director_cluster',
-    priority: 3,
+    priority: 4,
     backtest_evidence: {
       win_rate:        0.732,
       avg_return_5d:   0.0379,
@@ -77,14 +136,14 @@ export const ENTRY_RULES = [
   // ── 2. AT 52W HIGH WITH VOLUME ─────────────────────────────────────────────
   // Within 2% of 52-week high AND volume ≥ 2× 30-day avg.
   // Backtest: top decile by NEW 52w score had +9.00%/5d, 76.6% win on N=2,172.
-  // Strongest backtest edge in your data.
+  // Largest historic-backtest sample of any single-signal rule.
   //
-  // 2026-06-01: priority 2 → 1 to give 52w_high the top slot (highest backtest
-  //   EV and largest sample), and to make all priorities distinct in the cascade:
-  //   52w_high (1) → momentum_flip (2) → insider (3) → congress (4) → composite_70 (99).
+  // 2026-06-01: priority 1 → 2 to make room for ml_v2_intelligence at top.
+  //   New cascade: ml_v2 (1) → 52w_high (2) → momentum_flip (3) → insider (4)
+  //   → congress (5) → composite_70 (99). All distinct.
   {
     id: 'at_52w_high_with_volume',
-    priority: 1,
+    priority: 2,
     backtest_evidence: {
       win_rate:        0.766,
       avg_return_5d:   0.0900,
@@ -133,14 +192,11 @@ export const ENTRY_RULES = [
   // Backtest: +6.86%/5d, 65.5% win on N=1,477 in flat SPY regimes.
   // De-risked slightly with 0.8x sizing — your own Phase 2.1 Option C edge.
   //
-  // 2026-06-01: priority 3 → 2 so this rule is NOT tied with insider_director_cluster
-  //   (which is also priority 3). Without distinct priorities the stable sort
-  //   in matchEntryRules() falls back to registry order, silently making insider
-  //   always win against momentum_flip even when momentum has the better backtest.
-  //   Intended winner order: 52w_high (1) → momentum_flip (2) → insider (3) → ...
+  // 2026-06-01: priority 2 → 3 (shifted down by 1 after ml_v2_intelligence was
+  //   added at priority 1). Still distinct from neighbours so no arbitration ties.
   {
     id: 'momentum_flip',
-    priority: 2,
+    priority: 3,
     backtest_evidence: {
       win_rate:        0.655,
       avg_return_5d:   0.0686,
@@ -186,9 +242,11 @@ export const ENTRY_RULES = [
   // ≥$250K congressional buy, disclosed within 5 days.
   // Backtest: 66.7% win, +2.34%/5d on N=15 (quick-disclosure subset).
   // Smallest sample — sized at 0.3x until forward data accumulates.
+  //
+  // 2026-06-01: priority 4 → 5 (after ml_v2_intelligence added at top).
   {
     id: 'congress_high_conviction',
-    priority: 4,
+    priority: 5,
     backtest_evidence: {
       win_rate:        0.667,
       avg_return_5d:   0.0234,
