@@ -111,9 +111,9 @@ async function getLiveQuote(symbol) {
   }
 }
 
-const PRICE_INPUT_PER_M  = 3.00;   // claude-sonnet-4-6 input  $3.00/M tokens
-const PRICE_OUTPUT_PER_M = 15.00;  // claude-sonnet-4-6 output $15.00/M tokens
-function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
+// Centralized pricing: claude-sonnet-4-6 list price, including cache rates
+// (writes 1.25× input, reads 0.10× input). Source of truth: src/core/api-cost.js.
+import { calcCost, tokensFromUsage } from './api-cost.js';
 
 // ─── Lessons cache (5-min TTL, per-user) ─────────────────────────────────────
 const _lessonsCache = new Map(); // username (or '__system__') → { block, ts }
@@ -818,7 +818,7 @@ export const TOOLS = [
   },
   {
     name: 'get_bot_verdict',
-    description: 'Run the bot\'s full decision engine on a single symbol — same code that drives live trading. Returns one of 4 verdicts: BUY (passes all gates, composite ≥ 60), NEAR (within 10 points of threshold), BLOCKED (composite high enough but a hard gate fails), WATCH (below threshold). Also returns the composite score, setup type (catalyst/breakout/momentum/value/mean_reversion), top 3 driver signals, and an explicit blockers[] array naming each gate that failed (e.g. earnings_proximity, liquidity, conviction_grade). Use whenever the user asks "would the bot buy X?" or "why didn\'t the bot trade X?".',
+    description: 'Run the bot\'s full decision engine on a single symbol — same code that drives live trading. Returns one of 4 verdicts: BUY (passes all gates, composite ≥ 70), NEAR (within 10 points of threshold), BLOCKED (composite high enough but a hard gate fails), WATCH (below threshold). Also returns the composite score, setup type (catalyst/breakout/momentum/value/mean_reversion), top 3 driver signals, and an explicit blockers[] array naming each gate that failed (e.g. earnings_proximity, liquidity, conviction_grade). Use whenever the user asks "would the bot buy X?" or "why didn\'t the bot trade X?".',
     input_schema: {
       type: 'object',
       properties: {
@@ -1558,7 +1558,7 @@ export async function executeTool(name, input, { onTrade, userCfg, username } = 
         // Use production-default rules (same as live bot defaults — see BOT_DEFAULT_RULES in src/web/server.js)
         const botRules = {
           rules: {
-            entry_filters: { min_composite_score: 60, conviction_grade_min: 'C', market_cap_min_b: 5, price_min: 5, price_max: 500, min_adv_dollar_vol: 5_000_000, avoid_earnings_within_days: 3, vix_min: 15, vix_max: 60, vix_aggressive_at: 25, require_uw_label_any: ['bullish','strong_bullish'], skip_during_macro_blackout: true, avoid_premarket_gap_above_pct: 8 },
+            entry_filters: { min_composite_score: 70, conviction_grade_min: 'C', market_cap_min_b: 5, price_min: 5, price_max: 2500, min_adv_dollar_vol: 5_000_000, avoid_earnings_within_days: 3, vix_min: 15, vix_max: 60, vix_aggressive_at: 25, require_uw_label_any: ['bullish','strong_bullish'], skip_during_macro_blackout: true, avoid_premarket_gap_above_pct: 8 },
             composite_weights: { conviction: 0.10, news: 0.22, uw_options: 0.30, gex: 0.15, insider: 0.15, distance_52w: 0.08, predictor: 0.00 },
           },
           capital_usd: 10000,
@@ -1751,11 +1751,11 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
 
     const finalMsg = await stream.finalMessage();
-    const u = finalMsg.usage || {};
-    const inp = u.input_tokens || 0, out = u.output_tokens || 0;
-    const tools = finalMsg.content.filter(b => b.type === 'tool_use').length;
-    recordApiCall({ source: 'dashboard_chat', inputTokens: inp, outputTokens: out, toolCalls: tools, costUsd: calcCost(inp, out), durationMs: Date.now() - t0, model: finalMsg.model, username }).catch(() => {});
-    upsertUsageStats({ inputTokens: inp, outputTokens: out, toolCalls: tools, costUsd: calcCost(inp, out) }).catch(() => {});
+    const usage    = tokensFromUsage(finalMsg.usage);   // {inputTokens,outputTokens,cacheCreationTokens,cacheReadTokens}
+    const tools    = finalMsg.content.filter(b => b.type === 'tool_use').length;
+    const costUsd  = calcCost(usage);                    // includes cache write/read pricing
+    recordApiCall({ source: 'dashboard_chat', ...usage, toolCalls: tools, costUsd, durationMs: Date.now() - t0, model: finalMsg.model, username }).catch(() => {});
+    upsertUsageStats({ ...usage, toolCalls: tools, costUsd }).catch(() => {});
 
     if (finalMsg.stop_reason === 'tool_use') {
       const toolBlocks = finalMsg.content.filter(b => b.type === 'tool_use');

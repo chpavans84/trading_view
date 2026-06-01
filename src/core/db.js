@@ -22,26 +22,30 @@ CREATE TABLE IF NOT EXISTS conversation_history (
 CREATE INDEX IF NOT EXISTS idx_conv_chat_id ON conversation_history(chat_id);
 
 CREATE TABLE IF NOT EXISTS usage_stats (
-  id                  SERIAL PRIMARY KEY,
-  date                DATE NOT NULL UNIQUE,
-  total_messages      INT DEFAULT 0,
-  total_tool_calls    INT DEFAULT 0,
-  input_tokens        BIGINT DEFAULT 0,
-  output_tokens       BIGINT DEFAULT 0,
-  estimated_cost_usd  NUMERIC(10,4) DEFAULT 0,
-  updated_at          TIMESTAMPTZ DEFAULT NOW()
+  id                    SERIAL PRIMARY KEY,
+  date                  DATE NOT NULL UNIQUE,
+  total_messages        INT DEFAULT 0,
+  total_tool_calls      INT DEFAULT 0,
+  input_tokens          BIGINT DEFAULT 0,
+  output_tokens         BIGINT DEFAULT 0,
+  cache_creation_tokens BIGINT DEFAULT 0,   -- billed at 1.25× input ($3.75/M)
+  cache_read_tokens     BIGINT DEFAULT 0,   -- billed at 0.10× input ($0.30/M)
+  estimated_cost_usd    NUMERIC(10,4) DEFAULT 0,
+  updated_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS api_calls (
-  id                SERIAL PRIMARY KEY,
-  called_at         TIMESTAMPTZ DEFAULT NOW(),
-  source            VARCHAR(40) NOT NULL,
-  input_tokens      INT NOT NULL DEFAULT 0,
-  output_tokens     INT NOT NULL DEFAULT 0,
-  tool_calls        INT NOT NULL DEFAULT 0,
-  cost_usd          NUMERIC(10,6) NOT NULL DEFAULT 0,
-  duration_ms       INT,
-  model             VARCHAR(60)
+  id                    SERIAL PRIMARY KEY,
+  called_at             TIMESTAMPTZ DEFAULT NOW(),
+  source                VARCHAR(40) NOT NULL,
+  input_tokens          INT NOT NULL DEFAULT 0,
+  output_tokens         INT NOT NULL DEFAULT 0,
+  cache_creation_tokens INT NOT NULL DEFAULT 0,
+  cache_read_tokens     INT NOT NULL DEFAULT 0,
+  tool_calls            INT NOT NULL DEFAULT 0,
+  cost_usd              NUMERIC(10,6) NOT NULL DEFAULT 0,
+  duration_ms           INT,
+  model                 VARCHAR(60)
 );
 CREATE INDEX IF NOT EXISTS idx_api_calls_called_at ON api_calls(called_at);
 CREATE INDEX IF NOT EXISTS idx_api_calls_source    ON api_calls(source);
@@ -49,6 +53,12 @@ CREATE INDEX IF NOT EXISTS idx_api_calls_source    ON api_calls(source);
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='api_calls') THEN NULL; END IF;
 END $$;
+-- Cache-token columns (added 2026-05-25 to make our cost math match the
+-- Anthropic console — cache writes/reads are billed at different rates)
+ALTER TABLE usage_stats ADD COLUMN IF NOT EXISTS cache_creation_tokens BIGINT DEFAULT 0;
+ALTER TABLE usage_stats ADD COLUMN IF NOT EXISTS cache_read_tokens     BIGINT DEFAULT 0;
+ALTER TABLE api_calls   ADD COLUMN IF NOT EXISTS cache_creation_tokens INTEGER DEFAULT 0;
+ALTER TABLE api_calls   ADD COLUMN IF NOT EXISTS cache_read_tokens     INTEGER DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS trades (
   id                   SERIAL PRIMARY KEY,
@@ -1124,13 +1134,31 @@ export async function clearConversationHistory(chatId) {
 
 // ─── Usage stats ──────────────────────────────────────────────────────────────
 
-export async function recordApiCall({ source, inputTokens, outputTokens, toolCalls, costUsd, durationMs, model, username }) {
+export async function recordApiCall({
+  source, inputTokens, outputTokens, toolCalls, costUsd, durationMs, model, username,
+  cacheCreationTokens, cacheReadTokens,
+}) {
   if (!dbAvailable) return;
   try {
     await query(
-      `INSERT INTO api_calls (source, input_tokens, output_tokens, tool_calls, cost_usd, duration_ms, model, username)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [source, inputTokens ?? 0, outputTokens ?? 0, toolCalls ?? 0, costUsd ?? 0, durationMs ?? null, model ?? null, username ?? null]
+      `INSERT INTO api_calls (
+         source, input_tokens, output_tokens,
+         cache_creation_tokens, cache_read_tokens,
+         tool_calls, cost_usd, duration_ms, model, username
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        source,
+        inputTokens ?? 0,
+        outputTokens ?? 0,
+        cacheCreationTokens ?? 0,
+        cacheReadTokens ?? 0,
+        toolCalls ?? 0,
+        costUsd ?? 0,
+        durationMs ?? null,
+        model ?? null,
+        username ?? null,
+      ]
     );
   } catch (err) {
     console.error('recordApiCall error:', err.message);
@@ -1189,21 +1217,39 @@ export async function getApiCallStats({ days = 30, username } = {}) {
   }
 }
 
-export async function upsertUsageStats({ inputTokens, outputTokens, toolCalls, costUsd }) {
+export async function upsertUsageStats({
+  inputTokens, outputTokens, toolCalls, costUsd,
+  cacheCreationTokens, cacheReadTokens,
+}) {
   if (!dbAvailable) return;
   try {
     const today = new Date().toISOString().split('T')[0];
     await query(
-      `INSERT INTO usage_stats (date, total_messages, total_tool_calls, input_tokens, output_tokens, estimated_cost_usd, updated_at)
-       VALUES ($1, 1, $2, $3, $4, $5, NOW())
+      `INSERT INTO usage_stats (
+         date, total_messages, total_tool_calls,
+         input_tokens, output_tokens,
+         cache_creation_tokens, cache_read_tokens,
+         estimated_cost_usd, updated_at
+       )
+       VALUES ($1, 1, $2, $3, $4, $5, $6, $7, NOW())
        ON CONFLICT (date) DO UPDATE SET
-         total_messages     = usage_stats.total_messages + 1,
-         total_tool_calls   = usage_stats.total_tool_calls + $2,
-         input_tokens       = usage_stats.input_tokens + $3,
-         output_tokens      = usage_stats.output_tokens + $4,
-         estimated_cost_usd = usage_stats.estimated_cost_usd + $5,
-         updated_at         = NOW()`,
-      [today, toolCalls ?? 0, inputTokens ?? 0, outputTokens ?? 0, costUsd ?? 0]
+         total_messages         = usage_stats.total_messages + 1,
+         total_tool_calls       = usage_stats.total_tool_calls + $2,
+         input_tokens           = usage_stats.input_tokens + $3,
+         output_tokens          = usage_stats.output_tokens + $4,
+         cache_creation_tokens  = usage_stats.cache_creation_tokens + $5,
+         cache_read_tokens      = usage_stats.cache_read_tokens + $6,
+         estimated_cost_usd     = usage_stats.estimated_cost_usd + $7,
+         updated_at             = NOW()`,
+      [
+        today,
+        toolCalls ?? 0,
+        inputTokens ?? 0,
+        outputTokens ?? 0,
+        cacheCreationTokens ?? 0,
+        cacheReadTokens ?? 0,
+        costUsd ?? 0,
+      ]
     );
   } catch (err) {
     console.error('upsertUsageStats error:', err.message);

@@ -322,16 +322,136 @@ export function gateCompositeScore({ filters, composite }) {
  * Pre-signal gates — the ones that can be checked BEFORE running expensive
  * signal queries. _scoreCandidate uses these to bail early.
  */
+/**
+ * Retrospective 2026-05-29 — HUT loss post-mortem.
+ *
+ * HUT was bought at $141.26 while the cached last_price was $117.75 (+20% divergence).
+ * TTMI was bought at $208.18 while cached was $189.92 (+9.6%).
+ * AMD was bought at $510.20 while cached was $467.51 (+9.2%).
+ *
+ * In every case the bot entered mid-spike — the live quote had moved significantly
+ * above the cached price, meaning the stock had ALREADY made a large move and was
+ * at elevated risk of reversal. No gate was checking this divergence.
+ *
+ * This gate compares the live ask/quote price (available in indicators.liquidity) to
+ * the cached last_price. If the live price is > max_gap_from_cache_pct above the
+ * cached price, the entry is blocked as a spike-entry risk.
+ *
+ * Default: 8%. Opt-out per-bot: filters.max_gap_from_cache_pct = null (disable).
+ * Opt-in tighter: filters.max_gap_from_cache_pct = 5 for conservative bots.
+ *
+ * Uses last_price (cache) vs the live quote already in indicators.liquidity.last_price.
+ * The ACTUAL fill price is compared at execution time in bot-executor.js — this gate
+ * fires before the order is placed, using the quote the scanner fetched.
+ *
+ * Note: this gate does NOT apply when last_price is null (new listing) or when
+ * the symbol has no cache entry. It also does NOT block downward gaps (price below
+ * cache) since those are handled by the existing liquidity_stale gate.
+ */
+export function gatePriceGapFromCache({ filters, indicators }) {
+  const maxGapPct = filters.max_gap_from_cache_pct !== undefined
+    ? filters.max_gap_from_cache_pct
+    : 8;  // default 8%
+  if (maxGapPct == null) return null;  // explicitly disabled
+
+  const cachedPrice = indicators?.liquidity?.last_price;
+  const lastDate    = indicators?.liquidity?.last_date;
+  if (!cachedPrice || cachedPrice <= 0 || !lastDate) return null;
+
+  // ── Path A: pre-market gap (4:00–9:29 AM ET) ──────────────────────────────
+  // Yahoo Finance preMarketPrice is only non-null before market open.
+  // FIXED 2026-06-01: only block UPWARD gaps (chasing risk). Downward gaps may
+  // actually be entry opportunities for mean-reversion — using Math.abs() here
+  // was rejecting both directions, which over-filtered candidates.
+  const premktGap = indicators?.premarket?.gap_pct;
+  if (premktGap != null && premktGap > maxGapPct) {
+    return {
+      gate: 'price_gap_from_cache',
+      value: `premarket_gap=+${premktGap.toFixed(1)}%`,
+      threshold: `<= +${maxGapPct}%`,
+      message: `Pre-market gap UP +${premktGap.toFixed(1)}% exceeds ${maxGapPct}% — chasing risk`,
+    };
+  }
+
+  // ── Path B: intraday gap (9:30–16:00 ET) ───────────────────────────────────
+  // During regular trading hours Yahoo's regularMarketPrice is the live last-
+  // trade price (now in indicators.premarket.live_price via getPreMarketGap).
+  // Compare it to the cached last_price from backtest_prices.  If the stock has
+  // already surged intraday, the bot would be chasing — block it.
+  //
+  // Only fires if live_price is clearly ABOVE the cache (upward spike only).
+  // A drop from cache (negative gap) is not blocked here; it's handled by the
+  // gateLiquidityStale gate which checks staleness regardless of direction.
+  // cachedPrice already declared above — reuse it here.
+  const livePrice = indicators?.premarket?.live_price;
+  if (livePrice != null && cachedPrice != null && cachedPrice > 0) {
+    const intradayGap = ((livePrice - cachedPrice) / cachedPrice) * 100;
+    if (intradayGap > maxGapPct) {
+      return {
+        gate: 'price_gap_from_cache',
+        value: `live=$${livePrice} cache=$${cachedPrice} gap=+${intradayGap.toFixed(1)}%`,
+        threshold: `<= +${maxGapPct}%`,
+        message: `Live price $${livePrice} is ${intradayGap.toFixed(1)}% above cached $${cachedPrice} — spike-entry risk (stock already moved)`,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Retrospective 2026-05-29 — HUT loss post-mortem.
+ *
+ * HUT daily ATR was 8–10% of price. With a 1-minute monitoring loop, any stock
+ * that moves more than the stop% in a single minute will gap THROUGH the stop —
+ * the bot sees above-stop at tick N and below-stop+exit-price at tick N+1 with no
+ * fill at the stop level. Crypto miners (HUT, IREN, MARA), leveraged ETFs (TQQQ),
+ * and meme stocks regularly move 5–15% intraday on single news items.
+ *
+ * These stocks are untradeable at the 1-min monitoring frequency with any reasonable
+ * stop percentage. The fix is to simply refuse entry.
+ *
+ * Implementation: uses ATR(14) from backtest_prices (via trade.atr_pct in trades,
+ * but here we receive it in indicators.atr if pre-computed, or skip if unavailable).
+ * For the scanner path, we inject `indicators.atr_pct` from the pre-scan ATR fetch.
+ *
+ * Default threshold: 7%.  Configurable per bot: filters.max_atr_pct.
+ *
+ * Opt-out: filters.max_atr_pct = null → disables the gate (for high-vol strategies).
+ */
+export function gateHighVolatility({ filters, indicators }) {
+  const maxAtrPct = filters.max_atr_pct !== undefined
+    ? filters.max_atr_pct
+    : 7;  // default 7% — blocks crypto miners, meme stocks, leveraged ETFs
+  if (maxAtrPct == null) return null;  // explicitly disabled
+
+  const atrPct = indicators?.atr_pct;
+  if (atrPct == null) return null;  // no ATR data — skip gate
+
+  if (atrPct > maxAtrPct) {
+    return {
+      gate: 'high_volatility',
+      value: `atr_pct=${atrPct.toFixed(2)}%`,
+      threshold: `<= ${maxAtrPct}%`,
+      message: `ATR ${atrPct.toFixed(2)}% exceeds ${maxAtrPct}% — stop-hunting risk with 1-min monitoring loop`,
+    };
+  }
+
+  return null;
+}
+
 export const PRE_SIGNAL_GATES = [
   gateEarningsProximity,
   gateLiquidity,
-  gateLiquidityStale,       // 2026-05-28: block on stale price data (> 3 calendar days)
+  gateLiquidityStale,         // 2026-05-28: block on stale price data (> 2 trading days)
+  gatePriceGapFromCache,      // 2026-05-29: block when live quote > cached price × 1.08 (spike-entry prevention)
+  gateHighVolatility,         // 2026-05-29: block when ATR% > 7% (crypto miners, meme stocks)
   gateMacroBlackout,
   gatePremarketGap,
   gateShortInterest,
   gatePriceRange,
   gateVixRange,
-  gateMarketCloseProximity, // 2026-05-28: block entries after 3:30 PM ET
+  gateMarketCloseProximity,   // 2026-05-28: block entries after 3:30 PM ET
 ];
 
 /**
@@ -344,11 +464,55 @@ export const POST_SIGNAL_GATES = [
 ];
 
 /**
- * Setup gates — need classifySetup() output.
+ * Retrospective 2026-05-29 — RSI overbought block for price_breakout entries.
+ *
+ * HUT was classified as `price_breakout` and had RSI 77.73 at entry.
+ * A stock at RSI 77 has typically already made 70-80% of its near-term move —
+ * the momentum edge is in the 40-65 RSI range (early breakout) not the 75+
+ * range (exhaustion / climax). This gate exists to prevent chasing.
+ *
+ * TTMI had RSI 69.4 and was allowed by the momentum_flip RSI < 68 guard
+ * (it was blocked at 69.4, just above the cap).  For price_breakout, we are
+ * even stricter: RSI > 75 = block.  Momentum can run to 80+ in strong trends,
+ * so that ceiling is set higher.
+ *
+ * Per-setup ceilings (default):
+ *   price_breakout: 75  — chasing risk is highest for breakout entries
+ *   momentum:       80  — strong trends can sustain higher RSI for longer
+ *   (all other setup types: no cap — catalyst / news / value setups don't
+ *   have an RSI-exhaustion thesis)
+ *
+ * Opt-out per-bot: filters.max_rsi_overbought = null (disables the gate entirely).
+ * Custom ceilings: filters.max_rsi_by_setup = { price_breakout: 70, momentum: 85 }
  */
+const DEFAULT_MAX_RSI_BY_SETUP = {
+  price_breakout: 75,
+  momentum:       80,
+};
+
+export function gateOverboughtEntry({ filters, setup, rsi14 }) {
+  if (filters.max_rsi_overbought === null) return null;   // gate disabled for this bot
+  if (!setup?.setup_type || rsi14 == null) return null;   // no setup or no RSI data
+
+  const maxRsiBySetup = filters.max_rsi_by_setup ?? DEFAULT_MAX_RSI_BY_SETUP;
+  const ceiling = maxRsiBySetup[setup.setup_type];
+  if (ceiling == null) return null;  // this setup type has no RSI ceiling
+
+  if (rsi14 > ceiling) {
+    return {
+      gate: 'overbought_entry',
+      value: `rsi14=${rsi14.toFixed(1)} setup=${setup.setup_type}`,
+      threshold: `<= ${ceiling}`,
+      message: `RSI ${rsi14.toFixed(1)} exceeds ${setup.setup_type} ceiling ${ceiling} — entry likely chasing exhausted move`,
+    };
+  }
+  return null;
+}
+
 export const SETUP_GATES = [
   gateSetupClassification,
   gateStrategyFilter,
+  gateOverboughtEntry,        // 2026-05-29: block RSI>75 for price_breakout, RSI>80 for momentum
 ];
 
 /**

@@ -174,6 +174,9 @@
     <button class="tab" id="tab-bots" onclick="showPage('bots',this)">🤖 Bots</button>
     <button class="tab" id="tab-bot-advance" onclick="showPage('bot-advance',this)" title="Challenger bot — entry-rule ensemble in shadow mode">🧪 Bot Advance</button>
     <button class="tab" id="tab-screener" onclick="showPage('screener',this)" title="Finviz-style screener over 8K+ US stocks">🔎 Screener</button>
+    <button class="tab" id="tab-ext-hours" onclick="showPage('ext-hours',this)" title="Pre-market and post-market moving stocks">🌙 Ext Hours</button>
+    <button class="tab" id="tab-retrospective" onclick="showPage('retrospective',this)" title="Daily ±3% movers with reasons (news, UW, insider, bot caught)">🔍 Retrospective</button>
+    <button class="tab" id="tab-top-picks" onclick="showPage('top-picks',this)" title="ML-ranked best stocks to buy today (v2 model: AUC 0.58, +3.4% avg 5d return)">🎯 Top Picks</button>
     <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
     <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
     <button class="tab" id="tab-backtests" onclick="showPage('backtests',this)" title="Strategy replay results" style="display:none">📊 Backtests</button>
@@ -2377,6 +2380,281 @@
       <button class="screener-preset" onclick="screenerPagePrev()" id="scrPrev">◀ Prev</button>
       <span id="screenerPageInfo" style="color:#8b949e;font-size:0.82rem">Page 1</span>
       <button class="screener-preset" onclick="screenerPageNext()" id="scrNext">Next ▶</button>
+    </div>
+  </div>
+</div>
+<!-- ══════════════════════════════════════════════════════════ -->
+
+<!-- ── EXTENDED HOURS ─────────────────────────────────────── -->
+<div class="page" id="page-ext-hours">
+  <style>
+    #page-ext-hours .eh-wrap { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+    #page-ext-hours .eh-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border,#30363d); flex-wrap:wrap; gap:8px; }
+    #page-ext-hours .eh-header h2 { margin:0; font-size:20px; }
+    #page-ext-hours .eh-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    #page-ext-hours .eh-badge { display:inline-block; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:600; text-transform:uppercase; background:rgba(110,118,129,0.2); color:#8b949e; }
+    #page-ext-hours .eh-badge.premarket  { background:rgba(88,166,255,0.15); color:#58a6ff; }
+    #page-ext-hours .eh-badge.postmarket { background:rgba(210,153,34,0.15); color:#d29922; }
+    #page-ext-hours .eh-badge.regular    { background:rgba(63,185,80,0.15);  color:#3fb950; }
+    #page-ext-hours .eh-refresh-btn { background:var(--accent,#58a6ff); color:white; border:none; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; }
+    #page-ext-hours .eh-refresh-btn:hover { opacity:0.85; }
+    #page-ext-hours .eh-subtabs { display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--border,#30363d); padding-bottom:8px; }
+    #page-ext-hours .eh-stab { background:none; border:1px solid var(--border,#30363d); color:var(--muted,#8b949e); padding:6px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.15s; }
+    #page-ext-hours .eh-stab.active { background:var(--accent,#58a6ff); color:white; border-color:var(--accent,#58a6ff); }
+    #page-ext-hours .eh-2col { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    @media (max-width:768px) { #page-ext-hours .eh-2col { grid-template-columns:1fr; } }
+    #page-ext-hours .eh-side { background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; padding:14px 16px; overflow-x:auto; }
+    #page-ext-hours .eh-side-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted,#8b949e); margin-bottom:10px; }
+    #page-ext-hours table.eh-table { width:100%; border-collapse:collapse; font-size:12px; min-width:400px; }
+    #page-ext-hours table.eh-table th,
+    #page-ext-hours table.eh-table td { padding:7px 10px; text-align:left; border-bottom:1px solid var(--border,#30363d); white-space:nowrap; }
+    #page-ext-hours table.eh-table th { font-weight:600; color:var(--muted,#8b949e); text-transform:uppercase; font-size:10px; letter-spacing:0.05em; }
+    #page-ext-hours table.eh-table tr:last-child td { border-bottom:none; }
+    #page-ext-hours table.eh-table tr:hover td { background:rgba(88,166,255,0.04); }
+    #page-ext-hours table.eh-table td.num { text-align:right; font-family:ui-monospace,monospace; }
+    #page-ext-hours table.eh-table td.sym { font-weight:700; color:var(--accent,#58a6ff); cursor:pointer; }
+    #page-ext-hours table.eh-table td.sym:hover { text-decoration:underline; }
+    #page-ext-hours table.eh-table td.up  { color:#3fb950; font-weight:600; }
+    #page-ext-hours table.eh-table td.dn  { color:#f85149; font-weight:600; }
+    #page-ext-hours .eh-name { max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom; }
+    #page-ext-hours .eh-status { color:var(--muted,#8b949e); font-size:12px; padding:12px 0; text-align:center; }
+    #page-ext-hours .eh-empty { color:var(--muted,#8b949e); font-size:12px; padding:16px 0; text-align:center; }
+    /* Portfolio section */
+    #page-ext-hours .eh-portfolio { background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; padding:14px 16px; overflow-x:auto; margin-bottom:18px; }
+    #page-ext-hours .eh-portfolio-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px; }
+    #page-ext-hours .eh-portfolio-header h3 { margin:0; font-size:13px; font-weight:700; color:var(--fg,#e6edf3); }
+    #page-ext-hours .eh-portfolio-header .eh-port-source { font-size:11px; color:var(--muted,#8b949e); padding:2px 8px; background:rgba(110,118,129,0.15); border-radius:6px; }
+    #page-ext-hours .eh-port-loading { color:var(--muted,#8b949e); font-size:12px; padding:10px 0; }
+    #page-ext-hours table.eh-port-table { width:100%; border-collapse:collapse; font-size:12px; min-width:520px; }
+    #page-ext-hours table.eh-port-table th,
+    #page-ext-hours table.eh-port-table td { padding:7px 10px; text-align:left; border-bottom:1px solid var(--border,#30363d); white-space:nowrap; }
+    #page-ext-hours table.eh-port-table th { font-weight:600; color:var(--muted,#8b949e); text-transform:uppercase; font-size:10px; letter-spacing:0.05em; }
+    #page-ext-hours table.eh-port-table tr:last-child td { border-bottom:none; }
+    #page-ext-hours table.eh-port-table tr:hover td { background:rgba(88,166,255,0.04); }
+    #page-ext-hours table.eh-port-table td.num { text-align:right; font-family:ui-monospace,monospace; }
+    #page-ext-hours table.eh-port-table td.sym { font-weight:700; color:var(--accent,#58a6ff); cursor:pointer; }
+    #page-ext-hours table.eh-port-table td.sym:hover { text-decoration:underline; }
+    #page-ext-hours table.eh-port-table td.up  { color:#3fb950; font-weight:600; }
+    #page-ext-hours table.eh-port-table td.dn  { color:#f85149; font-weight:600; }
+    #page-ext-hours table.eh-port-table td.muted { color:var(--muted,#8b949e); }
+  </style>
+  <div class="eh-wrap">
+    <div class="eh-header">
+      <h2>🌙 Extended Hours</h2>
+      <div class="eh-meta">
+        <span id="ehSessionBadge" class="eh-badge">—</span>
+        <span id="ehEtTime" style="color:var(--muted,#8b949e);font-size:12px"></span>
+        <button class="eh-refresh-btn" onclick="loadExtHours(true)">↻ Refresh</button>
+      </div>
+    </div>
+    <!-- Portfolio section — shows current broker positions with ext-hours P&L -->
+    <div class="eh-portfolio" id="ehPortfolioSection">
+      <div class="eh-portfolio-header">
+        <h3>📊 My Portfolio — Ext Hours P&amp;L</h3>
+        <span id="ehPortSourceLabel" class="eh-port-source">—</span>
+      </div>
+      <div id="ehPortfolioBody"><div class="eh-port-loading">Loading portfolio…</div></div>
+    </div>
+
+    <div class="eh-subtabs">
+      <button class="eh-stab active" id="ehTabPre"  onclick="ehSwitchTab('pre')">🌅 Pre-Market</button>
+      <button class="eh-stab"        id="ehTabPost" onclick="ehSwitchTab('post')">🌆 Post-Market</button>
+    </div>
+    <!-- Pre-Market panel -->
+    <div id="ehPanelPre" class="eh-panel">
+      <div class="eh-2col">
+        <div class="eh-side">
+          <div class="eh-side-label">🟢 Gainers</div>
+          <div id="ehPreGainers"></div>
+        </div>
+        <div class="eh-side">
+          <div class="eh-side-label">🔴 Losers</div>
+          <div id="ehPreLosers"></div>
+        </div>
+      </div>
+    </div>
+    <!-- Post-Market panel -->
+    <div id="ehPanelPost" class="eh-panel" style="display:none">
+      <div class="eh-2col">
+        <div class="eh-side">
+          <div class="eh-side-label">🟢 Gainers</div>
+          <div id="ehPostGainers"></div>
+        </div>
+        <div class="eh-side">
+          <div class="eh-side-label">🔴 Losers</div>
+          <div id="ehPostLosers"></div>
+        </div>
+      </div>
+    </div>
+    <div id="ehStatus" class="eh-status"></div>
+  </div>
+</div>
+<!-- ══════════════════════════════════════════════════════════ -->
+
+<div class="page" id="page-retrospective">
+  <style>
+    #page-retrospective .rs-wrap { padding: 16px 20px; max-width: 1500px; margin: 0 auto; }
+    #page-retrospective .rs-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid var(--border,#30363d); flex-wrap:wrap; gap:8px; }
+    #page-retrospective .rs-header h2 { margin:0; font-size:20px; }
+    #page-retrospective .rs-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding:10px 12px; background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; }
+    #page-retrospective .rs-filters label { font-size:11px; color:var(--muted,#8b949e); font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
+    #page-retrospective .rs-filters select,
+    #page-retrospective .rs-filters input { background:var(--bg,#0d1117); color:var(--fg,#e6edf3); border:1px solid var(--border,#30363d); border-radius:6px; padding:5px 8px; font-size:12px; font-family:inherit; }
+    #page-retrospective .rs-filters input[type=date] { min-width:140px; }
+    #page-retrospective .rs-go { background:var(--accent,#58a6ff); color:white; border:none; padding:5px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; }
+    #page-retrospective .rs-go:hover { opacity:0.85; }
+    #page-retrospective .rs-summary { display:grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:14px; }
+    #page-retrospective .rs-stat { background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; padding:10px 12px; }
+    #page-retrospective .rs-stat .lbl { font-size:10px; color:var(--muted,#8b949e); text-transform:uppercase; letter-spacing:0.05em; }
+    #page-retrospective .rs-stat .val { font-size:20px; font-weight:700; margin-top:3px; }
+    #page-retrospective .rs-sig-pills { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+    #page-retrospective .rs-pill { padding:4px 10px; border-radius:12px; font-size:11px; font-weight:600; background:rgba(110,118,129,0.15); color:var(--muted,#8b949e); cursor:pointer; border:1px solid transparent; }
+    #page-retrospective .rs-pill.active { background:rgba(88,166,255,0.15); color:#58a6ff; border-color:#58a6ff; }
+    #page-retrospective .rs-pill:hover { background:rgba(88,166,255,0.08); }
+    #page-retrospective .rs-table-wrap { background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; overflow-x:auto; }
+    #page-retrospective table.rs-table { width:100%; border-collapse:collapse; font-size:11.5px; min-width:1200px; }
+    #page-retrospective table.rs-table th, #page-retrospective table.rs-table td { padding:6px 9px; text-align:left; border-bottom:1px solid var(--border,#30363d); white-space:nowrap; }
+    #page-retrospective table.rs-table th { font-weight:600; color:var(--muted,#8b949e); text-transform:uppercase; font-size:10px; letter-spacing:0.04em; position:sticky; top:0; background:var(--panel,#161b22); z-index:1; }
+    #page-retrospective table.rs-table tr:last-child td { border-bottom:none; }
+    #page-retrospective table.rs-table tr:hover td { background:rgba(88,166,255,0.04); }
+    #page-retrospective table.rs-table td.num { text-align:right; font-family:ui-monospace,monospace; }
+    #page-retrospective table.rs-table td.sym { font-weight:700; color:var(--accent,#58a6ff); cursor:pointer; }
+    #page-retrospective table.rs-table td.sym:hover { text-decoration:underline; }
+    #page-retrospective table.rs-table td.up   { color:#3fb950; font-weight:600; }
+    #page-retrospective table.rs-table td.dn   { color:#f85149; font-weight:600; }
+    #page-retrospective table.rs-table td.muted { color:var(--muted,#8b949e); }
+    #page-retrospective .rs-signal-tag { display:inline-block; padding:2px 7px; border-radius:8px; font-size:10px; font-weight:600; text-transform:uppercase; }
+    #page-retrospective .rs-signal-tag.earnings   { background:rgba(255,179,71,0.18);  color:#ffb347; }
+    #page-retrospective .rs-signal-tag.news_ma    { background:rgba(110,168,254,0.18); color:#6ea8fe; }
+    #page-retrospective .rs-signal-tag.news_fda   { background:rgba(186,107,255,0.18); color:#ba6bff; }
+    #page-retrospective .rs-signal-tag.news_govt  { background:rgba(255,138,128,0.18); color:#ff8a80; }
+    #page-retrospective .rs-signal-tag.news_other { background:rgba(140,189,255,0.18); color:#8cbdff; }
+    #page-retrospective .rs-signal-tag.uw_flow    { background:rgba(255,209,128,0.18); color:#ffd180; }
+    #page-retrospective .rs-signal-tag.insider    { background:rgba(255,176,46,0.18);  color:#ffb02e; }
+    #page-retrospective .rs-signal-tag.congress   { background:rgba(186,135,255,0.18); color:#ba87ff; }
+    #page-retrospective .rs-signal-tag.unknown    { background:rgba(140,148,158,0.15); color:#8b949e; }
+    #page-retrospective .rs-coverage { font-size:10px; color:var(--muted,#8b949e); margin-left:6px; }
+    #page-retrospective .rs-coverage.full    { color:#3fb950; }
+    #page-retrospective .rs-coverage.partial { color:#d29922; }
+    #page-retrospective .rs-coverage.sparse  { color:#f85149; }
+    #page-retrospective .rs-caught { color:#3fb950; font-weight:700; }
+    #page-retrospective .rs-empty { color:var(--muted,#8b949e); font-size:13px; padding:30px 0; text-align:center; }
+    #page-retrospective .rs-loading { color:var(--muted,#8b949e); font-size:13px; padding:30px 0; text-align:center; }
+    #page-retrospective .rs-headline { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom; color:var(--fg,#e6edf3); }
+  </style>
+  <div class="rs-wrap">
+    <div class="rs-header">
+      <h2>🔍 Movers Retrospective</h2>
+      <div style="font-size:11px;color:var(--muted,#8b949e)">For each day, every ±3% mover annotated with the reason it moved + whether the bot caught it</div>
+    </div>
+
+    <div class="rs-filters">
+      <label>Date</label>
+      <input type="date" id="rsDate" />
+      <label>Direction</label>
+      <select id="rsDirection">
+        <option value="both">Both</option>
+        <option value="UP">🟢 UP</option>
+        <option value="DOWN">🔴 DOWN</option>
+      </select>
+      <label>Min |Chg %|</label>
+      <input type="number" id="rsMinPct" value="3" step="0.5" style="width:60px" />
+      <label>Min Price $</label>
+      <input type="number" id="rsMinPrice" value="2" step="1" style="width:60px" />
+      <button class="rs-go" onclick="loadRetrospective()">↻ Update</button>
+    </div>
+
+    <div class="rs-summary" id="rsSummary"></div>
+    <div class="rs-sig-pills" id="rsSigPills"></div>
+    <div class="rs-table-wrap">
+      <div id="rsBody" class="rs-loading">Loading…</div>
+    </div>
+  </div>
+</div>
+<!-- ══════════════════════════════════════════════════════════ -->
+
+<div class="page" id="page-top-picks">
+  <style>
+    #page-top-picks .tp-wrap { padding: 16px 20px; max-width: 1500px; margin: 0 auto; }
+    #page-top-picks .tp-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border,#30363d); flex-wrap:wrap; gap:8px; }
+    #page-top-picks .tp-header h2 { margin:0; font-size:20px; }
+    #page-top-picks .tp-meta { font-size:11px; color:var(--muted,#8b949e); display:flex; gap:14px; flex-wrap:wrap; }
+    #page-top-picks .tp-meta .tag { background:rgba(110,118,129,0.15); padding:2px 8px; border-radius:6px; font-weight:600; }
+    #page-top-picks .tp-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; padding:10px 12px; background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; }
+    #page-top-picks .tp-filters label { font-size:11px; color:var(--muted,#8b949e); font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
+    #page-top-picks .tp-filters select, #page-top-picks .tp-filters input { background:var(--bg,#0d1117); color:var(--fg,#e6edf3); border:1px solid var(--border,#30363d); border-radius:6px; padding:5px 8px; font-size:12px; font-family:inherit; }
+    #page-top-picks .tp-go { background:var(--accent,#58a6ff); color:white; border:none; padding:5px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; }
+    #page-top-picks .tp-go:hover { opacity:0.85; }
+    #page-top-picks .tp-stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:14px; }
+    #page-top-picks .tp-stat { background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; padding:10px 12px; }
+    #page-top-picks .tp-stat .lbl { font-size:10px; color:var(--muted,#8b949e); text-transform:uppercase; letter-spacing:0.05em; }
+    #page-top-picks .tp-stat .val { font-size:18px; font-weight:700; margin-top:3px; }
+    #page-top-picks .tp-table-wrap { background:var(--panel,#161b22); border:1px solid var(--border,#30363d); border-radius:8px; overflow-x:auto; }
+    #page-top-picks table.tp-table { width:100%; border-collapse:collapse; font-size:12px; min-width:1300px; }
+    #page-top-picks table.tp-table th, #page-top-picks table.tp-table td { padding:7px 9px; text-align:left; border-bottom:1px solid var(--border,#30363d); white-space:nowrap; }
+    #page-top-picks table.tp-table th { font-weight:600; color:var(--muted,#8b949e); text-transform:uppercase; font-size:10px; letter-spacing:0.04em; position:sticky; top:0; background:var(--panel,#161b22); z-index:1; }
+    #page-top-picks table.tp-table tr:last-child td { border-bottom:none; }
+    #page-top-picks table.tp-table tr:hover td { background:rgba(88,166,255,0.04); }
+    #page-top-picks table.tp-table td.num { text-align:right; font-family:ui-monospace,monospace; }
+    #page-top-picks table.tp-table td.sym { font-weight:700; color:var(--accent,#58a6ff); cursor:pointer; }
+    #page-top-picks table.tp-table td.sym:hover { text-decoration:underline; }
+    #page-top-picks table.tp-table td.up   { color:#3fb950; font-weight:600; }
+    #page-top-picks table.tp-table td.dn   { color:#f85149; font-weight:600; }
+    #page-top-picks table.tp-table td.muted { color:var(--muted,#8b949e); }
+    #page-top-picks .tp-prob { display:inline-block; padding:2px 8px; border-radius:10px; font-weight:700; font-size:11px; }
+    #page-top-picks .tp-prob.hot   { background:rgba(63,185,80,0.18); color:#3fb950; }
+    #page-top-picks .tp-prob.warm  { background:rgba(210,153,34,0.18); color:#d29922; }
+    #page-top-picks .tp-prob.cool  { background:rgba(110,118,129,0.15); color:#8b949e; }
+    #page-top-picks .tp-rank { font-weight:700; color:var(--muted,#8b949e); }
+    #page-top-picks .tp-drivers { font-size:10px; color:var(--muted,#8b949e); }
+    #page-top-picks .tp-loading { color:var(--muted,#8b949e); font-size:13px; padding:30px 0; text-align:center; }
+    #page-top-picks .tp-banner { background:linear-gradient(90deg, rgba(63,185,80,0.08), rgba(88,166,255,0.08)); border:1px solid rgba(63,185,80,0.3); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:12px; color:var(--fg,#e6edf3); }
+    #page-top-picks .tp-banner strong { color:#3fb950; }
+  </style>
+  <div class="tp-wrap">
+    <div class="tp-header">
+      <h2>🎯 Top Picks <span style="font-size:11px;color:var(--muted,#8b949e);font-weight:400">(v2 ML model)</span></h2>
+      <div class="tp-meta" id="tpMeta"></div>
+    </div>
+
+    <div class="tp-banner">
+      <strong>Backtest:</strong> v2 model top-10 picks/day averaged <strong>+3.42% / 5-day return</strong> at <strong>49.6% win rate</strong> on 4-month out-of-sample test (vs 0.23% baseline mean). AUC = <strong>0.5822</strong>.
+    </div>
+
+    <div class="tp-filters">
+      <label>Date</label>
+      <input type="date" id="tpDate" />
+      <label>Top N</label>
+      <select id="tpLimit">
+        <option value="10">10</option>
+        <option value="20" selected>20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+      <label>Min Price $</label>
+      <input type="number" id="tpMinPrice" value="5" step="1" style="width:60px" />
+      <label>Min Vol (K)</label>
+      <input type="number" id="tpMinVol" value="500" step="100" style="width:70px" />
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer" title="Apply backtest-derived filters: exclude Healthcare/Financials/Comm Svcs/Defensive sectors + UW flow 20-65%. Pushed win rate 51%→63% in backtest.">
+        <input type="checkbox" id="tpQuality" onchange="loadTopPicks()" style="cursor:pointer" />
+        🛡️ Quality Filter
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="tpDiversified" onchange="loadTopPicks()" style="cursor:pointer" />
+        Diversified
+      </label>
+      <label id="tpPerSectorLbl" style="display:none">Per sector</label>
+      <select id="tpPerSector" style="display:none" onchange="loadTopPicks()">
+        <option value="1">1</option>
+        <option value="2" selected>2</option>
+        <option value="3">3</option>
+      </select>
+      <button class="tp-go" onclick="loadTopPicks()">↻ Update</button>
+    </div>
+
+    <div class="tp-stats" id="tpStats"></div>
+    <div class="tp-table-wrap">
+      <div id="tpBody" class="tp-loading">Loading…</div>
     </div>
   </div>
 </div>
@@ -5841,6 +6119,9 @@ const TAB_PAGE_MAP = {
   trading_desk:  'trading-desk',
   bots:          'bots',
   screener:      'screener',
+  ext_hours:     'ext-hours',
+  retrospective: 'retrospective',
+  top_picks:     'top-picks',
 };
 
 function _rebuildSourceDropdown() {
@@ -9727,6 +10008,7 @@ function showPage(name, btn) {
   if (_showPageCurrent === 'signal-center' && name !== 'signal-center') scStopSpikePolling?.();
   if (_showPageCurrent === 'bots' && name !== 'bots') _botStopFeedPoll?.();
   if (_showPageCurrent === 'bot-advance' && name !== 'bot-advance') _baStopPoll?.();
+  if (_showPageCurrent === 'ext-hours'   && name !== 'ext-hours')   _ehStopPoll?.();
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   if (name !== 'trading-desk') _tdClearHeight?.();
@@ -9734,7 +10016,7 @@ function showPage(name, btn) {
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
   _showPageCurrent = name;
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadBzOptions(); }, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, 'bot-advance': () => { loadBotAdvance(true); _baStartPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, /* Stats merged into Health (2026-05-25): one tab loads both */ health: () => { loadHealth(); loadStats(); }, stats: () => { showPage('health'); }, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); }, screener: () => { if (typeof loadScreener === 'function') loadScreener(); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadBzOptions(); }, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, 'bot-advance': () => { loadBotAdvance(true); _baStartPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, /* Stats merged into Health (2026-05-25): one tab loads both */ health: () => { loadHealth(); loadStats(); }, stats: () => { showPage('health'); }, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); }, screener: () => { if (typeof loadScreener === 'function') loadScreener(); }, 'ext-hours': () => { loadExtHours(); _ehStartPoll(); }, 'retrospective': () => { loadRetrospective(); }, 'top-picks': () => { loadTopPicks(); } };
   loaders[name]?.();
 }
 
@@ -24537,6 +24819,21 @@ async function loadUWCongress() {
 }
 
 function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Strict allowlist for stock tickers — strips anything that isn't safe for both
+// HTML text content AND JS-string contexts (e.g. inline onclick handlers).
+// Valid ticker chars: A-Z, 0-9, '.', '-' (plus '/' for FX/pairs).
+function _safeSymbol(s) { return String(s ?? '').toUpperCase().replace(/[^A-Z0-9./-]/g, '').slice(0, 20); }
+// Fetch + parse helper that surfaces HTTP errors clearly instead of letting
+// r.json() throw opaque parse errors on 4xx/5xx responses.
+async function _safeJson(url, opts = {}) {
+  const r = await fetch(url, { cache: 'no-store', ...opts });
+  if (!r.ok) {
+    let body = '';
+    try { body = (await r.text()).slice(0, 200); } catch {}
+    throw new Error(`HTTP ${r.status}${body ? ': ' + body : ''}`);
+  }
+  return r.json();
+}
 
 let _sentinelTimer = null;
 
@@ -25315,6 +25612,434 @@ window.screenerSaveCurrent  = screenerSaveCurrent;
 window.screenerLoadSaved    = screenerLoadSaved;
 window.loadScreener         = loadScreener;
 // ─── End Screener Tab ──────────────────────────────────────────────────────
+
+// ─── Extended Hours Tab ────────────────────────────────────────────────────
+let _ehCurrentTab = 'pre';
+let _ehPollTimer  = null;
+function _ehStartPoll() { _ehStopPoll(); _ehPollTimer = setInterval(() => loadExtHours(false), 5 * 60_000); }
+function _ehStopPoll()  { if (_ehPollTimer) { clearInterval(_ehPollTimer); _ehPollTimer = null; } }
+
+function ehSwitchTab(tab) {
+  _ehCurrentTab = tab;
+  document.getElementById('ehTabPre').classList.toggle('active',  tab === 'pre');
+  document.getElementById('ehTabPost').classList.toggle('active', tab === 'post');
+  document.getElementById('ehPanelPre').style.display  = tab === 'pre'  ? '' : 'none';
+  document.getElementById('ehPanelPost').style.display = tab === 'post' ? '' : 'none';
+}
+
+async function loadExtHours(forceRefresh) {
+  const statusEl = document.getElementById('ehStatus');
+  if (statusEl) statusEl.textContent = 'Loading…';
+  // Load portfolio in parallel (fire-and-forget into its own section)
+  _loadEhPortfolio().catch(() => {});
+  try {
+    const url = '/api/market/extended-hours' + (forceRefresh ? '?bust=' + Date.now() : '');
+    const d = await _safeJson(url);
+    if (d.error) throw new Error(d.error);
+
+    // Session badge
+    const badge = document.getElementById('ehSessionBadge');
+    if (badge) {
+      badge.textContent = d.session_active || '—';
+      badge.className   = 'eh-badge ' + (d.session_active || 'closed');
+    }
+    const etEl = document.getElementById('ehEtTime');
+    if (etEl) etEl.textContent = d.et_time || '';
+
+    // Render all four tables
+    _ehRenderTable('ehPreGainers',  d.premarket?.gainers  || []);
+    _ehRenderTable('ehPreLosers',   d.premarket?.losers   || []);
+    _ehRenderTable('ehPostGainers', d.postmarket?.gainers || []);
+    _ehRenderTable('ehPostLosers',  d.postmarket?.losers  || []);
+
+    const preTot  = d.premarket?.total  || 0;
+    const postTot = d.postmarket?.total || 0;
+    if (statusEl) statusEl.textContent =
+      `Scanned ${d.scanned || 0} symbols · ${preTot} pre-market movers · ${postTot} post-market movers${d.cached ? ' · cached' : ''}`;
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+function _ehRenderTable(containerId, rows) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = '<div class="eh-empty">No data available</div>';
+    return;
+  }
+  const fmtVol = v => {
+    if (!v) return '—';
+    if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
+    if (v >= 1_000)     return (v / 1_000).toFixed(0) + 'K';
+    return String(v);
+  };
+  el.innerHTML = `<table class="eh-table">
+    <thead><tr>
+      <th>Symbol</th>
+      <th>Name</th>
+      <th class="num">Price</th>
+      <th class="num">Chg %</th>
+      <th class="num">Chg $</th>
+      <th class="num">Volume</th>
+    </tr></thead>
+    <tbody>${rows.map(r => {
+      const up   = r.chg_pct >= 0;
+      const cls  = up ? 'up' : 'dn';
+      const sign = up ? '+' : '';
+      const sym  = _safeSymbol(r.symbol);
+      return `<tr>
+        <td class="sym" onclick="openFloatExplorer();explorerSelect('${sym}')" title="Open in Stock Explorer">${_escHtml(sym)}</td>
+        <td><span class="eh-name" title="${_escHtml(r.name || '')}">${_escHtml(r.name || '—')}</span></td>
+        <td class="num">$${r.ext_price != null ? r.ext_price.toFixed(2) : '—'}</td>
+        <td class="num ${cls}">${sign}${r.chg_pct != null ? r.chg_pct.toFixed(2) : '—'}%</td>
+        <td class="num ${cls}">${r.chg_abs != null ? sign + '$' + Math.abs(r.chg_abs).toFixed(2) : '—'}</td>
+        <td class="num">${fmtVol(r.volume)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+async function _loadEhPortfolio() {
+  const bodyEl   = document.getElementById('ehPortfolioBody');
+  const labelEl  = document.getElementById('ehPortSourceLabel');
+  const src      = typeof currentSource !== 'undefined' ? currentSource : 'alpaca';
+
+  const srcLabel = src === 'moomoo'      ? '💰 Moomoo'
+                 : src === 'alpaca_live' ? '🔴 Alpaca Live'
+                 : src === 'tiger'       ? '🐯 Tiger'
+                 : src === 'tiger_demo'  ? '🐯 Tiger Demo'
+                 :                        '📄 Alpaca Paper';
+  if (labelEl) labelEl.textContent = srcLabel;
+  if (bodyEl)  bodyEl.innerHTML = '<div class="eh-port-loading">Loading…</div>';
+
+  try {
+    const d = await _safeJson(`/api/market/extended-hours-portfolio?source=${encodeURIComponent(src)}`);
+    if (d.error) throw new Error(d.error);
+    if (d.error_hint && (!d.positions || !d.positions.length)) {
+      if (bodyEl) bodyEl.innerHTML = `<div class="eh-port-loading" style="color:#f85149">⚠️ ${d.error_hint}</div>`;
+      return;
+    }
+    _ehRenderPortfolioTable(bodyEl, d.positions || [], d.session_active);
+  } catch (e) {
+    if (bodyEl) bodyEl.innerHTML = `<div class="eh-port-loading">Unable to load portfolio: ${e.message}</div>`;
+  }
+}
+
+function _ehRenderPortfolioTable(el, rows, session) {
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = '<div class="eh-port-loading">No open positions in this account.</div>';
+    return;
+  }
+
+  // Column header depends on session
+  const extLabel = session === 'premarket'  ? 'Pre-Mkt Price'
+                 : session === 'postmarket' ? 'Post-Mkt Price'
+                 : 'Price';
+  const extChgLabel = session === 'premarket'  ? 'Pre-Mkt Chg'
+                    : session === 'postmarket' ? 'Post-Mkt Chg'
+                    : 'Day Chg';
+
+  const fmt$ = v => v != null ? (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2) : '—';
+  const fmtPct = v => v != null ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
+  const fmtPrice = v => v != null ? '$' + Number(v).toFixed(2) : '—';
+
+  el.innerHTML = `<table class="eh-port-table">
+    <thead><tr>
+      <th>Symbol</th>
+      <th class="num">Shares</th>
+      <th class="num">Avg Cost</th>
+      <th class="num">${extLabel}</th>
+      <th class="num">${extChgLabel}</th>
+      <th class="num">Ext P&amp;L</th>
+      <th class="num">Ext P&amp;L%</th>
+      <th class="num">Base P&amp;L</th>
+    </tr></thead>
+    <tbody>${rows.map(r => {
+      const extUp   = r.ext_chg_pct != null && r.ext_chg_pct >= 0;
+      const extCls  = r.ext_chg_pct == null ? 'muted' : extUp ? 'up' : 'dn';
+      const plCls   = r.ext_pl == null ? 'muted' : r.ext_pl >= 0 ? 'up' : 'dn';
+      const bplCls  = r.unrealized_pl == null ? 'muted' : r.unrealized_pl >= 0 ? 'up' : 'dn';
+      const basePl  = r.unrealized_pl != null
+        ? (r.unrealized_pl >= 0 ? '+$' : '-$') + Math.abs(r.unrealized_pl).toFixed(2)
+        : '—';
+      const sym = _safeSymbol(r.symbol);
+      return `<tr>
+        <td class="sym" onclick="openFloatExplorer();explorerSelect('${sym}')" title="Open in Stock Explorer">${_escHtml(sym)}</td>
+        <td class="num">${r.qty != null ? r.qty : '—'}</td>
+        <td class="num">${fmtPrice(r.avg_entry_price)}</td>
+        <td class="num">${fmtPrice(r.ext_price)}</td>
+        <td class="num ${extCls}">${r.ext_chg_pct != null ? fmtPct(r.ext_chg_pct) : '—'}${r.ext_chg_abs != null ? ' / ' + fmt$(r.ext_chg_abs) : ''}</td>
+        <td class="num ${plCls}">${r.ext_pl != null ? fmt$(r.ext_pl) : '—'}</td>
+        <td class="num ${plCls}">${r.ext_pl_pct != null ? fmtPct(r.ext_pl_pct) : '—'}</td>
+        <td class="num ${bplCls}">${basePl}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+// ─── End Extended Hours Tab ────────────────────────────────────────────────
+
+
+// ─── Retrospective Tab ─────────────────────────────────────────────────────
+let _rsCurrentSignal = 'all';
+async function loadRetrospective() {
+  const body = document.getElementById('rsBody');
+  if (body) body.innerHTML = '<div class="rs-loading">Loading…</div>';
+
+  // Default date = yesterday (most recent fully-settled trading day)
+  const dEl = document.getElementById('rsDate');
+  if (dEl && !dEl.value) {
+    const y = new Date(); y.setDate(y.getDate() - 1);
+    dEl.value = y.toISOString().slice(0, 10);
+  }
+
+  const date      = dEl?.value || new Date().toISOString().slice(0, 10);
+  const direction = document.getElementById('rsDirection')?.value || 'both';
+  const minPct    = document.getElementById('rsMinPct')?.value || 3;
+  const minPrice  = document.getElementById('rsMinPrice')?.value || 2;
+  const signal    = _rsCurrentSignal;
+
+  try {
+    const url = `/api/retrospective?date=${date}&direction=${direction}&min_pct=${minPct}&min_price=${minPrice}` +
+                (signal && signal !== 'all' ? `&signal=${encodeURIComponent(signal)}` : '');
+    const d = await _safeJson(url);
+    if (d.error) throw new Error(d.error);
+
+    _rsRenderSummary(d.summary, d.movers?.length || 0);
+    _rsRenderSigPills(d.summary);
+    _rsRenderTable(d.movers || []);
+  } catch (e) {
+    if (body) body.innerHTML = `<div class="rs-empty">Error: ${e.message}</div>`;
+  }
+}
+
+function _rsRenderSummary(summary, currentCount) {
+  const el = document.getElementById('rsSummary');
+  if (!el) return;
+  // The ROLLUP query returns one row per signal + 1 total row (where primary_signal is null)
+  const total = summary?.find(s => s.primary_signal === null) || { total: 0, up_count: 0, down_count: 0, bot_caught: 0 };
+  const catchPct = total.total > 0 ? (total.bot_caught / total.total * 100).toFixed(1) : '0.0';
+  el.innerHTML = `
+    <div class="rs-stat"><div class="lbl">Total Movers</div><div class="val">${total.total}</div></div>
+    <div class="rs-stat"><div class="lbl">🟢 UP</div><div class="val" style="color:#3fb950">${total.up_count}</div></div>
+    <div class="rs-stat"><div class="lbl">🔴 DOWN</div><div class="val" style="color:#f85149">${total.down_count}</div></div>
+    <div class="rs-stat"><div class="lbl">Bot Caught</div><div class="val" style="color:${total.bot_caught > 0 ? '#3fb950' : '#8b949e'}">${total.bot_caught} <span style="font-size:11px;color:var(--muted)">(${catchPct}%)</span></div></div>
+    <div class="rs-stat"><div class="lbl">Currently Shown</div><div class="val">${currentCount}</div></div>
+  `;
+}
+
+function _rsRenderSigPills(summary) {
+  const el = document.getElementById('rsSigPills');
+  if (!el) return;
+  const signals = (summary || []).filter(s => s.primary_signal !== null);
+  const buttons = [
+    { id: 'all', label: 'All', count: signals.reduce((a,b) => a + Number(b.signal_count), 0) },
+    ...signals.map(s => ({ id: s.primary_signal, label: s.primary_signal || 'unknown', count: Number(s.signal_count) })),
+  ];
+  el.innerHTML = buttons.map(b => `
+    <span class="rs-pill ${_rsCurrentSignal === b.id ? 'active' : ''}" onclick="_rsPickSignal('${b.id}')">
+      ${b.label} <span style="opacity:0.7">${b.count}</span>
+    </span>
+  `).join('');
+}
+
+function _rsPickSignal(s) { _rsCurrentSignal = s; loadRetrospective(); }
+
+function _rsRenderTable(rows) {
+  const body = document.getElementById('rsBody');
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = '<div class="rs-empty">No movers found for this date / filter combination.<br><span style="font-size:11px">(Backfill may still be running — try a recent date)</span></div>';
+    return;
+  }
+
+  const fmtPct = v => v != null ? (Number(v) >= 0 ? '+' : '') + Number(v).toFixed(2) + '%' : '—';
+  const fmt$   = v => v != null ? '$' + (Math.abs(Number(v)) >= 1_000_000 ? (Number(v)/1_000_000).toFixed(1)+'M' : Math.abs(Number(v)) >= 1_000 ? (Number(v)/1_000).toFixed(0)+'K' : Number(v).toFixed(0)) : '—';
+  const fmtPx  = v => v != null ? '$' + Number(v).toFixed(2) : '—';
+  const fmtVol = v => { if (!v) return '—'; v = Number(v); if (v >= 1e6) return (v/1e6).toFixed(1)+'M'; if (v >= 1e3) return (v/1e3).toFixed(0)+'K'; return String(v); };
+  const esc    = s => s == null ? '' : String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+  body.innerHTML = `<table class="rs-table">
+    <thead><tr>
+      <th>Symbol</th><th class="num">Chg %</th><th class="num">Close</th><th class="num">Vol×Avg</th>
+      <th>Sector</th><th class="num">Sector ETF</th><th>Cap</th>
+      <th>Primary Signal</th><th>Coverage</th>
+      <th>News</th><th class="num">UW Flow</th><th>Insider</th>
+      <th class="num">Bot Score</th><th>Caught?</th>
+    </tr></thead>
+    <tbody>${rows.map(r => {
+      const upDown = r.direction === 'UP' ? 'up' : 'dn';
+      const sigClass = r.primary_signal || 'unknown';
+      const cov      = r.signal_coverage_window || 'sparse';
+      const sectorEtf = r.sector_etf_move_pct != null ? fmtPct(r.sector_etf_move_pct) : '—';
+      const newsCell = r.news_count_24h > 0
+        ? `<span class="rs-headline" title="${esc(r.top_headline)}">${r.news_count_24h}× ${esc(r.top_headline || '').slice(0, 30)}…</span>`
+        : '<span class="muted">—</span>';
+      const flowCell = r.uw_flow_premium_24h != null ? fmt$(r.uw_flow_premium_24h) : '—';
+      const insCell  = r.insider_net_signal
+        ? `<span class="${r.insider_net_signal === 'buying' ? 'up' : 'dn'}">${r.insider_net_signal === 'buying' ? '🟢 buying' : '🔴 selling'}</span>`
+        : '<span class="muted">—</span>';
+      const botCaught = r.caught_by_bot
+        ? '<span class="rs-caught">✓ YES</span>'
+        : (r.bot_conviction_score != null ? '<span class="muted">no (scored)</span>' : '<span class="muted">no (not scored)</span>');
+      const sym = _safeSymbol(r.symbol);
+      return `<tr>
+        <td class="sym" onclick="openFloatExplorer();explorerSelect('${sym}')" title="Open in Stock Explorer">${_escHtml(sym)}</td>
+        <td class="num ${upDown}">${fmtPct(r.chg_pct)}</td>
+        <td class="num">${fmtPx(r.close)}</td>
+        <td class="num">${r.volume_vs_30d_avg != null ? Number(r.volume_vs_30d_avg).toFixed(1) + '×' : '—'}</td>
+        <td>${esc(r.sector) || '<span class="muted">—</span>'}</td>
+        <td class="num">${sectorEtf}</td>
+        <td>${r.market_cap_band || '<span class="muted">—</span>'}</td>
+        <td><span class="rs-signal-tag ${sigClass}">${sigClass}</span></td>
+        <td><span class="rs-coverage ${cov}">${cov}</span></td>
+        <td>${newsCell}</td>
+        <td class="num">${flowCell}</td>
+        <td>${insCell}</td>
+        <td class="num">${r.bot_conviction_score != null ? r.bot_conviction_score : '<span class="muted">—</span>'}</td>
+        <td>${botCaught}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+// ─── End Retrospective Tab ─────────────────────────────────────────────────
+
+
+// ─── Top Picks Tab (v2 ML model) ───────────────────────────────────────────
+async function loadTopPicks() {
+  const body  = document.getElementById('tpBody');
+  if (body) body.innerHTML = '<div class="tp-loading">Loading…</div>';
+
+  // Default date = blank → server uses latest available
+  const date         = document.getElementById('tpDate')?.value || '';
+  const limit        = document.getElementById('tpLimit')?.value || 20;
+  const minPrice     = document.getElementById('tpMinPrice')?.value || 5;
+  const minVolK      = parseInt(document.getElementById('tpMinVol')?.value || 500);
+  const minVol       = minVolK * 1000;
+  const diversified  = document.getElementById('tpDiversified')?.checked;
+  const perSector    = document.getElementById('tpPerSector')?.value || 2;
+  const quality      = document.getElementById('tpQuality')?.checked;
+
+  // Show/hide per-sector dropdown based on Diversified checkbox
+  const psLbl = document.getElementById('tpPerSectorLbl');
+  const psSel = document.getElementById('tpPerSector');
+  if (psLbl) psLbl.style.display = diversified ? '' : 'none';
+  if (psSel) psSel.style.display = diversified ? '' : 'none';
+
+  const url = `/api/predictions/top?limit=${limit}&min_price=${minPrice}&min_volume=${minVol}` +
+              (quality ? `&quality=1` : '') +
+              (diversified ? `&diversified=1&per_sector=${perSector}` : '') +
+              (date ? `&date=${date}` : '');
+  try {
+    const d = await _safeJson(url);
+    if (d.error) throw new Error(d.error);
+
+    // Update date picker if blank to reflect server-chosen date
+    const dEl = document.getElementById('tpDate');
+    if (dEl && !dEl.value && d.date) dEl.value = d.date.slice(0, 10);
+
+    _tpRenderMeta(d);
+    _tpRenderStats(d);
+    _tpRenderTable(d.results || []);
+  } catch (e) {
+    if (body) body.innerHTML = `<div class="tp-loading">Error: ${e.message}</div>`;
+  }
+}
+
+function _tpRenderMeta(d) {
+  const el = document.getElementById('tpMeta');
+  if (!el) return;
+  const divChip = d.diversified
+    ? `<span class="tag" style="background:rgba(63,185,80,0.18);color:#3fb950">Diversified: ${d.diversified.max_per_sector}/sector → ${d.diversified.sectors_in_result} sectors</span>`
+    : '';
+  const qualityChip = d.filters_applied
+    ? `<span class="tag" style="background:rgba(255,179,71,0.18);color:#ffb347" title="Quality filter applied — backtest: 51%→63% win rate">🛡️ Quality: removed ${Object.values(d.filters_applied).reduce((a,b)=>a+b,0)} picks</span>`
+    : '';
+  el.innerHTML = `
+    <span class="tag">Date: ${d.date ? d.date.slice(0,10) : '—'}</span>
+    <span class="tag">Model: v2-phaseB5 (id=${d.model_id})</span>
+    <span class="tag">AUC: ${Number(d.model_auc || 0).toFixed(4)}</span>
+    <span class="tag">Candidates scored: ${d.candidates}</span>
+    ${qualityChip}
+    ${divChip}
+  `;
+}
+
+function _tpRenderStats(d) {
+  const el = document.getElementById('tpStats');
+  if (!el) return;                                  // bail before any deref
+  if (!d.results?.length) { el.innerHTML = ''; return; }
+  const probs = d.results.map(r => r.prob);
+  const maxProb = Math.max(...probs);
+  const minProb = Math.min(...probs);
+  const meanProb = probs.reduce((a,b)=>a+b,0) / probs.length;
+  const sectorCounts = {};
+  for (const r of d.results) {
+    const s = r.sector || 'Unknown';
+    sectorCounts[s] = (sectorCounts[s] || 0) + 1;
+  }
+  const topSector = Object.entries(sectorCounts).sort((a,b) => b[1]-a[1])[0];
+  el.innerHTML = `
+    <div class="tp-stat"><div class="lbl">Picks shown</div><div class="val">${d.results.length}</div></div>
+    <div class="tp-stat"><div class="lbl">Top probability</div><div class="val" style="color:#3fb950">${(maxProb * 100).toFixed(1)}%</div></div>
+    <div class="tp-stat"><div class="lbl">Mean probability</div><div class="val">${(meanProb * 100).toFixed(1)}%</div></div>
+    <div class="tp-stat"><div class="lbl">Min probability</div><div class="val" style="color:var(--muted)">${(minProb * 100).toFixed(1)}%</div></div>
+    <div class="tp-stat"><div class="lbl">Top sector</div><div class="val" style="font-size:13px">${topSector ? topSector[0] + ' (' + topSector[1] + ')' : '—'}</div></div>
+  `;
+}
+
+function _tpRenderTable(rows) {
+  const body = document.getElementById('tpBody');
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = '<div class="tp-loading">No picks match the filters. Try lower min price / volume.</div>';
+    return;
+  }
+  const fmtPct = v => v != null ? (Number(v) >= 0 ? '+' : '') + Number(v).toFixed(2) + '%' : '—';
+  const fmt$   = v => v != null ? '$' + (Math.abs(Number(v)) >= 1_000_000 ? (Number(v)/1_000_000).toFixed(1)+'M' : Math.abs(Number(v)) >= 1_000 ? (Number(v)/1_000).toFixed(0)+'K' : Number(v).toFixed(0)) : '—';
+  const fmtPx  = v => v != null ? '$' + Number(v).toFixed(2) : '—';
+  const fmtMC  = v => { if (!v) return '—'; v = Number(v); if (v >= 1e12) return '$' + (v/1e12).toFixed(1) + 'T'; if (v >= 1e9) return '$' + (v/1e9).toFixed(1) + 'B'; return '$' + (v/1e6).toFixed(0) + 'M'; };
+  const fmtVol = v => { if (!v) return '—'; v = Number(v); if (v >= 1e6) return (v/1e6).toFixed(1) + 'M'; return (v/1e3).toFixed(0) + 'K'; };
+  const probClass = p => p >= 0.55 ? 'hot' : p >= 0.5 ? 'warm' : 'cool';
+  const esc = s => s == null ? '' : String(s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+  body.innerHTML = `<table class="tp-table">
+    <thead><tr>
+      <th>#</th><th>Symbol</th><th class="num">Prob</th><th>Sector</th><th class="num">Mkt Cap</th>
+      <th class="num">Price</th><th class="num">Day Chg</th><th class="num">RVOL</th>
+      <th class="num">Sec Rank</th><th class="num">Sec Chg</th>
+      <th class="num">UW Flow</th><th class="num">Bull %</th><th class="num">Insider</th>
+      <th class="num">Days→Earn</th><th class="num">Volume</th>
+    </tr></thead>
+    <tbody>${rows.map((r, i) => {
+      const dayCls = (r.full_day_chg_pct ?? 0) >= 0 ? 'up' : 'dn';
+      const secCls = (r.sector_chg ?? 0) >= 0 ? 'up' : 'dn';
+      const insider = r.insider_cluster_30d > 0 ? `<span class="up">🟢 ${r.insider_cluster_30d}</span>` : '<span class="muted">—</span>';
+      const daysE   = r.days_to_earnings != null && r.days_to_earnings <= 30
+        ? (r.days_to_earnings <= 7 ? `<span class="up">⚠️ ${r.days_to_earnings}d</span>` : `${r.days_to_earnings}d`)
+        : '<span class="muted">—</span>';
+      const sym = _safeSymbol(r.symbol);
+      return `<tr>
+        <td class="tp-rank">${i + 1}</td>
+        <td class="sym" onclick="openFloatExplorer();explorerSelect('${sym}')" title="Open in Stock Explorer">${_escHtml(sym)}</td>
+        <td class="num"><span class="tp-prob ${probClass(r.prob)}">${(r.prob * 100).toFixed(1)}%</span></td>
+        <td>${esc(r.sector || '—')}</td>
+        <td class="num">${fmtMC(r.market_cap)}</td>
+        <td class="num">${fmtPx(r.reg_close)}</td>
+        <td class="num ${dayCls}">${fmtPct(r.full_day_chg_pct)}</td>
+        <td class="num">${r.rvol_30d != null ? Number(r.rvol_30d).toFixed(1) + '×' : '—'}</td>
+        <td class="num">${r.sector_rank != null ? '#' + r.sector_rank : '—'}</td>
+        <td class="num ${secCls}">${fmtPct(r.sector_chg)}</td>
+        <td class="num">${r.uw_flow_24h_premium > 0 ? fmt$(r.uw_flow_24h_premium) : '<span class="muted">—</span>'}</td>
+        <td class="num">${r.uw_flow_bullish_pct != null ? Math.round(r.uw_flow_bullish_pct) + '%' : '<span class="muted">—</span>'}</td>
+        <td class="num">${insider}</td>
+        <td class="num">${daysE}</td>
+        <td class="num">${fmtVol(r.total_volume)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+// ─── End Top Picks Tab ─────────────────────────────────────────────────────
 
 
 async function loadBots() {

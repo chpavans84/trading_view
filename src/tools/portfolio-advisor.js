@@ -35,8 +35,8 @@ async function ensureDb() {
 const PROD_BOT_RULES = {
   rules: {
     entry_filters: {
-      min_composite_score: 60, conviction_grade_min: 'C',
-      market_cap_min_b: 5, price_min: 5, price_max: 500,
+      min_composite_score: 70, conviction_grade_min: 'C',
+      market_cap_min_b: 5, price_min: 5, price_max: 2500,
       min_adv_dollar_vol: 5_000_000, avoid_earnings_within_days: 3,
       vix_min: 15, vix_max: 60, vix_aggressive_at: 25,
       require_uw_label_any: ['bullish', 'strong_bullish'],
@@ -107,7 +107,7 @@ export function registerPortfolioAdvisorTools(server) {
 
   server.tool(
     'bot_verdict',
-    'Run the bot\'s full decision engine on a single symbol. Returns one of 4 verdicts: BUY (passes all gates, composite ≥ 60), NEAR (within 10 points of threshold), BLOCKED (composite high enough but a hard gate fails), WATCH (below threshold). Also returns composite score, setup type (catalyst/breakout/momentum/value/mean_reversion), top 3 driver signals, and explicit blockers[] naming each failed gate (earnings_proximity, liquidity, conviction_grade, uw_label, etc.). Use whenever asked "would the bot buy X?" or "why didn\'t the bot trade X?".',
+    'Run the bot\'s full decision engine on a single symbol. Returns one of 4 verdicts: BUY (passes all gates, composite ≥ 70), NEAR (within 10 points of threshold), BLOCKED (composite high enough but a hard gate fails), WATCH (below threshold). Also returns composite score, setup type (catalyst/breakout/momentum/value/mean_reversion), top 3 driver signals, and explicit blockers[] naming each failed gate (earnings_proximity, liquidity, conviction_grade, uw_label, etc.). Use whenever asked "would the bot buy X?" or "why didn\'t the bot trade X?".',
     {
       symbol: z.string().describe('Stock ticker, e.g. NVDA, AAPL.'),
     },
@@ -176,6 +176,329 @@ export function registerPortfolioAdvisorTools(server) {
   );
 
   server.tool(
+    'weekly_bot_retrospective',
+    'Generate a structured weekly retrospective of the bot\'s activity. Returns: trades opened/closed in the window with P&L, top winners + top losers, biggest misses (stocks that conviction-engine scored A/B but bot never bought), gate-histogram summary (which gates rejected most candidates), signal-edge updates from signal_returns. Use on Saturdays to assess the week. Pavan asks Claude Desktop "weekly review" and this gives all the data; Claude narrates the analysis using your Max subscription.',
+    {
+      days: z.coerce.number().optional().describe('Lookback window in days. Default 7, min 1, max 30.'),
+    },
+    async ({ days }) => {
+      const d = Math.min(Math.max(parseInt(days, 10) || 7, 1), 30);
+      if (!await ensureDb()) return jsonResult({ error: 'Database unreachable from MCP server.' }, true);
+      try {
+        // 1. Trades opened in window
+        const { rows: opened } = await dbQuery(`
+          SELECT t.symbol, t.qty, t.entry_price, t.opened_at, t.setup_type, t.status,
+                 t.exit_price, t.closed_at, b.name AS bot_name,
+                 CASE WHEN t.status = 'closed' AND t.entry_price > 0
+                      THEN ROUND(((t.exit_price - t.entry_price) / t.entry_price * 100)::numeric, 2)
+                      ELSE NULL END AS pnl_pct,
+                 CASE WHEN t.status = 'closed' AND t.qty IS NOT NULL
+                      THEN ROUND(((t.exit_price - t.entry_price) * t.qty)::numeric, 2)
+                      ELSE NULL END AS pnl_usd
+          FROM trades t LEFT JOIN bots b ON b.id = t.bot_id
+          WHERE t.opened_at > NOW() - INTERVAL '${d} days'
+          ORDER BY t.opened_at DESC LIMIT 50`);
+
+        // 2. Top winners + losers (closed only)
+        const closed = opened.filter(t => t.status === 'closed' && t.pnl_pct != null);
+        const winners = [...closed].filter(t => t.pnl_pct > 0).sort((a, b) => b.pnl_pct - a.pnl_pct).slice(0, 5);
+        const losers  = [...closed].filter(t => t.pnl_pct < 0).sort((a, b) => a.pnl_pct - b.pnl_pct).slice(0, 5);
+        const open_positions = opened.filter(t => t.status === 'open');
+
+        // 3. Biggest MISSES: A/B-grade conviction stocks the bot never bought
+        const heldSymbols = open_positions.map(t => t.symbol).concat(closed.map(t => t.symbol));
+        const heldSet = heldSymbols.length ? heldSymbols : ['__NONE__'];
+        const { rows: misses } = await dbQuery(`
+          SELECT cs.symbol,
+                 MAX(cs.score)::int AS peak_score,
+                 STRING_AGG(DISTINCT cs.grade, ',') AS grades,
+                 COUNT(*)::int AS n_scores,
+                 MAX(cs.scored_at) AS latest_score_at
+          FROM conviction_scores cs
+          WHERE cs.scored_at > NOW() - INTERVAL '${d} days'
+            AND cs.grade IN ('A', 'B')
+            AND cs.score >= 70
+            AND cs.symbol != ALL($1::text[])
+          GROUP BY cs.symbol
+          ORDER BY MAX(cs.score) DESC, COUNT(*) DESC
+          LIMIT 15`, [heldSet]);
+
+        // 4. Gate-histogram summary (from Phase 1.2 logging)
+        const { rows: gateHist } = await dbQuery(`
+          SELECT key AS gate, SUM(value::int)::int AS rejections
+          FROM bot_decisions bd, jsonb_each_text(bd.factor_breakdown->'gate_histogram')
+          WHERE bd.scanned_at > NOW() - INTERVAL '${d} days'
+            AND bd.factor_breakdown ? 'gate_histogram'
+          GROUP BY 1 ORDER BY 2 DESC LIMIT 10`);
+
+        // 5. Bot decision action breakdown
+        const { rows: actionMix } = await dbQuery(`
+          SELECT action, COUNT(*)::int AS n
+          FROM bot_decisions
+          WHERE scanned_at > NOW() - INTERVAL '${d} days'
+          GROUP BY 1 ORDER BY 2 DESC`);
+
+        // 6. Composite-score edge stats (refresh from signal_returns)
+        const { rows: compositeEdge } = await dbQuery(`
+          SELECT
+            CASE WHEN composite_score >= 80 THEN '80-100'
+                 WHEN composite_score >= 70 THEN '70-79'
+                 WHEN composite_score >= 60 THEN '60-69'
+                 ELSE 'below 60' END AS bucket,
+            COUNT(DISTINCT source_id)::int AS n,
+            ROUND(AVG(ret_10d_pct)::numeric, 2)::float8 AS avg_10d_pct,
+            ROUND(100.0 * COUNT(*) FILTER (WHERE ret_10d_pct > 0)::numeric / NULLIF(COUNT(*), 0), 1)::float8 AS win_10d_pct
+          FROM signal_returns
+          WHERE signal_name = 'vix' AND ret_10d_pct IS NOT NULL
+            AND scored_at > NOW() - INTERVAL '${d * 6} days'   -- wider window for stats
+          GROUP BY 1 ORDER BY 1 DESC`);
+
+        // 7. Momentum_flip live experiment stats
+        const { rows: momFlipStats } = await dbQuery(`
+          SELECT COUNT(*)::int AS n_buys, COUNT(DISTINCT symbol)::int AS unique_symbols
+          FROM bot_decisions
+          WHERE setup_type = 'momentum_flip' AND action = 'buy'
+            AND scanned_at > NOW() - INTERVAL '${d} days'`);
+
+        return jsonResult({
+          window_days: d,
+          generated_at: new Date().toISOString(),
+          trades_opened: opened.length,
+          trades_closed: closed.length,
+          open_positions: open_positions.length,
+          total_realized_pnl_usd: closed.reduce((s, t) => s + (Number(t.pnl_usd) || 0), 0).toFixed(2),
+          winners,
+          losers,
+          biggest_misses: misses,
+          gate_rejection_summary: gateHist,
+          action_breakdown: actionMix,
+          composite_edge_recent: compositeEdge,
+          momentum_flip_experiment: momFlipStats[0],
+          interpretation: 'Use winners + losers to assess which setups worked. biggest_misses = stocks scored A/B at 70+ but bot never bought (universe filter, gate rejection, or capacity constraint). gate_rejection_summary tells which gate is killing trades. momentum_flip_experiment tracks the live capped experiment shipped 2026-05-27.',
+        });
+      } catch (err) {
+        return jsonResult({ error: `Weekly retrospective failed: ${err.message}` }, true);
+      }
+    }
+  );
+
+  server.tool(
+    'why_didnt_bot_buy',
+    'Audit why the bot did NOT take a position in a specific symbol. Returns three things: (1) historical bot_decisions for the symbol on the requested date or recent window, including the gate histogram showing which gates rejected candidates that scan, (2) any conviction_scores written for the symbol around that time with grade + composite, (3) a live `bot_verdict` for the symbol RIGHT NOW (uses current data — same engine as live bot scans). Use when Pavan asks "why didn\'t the bot buy MU on May 21?" or "what\'s blocking AMD today?". Note: live verdict uses CURRENT signals; historical bot_decisions row tells what happened at the time.',
+    {
+      symbol: z.string().describe('Stock ticker, e.g. MU, AMD, NVDA.'),
+      date: z.string().optional().describe('ISO date YYYY-MM-DD to audit, e.g. "2026-05-21". Default: last 7 days of decisions for the symbol.'),
+    },
+    async ({ symbol, date }) => {
+      const sym = (symbol || '').trim().toUpperCase();
+      if (!sym) return jsonResult({ error: 'symbol is required' }, true);
+      if (!await ensureDb()) return jsonResult({ error: 'Database unreachable from MCP server.' }, true);
+      try {
+        // 1. Historical bot_decisions for this symbol
+        const decisionsQuery = date
+          ? `SELECT bd.id, bd.bot_id, b.name AS bot_name, bd.scanned_at, bd.action, bd.composite_score, bd.setup_type, bd.notes, bd.factor_breakdown
+             FROM bot_decisions bd
+             LEFT JOIN bots b ON b.id = bd.bot_id
+             WHERE bd.symbol = $1
+               AND (bd.scanned_at AT TIME ZONE 'America/New_York')::date = $2::date
+             ORDER BY bd.scanned_at DESC LIMIT 20`
+          : `SELECT bd.id, bd.bot_id, b.name AS bot_name, bd.scanned_at, bd.action, bd.composite_score, bd.setup_type, bd.notes, bd.factor_breakdown
+             FROM bot_decisions bd
+             LEFT JOIN bots b ON b.id = bd.bot_id
+             WHERE bd.symbol = $1
+               AND bd.scanned_at > NOW() - INTERVAL '7 days'
+             ORDER BY bd.scanned_at DESC LIMIT 20`;
+        const decisionsParams = date ? [sym, date] : [sym];
+        const { rows: decisions } = await dbQuery(decisionsQuery, decisionsParams);
+
+        // 1b. Gate histograms from the SAME bot+date as the symbol's decisions (not random other bots).
+        // FIXED 2026-06-01: previously matched only by date+action, returning unrelated histograms
+        // for other symbols/bots. Now constrains to the bot_id values from the decisions we just
+        // fetched so the histogram reflects the same scan context as the decision rows above.
+        const botIdsForHist = [...new Set(decisions.map(d => d.bot_id).filter(Boolean))];
+        let gateHistograms = [];
+        if (botIdsForHist.length) {
+          const histogramQuery = date
+            ? `SELECT b.name AS bot_name, bd.scanned_at, bd.action, bd.factor_breakdown->'gate_histogram' AS gates, bd.factor_breakdown->'sample_blocked' AS sample, bd.notes
+               FROM bot_decisions bd LEFT JOIN bots b ON b.id = bd.bot_id
+               WHERE bd.action IN ('skip_unclassifiable_setup', 'skip_filtered')
+                 AND (bd.scanned_at AT TIME ZONE 'America/New_York')::date = $1::date
+                 AND bd.bot_id = ANY($2::int[])
+                 AND bd.factor_breakdown ? 'gate_histogram'
+               ORDER BY bd.scanned_at DESC LIMIT 10`
+            : `SELECT b.name AS bot_name, bd.scanned_at, bd.action, bd.factor_breakdown->'gate_histogram' AS gates, bd.factor_breakdown->'sample_blocked' AS sample, bd.notes
+               FROM bot_decisions bd LEFT JOIN bots b ON b.id = bd.bot_id
+               WHERE bd.action IN ('skip_unclassifiable_setup', 'skip_filtered')
+                 AND bd.scanned_at > NOW() - INTERVAL '24 hours'
+                 AND bd.bot_id = ANY($1::int[])
+                 AND bd.factor_breakdown ? 'gate_histogram'
+               ORDER BY bd.scanned_at DESC LIMIT 10`;
+          const histogramParams = date ? [date, botIdsForHist] : [botIdsForHist];
+          ({ rows: gateHistograms } = await dbQuery(histogramQuery, histogramParams));
+        }
+
+        // 2. Conviction scores around that date
+        const scoresQuery = date
+          ? `SELECT scored_at, score, grade, signals->>'rsi' AS rsi, signals->>'analyst_consensus' AS analyst_consensus, signals->>'weekly_trend' AS weekly_trend
+             FROM conviction_scores
+             WHERE symbol = $1
+               AND (scored_at AT TIME ZONE 'America/New_York')::date BETWEEN ($2::date - 1) AND ($2::date + 1)
+             ORDER BY scored_at DESC LIMIT 15`
+          : `SELECT scored_at, score, grade, signals->>'rsi' AS rsi, signals->>'analyst_consensus' AS analyst_consensus, signals->>'weekly_trend' AS weekly_trend
+             FROM conviction_scores
+             WHERE symbol = $1 AND scored_at > NOW() - INTERVAL '7 days'
+             ORDER BY scored_at DESC LIMIT 15`;
+        const { rows: scores } = await dbQuery(scoresQuery, decisionsParams);
+
+        // 3. Live verdict using current data
+        let liveVerdict = null;
+        try {
+          liveVerdict = await diagnoseCandidate(sym, PROD_BOT_RULES);
+        } catch (err) {
+          liveVerdict = { error: `Live diagnose failed: ${err.message}` };
+        }
+
+        return jsonResult({
+          symbol: sym,
+          query_date: date || 'last 7 days',
+          summary: decisions.length === 0
+            ? `No bot_decisions for ${sym} in the requested window. Either the bot never had ${sym} in its candidate universe, or no scan ran. Check the gate_histograms below to see what was killing candidates in scans that day.`
+            : `${decisions.length} bot_decision rows for ${sym}. See "decisions" array for what each bot did when it saw ${sym}.`,
+          decisions: decisions,
+          gate_histograms: gateHistograms,
+          conviction_scores: scores,
+          live_verdict_now: liveVerdict,
+          interpretation: 'Three views: (1) decisions = bot rows that saw this symbol on the date; (2) gate_histograms = scans that day where ALL candidates were blocked, showing which gates fired most. If the symbol isn\'t in (1) but appears in (3) conviction_scores with grade A/B, then the symbol was scored by the pipeline but NEVER reached the bot — likely killed at the universe filter (ADV NULL, price out of band, etc.). live_verdict_now answers what would happen RIGHT NOW if the bot scanned this symbol fresh.',
+        });
+      } catch (err) {
+        return jsonResult({ error: `Audit query failed: ${err.message}` }, true);
+      }
+    }
+  );
+
+  server.tool(
+    'signal_edge_report',
+    'Forward-return edge analysis per signal from the signal_returns table. For each tracked signal (composite_score, RSI, RVOL, analyst_consensus, analyst_upside_pct, insider_buys_60d, weekly_trend, drift_5d_pct, etc.), reports avg 5d/10d forward returns + win rate, BUCKETED BY VALUE (numeric signals) or BY LABEL (categorical). Use this as the canonical "does this signal have edge?" answer. ' +
+    'Pass `signal` (default: top 10 signals by sample size) to focus on one signal. Pass `days` (default 90, range 30-365). The 90-day backfill covers ~40k unique decisions per signal, ~22k with full 10d windows. Example findings already discovered 2026-05-27: composite_score 70+ has +10%/70% win rate vs 40-49 at +2%/47% (worse than coin flip); RSI 70+ overbought wins +9.65%; analyst upside 30%+ is WORST bucket (herd-already-priced-in).',
+    {
+      signal: z.string().optional().describe('Specific signal_name to analyze (e.g. "rsi", "analyst_consensus", "composite_score"). Omit to get top signals overview.'),
+      days: z.coerce.number().optional().describe('Lookback window in days. Default 90, min 30, max 365.'),
+    },
+    async ({ signal, days }) => {
+      const d = Math.min(Math.max(parseInt(days, 10) || 90, 30), 365);
+      if (!await ensureDb()) return jsonResult({ error: 'Database unreachable from MCP server.' }, true);
+      try {
+        // Composite-score bucketed analysis is the headline finding — always include.
+        const compositeBuckets = await dbQuery(`
+          SELECT
+            CASE WHEN composite_score >= 80 THEN '80-100'
+                 WHEN composite_score >= 70 THEN '70-79'
+                 WHEN composite_score >= 60 THEN '60-69'
+                 WHEN composite_score >= 50 THEN '50-59'
+                 WHEN composite_score >= 40 THEN '40-49'
+                 ELSE '0-39' END AS bucket,
+            COUNT(DISTINCT source_id)::int AS n_decisions,
+            ROUND(AVG(ret_5d_pct)::numeric, 2)::float8  AS avg_5d_pct,
+            ROUND(AVG(ret_10d_pct)::numeric, 2)::float8 AS avg_10d_pct,
+            ROUND((COUNT(*) FILTER (WHERE ret_10d_pct > 0)::numeric / NULLIF(COUNT(ret_10d_pct), 0) * 100), 1)::float8 AS pct_up_10d
+          FROM signal_returns
+          WHERE signal_name = 'vix'
+            AND scored_at > NOW() - INTERVAL '${d} days'
+            AND ret_10d_pct IS NOT NULL
+          GROUP BY 1 ORDER BY 1 DESC`);
+
+        // If a specific signal is requested, analyze it in detail (numeric → bucketed, label → grouped).
+        if (signal) {
+          const sigName = signal.trim().toLowerCase();
+          // Detect whether this signal is mostly numeric or labeled
+          const probe = await dbQuery(`
+            SELECT
+              COUNT(signal_value)::int AS n_numeric,
+              COUNT(signal_label)::int AS n_label
+            FROM signal_returns
+            WHERE signal_name = $1 AND scored_at > NOW() - INTERVAL '${d} days'`,
+            [sigName]);
+          if (!probe.rows.length || (probe.rows[0].n_numeric === 0 && probe.rows[0].n_label === 0)) {
+            return jsonResult({ error: `No data for signal "${sigName}" in the last ${d} days. Try one of: composite_score, rsi, rvol, analyst_consensus, analyst_upside_pct, insider_buys_60d, weekly_trend, drift_5d_pct, rs_score, rs_signal, guidance_signal, drift_direction.` }, true);
+          }
+          const useNumeric = probe.rows[0].n_numeric >= probe.rows[0].n_label;
+          let buckets;
+          if (useNumeric) {
+            // Auto-bucket by quintile based on observed value range
+            buckets = await dbQuery(`
+              WITH q AS (
+                SELECT
+                  signal_value, ret_5d_pct, ret_10d_pct,
+                  NTILE(5) OVER (ORDER BY signal_value) AS quintile
+                FROM signal_returns
+                WHERE signal_name = $1
+                  AND scored_at > NOW() - INTERVAL '${d} days'
+                  AND signal_value IS NOT NULL
+                  AND ret_10d_pct IS NOT NULL
+              )
+              SELECT
+                quintile,
+                CONCAT('Q', quintile, ': ', ROUND(MIN(signal_value)::numeric, 2), ' to ', ROUND(MAX(signal_value)::numeric, 2)) AS range,
+                COUNT(*)::int AS n,
+                ROUND(AVG(ret_5d_pct)::numeric, 2)::float8  AS avg_5d_pct,
+                ROUND(AVG(ret_10d_pct)::numeric, 2)::float8 AS avg_10d_pct,
+                ROUND((COUNT(*) FILTER (WHERE ret_10d_pct > 0)::numeric / NULLIF(COUNT(ret_10d_pct), 0) * 100), 1)::float8 AS pct_up_10d
+              FROM q GROUP BY quintile ORDER BY quintile`);
+          } else {
+            buckets = await dbQuery(`
+              SELECT
+                signal_label AS label,
+                COUNT(*)::int AS n,
+                ROUND(AVG(ret_5d_pct)::numeric, 2)::float8  AS avg_5d_pct,
+                ROUND(AVG(ret_10d_pct)::numeric, 2)::float8 AS avg_10d_pct,
+                ROUND((COUNT(*) FILTER (WHERE ret_10d_pct > 0)::numeric / NULLIF(COUNT(ret_10d_pct), 0) * 100), 1)::float8 AS pct_up_10d
+              FROM signal_returns
+              WHERE signal_name = $1
+                AND scored_at > NOW() - INTERVAL '${d} days'
+                AND signal_label IS NOT NULL
+                AND ret_10d_pct IS NOT NULL
+              GROUP BY 1 ORDER BY avg_10d_pct DESC NULLS LAST`,
+              [sigName]);
+          }
+          return jsonResult({
+            window_days: d,
+            signal: sigName,
+            type: useNumeric ? 'numeric (bucketed by quintile)' : 'label',
+            composite_score_buckets: compositeBuckets.rows,
+            signal_buckets: buckets.rows,
+            interpretation: useNumeric
+              ? 'Look at avg_10d_pct + pct_up_10d trending across quintiles. Monotonic increase = signal has positive forward edge. Flat across quintiles = noise. Reversed (high values → worse returns) = inverted signal (e.g. analyst_upside_pct).'
+              : 'Compare each label\'s avg_10d_pct + pct_up_10d to overall baseline. Labels with materially higher returns = useful classifier; labels near baseline = noise.',
+          });
+        }
+
+        // No specific signal — return the overview: composite buckets + top N signals by sample size.
+        const topSignals = await dbQuery(`
+          SELECT
+            signal_name,
+            COUNT(*)::int AS n_total,
+            COUNT(ret_10d_pct)::int AS n_with_returns,
+            ROUND(AVG(ret_5d_pct)::numeric, 2)::float8  AS avg_5d_pct,
+            ROUND(AVG(ret_10d_pct)::numeric, 2)::float8 AS avg_10d_pct,
+            ROUND((COUNT(*) FILTER (WHERE ret_10d_pct > 0)::numeric / NULLIF(COUNT(ret_10d_pct), 0) * 100), 1)::float8 AS pct_up_10d
+          FROM signal_returns
+          WHERE scored_at > NOW() - INTERVAL '${d} days'
+          GROUP BY 1 ORDER BY n_with_returns DESC NULLS LAST LIMIT 15`);
+
+        return jsonResult({
+          window_days: d,
+          composite_score_buckets: compositeBuckets.rows,
+          all_signals_overview: topSignals.rows,
+          interpretation: 'composite_score_buckets is the headline: confirms threshold-70 decision (40-49 bucket is sub-coin-flip). all_signals_overview shows per-signal sample sizes + flat avg returns — to see EDGE per signal, call this tool again with `signal="<name>"` (e.g. `signal="rsi"` or `signal="analyst_consensus"`).',
+          hint: 'For per-signal edge analysis, call again with parameter `signal=<signal_name>` from the list. Try: rsi, analyst_consensus, analyst_upside_pct, insider_buys_60d, weekly_trend, drift_5d_pct.',
+        });
+      } catch (err) {
+        return jsonResult({ error: `Signal edge query failed: ${err.message}` }, true);
+      }
+    }
+  );
+
+  server.tool(
     'hedge_recommendation',
     'Generate a specific covered-call hedge proposal for a held position. Computes strike (~10% OTM), expiry (~30 days), per-share premium (live UW option chain when available, Black-Scholes fallback), total premium across all 100-share blocks, breakeven price, "stays under strike" outcome, "called away" outcome, annualized yield on premium. Only suggests when position ≥ $5,000 AND ≥ 100 shares. Read-only — proposes only, never executes.',
     {
@@ -214,6 +537,43 @@ export function registerPortfolioAdvisorTools(server) {
       if (!pos) return jsonResult({ error: `${sym} not found in any connected broker (Moomoo, Alpaca paper, or Alpaca live) — must be a held position to hedge.` }, true);
       try { return jsonResult({ symbol: sym, position: pos, hedge: await advHedgeRecommendation(pos, 100) }); }
       catch (err) { return jsonResult({ error: `Hedge recommendation failed: ${err.message}` }, true); }
+    }
+  );
+
+  server.tool(
+    'get_regime_state',
+    'Returns the current market regime (risk_on, neutral, risk_off, vol_spike) with SPY slope, distance from 50d MA, realized volatility proxy, and sector ETF relative strength leaders/laggers. Also returns the last 5 regime snapshots for trend context. Data is computed from backtest_prices (SPY + 11 sector ETFs). Use before making broad market calls, sizing decisions, or when the user asks "what is the market doing right now?"',
+    {},
+    async () => {
+      const ok = await ensureDb();
+      if (!ok) return jsonResult({ error: 'Database unavailable' }, true);
+      try {
+        const { getCurrentRegime } = await import('../core/regime-detector.js');
+        const current = await getCurrentRegime();
+
+        // Last 5 snapshots for history (including the current one)
+        const { rows: history } = await dbQuery(
+          `SELECT id, snapshot_at, regime, strength,
+                  spy_slope_50d, spy_pct_from_50d, vix_proxy, vix_5d_change,
+                  sector_leaders, sector_laggers, notes
+           FROM regime_snapshots
+           ORDER BY snapshot_at DESC
+           LIMIT 5`
+        );
+
+        return jsonResult({
+          current,
+          history,
+          interpretation: {
+            risk_on:   'SPY trending up (slope >+0.05%/d), above 50d MA, low vol (<22). Favorable for long entries.',
+            neutral:   'Mixed signals. No strong directional edge. Normal position sizing applies.',
+            risk_off:  'SPY below 50d MA or declining slope. Bot still trades but reduce conviction thresholds.',
+            vol_spike: 'Realized vol >35% annualized OR sudden +40% vol surge. Elevated risk — review all open positions.',
+          },
+        });
+      } catch (err) {
+        return jsonResult({ error: `Regime state query failed: ${err.message}` }, true);
+      }
     }
   );
 }

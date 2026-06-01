@@ -13,7 +13,12 @@ import { getAlpacaAssets } from '../brokers/alpaca.js';
 
 const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 
-const ALLOWED_EXCHANGES = new Set(['NYSE', 'NASDAQ']);
+// Added 'ARCA' + 'BATS' (2026-05-27): the original {NYSE,NASDAQ}-only filter
+// silently excluded *every* major sector + leveraged ETF that trades on NYSE
+// Arca — SOXL, SPY, XLK, XLF, IWM, GLD, EWZ, etc. These are exactly the names
+// users ask "why didn't the bot catch the semis pop?" about. ARCA-listed
+// products are tradable on Alpaca/Tiger like any other equity.
+const ALLOWED_EXCHANGES = new Set(['NYSE', 'NASDAQ', 'ARCA', 'BATS']);
 const YAHOO_CONCURRENCY = 20;
 
 // ── concurrency-limited batch helper ─────────────────────────────────────────

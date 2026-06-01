@@ -26,10 +26,18 @@ export const ENTRY_RULES = [
   // ── 1. INSIDER DIRECTOR CLUSTER ─────────────────────────────────────────────
   // Cluster of ≥2 Director/10%-Owner purchases ≥$100K in last 30 days.
   // Backtest (your own data, BOT_DESIGN.md): N=436, win=73.2%, +3.79%/5d
-  // Strongest individual signal you've validated.
+  //
+  // 2026-05-29: PRIORITY LOWERED from 1 → 3.
+  //   Insider has highest WIN RATE (73.2%) but smallest avg RETURN (+3.79%).
+  //   Under single-pick arbitration, this rule monopolised every scan (12 of 13
+  //   picks on 2026-05-29 were insider), leaving 52w_high (+9.00%/76.6%, N=2,172)
+  //   and composite_70 (live data: +6.84%/69.4%, N=76K) dormant.
+  //   New order = 52w_high (1) → momentum_flip (2) → insider (3) → congress (4)
+  //   → composite_70 (99 fallback). Multi-pick fix still lets all 5 rules fire
+  //   simultaneously when slots permit; this just breaks the single-slot monopoly.
   {
     id: 'insider_director_cluster',
-    priority: 1,
+    priority: 3,
     backtest_evidence: {
       win_rate:        0.732,
       avg_return_5d:   0.0379,
@@ -70,9 +78,13 @@ export const ENTRY_RULES = [
   // Within 2% of 52-week high AND volume ≥ 2× 30-day avg.
   // Backtest: top decile by NEW 52w score had +9.00%/5d, 76.6% win on N=2,172.
   // Strongest backtest edge in your data.
+  //
+  // 2026-06-01: priority 2 → 1 to give 52w_high the top slot (highest backtest
+  //   EV and largest sample), and to make all priorities distinct in the cascade:
+  //   52w_high (1) → momentum_flip (2) → insider (3) → congress (4) → composite_70 (99).
   {
     id: 'at_52w_high_with_volume',
-    priority: 2,
+    priority: 1,
     backtest_evidence: {
       win_rate:        0.766,
       avg_return_5d:   0.0900,
@@ -103,9 +115,16 @@ export const ENTRY_RULES = [
       const liq = ctx?.indicators?.liquidity;
       const i52 = ctx?.indicators?.distance_52w;
       if (!liq?.last_price || !i52?.week_52_high) return false;
-      const withinHigh  = liq.last_price >= 0.98 * i52.week_52_high;
-      const volumeSpike = Number(ctx?.signals?.rvol || 0) >= 2.0;
-      return withinHigh && volumeSpike;
+      const withinHigh = liq.last_price >= 0.98 * i52.week_52_high;
+      // Fix A-2: use conviction_scores rvol when available; fall back to
+      // tradable_universe day_volume/avg_volume so detect() doesn't silently fail
+      // for symbols that haven't been scored in the last 24 hours.
+      const rvol = ctx?.signals?.rvol != null
+        ? Number(ctx.signals.rvol)
+        : (Number(ctx?.indicators?.avg_volume) > 0
+            ? Number(ctx?.indicators?.day_volume ?? 0) / Number(ctx.indicators.avg_volume)
+            : 0);
+      return withinHigh && rvol >= 2.0;
     },
   },
 
@@ -113,9 +132,15 @@ export const ENTRY_RULES = [
   // Composite 60-69 + drift_5d positive but <15% + MACD turning + RSI < 68.
   // Backtest: +6.86%/5d, 65.5% win on N=1,477 in flat SPY regimes.
   // De-risked slightly with 0.8x sizing — your own Phase 2.1 Option C edge.
+  //
+  // 2026-06-01: priority 3 → 2 so this rule is NOT tied with insider_director_cluster
+  //   (which is also priority 3). Without distinct priorities the stable sort
+  //   in matchEntryRules() falls back to registry order, silently making insider
+  //   always win against momentum_flip even when momentum has the better backtest.
+  //   Intended winner order: 52w_high (1) → momentum_flip (2) → insider (3) → ...
   {
     id: 'momentum_flip',
-    priority: 3,
+    priority: 2,
     backtest_evidence: {
       win_rate:        0.655,
       avg_return_5d:   0.0686,
@@ -180,11 +205,12 @@ export const ENTRY_RULES = [
     candidate_generator: async () => {
       // uw_congressional_trades stores amount as a TEXT range bucket (e.g. "$250,001 - $500,000").
       // We enumerate the buckets that start at $250K or higher.
+      // Fix A-1: UW API stores transaction_type as 'Buy' (capital B) — previous list missed it.
       try {
         const { rows } = await query(`
           SELECT DISTINCT ticker
             FROM uw_congressional_trades
-           WHERE transaction_type IN ('buy', 'purchase', 'Purchase')
+           WHERE transaction_type IN ('buy', 'purchase', 'Purchase', 'Buy')
              AND amount_range IN (
                  '$250,001 - $500,000',
                  '$500,001 - $1,000,000',

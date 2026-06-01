@@ -208,8 +208,8 @@ export async function classifySetup({ signals, indicators, rsi, fundamentals, la
     try {
       const { rows } = await query(
         `SELECT
-           COALESCE(SUM(CASE WHEN transaction_type='buy' THEN value ELSE 0 END), 0) AS buy_usd,
-           COALESCE(SUM(CASE WHEN transaction_type='sell' THEN value ELSE 0 END), 0) AS sell_usd
+           COALESCE(SUM(CASE WHEN transaction_type='P' THEN value ELSE 0 END), 0) AS buy_usd,
+           COALESCE(SUM(CASE WHEN transaction_type='S' THEN value ELSE 0 END), 0) AS sell_usd
          FROM uw_insider_trades
          WHERE ticker=$1 AND filed_at > NOW() - INTERVAL '30 days'`,
         [sym.toUpperCase()]
@@ -380,6 +380,43 @@ export async function classifySetup({ signals, indicators, rsi, fundamentals, la
       thesis: _meanReversionThesis({ pctOff52w, rsi14: rsi, ma50Distance }),
       expected_hold_days_min: 5,
       expected_hold_days_max: 15,
+    };
+  }
+
+  // ── 6. SIGNAL_STACK (catch-all for strong signals not matching above) ────
+  // The 5 specific setups above all require multiple LATE-STAGE conditions
+  // (e.g. catalyst needs todayChangePct, breakout needs 5d-volume, momentum
+  // needs UW bullish label). Most days these conditions don't align even
+  // when the raw signals are screaming bullish (e.g. $5M in UW flow OR
+  // major insider buy + grade-A conviction).
+  //
+  // This catch-all fires when the underlying data agrees but doesn't fit
+  // the rigid templates — basically "trust the composite when it's loud".
+  // We require AT LEAST ONE of:
+  //   • Big UW flow (≥ $200K bullish in 6h)
+  //   • Insider net buy ≥ $250K in 30d
+  //   • Bullish news (≥3 articles + positive label)
+  //   • Bot grade A/B
+  // AND price not extended (within 8% of 52w high is fine, distressed isn't).
+  const hasBigFlow    = recentFlowPremium != null && recentFlowPremium >= 200_000;
+  const hasInsiderBuy = insiderNetUsd     != null && insiderNetUsd     >= 250_000;
+  const hasBullNews   = articleCount >= 3 && (newsLabel === 'positive' || (news.avg_sentiment ?? 0) > 0.3);
+  const hasGrade      = conv?.grade === 'A' || conv?.grade === 'B';
+  const priceOk       = pctOff52w == null || (pctOff52w >= -0.40 && pctOff52w <= 0.05);
+  const newsOk        = newsLabel !== 'negative';
+  const uwOk          = uwLabel !== 'bearish' && uwLabel !== 'strong_bearish';
+
+  if (priceOk && newsOk && uwOk && (hasBigFlow || hasInsiderBuy || hasBullNews || hasGrade)) {
+    const drivers = [];
+    if (hasGrade)      drivers.push(`Grade ${conv.grade}`);
+    if (hasBigFlow)    drivers.push(`$${(recentFlowPremium/1e6).toFixed(1)}M bullish flow`);
+    if (hasInsiderBuy) drivers.push(`$${(insiderNetUsd/1e6).toFixed(1)}M insider buy`);
+    if (hasBullNews)   drivers.push(`${articleCount} positive articles`);
+    return {
+      setup_type: 'signal_stack',
+      thesis: `Strong composite — ${drivers.join(' + ')}. No specific 5-setup match but signals align bullishly.`,
+      expected_hold_days_min: 3,
+      expected_hold_days_max: 10,
     };
   }
 

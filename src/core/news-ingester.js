@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { getBzNews, isBenzingaConfigured } from './benzinga.js';
 import { query, isDbAvailable } from './db.js';
+import { scanAndAlertNewsMovers } from './news-alert.js';
 
 let _isRunning = false;
 let _lastRunAt = null;
@@ -77,6 +78,10 @@ export async function ingestNews({ limit = 100 } = {}) {
     _lastRunAt = new Date();
     _lastUpsertedCount = upserted;
     console.log(`[news-ingester] upserted ${upserted}/${articles.length}`);
+
+    // Scan for market-moving events and push to Telegram (fire-and-forget).
+    if (upserted > 0) scanAndAlertNewsMovers().catch(() => {});
+
     return { fetched: articles.length, upserted };
   } catch (e) {
     console.error('[news-ingester] fatal:', e.message);

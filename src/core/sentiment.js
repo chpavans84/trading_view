@@ -185,11 +185,14 @@ async function fetchQuote(symbol) {
 
       const meta   = result.meta;
       const closes = result.indicators?.quote?.[0]?.close?.filter(v => v != null) || [];
+      const vols   = result.indicators?.quote?.[0]?.volume || [];
       const price  = meta.regularMarketPrice ?? closes[closes.length - 1];
       const prev   = closes.length >= 2 ? closes[closes.length - 2] : (meta.chartPreviousClose ?? meta.previousClose);
       const chgPct = price && prev ? +((price - prev) / prev * 100).toFixed(2) : null;
+      // Take the last non-null volume bar (intraday volume may be the current bar)
+      const volume = meta.regularMarketVolume ?? [...vols].reverse().find(v => v != null) ?? null;
 
-      return { symbol, price, prev, chg_pct: chgPct, name: meta.shortName || meta.symbol || symbol };
+      return { symbol, price, prev, chg_pct: chgPct, volume, name: meta.shortName || meta.symbol || symbol };
     } catch {
       return null;
     }
@@ -265,22 +268,30 @@ export async function getMarketSentiment() {
   const cached = cacheGet('sentiment', 5 * 60 * 1000);
   if (cached) return { ...cached, cached: true };
 
-  // Fetch in parallel: VIX from CBOE, index ETF proxies from Moomoo, futures from Yahoo
-  const [vixData, moomooIdx, yfFutures] = await Promise.allSettled([
+  // Fetch in parallel: VIX from CBOE, index ETF proxies from Moomoo, futures from Yahoo.
+  // Hotfix 2026-05-27: also fetch the same 4 ETFs from Yahoo in parallel as fallback,
+  // so the Home tab indices aren't blank whenever Moomoo OpenD isn't running.
+  // Previously this collapsed to 'n/a' for SP500/Nasdaq/Dow/Russell on every machine
+  // that didn't have OpenD up — which is most of the time on Pavan's MacBook.
+  const [vixData, moomooIdx, yfIndices, yfFutures] = await Promise.allSettled([
     fetchVix(),
     fetchMoomooQuotes(['SPY', 'QQQ', 'DIA', 'IWM']),  // ETF proxies for S&P/Nasdaq/Dow/Russell
+    fetchAll(['SPY', 'QQQ', 'DIA', 'IWM'], 600),       // Yahoo fallback
     fetchAll(['ES=F', 'NQ=F'], 600),                   // futures — Yahoo only
   ]);
 
   const vix    = vixData.status    === 'fulfilled' ? vixData.value    : null;
   const mIdx   = moomooIdx.status  === 'fulfilled' ? moomooIdx.value  : new Map();
+  const yfIdx  = yfIndices.status  === 'fulfilled' ? yfIndices.value  : new Map();
   const yf     = yfFutures.status  === 'fulfilled' ? yfFutures.value  : new Map();
 
-  // Use Moomoo ETF proxies for index direction; fall back to Yahoo synthetic symbols
-  const spy    = mIdx.get('SPY')  ?? null;
-  const qqq    = mIdx.get('QQQ')  ?? null;
-  const dia    = mIdx.get('DIA')  ?? null;
-  const iwm    = mIdx.get('IWM')  ?? null;
+  // Prefer Moomoo (real-time when OpenD is up) but fall back to Yahoo (15-min
+  // delayed but always reliable) for any symbol Moomoo didn't return.
+  const pick = sym => mIdx.get(sym) ?? yfIdx.get(sym) ?? null;
+  const spy    = pick('SPY');
+  const qqq    = pick('QQQ');
+  const dia    = pick('DIA');
+  const iwm    = pick('IWM');
   const es     = yf.get('ES=F')   ?? null;
   const nq     = yf.get('NQ=F')   ?? null;
 
@@ -660,6 +671,7 @@ async function fetchBatchQuotes(symbols, batchSize = 40, batchDelayMs = 100) {
         price:   q.price,
         prev:    q.prev_close,
         chg_pct: q.change_pct,
+        volume:  q.volume,    // preserve for Top Movers table + heatmap weighting
       }));
     }
   } catch { /* fall through */ }
@@ -732,6 +744,7 @@ export async function getMarketMovers({ limit = 25 } = {}) {
     name:      q.name || q.symbol,
     price:     q.price,
     chg_pct:   q.chg_pct,
+    volume:    q.volume ?? null,   // surfaced in Top Movers table on Market tab
     direction: q.chg_pct > 0 ? 'up' : 'down',
   }));
 

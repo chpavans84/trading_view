@@ -69,12 +69,37 @@ const EXIT_RULES_BY_SETUP = {
   // stop to 6% to let the early-cycle thesis develop over the full 5-day window.
   momentum_flip:    { hard_sl_pct: 0.06, trail_pct: 35, time_stop_days:  5,
                       exit_on_uw_flip: true,  exit_on_news: true,  exit_before_earnings: true },
+  // signal_stack: catch-all from classifySetup() when no single setup template fits
+  // but signals are broadly bullish. Previously fell to LEGACY_EXIT_RULES (3% stop)
+  // which fired within minutes on any intraday noise. 7% stop + 7d time horizon is
+  // the correct default for a "signals agree, thesis unclear" situation.
+  // Bug fix 2026-05-29 (audit A-2).
+  signal_stack:     { hard_sl_pct: 0.07, trail_pct: 30, time_stop_days:  7,
+                      exit_on_uw_flip: true,  exit_on_news: false, exit_before_earnings: true },
 };
 
 const LEGACY_EXIT_RULES = {
   hard_sl_pct: 0.03, trail_pct: 30, time_stop_days: 5,
   exit_on_uw_flip: true, exit_on_news: true, exit_before_earnings: true,
 };
+
+// ─── ATR at entry (observational — does not affect stop logic) ───────────────
+// Computes ATR(14) as a % of entry price using high-low ranges from
+// backtest_prices. Stored in trades.atr_pct for later analysis.
+// Returns null on any failure so it never blocks a trade.
+async function computeAtrPct(symbol, entryPrice) {
+  try {
+    const { rows } = await query(
+      `SELECT close, high, low FROM backtest_prices
+       WHERE symbol=$1 ORDER BY price_date DESC LIMIT 20`,
+      [symbol]
+    );
+    if (rows.length < 14) return null;
+    const ranges = rows.slice(0, 14).map(r => Number(r.high) - Number(r.low));
+    const atr = ranges.reduce((s, v) => s + v, 0) / 14;
+    return entryPrice > 0 ? Number(((atr / entryPrice) * 100).toFixed(2)) : null;
+  } catch { return null; }
+}
 
 // ─── Quote helpers ────────────────────────────────────────────────────────────
 
@@ -353,11 +378,43 @@ async function _tryOpenPosition(bot) {
   const fillPrice      = order.fill_price || price;
   const dollarsInvested = +(fillPrice * qty).toFixed(2);
 
-  // 6. Derive stop-loss price from dollar risk rule (uses fill price, not the
-  //    earlier quote — broker fill can differ). Pure math in bot-sizing.js.
-  const stopLossUsd = bot.rules?.exit_rules?.stop_loss_usd ?? 50;
-  const stopPct     = computeStopPct(stopLossUsd, dollarsInvested);
-  const stopPrice   = computeStopPrice(fillPrice, stopPct);
+  // 6. Derive stop-loss price. M7 (2026-05-29): use MIN(flat exit-rule %, ATR×1.5)
+  //    so low-vol stocks get a tighter stop calibrated to their actual noise floor.
+  //
+  //    Bug fix 2026-05-29 (audit A-1): the previous condition required BOTH
+  //    flatSlPct2 AND tradeAtrPct to be non-null. Since computeAtrPct returns null
+  //    when backtest_prices has insufficient rows, most trades fell back to the
+  //    legacy dollar-amount stop path — producing wildly wrong stop_loss values
+  //    (e.g. MU: $300 dollar-stop / $945 position = 31.75% recorded, vs 8% actual).
+  //
+  //    Corrected logic:
+  //      • If setup rule exists   → ALWAYS use flat_sl_pct as the base
+  //        ∘ If ATR also available → MIN(flat_pct, atr×1.5) (M7 tightening for low-vol)
+  //        ∘ If ATR unavailable   → use flat_pct as-is
+  //      • If no setup rule       → legacy dollar-amount path (fallback only)
+  //
+  const tradeAtrPct  = await computeAtrPct(symbol, fillPrice);  // % of fill price
+  const setupType2   = decision.setup_type ?? null;
+  const setupRules2  = setupType2 ? EXIT_RULES_BY_SETUP[setupType2] : null;
+  const flatSlPct2   = setupRules2?.hard_sl_pct ?? null;
+  let recordedStopPct;
+  let recordedStopPrice;
+  if (flatSlPct2 != null) {
+    // Setup rule known — use it as the authoritative base.
+    // Apply ATR tightening only when ATR data is available.
+    if (tradeAtrPct != null && tradeAtrPct > 0) {
+      const atrStop = (tradeAtrPct / 100) * 1.5;
+      recordedStopPct = +(Math.min(flatSlPct2, atrStop) * 100).toFixed(4);
+    } else {
+      recordedStopPct = +(flatSlPct2 * 100).toFixed(4);
+    }
+    recordedStopPrice = +(fillPrice * (1 - recordedStopPct / 100)).toFixed(4);
+  } else {
+    // No setup rule — legacy dollar-amount stop (conservative fallback).
+    const stopLossUsd0 = bot.rules?.exit_rules?.stop_loss_usd ?? 50;
+    recordedStopPct    = computeStopPct(stopLossUsd0, dollarsInvested);
+    recordedStopPrice  = computeStopPrice(fillPrice, recordedStopPct);
+  }
 
   // 7. Record trade and tag with bot_id + setup classification
   const tradeId = await recordTrade({
@@ -366,12 +423,12 @@ async function _tryOpenPosition(bot) {
     side:        'buy',
     qty,
     entry_price: fillPrice,
-    stop_loss:   stopPrice,
+    stop_loss:   recordedStopPrice,
     take_profit: null,
     dollars_invested:  dollarsInvested,
-    stop_loss_pct:     stopPct,
+    stop_loss_pct:     recordedStopPct,
     take_profit_pct:   null,
-    atr_pct:           null,
+    atr_pct:           tradeAtrPct,
     conviction_score:  decision.composite_score != null ? Number(decision.composite_score) : null,
     conviction_grade:  null,
     conviction_breakdown: decision.factor_breakdown ?? null,
@@ -440,7 +497,18 @@ async function _manageOpenPosition(bot) {
     console.warn(`[bot-exec] LEGACY exit rules used for trade ${trade.id} (setup_type=${trade.setup_type ?? 'null'})`);
   }
   const dollarsInvested = parseFloat(trade.entry_price) * parseFloat(trade.qty);
-  const hardSlUsd    = dollarsInvested * exitRules.hard_sl_pct;
+
+  // M7 ATR-adjusted hard stop (2026-05-29).
+  // Backtest on 89 closed trades: 7/8 big losers had stops tighter than 1×ATR.
+  // Using MIN(flat_pct, ATR×1.5) tightens stops for low-vol stocks (saves ~13%
+  // across the trade population = 10.4% relative P&L improvement; gate = ≥5%).
+  // For high-vol stocks the flat % wins, so no regression there.
+  // trade.atr_pct populated at entry by computeAtrPct(); falls back to flat when null.
+  const flatSlPct  = exitRules.hard_sl_pct;
+  const atrFrac    = trade.atr_pct != null ? Number(trade.atr_pct) / 100 : null;
+  const atrSlPct   = atrFrac && atrFrac > 0 ? atrFrac * 1.5 : null;
+  const effectiveSlPct = atrSlPct != null ? Math.min(flatSlPct, atrSlPct) : flatSlPct;
+  const hardSlUsd  = dollarsInvested * effectiveSlPct;
 
   // Hard stop
   if (currentPnl <= -hardSlUsd) {

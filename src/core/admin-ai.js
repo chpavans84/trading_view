@@ -24,9 +24,9 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL_CRITICAL = 'claude-sonnet-4-6'; // reasoning, user chat, tool use
 
-const PRICE_INPUT_PER_M  = 3.00;  // claude-sonnet-4-6
-const PRICE_OUTPUT_PER_M = 15.00; // claude-sonnet-4-6
-function calcCost(inp, out) { return (inp / 1e6) * PRICE_INPUT_PER_M + (out / 1e6) * PRICE_OUTPUT_PER_M; }
+// Centralized pricing: claude-sonnet-4-6 list price, including cache rates
+// (writes 1.25× input, reads 0.10× input). Source of truth: src/core/api-cost.js.
+import { calcCost, tokensFromUsage } from './api-cost.js';
 
 // Separate in-memory conversation history for admin sessions (per session ID)
 export const adminChatHistory = new Map();
@@ -470,13 +470,12 @@ export async function adminChat({ sessionId, message, adminUsername, onChunk, on
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
 
     const finalMsg = await stream.finalMessage();
-    const u = finalMsg.usage || {};
+    const usage    = tokensFromUsage(finalMsg.usage);   // includes cache tokens
     recordApiCall({
       source:       'admin_chat',
-      inputTokens:  u.input_tokens || 0,
-      outputTokens: u.output_tokens || 0,
+      ...usage,
       toolCalls:    finalMsg.content.filter(b => b.type === 'tool_use').length,
-      costUsd:      calcCost(u.input_tokens || 0, u.output_tokens || 0),
+      costUsd:      calcCost(usage),                     // cache-aware pricing
       durationMs:   Date.now() - t0,
       model:        finalMsg.model,
       username:     adminUsername,

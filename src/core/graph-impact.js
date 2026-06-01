@@ -10,6 +10,7 @@
 
 import YahooFinance from 'yahoo-finance2';
 import { getSympathyTrades } from './graph.js';
+import { query, isDbAvailable } from './db.js';
 
 const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 
@@ -52,7 +53,32 @@ function corrLabel(c) {
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
+// Prefer our local PostgreSQL `backtest_prices` table — 3 years of daily OHLCV
+// already loaded for S&P 500 + Nasdaq 100. Yahoo's `chart()` rate-limits us
+// after a few hundred requests per process, and impact analysis fans out 6+
+// peers per lookup, so a single user clicking around the Earnings tab burns
+// our quota. The DB is local + reliable; fall back to Yahoo only when the
+// ticker isn't in our universe.
 async function fetchHistory(ticker, days) {
+  // DB path (fast + reliable)
+  if (isDbAvailable()) {
+    try {
+      const { rows } = await query(
+        `SELECT TO_CHAR(price_date, 'YYYY-MM-DD') AS date, close
+         FROM backtest_prices
+         WHERE symbol = $1 AND price_date >= CURRENT_DATE - ($2 || ' days')::INTERVAL
+         ORDER BY price_date ASC`,
+        [ticker, days + 30]
+      );
+      if (rows.length >= 20) {
+        return rows
+          .map(r => ({ date: r.date, close: Number(r.close) }))
+          .filter(d => d.close > 0);
+      }
+    } catch { /* fall through to Yahoo */ }
+  }
+
+  // Yahoo fallback for tickers not in backtest_prices (foreign ADRs, micro-caps).
   const period1 = new Date(Date.now() - (days + 30) * 86_400_000);
   try {
     const result = await yf.chart(ticker, { period1, interval: '1d' });

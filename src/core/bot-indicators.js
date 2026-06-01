@@ -183,6 +183,7 @@ export async function getPreMarketGap(symbol) {
     gap_dollars: null,
     pre_market_price: null,
     previous_close: null,
+    live_price: null,         // regularMarketPrice — available intraday for gap-vs-cache check
     available: false,
     fetched_at: new Date().toISOString(),
   };
@@ -191,6 +192,8 @@ export async function getPreMarketGap(symbol) {
     const q = await yfClient.quote(sym);
     const pre  = q?.preMarketPrice;
     const prev = q?.regularMarketPreviousClose ?? q?.previousClose;
+    const live = q?.regularMarketPrice;
+    if (live != null) result.live_price = +live.toFixed(2);
     if (pre != null && prev != null && prev > 0) {
       const gap = ((pre - prev) / prev) * 100;
       result.gap_pct           = +gap.toFixed(2);
@@ -248,23 +251,83 @@ export async function getShortInterest(symbol) {
   return result;
 }
 
-// ─── Aggregate: all 5 in one shot ─────────────────────────────────────────
+// ─── 6. ATR profile ───────────────────────────────────────────────────────
+//
+// ATR(14) as a percentage of the most recent closing price, computed from
+// backtest_prices high-low ranges.  Used by gateHighVolatility to block entry
+// into crypto miners (HUT, IREN, MARA), leveraged ETFs (TQQQ), and meme stocks
+// whose 1-min move magnitude can exceed the configured hard stop in one tick.
+//
+// Retrospective 2026-05-29: HUT daily ATR was 8-10%.  With a 1-min monitoring
+// loop and an 8% hard stop, a single news-driven spike gaps THROUGH the stop —
+// the bot sees above-stop at tick N and an unreachable exit at tick N+1.
+// Default gate: block when ATR% > 7 (see gateHighVolatility in bot-gates.js).
+//
+export async function getAtrProfile(symbol) {
+  if (!symbol) return null;
+  const sym = symbol.toUpperCase();
+  const k = `atr:${sym}`;
+  const cached = _fromCache(k);
+  if (cached) return cached;
+
+  if (!isDbAvailable()) return null;
+
+  try {
+    const { rows } = await query(
+      `SELECT close, high, low FROM backtest_prices
+       WHERE symbol = $1
+       ORDER BY price_date DESC
+       LIMIT 20`,
+      [sym]
+    );
+    if (rows.length < 14) {
+      const result = { symbol: sym, atr_pct: null, atr_abs: null, available: false,
+                       reason: `only ${rows.length} days of data` };
+      _toCache(k, result, 60 * 60_000);
+      return result;
+    }
+    const price  = Number(rows[0].close);
+    const ranges = rows.slice(0, 14).map(r => Number(r.high) - Number(r.low));
+    const atr    = ranges.reduce((s, v) => s + v, 0) / 14;
+    const atrPct = price > 0 ? Number(((atr / price) * 100).toFixed(2)) : null;
+    const result = {
+      symbol:    sym,
+      atr_pct:   atrPct,
+      atr_abs:   +atr.toFixed(4),
+      last_price: +price.toFixed(2),
+      available:  atrPct != null,
+    };
+    _toCache(k, result, 60 * 60_000); // 1 hr — ATR is a daily figure, reruns ok
+    return result;
+  } catch (e) {
+    console.error('[bot-indicators/atr]', e.message);
+    return null;
+  }
+}
+
+// ─── Aggregate: all 6 in one shot ─────────────────────────────────────────
 export async function getAllBotIndicators(symbol) {
   if (!symbol) return null;
-  const [macro, liq, earn, pm, si] = await Promise.allSettled([
+  const [macro, liq, earn, pm, si, atrResult] = await Promise.allSettled([
     getMacroBlackoutStatus(),
     getLiquidityProfile(symbol),
     getEarningsProximity(symbol),
     getPreMarketGap(symbol),
     getShortInterest(symbol),
+    getAtrProfile(symbol),
   ]);
+  const atrVal = atrResult.status === 'fulfilled' ? atrResult.value : null;
   return {
-    symbol: symbol.toUpperCase(),
+    symbol:         symbol.toUpperCase(),
     macro:          macro.status === 'fulfilled' ? macro.value : null,
     liquidity:      liq.status   === 'fulfilled' ? liq.value   : null,
     earnings:       earn.status  === 'fulfilled' ? earn.value  : null,
     premarket:      pm.status    === 'fulfilled' ? pm.value    : null,
     short_interest: si.status    === 'fulfilled' ? si.value    : null,
+    atr:            atrVal,
+    // Surfaced at root level so gateHighVolatility can read indicators.atr_pct
+    // directly without drilling into the nested atr object.
+    atr_pct:        atrVal?.atr_pct ?? null,
     fetched_at:     new Date().toISOString(),
   };
 }

@@ -149,6 +149,27 @@ export async function getChartTechnicals({ symbol } = {}) {
     const symbolMismatch = symbol && chartSymbol &&
       !chartSymbol.toUpperCase().includes(symbol.toUpperCase());
 
+    // ── Fix 2026-05-27 (Phase 2.7) ────────────────────────────────────────────
+    // If the caller asked about a symbol that ISN'T currently on the chart, the
+    // chart's study values (RSI/MACD/EMAs) don't apply to it. Reading them anyway
+    // returns nulls (or worse, the wrong symbol's values) — which then get written
+    // into conviction_scores.signals as macd_hist=null, rsi=null, ema=null.
+    //
+    // That broke momentum_flip silently for ~10 days: 0/176 conviction rows in
+    // a recent 2h window had macd_hist, because the bot scans 50 candidates per
+    // scan but the chart only shows 1 symbol. Fall back to the OHLCV computation
+    // path — same one used when TV is offline. Yahoo daily range=90d provides
+    // 60+ bars, well over the 35-bar minimum MACD needs.
+    if (symbolMismatch && symbol) {
+      try {
+        const fb = await fetchFallbackTechnicals(symbol);
+        return { ...fb, symbol_mismatch: true, chart_symbol: chartSymbol };
+      } catch (e) {
+        // Fall through — degraded data is better than crashing the scan, and the
+        // caller's null-checks (`tech?.macd_hist ?? null`) handle missing fields.
+      }
+    }
+
     // Flatten all study values into one map for easy lookup
     const flat = {};
     for (const s of studies) {

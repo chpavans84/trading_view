@@ -300,16 +300,20 @@ export async function getInsiderTrades({ ticker, days = 30 } = {}) {
     .filter(t => !ticker || t.ticker?.toUpperCase() === ticker.toUpperCase())
     .filter(t => new Date(t.transaction_date) >= cutoff)
     .map(t => ({
-      ticker:           t.ticker,
-      owner_name:       t.owner_name,
-      is_director:      t.is_director,
-      is_officer:       t.is_officer,
-      transaction_date: t.transaction_date,
-      amount:           t.amount,
-      price:            t.price,
-      transactions:     t.transactions,
-      sector:           t.sector,
-      side:             (t.amount ?? 0) < 0 ? 'sell' : 'buy',
+      ticker:            t.ticker,
+      owner_name:        t.owner_name,
+      is_director:       t.is_director,
+      is_officer:        t.is_officer,
+      is_ten_percent_owner: t.is_ten_percent_owner,
+      transaction_date:  t.transaction_date,
+      filing_date:       t.filing_date,
+      amount:            t.amount,           // share count (negative = sell)
+      price:             t.price,
+      transactions:      t.transactions,
+      sector:            t.sector,
+      transaction_code:  t.transaction_code, // SEC code: P=purchase, S=sale, F=tax, A=award, M=exercise
+      officer_title:     t.officer_title,
+      side:              (t.amount ?? 0) < 0 ? 'sell' : 'buy',
     }));
 }
 

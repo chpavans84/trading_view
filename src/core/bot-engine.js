@@ -30,6 +30,23 @@ const _runningBots = new Set();
 
 export async function runBotScanForAllActive() {
   if (!isDbAvailable()) return { skipped: true, reason: 'no_db' };
+
+  // Bug fix 2026-05-29 (audit G-2): scanner cron runs until 15:55 ET but
+  // gateMarketCloseProximity blocks ALL entries after 15:30. Every scan from
+  // 15:30–15:55 evaluates 50+ candidates through expensive Yahoo + DB calls only
+  // to hit the close-proximity gate for every single one. Skip the whole scan
+  // at the top level — cheaper and produces a clean skip log instead of a
+  // gate_histogram showing market_close_proximity×49.
+  try {
+    const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const day = et.getDay();
+    const minsET = et.getHours() * 60 + et.getMinutes();
+    // Weekends: no market. After 15:29 ET (30 min before close cutoff): skip.
+    if (day === 0 || day === 6 || minsET >= 15 * 60 + 29) {
+      return { skipped: true, reason: 'outside_trading_window' };
+    }
+  } catch { /* ignore clock failures — let scan proceed */ }
+
   try {
     const bots = await getScannableBots();
     const results = [];
@@ -383,7 +400,7 @@ async function _scoreCandidate(symbol, bot) {
   if (preBlocker) return { _blocked: true, symbol, gate: preBlocker.gate, value: preBlocker.value, threshold: preBlocker.threshold, message: preBlocker.message };
 
   // ── Signal computation ──────────────────────────────────────────────────
-  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig, congressSig] = await Promise.all([
+  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig, congressSig, rsSig] = await Promise.all([
     _signalConviction(symbol),
     _signalNews(symbol),
     _signalUw(symbol),
@@ -392,16 +409,18 @@ async function _scoreCandidate(symbol, bot) {
     _signalDistance52w(symbol),
     _signalPredictor(symbol),
     _signalCongress(symbol),
+    _signalRelativeStrength(symbol),  // M4 — observational, weight=0 until backtested
   ]);
   const signals = {
-    conviction:   convSig,
-    news:         newsSig,
-    uw_options:   uwSig,
-    gex:          gexSig,
-    insider:      insiderSig,
-    distance_52w: dist52wSig,
-    predictor:    predSig,
-    congress:     congressSig,
+    conviction:           convSig,
+    news:                 newsSig,
+    uw_options:           uwSig,
+    gex:                  gexSig,
+    insider:              insiderSig,
+    distance_52w:         dist52wSig,
+    predictor:            predSig,
+    congress:             congressSig,
+    relative_strength:    rsSig,      // weight 0 — logged in factor_breakdown only
   };
 
   // ── Post-signal gates (need conviction/UW/news to be computed) ───────────
@@ -421,15 +440,21 @@ async function _scoreCandidate(symbol, bot) {
   // Phase 4.2 (2026-05-28): congress signal added. Only participates when
   // there are recent congressional buys (value=0 otherwise → excluded).
   const w = rules.composite_weights || {};
+  // Bug fix 2026-05-29 (audit B-3): relative_strength was missing from pairs[].
+  // With weight=0.00 this had no visible effect today, but the M4 promotion plan
+  // (bump weight to 0.05 by updating DB rows) would have silently done nothing
+  // because the signal was never read in the weighted sum. Added here so the
+  // weight change is sufficient to activate RS scoring — no code change needed later.
   const pairs = [
-    ['conviction',   signals.conviction.value],
-    ['news',         signals.news.value],
-    ['uw_options',   signals.uw_options.value],
-    ['gex',          signals.gex.value],
-    ['insider',      signals.insider.value],
-    ['distance_52w', signals.distance_52w.value],
-    ['predictor',    signals.predictor.value],
-    ['congress',     signals.congress.value],
+    ['conviction',        signals.conviction.value],
+    ['news',              signals.news.value],
+    ['uw_options',        signals.uw_options.value],
+    ['gex',               signals.gex.value],
+    ['insider',           signals.insider.value],
+    ['distance_52w',      signals.distance_52w.value],
+    ['predictor',         signals.predictor.value],
+    ['congress',          signals.congress.value],
+    ['relative_strength', signals.relative_strength.value],  // M4 — weight=0 until backtest gate passes
   ];
   let weightedSum = 0, weightTotal = 0;
   for (const [key, val] of pairs) {
@@ -467,8 +492,9 @@ async function _scoreCandidate(symbol, bot) {
     ? await classifySetup({ signals, indicators: { ...ind, symbol }, rsi: rsi14, fundamentals, last5dReturn }).catch(() => null)
     : null;
 
-  // Setup classification + strategy filter (shared with diagnoseCandidate)
-  const setupBlocker = firstBlocker({ filters, setup, enforceSetup }, SETUP_GATES);
+  // Setup classification + strategy filter + overbought gate (shared with diagnoseCandidate)
+  // rsi14 is threaded in so gateOverboughtEntry can check RSI vs per-setup ceiling.
+  const setupBlocker = firstBlocker({ filters, setup, enforceSetup, rsi14 }, SETUP_GATES);
   if (setupBlocker) return { _blocked: true, symbol, gate: setupBlocker.gate, value: setupBlocker.value, threshold: setupBlocker.threshold, message: setupBlocker.message };
 
   // ── Phase 2.1 Option C: momentum_flip override (experimental, capped at 5/day) ──
@@ -576,9 +602,17 @@ async function _scoreCandidate(symbol, bot) {
 // Phase 4.2 (2026-05-28): added congress 0.05 — weak but real signal (+0.44pp edge).
 // Weights are renormalized over signals WITH data so congress only participates
 // when there are recent congressional buys for the given stock.
+// Bug fix 2026-05-29 (audit A-3/C-1): uw_options was 0.30 here but 0.25 in all
+// active bots and BOT_DEFAULT_RULES (Phase 4.2 congress fix updated server.js and
+// DB but not this constant). Result: bot_verdict and diagnoseCandidate computed
+// a different composite than the live bot for the same stock — up to ~4 pts higher
+// for UW-strong candidates. Fixed to mirror BOT_DEFAULT_RULES exactly.
+// Also added relative_strength: 0.00 so this object stays in sync as M4 weight
+// is promoted (see B-3 audit finding — pairs[] must match this object).
 const DIAGNOSE_DEFAULT_WEIGHTS = {
-  conviction: 0.10, news: 0.22, uw_options: 0.30, gex: 0.15,
+  conviction: 0.10, news: 0.22, uw_options: 0.25, gex: 0.15,
   insider: 0.15, distance_52w: 0.08, predictor: 0, congress: 0.05,
+  relative_strength: 0.00,
 };
 
 export async function diagnoseCandidate(symbol, bot) {
@@ -596,7 +630,7 @@ export async function diagnoseCandidate(symbol, bot) {
   const blockers = allBlockers({ filters, indicators: ind, vix }, PRE_SIGNAL_GATES);
 
   // ── Signal computation ───────────────────────────────────────────────
-  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig, congressSig] = await Promise.all([
+  const [convSig, newsSig, uwSig, gexSig, insiderSig, dist52wSig, predSig, congressSig, rsSig2] = await Promise.all([
     _signalConviction(symbol),
     _signalNews(symbol),
     _signalUw(symbol),
@@ -605,22 +639,24 @@ export async function diagnoseCandidate(symbol, bot) {
     _signalDistance52w(symbol),
     _signalPredictor(symbol),
     _signalCongress(symbol),
+    _signalRelativeStrength(symbol),  // M4 — observational, weight=0 until backtested
   ]);
-  const signals = { conviction: convSig, news: newsSig, uw_options: uwSig, gex: gexSig, insider: insiderSig, distance_52w: dist52wSig, predictor: predSig, congress: congressSig };
+  const signals = { conviction: convSig, news: newsSig, uw_options: uwSig, gex: gexSig, insider: insiderSig, distance_52w: dist52wSig, predictor: predSig, congress: congressSig, relative_strength: rsSig2 };
 
   // Post-signal gates (conviction grade, UW label, news sentiment)
   blockers.push(...allBlockers({ filters, signals }, POST_SIGNAL_GATES));
 
   // ── Composite score (renormalized — see _scoreCandidate for rationale) ─
   const pairs = [
-    ['conviction',   signals.conviction.value],
-    ['news',         signals.news.value],
-    ['uw_options',   signals.uw_options.value],
-    ['gex',          signals.gex.value],
-    ['insider',      signals.insider.value],
-    ['distance_52w', signals.distance_52w.value],
-    ['predictor',    signals.predictor.value],
-    ['congress',     signals.congress.value],
+    ['conviction',        signals.conviction.value],
+    ['news',              signals.news.value],
+    ['uw_options',        signals.uw_options.value],
+    ['gex',               signals.gex.value],
+    ['insider',           signals.insider.value],
+    ['distance_52w',      signals.distance_52w.value],
+    ['predictor',         signals.predictor.value],
+    ['congress',          signals.congress.value],
+    ['relative_strength', signals.relative_strength.value],  // M4 — weight=0 until backtest gate passes
   ];
   let weightedSum = 0, weightTotal = 0;
   for (const [key, val] of pairs) {
@@ -645,7 +681,8 @@ export async function diagnoseCandidate(symbol, bot) {
   const setup = enforceSetup
     ? await classifySetup({ signals, indicators: { ...ind, symbol }, rsi: rsi14, fundamentals, last5dReturn }).catch(() => null)
     : null;
-  blockers.push(...allBlockers({ filters, setup, enforceSetup }, SETUP_GATES));
+  // Thread rsi14 into setup gates so gateOverboughtEntry can apply its RSI ceiling.
+  blockers.push(...allBlockers({ filters, setup, enforceSetup, rsi14 }, SETUP_GATES));
 
   // Top driver signals (sorted by absolute contribution to composite)
   const sigEntries = Object.entries(signals).map(([k, v]) => ({
@@ -899,6 +936,62 @@ async function _signalPredictor(symbol) {
   // 47% historical accuracy — weight already capped at 5% in defaults
   const value = Math.max(-100, Math.min(100, pct * 10)) * (conf / 100);
   return { value: +value.toFixed(1), predicted_change_pct: pct, confidence: conf };
+}
+
+// ─── _signalRelativeStrength ───────────────────────────────────────────────────
+// M4 (2026-05-29): queries relative_strength table computed by rs-scanner.js
+// daily cron. Returns value 0–100 based on rank_overall percentile + RS vs sector.
+//
+// Weight: 0.00 (observational) — no backtest data yet.
+// Backtest gate: after 30d of daily RS data, test whether top-quartile RS symbols
+// (rs_vs_spy_5d > 0 AND rank_overall ≤ 25%) show ≥ +2pp edge vs bottom half.
+// If gate passes, promote to 0.05 weight, reduce distance_52w from 0.08 → 0.03.
+// (The two signals are correlated — near-52w-high stocks tend to have strong RS.)
+async function _signalRelativeStrength(symbol) {
+  try {
+    const { rows } = await query(
+      `SELECT rs_vs_spy_5d, rs_vs_sector_5d, rank_overall, rank_sector, return_5d
+       FROM relative_strength
+       WHERE symbol = $1
+       ORDER BY calc_date DESC
+       LIMIT 1`,
+      [symbol.toUpperCase()]
+    );
+    if (!rows.length) return { value: 0 };
+    const rs5d     = rows[0].rs_vs_spy_5d  != null ? Number(rows[0].rs_vs_spy_5d)  : null;
+    const rsSec    = rows[0].rs_vs_sector_5d != null ? Number(rows[0].rs_vs_sector_5d) : null;
+    const rankAll  = rows[0].rank_overall   != null ? Number(rows[0].rank_overall)  : null;
+
+    if (rs5d == null) return { value: 0 };
+
+    // Score in [-100, +100] range (signal-module contract; 0 = neutral).
+    // FIXED 2026-06-01: previously returned 10-90 unsigned which violated the
+    // contract and caused composite-score scaling drift in scoring.js.
+    //   rs_spy >  +20pp → +80 (sector leader)
+    //   rs_spy +5–+20pp → +40-60 (strong outperformer)
+    //   rs_spy   0–+5pp → 0-+20 (modest outperformer)
+    //   rs_spy -5–  0pp → -20-0 (slight laggard)
+    //   rs_spy < -5pp   → -40-80 (clear laggard)
+    let value;
+    if      (rs5d >=  20) value = 80;
+    else if (rs5d >=  10) value = 60;
+    else if (rs5d >=   5) value = 40;
+    else if (rs5d >=   2) value = 20;
+    else if (rs5d >=   0) value = 0;
+    else if (rs5d >=  -3) value = -20;
+    else if (rs5d >=  -7) value = -50;
+    else                  value = -80;
+
+    // Sector bonus: +/-10 if also beating/lagging sector ETF
+    if (rsSec != null) value = Math.max(-100, Math.min(100, value + (rsSec > 0 ? 10 : rsSec < 0 ? -10 : 0)));
+
+    return {
+      value,
+      rs_vs_spy_5d:    rs5d    != null ? +rs5d.toFixed(2)    : null,
+      rs_vs_sector_5d: rsSec   != null ? +rsSec.toFixed(2)   : null,
+      rank_overall:    rankAll,
+    };
+  } catch { return { value: 0 }; }
 }
 
 async function _getCurrentVix() {

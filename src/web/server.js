@@ -46,6 +46,7 @@ import { getAccounts, getFunds, getPositions as getMoomooPositions, getMoomooTod
 import { validateTigerCreds, getTigerFunds, getTigerPositions, getTigerOrders, placeTigerOrder } from '../core/tiger.js';
 import { chat, clearHistory, chatHistory } from '../core/ai-chat.js';
 import { startTelegramBot } from '../core/telegram-bot.js';
+import { scanAndAlertUWFlow, scanAndAlertUWInsider, scanAndAlertUWCongress, scanAndAlertUWMovers } from '../core/uw-alert.js';
 import { seedKnowledge } from '../core/knowledge.js';
 import { isGraphConfigured, getContagionImpact, getSympathyTrades, getSystemicRisk, getGraphStats, getFullGraph } from '../core/graph.js';
 import { seedGraph } from '../core/graph-seed.js';
@@ -139,6 +140,7 @@ import { runBotScanForAllActive, scanBot, startBotEngineCrons } from '../core/bo
 import { runExecutorForAllActive, processBot, startBotExecutorCrons } from '../core/bot-executor.js';
 import { reconcileBotPositions } from '../core/bot-reconciler.js';
 import { syncTradableUniverse } from '../core/universe-sync.js';
+import { scoreUniverse as scoreUniverseV2 } from '../core/model-v2-scorer.js';
 import { cachePolicy } from './middleware/cache-policy.js';
 
 // ─── Process-level error handlers ─────────────────────────────────────────────
@@ -283,12 +285,12 @@ async function migrateUsersToDb() {
 
 // 'stats' merged into 'health' (2026-05-25). Both keys accepted for backwards
 // compat — TAB_PAGE_MAP in index.html aliases 'stats' → 'health'.
-const ALL_TABS    = ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'health', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener'];
+const ALL_TABS    = ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'health', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener', 'ext_hours', 'retrospective', 'top_picks'];
 const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
 
 const DEFAULT_PERMISSIONS = {
   admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
+  viewer: { tabs: ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener', 'ext_hours', 'retrospective', 'top_picks'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
 };
 
 function getPermissions(user) {
@@ -5058,6 +5060,420 @@ app.get('/api/market/top-stocks', async (req, res) => {
   }
 });
 
+// ─── Extended Hours Movers ────────────────────────────────────────────────────
+// GET /api/market/extended-hours
+// Returns pre-market and post-market gainers/losers from Yahoo Finance.
+// Scans SP500 top-200 + top-100 DB symbols by market cap.
+// Cache: 3 min (Yahoo only publishes ext-hours data every few minutes anyway).
+let _extHoursCache = { data: null, ts: 0 };
+const EXT_HOURS_TTL = 4 * 60_000;   // 4 min — inside the 5-min frontend poll window
+
+app.get('/api/market/extended-hours', requireAuth, async (req, res) => {
+  try {
+    if (_extHoursCache.data && Date.now() - _extHoursCache.ts < EXT_HOURS_TTL) {
+      return res.json({ ..._extHoursCache.data, cached: true });
+    }
+
+    // Current ET session
+    const et     = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const h      = et.getHours();
+    const m      = et.getMinutes();
+    const minsET = h * 60 + m;
+    const day    = et.getDay();
+    let sessionActive = 'closed';
+    if (day >= 1 && day <= 5) {
+      if      (minsET >= 4 * 60     && minsET <  9 * 60 + 30) sessionActive = 'premarket';
+      else if (minsET >= 9 * 60 + 30 && minsET < 16 * 60)     sessionActive = 'regular';
+      else if (minsET >= 16 * 60    && minsET < 20 * 60)       sessionActive = 'postmarket';
+    }
+    const etStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} ET`;
+
+    // Universe: SP500 top-200 + DB top-100 by market cap (deduplicated)
+    let dbSymbols = [];
+    if (isDbAvailable()) {
+      try {
+        const { rows } = await query(
+          `SELECT symbol FROM tradable_universe WHERE market_cap_usd IS NOT NULL ORDER BY market_cap_usd DESC LIMIT 100`
+        );
+        dbSymbols = rows.map(r => r.symbol);
+      } catch (_) {}
+    }
+    const universe = [...new Set([...SP500.slice(0, 200), ...dbSymbols])];
+
+    // Batch Yahoo Finance quotes — 25 per call to stay well within limits
+    const BATCH = 25;
+    const rawQuotes = [];
+    for (let i = 0; i < universe.length; i += BATCH) {
+      try {
+        const batch  = universe.slice(i, i + BATCH);
+        const result = await _yf.quote(batch, {}, { validateResult: false });
+        if (Array.isArray(result)) rawQuotes.push(...result);
+        else if (result)           rawQuotes.push(result);
+      } catch (e) {
+        console.warn('[ext-hours] batch failed:', e.message?.slice(0, 80));
+      }
+    }
+
+    // Extract pre/post-market rows
+    const preMovers  = [];
+    const postMovers = [];
+
+    for (const q of rawQuotes) {
+      if (!q?.symbol) continue;
+      const sym      = q.symbol;
+      const name     = q.shortName ?? q.longName ?? sym;
+      const prevClose = q.regularMarketPreviousClose ?? q.regularMarketPrice ?? null;
+      const mktCap   = q.marketCap ?? null;
+      const sector   = q.sector   ?? null;
+
+      // ⚠️ INTENTIONAL — DO NOT "FIX" THIS BY MULTIPLYING BY 100 ⚠️
+      // yahoo-finance2 returns preMarketChangePercent / postMarketChangePercent
+      // ALREADY IN PERCENT FORM (e.g. -0.659 = -0.659%, NOT -0.659 decimal = -65.9%).
+      // Verified empirically against AAPL pre-market 2026-05-29.
+      // This bug was previously introduced + fixed once; the * 100 multiplier was the bug.
+      // CodeRabbit may flag this — explicitly suppress (see comment above).
+      if (q.preMarketPrice && q.preMarketChangePercent != null) {
+        preMovers.push({
+          symbol:    sym,
+          name,
+          prev_close: prevClose ? +prevClose.toFixed(2) : null,
+          ext_price: +q.preMarketPrice.toFixed(2),
+          chg_pct:   +Number(q.preMarketChangePercent).toFixed(2),
+          chg_abs:   prevClose ? +(q.preMarketPrice - prevClose).toFixed(2) : null,
+          volume:    q.preMarketVolume ?? null,
+          market_cap: mktCap,
+          sector,
+          session:   'premarket',
+        });
+      }
+
+      if (q.postMarketPrice && q.postMarketChangePercent != null) {
+        postMovers.push({
+          symbol:    sym,
+          name,
+          prev_close: prevClose ? +prevClose.toFixed(2) : null,
+          ext_price: +q.postMarketPrice.toFixed(2),
+          chg_pct:   +Number(q.postMarketChangePercent).toFixed(2),
+          chg_abs:   prevClose ? +(q.postMarketPrice - prevClose).toFixed(2) : null,
+          volume:    q.postMarketVolume ?? null,
+          market_cap: mktCap,
+          sector,
+          session:   'postmarket',
+        });
+      }
+    }
+
+    const byAbs = arr => [...arr].sort((a, b) => Math.abs(b.chg_pct) - Math.abs(a.chg_pct));
+
+    const data = {
+      session_active: sessionActive,
+      et_time:        etStr,
+      premarket: {
+        gainers: byAbs(preMovers.filter(x => x.chg_pct > 0)).slice(0, 25),
+        losers:  byAbs(preMovers.filter(x => x.chg_pct < 0)).slice(0, 25),
+        total:   preMovers.length,
+      },
+      postmarket: {
+        gainers: byAbs(postMovers.filter(x => x.chg_pct > 0)).slice(0, 25),
+        losers:  byAbs(postMovers.filter(x => x.chg_pct < 0)).slice(0, 25),
+        total:   postMovers.length,
+      },
+      scanned: rawQuotes.length,
+      cached:  false,
+    };
+
+    // Only cache if we actually got quotes — don't freeze empty results
+    // from a rate-limited startup scan (next call will retry fresh).
+    if (rawQuotes.length > 0) _extHoursCache = { data, ts: Date.now() };
+    res.json(data);
+  } catch (err) {
+    console.error('[ext-hours] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/market/extended-hours-portfolio?source=...
+// Returns the current user's broker positions enriched with pre/post-market prices
+// from Yahoo Finance. Much faster than the main ext-hours endpoint because it only
+// fetches quotes for held symbols (not 200+ universe symbols).
+app.get('/api/market/extended-hours-portfolio', requireAuth, async (req, res) => {
+  try {
+    const rawSource = req.query.source;
+    const source = ['moomoo','alpaca_live','tiger','tiger_demo'].includes(rawSource) ? rawSource : 'alpaca';
+
+    const { positions } = await getAccountData(source, req.session.username);
+    if (!positions || positions.length === 0) {
+      // For Moomoo: detect if FutuOpenD is not running so we can surface a helpful message
+      let error_hint = null;
+      if (source === 'moomoo' && process.env.MOOMOO_OPEND_HOST !== undefined) {
+        const mmHost = process.env.MOOMOO_OPEND_HOST || '127.0.0.1';
+        const mmPort = parseInt(process.env.MOOMOO_OPEND_PORT) || 11111;
+        const connected = await new Promise(resolve => {
+          const sock = new net.Socket();
+          sock.setTimeout(1200);
+          sock.on('connect', () => { sock.destroy(); resolve(true); });
+          sock.on('error',   () => resolve(false));
+          sock.on('timeout', () => resolve(false));
+          sock.connect(mmPort, mmHost);
+        });
+        if (!connected) {
+          error_hint = `FutuOpenD is not reachable at ${mmHost}:${mmPort}. Open the Moomoo desktop app and make sure FutuOpenD is running.`;
+        }
+      }
+      return res.json({ source, positions: [], session_active: 'closed', et_time: null, error_hint });
+    }
+
+    // Current ET session
+    const et     = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const h      = et.getHours();
+    const m      = et.getMinutes();
+    const minsET = h * 60 + m;
+    const day    = et.getDay();
+    let session  = 'closed';
+    if (day >= 1 && day <= 5) {
+      if      (minsET >= 4 * 60     && minsET <  9 * 60 + 30) session = 'premarket';
+      else if (minsET >= 9 * 60 + 30 && minsET < 16 * 60)     session = 'regular';
+      else if (minsET >= 16 * 60    && minsET < 20 * 60)       session = 'postmarket';
+    }
+    const etStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} ET`;
+
+    // Fetch Yahoo quotes for just the held symbols
+    const symbols = [...new Set(positions.map(p => p.symbol).filter(Boolean))];
+    let quotes = {};
+    try {
+      const result = await _yf.quote(symbols, {}, { validateResult: false });
+      const arr = Array.isArray(result) ? result : (result ? [result] : []);
+      for (const q of arr) { if (q?.symbol) quotes[q.symbol] = q; }
+    } catch (_) {}
+
+    const enriched = positions.map(p => {
+      const q         = quotes[p.symbol] || {};
+      const prevClose = q.regularMarketPreviousClose ?? q.regularMarketPrice ?? null;
+
+      let ext_price   = null;
+      let ext_chg_pct = null;
+      let ext_chg_abs = null;
+      let ext_session = null;
+
+      if (session === 'premarket' && q.preMarketPrice) {
+        ext_price   = +Number(q.preMarketPrice).toFixed(2);
+        ext_chg_pct = q.preMarketChangePercent != null ? +Number(q.preMarketChangePercent).toFixed(2) : null;
+        ext_chg_abs = prevClose ? +(q.preMarketPrice - prevClose).toFixed(2) : null;
+        ext_session = 'premarket';
+      } else if (session === 'postmarket' && q.postMarketPrice) {
+        ext_price   = +Number(q.postMarketPrice).toFixed(2);
+        ext_chg_pct = q.postMarketChangePercent != null ? +Number(q.postMarketChangePercent).toFixed(2) : null;
+        ext_chg_abs = prevClose ? +(q.postMarketPrice - prevClose).toFixed(2) : null;
+        ext_session = 'postmarket';
+      } else if (q.regularMarketPrice) {
+        ext_price   = +Number(q.regularMarketPrice).toFixed(2);
+        ext_chg_pct = q.regularMarketChangePercent != null ? +Number(q.regularMarketChangePercent).toFixed(2) : null;
+        ext_chg_abs = q.regularMarketChange   != null ? +Number(q.regularMarketChange).toFixed(2) : null;
+        ext_session = 'regular';
+      }
+
+      // Use absolute qty + side flag so short positions get their P&L sign flipped.
+      // Without this, a short up 1% would show as +1% gain (wrong — short loses when price rises).
+      const qty     = Math.abs(+(p.qty ?? 0));
+      const avg     = +(p.avg_entry_price ?? 0);
+      const isShort = String(p.side || 'long').toLowerCase() === 'short';
+      const priceGap = (ext_price != null && avg > 0)
+        ? (isShort ? (avg - ext_price) : (ext_price - avg))
+        : null;
+      const ext_pl     = (priceGap != null && qty > 0)
+        ? +(priceGap * qty).toFixed(2) : null;
+      const ext_pl_pct = (priceGap != null && avg > 0)
+        ? +((priceGap / avg) * 100).toFixed(2) : null;
+
+      return {
+        symbol:          p.symbol,
+        name:            p.name ?? q.shortName ?? q.longName ?? null,
+        qty,
+        avg_entry_price: avg ? +Number(avg).toFixed(2) : null,
+        current_price:   p.current_price  ? +Number(p.current_price).toFixed(2)  : null,
+        market_value:    p.market_value   ?? null,
+        unrealized_pl:   p.unrealized_pl  ?? null,
+        unrealized_plpc: p.unrealized_plpc ?? null,
+        ext_price,
+        ext_chg_pct,
+        ext_chg_abs,
+        ext_session,
+        ext_pl,
+        ext_pl_pct,
+      };
+    });
+
+    res.json({ source, session_active: session, et_time: etStr, positions: enriched });
+  } catch (err) {
+    console.error('[ext-hours-portfolio]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Movers Retrospective endpoints (2026-05-29) ────────────────────────────
+// Powers the "🔍 Retrospective" tab. Reads from mover_retrospective + mover_signals
+// (populated by scripts/backfill-mover-retrospective.mjs).
+
+// GET /api/retrospective/days — list of dates with movers + roll-up stats per day
+app.get('/api/retrospective/days', requireAuth, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const { rows } = await query(`
+      SELECT m.price_date,
+             COUNT(*)::int                                         AS total_movers,
+             COUNT(*) FILTER (WHERE m.direction = 'UP')::int        AS up_count,
+             COUNT(*) FILTER (WHERE m.direction = 'DOWN')::int      AS down_count,
+             COUNT(*) FILTER (WHERE s.caught_by_bot)::int           AS bot_caught,
+             COUNT(*) FILTER (WHERE s.primary_signal = 'unknown')::int AS unknown_count
+        FROM mover_retrospective m
+        LEFT JOIN mover_signals s ON s.mover_id = m.id
+       WHERE m.price_date > CURRENT_DATE - ($1::int * INTERVAL '1 day')
+       GROUP BY m.price_date
+       ORDER BY m.price_date DESC
+    `, [days]);
+    res.json({ days: rows });
+  } catch (err) {
+    console.error('[retrospective/days]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/retrospective?date=YYYY-MM-DD&direction=UP|DOWN|both&signal=...&min_pct=...
+//   Returns paginated movers for a specific date with all signal context.
+app.get('/api/retrospective', requireAuth, async (req, res) => {
+  try {
+    const date      = req.query.date;
+    const direction = req.query.direction || 'both';   // UP|DOWN|both
+    const signal    = req.query.signal    || null;     // optional filter
+    const minPct    = req.query.min_pct ? Math.abs(parseFloat(req.query.min_pct)) : 0;
+    const minPrice  = req.query.min_price ? parseFloat(req.query.min_price) : 0;
+    const limit     = Math.min(parseInt(req.query.limit) || 200, 500);
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date param required (YYYY-MM-DD)' });
+    }
+
+    const params = [date, minPct, minPrice, limit];
+    let whereSig = '';
+    let dirClause = '';
+
+    if (direction === 'UP')   dirClause = ` AND m.direction = 'UP'`;
+    if (direction === 'DOWN') dirClause = ` AND m.direction = 'DOWN'`;
+
+    if (signal && signal !== 'all') {
+      whereSig = ` AND s.primary_signal = $${params.length + 1}`;
+      params.push(signal);
+    }
+
+    const { rows } = await query(`
+      SELECT m.id, m.price_date, m.symbol, m.direction, m.prev_close, m.close,
+             m.chg_pct, m.volume, m.volume_vs_30d_avg, m.sector, m.sector_etf_move_pct,
+             m.market_cap_band,
+             s.had_earnings_in_window, s.earnings_date,
+             s.news_count_24h, s.news_sentiment, s.news_categories, s.top_headline,
+             s.uw_flow_premium_24h, s.uw_flow_sentiment, s.uw_flow_largest,
+             s.insider_buys_30d_value, s.insider_sells_30d_value, s.insider_net_signal,
+             s.congress_activity_30d, s.congress_details,
+             s.bot_conviction_score, s.bot_grade, s.bot_action, s.caught_by_bot,
+             s.primary_signal, s.signal_coverage_window
+        FROM mover_retrospective m
+        LEFT JOIN mover_signals s ON s.mover_id = m.id
+       WHERE m.price_date = $1::date
+         AND ABS(m.chg_pct) >= $2
+         AND COALESCE(m.close, 0) >= $3
+         ${dirClause}
+         ${whereSig}
+       ORDER BY ABS(m.chg_pct) DESC
+       LIMIT $4
+    `, params);
+
+    // Compute summary with SAME filters as the movers list so totals match what the user sees.
+    // FIXED 2026-06-01: was using only date/minPct/minPrice — direction & signal filters were ignored,
+    // making the summary disagree with the rendered table.
+    const summaryParams = [date, minPct, minPrice];
+    let summaryDirClause = '';
+    let summarySigClause = '';
+    if (direction === 'UP')   summaryDirClause = ` AND m.direction = 'UP'`;
+    if (direction === 'DOWN') summaryDirClause = ` AND m.direction = 'DOWN'`;
+    if (signal && signal !== 'all') {
+      summarySigClause = ` AND s.primary_signal = $${summaryParams.length + 1}`;
+      summaryParams.push(signal);
+    }
+    const { rows: summary } = await query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE m.direction = 'UP')::int   AS up_count,
+        COUNT(*) FILTER (WHERE m.direction = 'DOWN')::int AS down_count,
+        COUNT(*) FILTER (WHERE s.caught_by_bot)::int      AS bot_caught,
+        s.primary_signal,
+        COUNT(*)::int                                     AS signal_count
+        FROM mover_retrospective m
+        LEFT JOIN mover_signals s ON s.mover_id = m.id
+       WHERE m.price_date = $1::date AND ABS(m.chg_pct) >= $2 AND COALESCE(m.close, 0) >= $3
+         ${summaryDirClause}
+         ${summarySigClause}
+       GROUP BY ROLLUP(s.primary_signal)
+       ORDER BY s.primary_signal NULLS FIRST
+    `, summaryParams);
+
+    res.json({
+      date, direction, signal, min_pct: minPct, min_price: minPrice,
+      movers:  rows,
+      summary: summary,
+    });
+  } catch (err) {
+    console.error('[retrospective]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Predictions (Phase B5 v2 model) ──────────────────────────────────────────
+// GET /api/predictions/top?date=YYYY-MM-DD&limit=20&min_price=5&min_volume=500000&explain=1
+//   Returns top-N highest-probability picks for the given date (default: latest with data).
+//   Uses the v2-phaseB5 logistic regression model (intraday + sector + earnings + UW + insider features).
+//   Backtested top-10/day = +3.42% avg 5d return, 49.6% win rate (vs base 0.23%/34.9%).
+app.get('/api/predictions/top', requireAuth, async (req, res) => {
+  try {
+    const date      = req.query.date && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : null;
+    const limit     = Math.min(parseInt(req.query.limit) || 20, 200);
+    const minPrice  = req.query.min_price  ? parseFloat(req.query.min_price)  : 5;
+    const minVolume = req.query.min_volume ? parseInt(req.query.min_volume)   : 500_000;
+    const explain   = req.query.explain === '1' || req.query.explain === 'true';
+    // Diversified mode: max picks per sector. e.g. `?diversified=1&per_sector=2` caps Tech at 2 names.
+    const diversified  = req.query.diversified === '1' || req.query.diversified === 'true';
+    const maxPerSector = diversified ? Math.max(1, Math.min(10, parseInt(req.query.per_sector) || 2)) : null;
+
+    // Backtest-derived quality filters (push win rate from 51% → 60-63%):
+    //   ?quality=1                              applies the recommended preset
+    //   ?exclude_sectors=Healthcare,Financial%20Services
+    //   ?cap_band=mid                           mid-cap only ($2-10B)
+    //   ?bullish_min=20&bullish_max=65          UW flow mixed sweet spot
+    let excludeSectors = null;
+    let capBand        = null;
+    let bullishMin     = null;
+    let bullishMax     = null;
+    if (req.query.quality === '1' || req.query.quality === 'true') {
+      const { POOR_SECTORS_DEFAULT } = await import('../core/model-v2-scorer.js');
+      excludeSectors = POOR_SECTORS_DEFAULT;
+      bullishMin = 20;
+      bullishMax = 65;
+    }
+    if (req.query.exclude_sectors) excludeSectors = req.query.exclude_sectors.split(',').map(s => s.trim()).filter(Boolean);
+    if (req.query.cap_band) capBand = req.query.cap_band;
+    if (req.query.bullish_min) bullishMin = parseFloat(req.query.bullish_min);
+    if (req.query.bullish_max) bullishMax = parseFloat(req.query.bullish_max);
+
+    const out = await scoreUniverseV2({
+      date, minPrice, minVolume, limit, explain, maxPerSector,
+      excludeSectors, capBand, bullishMin, bullishMax,
+    });
+    res.json(out);
+  } catch (err) {
+    console.error('[predictions/top]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Which data sources are available
 app.get('/api/sources', requireAuth, async (req, res) => {
   const dbUser = isDbAvailable() ? await getDbUser(req.session.username) : null;
@@ -8985,7 +9401,8 @@ const BOT_DEFAULT_RULES = {
     price_max: 2500,            // raised 2026-05-27 (500→1500→2500) — KLAC $2011, fractionable=TRUE means dollar-sized orders
     min_adv_dollar_vol: 5000000,
     avoid_earnings_within_days: 3,
-    vix_min: 15,
+    // vix_min REMOVED 2026-06-01 — deprecated. Default was 15 (don't trade in calm regimes)
+    // but that filters out the majority of profitable swing windows. Use vix_max only.
     vix_max: 60,
     vix_aggressive_at: 25,
     // require_uw_label_any: previously ['bullish', 'strong_bullish'] but the
@@ -9004,8 +9421,20 @@ const BOT_DEFAULT_RULES = {
     skip_during_macro_blackout: true,
     skip_high_short_interest: false,
     avoid_premarket_gap_above_pct: 8,
+    // Removed vix_min default (audit E-3 2026-05-29):
+    // vix_min: 15 was blocking ALL entries when VIX < 15, which is the normal
+    // range during calm bull markets (2017 full year: 9-14, summer 2024: 11-14).
+    // Momentum/breakout strategies perform BEST in low-VIX uptrends — the floor
+    // was silently killing good trades. vix_max: 60 (above-limit panic) is kept.
+    // vix_min can still be set manually on individual bots that need it.
   },
   exit_rules: {
+    // stop_loss_usd is the legacy fallback when no setup rule applies. Used in
+    // computeStopPct(stop_loss_usd / dollars_invested). With max_position_usd=1000
+    // and stop_loss_usd=50: stopPct=5% — reasonable. Without max_position_usd on a
+    // $10K capital bot: position=$9500, stopPct=0.53% — fires on the first uptick.
+    // Bug fix 2026-05-29 (audit C-2): explicitly define so new bots have a known value.
+    stop_loss_usd: 50,
     legacy_stop_loss_usd: 50,
     legacy_trail_pct: 30,
     legacy_time_stop_days: 5,
@@ -9014,17 +9443,29 @@ const BOT_DEFAULT_RULES = {
     exit_before_earnings: true,
   },
   sizing: {
-    position_size_pct: 60,
+    // Bug fix 2026-05-29 (audit C-3 / E-2):
+    // position_size_pct was 60 here but all 4 active bots run at 95%. New bots
+    // created via the UI would silently use 60%, under-deploying capital.
+    // Aligned to 95% — the same value that active bots were manually set to.
+    //
+    // max_position_usd is the hard dollar cap per trade. Without it a 95%-sizing
+    // bot with $20K capital deploys $19K on a single name. Bot 30 (HUT, -$4,754)
+    // had no cap set. $1,000 default ensures any gap-through-stop cannot exceed
+    // ~$70-80 per trade on a 7-8% stop — aligns with the circuit-breaker budget.
+    position_size_pct: 95,
+    max_position_usd: 1000,
     vix_aggressive_multiplier: 1.3,
   },
   composite_weights: {
     conviction:   0.10,
     news:         0.22,
-    uw_options:   0.30,
+    uw_options:   0.25,  // reduced 0.30→0.25 to make room for congress
     gex:          0.15,
     insider:      0.15,
     distance_52w: 0.08,
-    predictor:    0.00,
+    predictor:          0.00,
+    congress:           0.05,  // Phase 4.2 — congressional trade signal
+    relative_strength:  0.00,  // M4 — observational until 30d backtest gate passes
   },
   risk: {
     max_loss_usd: null,
@@ -10192,6 +10633,41 @@ if (!_IS_STAGING_DASHBOARD) {
   startBotExecutorCrons();
 } else {
   console.log('[bot-crons] staging mode (DASHBOARD_PORT set) — skipping engine + executor crons; prod owns them');
+}
+
+// ─── Regime Snapshot Cron ─────────────────────────────────────────────────────
+// Observational only — computes and stores market regime; does NOT change bot
+// entry/exit logic. Every 30 min during market hours (9:00–16:30 ET).
+// Gated to PROD only (staging skips).
+//
+// Bug fix 2026-05-29 (audit G-1): the separate '0 9 * * 1-5' cron was firing
+// at the same instant as the first '*/30 9-16 ...' tick (both at 9:00:00 AM),
+// writing two identical regime_snapshot rows every market open. Removed the
+// duplicate; the 30-min cron covers 9:00 AM naturally as its first tick.
+if (!_IS_STAGING_DASHBOARD) {
+  cron.schedule('*/30 9-16 * * 1-5', async () => {
+    try {
+      const { computeRegime, saveRegimeSnapshot } = await import('../core/regime-detector.js');
+      const r = await computeRegime();
+      const saved = await saveRegimeSnapshot(r);
+      console.log(`[regime-detector] snapshot: regime=${r.regime} strength=${r.strength} id=${saved.id}`);
+    } catch (err) { console.error('[regime-detector] cron error:', err.message); }
+  }, { timezone: 'America/New_York' });
+}
+
+// ─── Relative Strength Scanner Cron (M4) ─────────────────────────────────────
+// Runs daily at 6:00 PM ET (after extended-hours prices settle).
+// Computes rs_vs_spy_5d, rs_vs_spy_20d, rs_vs_sector_5d for every liquid symbol
+// and upserts into relative_strength table.
+// Gated to PROD only (staging skips).
+if (!_IS_STAGING_DASHBOARD) {
+  cron.schedule('0 18 * * 1-5', async () => {
+    try {
+      const { runRsScanner } = await import('../core/rs-scanner.js');
+      const result = await runRsScanner();
+      console.log(`[rs-scanner] daily cron done: ${result.inserted} symbols, SPY 5d=${result.spyRet5d?.toFixed(2)}%`);
+    } catch (err) { console.error('[rs-scanner] daily cron error:', err.message); }
+  }, { timezone: 'America/New_York' });
 }
 
 // ─── Near-Miss Report — 4:30 PM ET Mon–Fri (after close) ─────────────────────
@@ -11637,6 +12113,7 @@ cron.schedule('*/5 * * * 1-5', async () => {
          m.price ?? null, m.volume ?? null, JSON.stringify(m), captured_at]
       ).catch(() => {});
     }
+    scanAndAlertUWMovers().catch(() => {});
   } catch (e) {
     console.error('[uw-cron/movers]', e.message);
     sysAlert({ key: 'uw-cron/movers', severity: 'critical', title: 'UW movers cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
@@ -11675,6 +12152,7 @@ cron.schedule('*/2 9-16 * * 1-5', async () => {
         ]
       ).catch(() => {});
     }
+    scanAndAlertUWFlow().catch(() => {});
   } catch (e) {
     console.error('[uw-cron/flow-alerts]', e.message);
     sysAlert({ key: 'uw-cron/flow-alerts', severity: 'critical', title: 'UW flow-alerts cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
@@ -11712,6 +12190,7 @@ cron.schedule('*/15 * * * 1-5', async () => {
          sharesAbs, priceNum, valueDollars, filedAt]
       ).catch(() => {});
     }
+    scanAndAlertUWInsider().catch(() => {});
   } catch (e) {
     console.error('[uw-cron/insider]', e.message);
     sysAlert({ key: 'uw-cron/insider', severity: 'critical', title: 'UW insider cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
@@ -11780,6 +12259,8 @@ cron.schedule('0 * * * 1-5', async () => {
       await sendEmailAlert(subject, body).catch(e => console.error('[congress-email]', e.message));
       console.log(`[uw-cron/congress] emailed ${newBuys.length} new buy(s): ${newBuys.map(b => b.ticker).join(', ')}`);
     }
+    // Telegram alerts for ALL new congress trades (buys + sells) ≥ $15K
+    scanAndAlertUWCongress().catch(() => {});
   } catch (e) {
     console.error('[uw-cron/congress]', e.message);
     sysAlert({ key: 'uw-cron/congress', severity: 'critical', title: 'UW congress cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});

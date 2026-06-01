@@ -125,8 +125,10 @@ async function _getLivePrice(bot, creds, symbol) {
   let live = null;
   try {
     if (bot.broker === 'tiger_demo') {
-      const q = await getTigerQuote(creds, symbol);
-      live = q?.latestPrice ?? q?.last ?? q?.bidPrice ?? q?.askPrice ?? null;
+      // Fix E-3 (2026-05-29): Tiger simulator accounts do not support
+      // quote_real_time (returns error 1000).  Skip straight to the
+      // backtest_prices fallback to avoid console.error spam on every tick.
+      live = null;
     } else {
       const q = await getLatestPrice(symbol);
       live = q?.ask ?? q?.mid ?? q?.bid ?? null;
@@ -184,6 +186,20 @@ async function _tryOpenPosition(bot) {
   //    held / pending. We grab up to (max - open) so we can fill multiple slots
   //    on one executor tick if multiple rules fired.
   const slotsAvailable = maxPositions - openCount;
+  // Fix E-2 (2026-05-29): also exclude decisions that already produced a 'failed'
+  // trade row.  Without this, a broker rejection (e.g. Tiger code 1200 after market
+  // close) is treated as a cleared slot and the next executor tick retries the same
+  // decision, producing one failed row per minute for every open decision.
+  // Matching on decision_id (not just symbol) is precise: a new decision for the
+  // same symbol on the same day is still eligible if it passed the scanner dedup.
+  //
+  // Fix E-3 (2026-05-29): generalised the decision-consumption check to ANY status,
+  // not just 'failed'. Previous behaviour let a `closed` trade re-fire its decision
+  // (e.g. SRAD trade #276 opened 22:11:02, closed 22:15:08 on a quick stop-out, then
+  // SAME decision #167 fired AGAIN at 22:15:08 producing malformed pending trade #278
+  // with qty=0/entry=0). Rule is now strictly "one decision → at most one trade,
+  // regardless of status." Concurrency dedup is still handled by the symbol+open/pending
+  // NOT-EXISTS above; the upstream scanner's 15-min cross-process dedup is the other guard.
   const { rows: decisions } = await query(`
     SELECT d.id, d.symbol, d.entry_rule, d.rule_metadata, d.composite_score
       FROM bot_advance_decisions d
@@ -194,6 +210,10 @@ async function _tryOpenPosition(bot) {
           WHERE t.bot_id = d.bot_id
             AND t.symbol = UPPER(d.symbol)
             AND t.status IN ('open', 'pending')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM bot_advance_trades t
+          WHERE t.decision_id = d.id
        )
      ORDER BY d.scanned_at DESC
      LIMIT $3
@@ -448,6 +468,20 @@ export async function processBotAdvance(bot) {
 // ─── Run for all active ──────────────────────────────────────────────────────
 export async function runAdvanceExecutorForAllActive() {
   if (!isDbAvailable()) return { skipped: true, reason: 'no_db' };
+  // Fix E-1 (2026-05-29): market-hours guard mirrors engine.js Fix A-6.
+  // Executor cron fires until 15:59 ET but brokers (Tiger in particular) reject
+  // orders after 15:30 with code 1200.  Without this guard every post-close tick
+  // generates a failed row for each pending decision, producing the 187-row storm
+  // we saw before the clean reset.  Allow up to 15:34 so any fill already in
+  // progress at 15:30 can settle, then stop hard.
+  try {
+    const et     = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const day    = et.getDay();
+    const minsET = et.getHours() * 60 + et.getMinutes();
+    if (day === 0 || day === 6 || minsET < 9 * 60 + 30 || minsET >= 15 * 60 + 34) {
+      return { skipped: true, reason: 'outside_trading_window' };
+    }
+  } catch { /* ignore clock failures — let executor proceed */ }
   try {
     const bots = await getActiveAdvanceBots();
     const out = [];
