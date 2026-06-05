@@ -34,3 +34,6 @@ tiger_private.pem
 
 # TLS certs — contain private keys
 certs/
+
+# Claude Code local settings
+.claude/
