@@ -200,6 +200,9 @@ async function buildLessonsBlock(username = null) {
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL_CRITICAL = 'claude-sonnet-4-6'; // reasoning, user chat, tool use
+// 2026-06-03: voice mode is constrained to ≤3 sentences, no tools.
+// Haiku 4.5 has ~3× faster TTFT than Sonnet on this workload.
+const MODEL_VOICE    = 'claude-haiku-4-5';
 
 const DEFAULT_WATCHLIST = [
   'MRVL','NVDA','AMD','AAPL','MSFT','GOOGL','META','AMZN',
@@ -1717,11 +1720,24 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
     if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
 
     const t0 = Date.now();
+    // 2026-06-03 — prompt caching on system + tools.
+    // System + 52 tools = ~9,200 tokens, identical every turn → cache hits
+    // give 10× cheaper input + ~30-50% faster TTFT after first turn.
+    // For voice mode, route to Haiku 4.5 — ~3× faster TTFT, fine for ≤3-sentence replies.
+    const useModel  = voiceMode ? MODEL_VOICE : MODEL_CRITICAL;
+    const useTools  = voiceMode ? [] : TOOLS;
+    const useMaxTok = voiceMode ? 512 : 2048;
+    // Cache breakpoint at end of system prompt + end of tools array.
+    // Anthropic caches everything BEFORE the cache_control marker.
+    const cachedSystem = [{ type: 'text', text: fullSystem, cache_control: { type: 'ephemeral' } }];
+    const cachedTools  = useTools.length
+      ? [...useTools.slice(0, -1), { ...useTools[useTools.length - 1], cache_control: { type: 'ephemeral' } }]
+      : useTools;
     const stream = anthropic.messages.stream({
-      model: MODEL_CRITICAL,
-      max_tokens: 2048,
-      system: fullSystem,
-      tools: TOOLS,
+      model: useModel,
+      max_tokens: useMaxTok,
+      system: cachedSystem,
+      tools: cachedTools,
       messages,
     });
 
@@ -1778,7 +1794,7 @@ export async function chat({ chatId, message, onChunk, onTool, signal, userConfi
       role:    'assistant',
       content: fullText,
       source:  'claude',
-      model:   MODEL_CRITICAL,
+      model:   useModel,
     };
   }
 }
