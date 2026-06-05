@@ -201,7 +201,7 @@ async function _tryOpenPosition(bot) {
   // regardless of status." Concurrency dedup is still handled by the symbol+open/pending
   // NOT-EXISTS above; the upstream scanner's 15-min cross-process dedup is the other guard.
   const { rows: decisions } = await query(`
-    SELECT d.id, d.symbol, d.entry_rule, d.rule_metadata, d.composite_score
+    SELECT d.id, d.symbol, d.entry_rule, d.rule_metadata, d.composite_score, d.signals
       FROM bot_advance_decisions d
      WHERE d.bot_id=$1 AND d.action='would_buy'
        AND d.scanned_at > NOW() - ($2 * INTERVAL '1 minute')
@@ -293,6 +293,23 @@ async function _openOneSymbol(bot, creds, d) {
       return { action: 'skip_no_price', symbol };
     }
 
+    // 2026-06-03 (CLS/ELMT catastrophe): LIVE-QUOTE VALIDATION.
+    // Compare broker live price vs the scan-time cached price stored in the
+    // decision's signals JSON. If they diverge by > 5%, reject — the scan's
+    // thesis was built on stale data. Saved $1000+ on 2026-06-02 if shipped earlier.
+    const cachedPriceFromScan = Number(d.signals?.current_price ?? d.signals?.last_price);
+    const maxQuoteDivergence  = Number(bot.rules?.entry_filters?.max_entry_quote_divergence_pct ?? 5);
+    if (cachedPriceFromScan > 0 && maxQuoteDivergence > 0) {
+      const divergence = ((price - cachedPriceFromScan) / cachedPriceFromScan) * 100;
+      if (Math.abs(divergence) > maxQuoteDivergence) {
+        const reason = `live_quote_diverged_${divergence > 0 ? 'up' : 'down'}_${Math.abs(divergence).toFixed(1)}pct`;
+        console.warn(`[bot-advance/exec] bot ${bot.id} SKIP ${symbol}: live=${price} cache=${cachedPriceFromScan} divergence=${divergence.toFixed(1)}% (>${maxQuoteDivergence}%) — stale-cache catastrophe protection`);
+        await query(`UPDATE bot_advance_trades SET status='failed', exit_reason=$1 WHERE id=$2`,
+          [reason.slice(0, 30), pendingId]);
+        return { action: 'skip_live_quote_diverged', symbol, live: price, cache: cachedPriceFromScan, divergence_pct: +divergence.toFixed(2) };
+      }
+    }
+
     const { qty, dollarsInvested } = _planQty(bot, rule, price);
     if (qty < 1) {
       await query(`UPDATE bot_advance_trades SET status='failed', exit_reason='insufficient_capital' WHERE id=$1`, [pendingId]);
@@ -318,6 +335,14 @@ async function _openOneSymbol(bot, creds, d) {
 
     const stopLossPrice = +(order.fill_price * (1 - rule.exits.hard_sl_pct)).toFixed(2);
 
+    // Capture entry_score for intelligent-exit re-scoring (2026-06-03).
+    // For ml_v2_intelligence: composite_score in decisions is the model prob × 100.
+    // For other rules: store composite_score / 100 as normalized 0..1 prob-like value.
+    const rawScore = d.composite_score != null ? Number(d.composite_score) : null;
+    const entryScore = rawScore != null
+      ? (d.entry_rule === 'ml_v2_intelligence' ? rawScore : rawScore / 100)
+      : null;
+
     // Promote pending → open with full fill data
     await query(`
       UPDATE bot_advance_trades
@@ -325,9 +350,10 @@ async function _openOneSymbol(bot, creds, d) {
              order_id=$1,
              qty=$2, entry_price=$3, dollars_invested=$4,
              stop_loss_price=$5,
+             entry_score=$7,
              opened_at=NOW()
        WHERE id=$6
-    `, [order.order_id, qty, order.fill_price, +(qty * order.fill_price).toFixed(2), stopLossPrice, pendingId]);
+    `, [order.order_id, qty, order.fill_price, +(qty * order.fill_price).toFixed(2), stopLossPrice, pendingId, entryScore]);
 
     // For backwards compat / display, set current_trade_id to most-recent open trade
     await query(`UPDATE bots_advance SET current_trade_id=$1, updated_at=NOW() WHERE id=$2`, [pendingId, bot.id]);
@@ -373,19 +399,44 @@ async function _manageOnePosition(bot, trade) {
     await query(`UPDATE bot_advance_trades SET peak_pnl_usd=$1 WHERE id=$2`, [peakPnl, trade.id]);
   }
 
-  // Exit checks
-  const hardSlUsd = dollarsInv * Number(trade.hard_sl_pct);
-  const trailFraction = Number(trade.trail_pct) / 100;
-  const trailMinPeak = dollarsInv * 0.01;  // 1% peak gate before trail engages
-
+  // ── Intelligent exit (opt-in per bot, 2026-06-03) ───────────────────────────
+  // Backtest evidence: +5.18% per trade edge over mechanical (176 trades, 20d).
+  // Replaces hard_sl_pct / trail_pct / time_stop_days with thesis-break check
+  // + catastrophic floor (-15%). Opt-in via bot.rules.intelligent_exit_enabled.
   let exitReason = null;
-  if (currentPnl <= -hardSlUsd) {
-    exitReason = 'hard_stop';
-  } else if (peakPnl > trailMinPeak && currentPnl < peakPnl * (1 - trailFraction)) {
-    exitReason = 'trail_stop';
-  } else {
-    const heldDays = (Date.now() - new Date(trade.opened_at).getTime()) / 86_400_000;
-    if (heldDays >= Number(trade.time_stop_days)) exitReason = 'time_stop';
+  const { isIntelligentExitEnabled, decideIntelligentExit, rescoreForExit, getExitEventFlags } = await import('../intelligent-exit.js');
+  if (isIntelligentExitEnabled(bot)) {
+    try {
+      const currentScore = await rescoreForExit({ symbol: trade.symbol, entryRule: trade.entry_rule });
+      const eventFlags   = await getExitEventFlags(trade.symbol);
+      const decision = decideIntelligentExit({
+        bot,
+        entryScore: trade.entry_score != null ? Number(trade.entry_score) : null,
+        currentScore,
+        currentPnl,
+        dollarsInvested: dollarsInv,
+        eventFlags,
+      });
+      if (decision.exit) exitReason = decision.reason;
+    } catch (e) {
+      console.warn(`[bot-advance/exec] intelligent_exit failed for ${trade.symbol}, falling back to mechanical:`, e.message);
+    }
+  }
+
+  // ── Mechanical exit (fallback or when intelligent_exit not enabled) ─────────
+  if (!exitReason) {
+    const hardSlUsd = dollarsInv * Number(trade.hard_sl_pct);
+    const trailFraction = Number(trade.trail_pct) / 100;
+    const trailMinPeak = dollarsInv * 0.01;  // 1% peak gate before trail engages
+
+    if (currentPnl <= -hardSlUsd) {
+      exitReason = 'hard_stop';
+    } else if (peakPnl > trailMinPeak && currentPnl < peakPnl * (1 - trailFraction)) {
+      exitReason = 'trail_stop';
+    } else {
+      const heldDays = (Date.now() - new Date(trade.opened_at).getTime()) / 86_400_000;
+      if (heldDays >= Number(trade.time_stop_days)) exitReason = 'time_stop';
+    }
   }
 
   if (!exitReason) return { action: 'hold', symbol: trade.symbol, pnl: currentPnl };

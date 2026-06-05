@@ -56,13 +56,20 @@ export const ENTRY_RULES = [
       trail_pct:      30,
       time_stop_days: 5,   // matches model's 5-day forward-return horizon
     },
-    candidate_generator: async () => {
+    candidate_generator: async (botCtx = {}) => {
       try {
         // Dynamic import so cyclic-dep / startup-init isn't a concern.
         const { scoreUniverse, POOR_SECTORS_DEFAULT } = await import('../model-v2-scorer.js');
+        // 2026-06-02: pass the bot's per-position cap as maxPrice so the
+        // model doesn't keep ranking $971 MU at the top for a $1000-cap bot
+        // (qty=0 → insufficient_capital → 7 wasted broker calls on 2026-06-01).
+        // Heuristic: a stock needs to fit at least 2 shares to be tradeable
+        // under the bot's per-position cap, so maxPrice = cap / 2.
+        const cap = Number(botCtx.maxPrice) || null;  // already pre-computed by caller
         const r = await scoreUniverse({
           limit: 30,
           minPrice: 5,
+          maxPrice: cap,
           minVolume: 1_000_000,
           excludeSectors: POOR_SECTORS_DEFAULT,
           bullishMin: 20,
@@ -370,9 +377,15 @@ export function matchEntryRules(ctx, enabledRules) {
  * Each rule contributes its own ticker list; we dedup the union.
  *
  * @param {string[]} enabledRules
+ * @param {object}   [botCtx]        Optional bot-derived context the generators
+ *                                    can use to self-tune (e.g. maxPrice from
+ *                                    the bot's per-position $-cap). Backwards-
+ *                                    compatible: generators that ignore the arg
+ *                                    behave exactly as before.
+ *                                    Shape: { maxPrice, capitalUsd, ... }
  * @returns {Promise<string[]>}      deduplicated, uppercase tickers
  */
-export async function buildAdvanceCandidateUniverse(enabledRules) {
+export async function buildAdvanceCandidateUniverse(enabledRules, botCtx = {}) {
   const enabled = new Set(enabledRules || []);
   const active = ENTRY_RULES.filter(r => enabled.has(r.id));
   const universe = new Set();
@@ -380,7 +393,7 @@ export async function buildAdvanceCandidateUniverse(enabledRules) {
 
   for (const r of active) {
     try {
-      const tickers = await r.candidate_generator();
+      const tickers = await r.candidate_generator(botCtx);
       breakdown[r.id] = tickers.length;
       for (const t of tickers) {
         if (t && typeof t === 'string') universe.add(t.toUpperCase());

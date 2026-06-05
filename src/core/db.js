@@ -1331,20 +1331,27 @@ export async function recordTrade({
   }
 }
 
-export async function closeTrade({ order_id, symbol, exit_price, pnl_usd, pnl_pct }) {
+export async function closeTrade({ order_id, symbol, exit_price, pnl_usd, pnl_pct, exit_reason }) {
   if (!dbAvailable) return;
+  // 2026-06-02 fix: exit_reason was being computed in _closeTrade() but silently
+  // dropped because the column didn't exist (now added via migration). Persist
+  // it so we can answer "why did this trade close?" from SQL and surface it on
+  // the dashboard. bot_advance_trades.exit_reason already had this.
+  const reason = (exit_reason ?? null) ? String(exit_reason).slice(0, 40) : null;
   try {
     if (order_id) {
       await query(
-        `UPDATE trades SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4, closed_at=NOW()
+        `UPDATE trades SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4,
+                          exit_reason=COALESCE($5, exit_reason), closed_at=NOW()
          WHERE order_id=$1 AND status='open'`,
-        [order_id, exit_price, pnl_usd, pnl_pct]
+        [order_id, exit_price, pnl_usd, pnl_pct, reason]
       );
     } else if (symbol) {
       await query(
-        `UPDATE trades SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4, closed_at=NOW()
+        `UPDATE trades SET status='closed', exit_price=$2, pnl_usd=$3, pnl_pct=$4,
+                          exit_reason=COALESCE($5, exit_reason), closed_at=NOW()
          WHERE id = (SELECT id FROM trades WHERE symbol=$1 AND status='open' ORDER BY opened_at DESC LIMIT 1)`,
-        [symbol.toUpperCase(), exit_price, pnl_usd, pnl_pct]
+        [symbol.toUpperCase(), exit_price, pnl_usd, pnl_pct, reason]
       );
     }
   } catch (err) {

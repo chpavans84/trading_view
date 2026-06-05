@@ -20,7 +20,7 @@ import {
   PRE_SIGNAL_GATES, POST_SIGNAL_GATES, SETUP_GATES,
   firstBlocker, allBlockers, gateCompositeScore,
 } from './bot-gates.js';
-import { getScannableBots, getOtherBotsHeldSymbols, tripCircuitBreaker, unlinkTrade } from '../repositories/bots-repo.js';
+import { getScannableBots, getOtherBotsHeldSymbols, getSiblingBotsActivity, tripCircuitBreaker, unlinkTrade } from '../repositories/bots-repo.js';
 import { recordDecision } from '../repositories/bot-decisions-repo.js';
 
 // ─── Single-flight guard per bot ──────────────────────────────────────────────
@@ -98,7 +98,7 @@ export async function scanBot(bot) {
       // fall through to normal scan
     }
 
-    // Circuit breaker
+    // Circuit breaker — cumulative (lifetime) loss
     const maxLoss = rules.risk?.max_loss_usd ?? 100;
     if (bot.cumulative_pnl_usd != null && Number(bot.cumulative_pnl_usd) <= -maxLoss) {
       if (bot.status !== 'stopped') {
@@ -108,18 +108,76 @@ export async function scanBot(bot) {
         `cumulative loss ${bot.cumulative_pnl_usd} ≤ -${maxLoss}`);
     }
 
+    // 2026-06-03 (CLS/ELMT pattern) — DAILY catastrophic-loss circuit breaker.
+    // A bot can be up $500 lifetime and still lose $500 in one bad day if a
+    // single stock gaps. This pauses new entries for the rest of the SESSION
+    // (auto-resets next ET trading day). Does NOT change bot.status — just
+    // skips entries until tomorrow.
+    const maxDailyLoss = Number(rules.risk?.max_daily_loss_usd ?? 200);
+    if (maxDailyLoss > 0) {
+      const { rows: pnlRows } = await query(`
+        SELECT COALESCE(SUM(pnl_usd), 0)::numeric AS daily_pnl, COUNT(*) AS n
+          FROM trades
+         WHERE bot_id = $1
+           AND status = 'closed'
+           AND (closed_at AT TIME ZONE 'America/New_York')::date
+             = (NOW() AT TIME ZONE 'America/New_York')::date
+      `, [bot.id]);
+      const dailyPnl = Number(pnlRows[0]?.daily_pnl ?? 0);
+      if (dailyPnl <= -maxDailyLoss) {
+        return await _log(bot.id, 'skip_daily_loss_cap', null, null, null,
+          `daily realized P&L $${dailyPnl.toFixed(2)} ≤ -$${maxDailyLoss} (${pnlRows[0]?.n} closed trades today) — paused until next session`);
+      }
+    }
+
     // 1. Candidate universe
     const universe = await _buildCandidateUniverse(bot);
     if (!universe.length) {
       return await _log(bot.id, 'skip_no_candidate', null, null, null, 'empty universe');
     }
 
-    // 2. Deconflict against this user's other bots' open positions
-    const heldSymbols = await _getHeldSymbolsForUser(bot.user_id, bot.id);
-    const filtered = universe.filter(sym => !heldSymbols.has(sym));
+    // 2. Cross-bot situational awareness (2026-06-02): bots in the same broker
+    //    account act as one autonomous fleet. Each bot must avoid:
+    //      (a) symbols any sibling bot currently HOLDS — duplicate position
+    //          stacks risk on the same name
+    //      (b) symbols any sibling bot CLOSED or FAILED within the cool-down
+    //          window — prevents the AMD/AVGO/MU re-entry pingpong that bled
+    //          $1,860 across 34 wasted attempts in the last 30d
+    //    Scope = same user + same broker. Different brokers = different real
+    //    capital pools, so no cross-contamination.
+    const cooldownHours = Number(rules.entry_filters?.reentry_cooldown_hours ?? 4);
+    const sibling = await getSiblingBotsActivity({
+      userId:       bot.user_id,
+      broker:       bot.broker,
+      excludeBotId: bot.id,
+      cooldownHours,
+    });
+
+    // Filter out held AND in-cooldown symbols. Track WHY for observability.
+    const blockedBy = { held: [], cooldown: [] };
+    const filtered = [];
+    for (const sym of universe) {
+      const symU = sym.toUpperCase();
+      if (sibling.held.has(symU))     { blockedBy.held.push(symU);     continue; }
+      if (sibling.cooldown.has(symU)) { blockedBy.cooldown.push(symU); continue; }
+      filtered.push(sym);
+    }
+
     if (!filtered.length) {
+      const heldNames = blockedBy.held.slice(0, 5).join(',');
+      const cdNames   = blockedBy.cooldown.slice(0, 5).join(',');
       return await _log(bot.id, 'skip_no_candidate', null, null, null,
-        `all ${universe.length} candidates already held by other bots`);
+        `all ${universe.length} candidates blocked by sibling-bot activity: ` +
+        `held=${blockedBy.held.length}${heldNames ? `[${heldNames}]` : ''}, ` +
+        `cooldown=${blockedBy.cooldown.length}${cdNames ? `[${cdNames}]` : ''}`);
+    }
+
+    // Observability: log a one-line summary of cross-bot filtering even when
+    // some candidates survive, so we can tell whether the gate is doing useful work.
+    if (blockedBy.held.length || blockedBy.cooldown.length) {
+      console.log(`[bot-engine] bot ${bot.id} cross-bot filter: ` +
+        `${blockedBy.held.length} held, ${blockedBy.cooldown.length} cooldown ` +
+        `(${cooldownHours}h), ${filtered.length} survived`);
     }
 
     // 3. Score each candidate (cap at 50 per scan)
@@ -1035,4 +1093,11 @@ export function startBotEngineCrons() {
   // 10:00–15:59 ET every 5 min
   cron.schedule('*/5 10-15 * * 1-5', () => runBotScanForAllActive(), TZ);
   console.log('[bot-engine] crons scheduled — scanning every 5 min during market hours (BOT_CRON_OWNER=true)');
+
+  // 2026-06-03: drift detector. Every 5 min during RTH, compare each bot's
+  // DB-open trades to the broker's truth and auto-reconcile phantoms.
+  // Prevents the bot-4 phantom-cap paralysis from recurring.
+  import('./drift-detector.js').then(({ startDriftDetectorCron }) => {
+    startDriftDetectorCron();
+  }).catch(e => console.warn('[bot-engine] drift-detector load failed:', e.message));
 }

@@ -42,11 +42,15 @@ export function gateEarningsProximity({ filters, indicators }) {
   const limit = filters.avoid_earnings_within_days;
   const days  = indicators?.earnings?.days_until;
   if (limit == null || days == null || days < 0) return null;
-  if (days < limit) {
+  // 2026-06-02 fix (AVGO loop): entry used `<`, exit (bot-executor.js:543) uses `<=`.
+  // With buffer=3 and days_until=3 the entry passed but the exit fired immediately →
+  // 6 round-trip trades on AVGO in <30 min, all losing on the bid-ask spread.
+  // Use `<=` here so entry and exit agree: "within N days" means inclusive of day N.
+  if (days <= limit) {
     return {
       gate: 'earnings_proximity',
       value: `${days}d`,
-      threshold: `>= ${limit}d`,
+      threshold: `> ${limit}d`,
       message: `Earnings in ${days} days — bot avoids within ${limit}d (binary event risk)`,
     };
   }
@@ -351,8 +355,17 @@ export function gateCompositeScore({ filters, composite }) {
 export function gatePriceGapFromCache({ filters, indicators }) {
   const maxGapPct = filters.max_gap_from_cache_pct !== undefined
     ? filters.max_gap_from_cache_pct
-    : 8;  // default 8%
-  if (maxGapPct == null) return null;  // explicitly disabled
+    : 8;  // default 8% — UPWARD chase block
+  // 2026-06-03 (CLS/ELMT catastrophe): catastrophic gap-DOWN block. The bot bought
+  // ELMT at $24.99 when live was $18.62 (-25% gap), stopped out instantly. Same on
+  // CLS ($507 cache → $385 live, -24%). The UPWARD-only block let these through
+  // because mean-reversion candidates was the prior concern. Now: small gap-downs
+  // are still allowed (mean-reversion edge), but a >10% gap-down means the cache is
+  // catastrophically stale and we should NEVER fill at the cached price.
+  const maxGapDownPct = filters.max_gap_down_from_cache_pct !== undefined
+    ? filters.max_gap_down_from_cache_pct
+    : 10;  // default 10% — catastrophic-stale block
+  if (maxGapPct == null && maxGapDownPct == null) return null;  // both disabled
 
   const cachedPrice = indicators?.liquidity?.last_price;
   const lastDate    = indicators?.liquidity?.last_date;
@@ -360,38 +373,48 @@ export function gatePriceGapFromCache({ filters, indicators }) {
 
   // ── Path A: pre-market gap (4:00–9:29 AM ET) ──────────────────────────────
   // Yahoo Finance preMarketPrice is only non-null before market open.
-  // FIXED 2026-06-01: only block UPWARD gaps (chasing risk). Downward gaps may
-  // actually be entry opportunities for mean-reversion — using Math.abs() here
-  // was rejecting both directions, which over-filtered candidates.
+  // Two checks: UPWARD chasing risk + DOWNWARD catastrophic-stale risk.
   const premktGap = indicators?.premarket?.gap_pct;
-  if (premktGap != null && premktGap > maxGapPct) {
-    return {
-      gate: 'price_gap_from_cache',
-      value: `premarket_gap=+${premktGap.toFixed(1)}%`,
-      threshold: `<= +${maxGapPct}%`,
-      message: `Pre-market gap UP +${premktGap.toFixed(1)}% exceeds ${maxGapPct}% — chasing risk`,
-    };
+  if (premktGap != null) {
+    if (maxGapPct != null && premktGap > maxGapPct) {
+      return {
+        gate: 'price_gap_from_cache',
+        value: `premarket_gap=+${premktGap.toFixed(1)}%`,
+        threshold: `<= +${maxGapPct}%`,
+        message: `Pre-market gap UP +${premktGap.toFixed(1)}% exceeds ${maxGapPct}% — chasing risk`,
+      };
+    }
+    if (maxGapDownPct != null && premktGap < -maxGapDownPct) {
+      return {
+        gate: 'price_gap_from_cache',
+        value: `premarket_gap=${premktGap.toFixed(1)}%`,
+        threshold: `>= -${maxGapDownPct}%`,
+        message: `Pre-market gap DOWN ${premktGap.toFixed(1)}% exceeds -${maxGapDownPct}% — stale-cache catastrophe risk (bot would fill at stale price)`,
+      };
+    }
   }
 
   // ── Path B: intraday gap (9:30–16:00 ET) ───────────────────────────────────
   // During regular trading hours Yahoo's regularMarketPrice is the live last-
   // trade price (now in indicators.premarket.live_price via getPreMarketGap).
-  // Compare it to the cached last_price from backtest_prices.  If the stock has
-  // already surged intraday, the bot would be chasing — block it.
-  //
-  // Only fires if live_price is clearly ABOVE the cache (upward spike only).
-  // A drop from cache (negative gap) is not blocked here; it's handled by the
-  // gateLiquidityStale gate which checks staleness regardless of direction.
-  // cachedPrice already declared above — reuse it here.
+  // Compare it to the cached last_price from backtest_prices.
   const livePrice = indicators?.premarket?.live_price;
   if (livePrice != null && cachedPrice != null && cachedPrice > 0) {
     const intradayGap = ((livePrice - cachedPrice) / cachedPrice) * 100;
-    if (intradayGap > maxGapPct) {
+    if (maxGapPct != null && intradayGap > maxGapPct) {
       return {
         gate: 'price_gap_from_cache',
         value: `live=$${livePrice} cache=$${cachedPrice} gap=+${intradayGap.toFixed(1)}%`,
         threshold: `<= +${maxGapPct}%`,
         message: `Live price $${livePrice} is ${intradayGap.toFixed(1)}% above cached $${cachedPrice} — spike-entry risk (stock already moved)`,
+      };
+    }
+    if (maxGapDownPct != null && intradayGap < -maxGapDownPct) {
+      return {
+        gate: 'price_gap_from_cache',
+        value: `live=$${livePrice} cache=$${cachedPrice} gap=${intradayGap.toFixed(1)}%`,
+        threshold: `>= -${maxGapDownPct}%`,
+        message: `Live price $${livePrice} is ${Math.abs(intradayGap).toFixed(1)}% BELOW cached $${cachedPrice} — stale-cache catastrophe (CLS/ELMT pattern: would buy at stale price and stop out instantly)`,
       };
     }
   }

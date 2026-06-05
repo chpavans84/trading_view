@@ -21,6 +21,8 @@ import {
   getRule,
 } from './entry-rules.js';
 import { buildContext } from './context.js';
+import { getSiblingBotsActivity } from '../../repositories/bots-repo.js';
+import { getBrokerOpenSymbols } from '../drift-detector.js';
 
 const ADVANCE_PREFIX = '🧪';   // marks all bot-advance telegrams so they're distinguishable
 const _runningBots = new Set();
@@ -77,12 +79,44 @@ export async function scanBotAdvance(bot) {
     //
     // If the bot is already at the cap, we still log 'hold' so the dashboard's
     // last_scan timestamp updates (operators can see the bot is alive).
+    // 2026-06-03: position cap must reflect BROKER TRUTH, not DB count.
+    // The phantom-position bug (bot 4 2026-06-02) had DB=5 open / broker=0,
+    // paralyzing the bot. Cross-check broker first; if it has fewer positions
+    // than DB, auto-reconcile the phantom rows and use the broker count.
     const { rows: posRow } = await query(
-      `SELECT COUNT(*)::int AS n FROM bot_advance_trades WHERE bot_id=$1 AND status IN ('open','pending')`,
+      `SELECT id, symbol FROM bot_advance_trades
+        WHERE bot_id=$1 AND status IN ('open','pending')`,
       [bot.id]
     );
-    const openCount = posRow[0]?.n ?? 0;
+    let openCount = posRow.length;
     const maxPositions = Number(bot.rules?.sizing?.max_concurrent_positions) || 5;
+
+    // Cross-check broker (cheap call, ~150ms). Skip if not at cap (no need).
+    if (openCount >= maxPositions) {
+      const brokerResult = await getBrokerOpenSymbols(bot);
+      if (brokerResult.available) {
+        const phantomRows = posRow.filter(r => !brokerResult.symbols.has(r.symbol.toUpperCase()));
+        if (phantomRows.length > 0) {
+          console.warn(`[bot-advance] bot ${bot.id} found ${phantomRows.length} PHANTOM positions vs broker — auto-reconciling`);
+          for (const ph of phantomRows) {
+            await query(
+              `UPDATE bot_advance_trades
+                  SET status='failed',
+                      exit_reason=COALESCE(exit_reason, 'alpaca_reconcile_phantom'),
+                      closed_at=NOW()
+                WHERE id=$1`, [ph.id]
+            ).catch(e => console.error(`[bot-advance] reconcile ${ph.symbol}:`, e.message));
+          }
+          await query(`UPDATE bots_advance SET current_trade_id=NULL, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
+          openCount = posRow.length - phantomRows.length;
+          await logDecision({
+            botId: bot.id, action: 'phantom_reconciled',
+            notes: `auto-reconciled ${phantomRows.length} phantom rows: ${phantomRows.map(p=>p.symbol).join(',')}`,
+            shadowMode: bot.shadow_mode,
+          });
+        }
+      }
+    }
     if (openCount >= maxPositions) {
       await logDecision({
         botId:      bot.id,
@@ -91,6 +125,31 @@ export async function scanBotAdvance(bot) {
         shadowMode: bot.shadow_mode,
       });
       return { action: 'hold', open: openCount, cap: maxPositions };
+    }
+
+    // 2026-06-03 (CLS/ELMT pattern) — DAILY catastrophic-loss circuit breaker.
+    // Skip new entries for the rest of the ET session if today's realized loss
+    // breaches max_daily_loss_usd. Default $200. Auto-resets next ET trading day.
+    const maxDailyLoss = Number(bot.rules?.risk?.max_daily_loss_usd ?? 200);
+    if (maxDailyLoss > 0) {
+      const { rows: pnlRows } = await query(`
+        SELECT COALESCE(SUM(pnl_usd), 0)::numeric AS daily_pnl, COUNT(*) AS n
+          FROM bot_advance_trades
+         WHERE bot_id = $1
+           AND status = 'closed'
+           AND (closed_at AT TIME ZONE 'America/New_York')::date
+             = (NOW() AT TIME ZONE 'America/New_York')::date
+      `, [bot.id]);
+      const dailyPnl = Number(pnlRows[0]?.daily_pnl ?? 0);
+      if (dailyPnl <= -maxDailyLoss) {
+        await logDecision({
+          botId:      bot.id,
+          action:     'skip_daily_loss_cap',
+          notes:      `daily P&L $${dailyPnl.toFixed(2)} ≤ -$${maxDailyLoss} (${pnlRows[0]?.n} closed trades today) — paused until next session`,
+          shadowMode: bot.shadow_mode,
+        });
+        return { action: 'skip_daily_loss_cap', daily_pnl: dailyPnl, cap: maxDailyLoss };
+      }
     }
 
     const enabledRules = Array.isArray(bot.enabled_rules) ? bot.enabled_rules : [];
@@ -104,8 +163,18 @@ export async function scanBotAdvance(bot) {
       return { action: 'skip_no_rules' };
     }
 
-    // 2. Build candidate universe (each rule contributes its own list)
-    const { tickers: candidates, breakdown } = await buildAdvanceCandidateUniverse(enabledRules);
+    // 2. Build candidate universe (each rule contributes its own list).
+    //    Pass bot-derived context so generators can self-tune. maxPrice here
+    //    prevents the ml_v2 rule from ranking $971 stocks at the top for a
+    //    $1000-cap bot (fixes the 7× insufficient_capital loop seen 2026-06-01).
+    //    Heuristic: need to fit at least 2 shares to be tradeable.
+    const _maxPositionUsd = Number(bot.rules?.sizing?.max_position_usd) || 1000;
+    const botCtx = {
+      capitalUsd: Number(bot.capital_usd) || 10000,
+      maxPositionUsd: _maxPositionUsd,
+      maxPrice: Math.floor(_maxPositionUsd / 2),   // need to afford ≥ 2 shares
+    };
+    const { tickers: candidates, breakdown } = await buildAdvanceCandidateUniverse(enabledRules, botCtx);
     if (!candidates.length) {
       await logDecision({
         botId:      bot.id,
@@ -123,11 +192,55 @@ export async function scanBotAdvance(bot) {
                 `breakdown=${JSON.stringify(breakdown)} first10=[${candidates.slice(0, 10).join(',')}] ` +
                 `last10=[${candidates.slice(-10).join(',')}]`);
 
+    // 2b. Cross-bot situational awareness (2026-06-02) — see bot-engine.js for
+    //     the full rationale. Bots sharing a broker account act as a fleet:
+    //       • Skip symbols any sibling bot currently holds (duplicate position
+    //         in the broker = no risk diversification, just stacked exposure)
+    //       • Skip symbols any sibling bot closed/failed within cool-down
+    //         (the same MU was attempted 7× in 3.5h on 2026-06-01 — exactly
+    //         what this prevents)
+    //     Default cool-down 4h; configurable via bot.rules.entry_filters.reentry_cooldown_hours.
+    const cooldownHours = Number(bot.rules?.entry_filters?.reentry_cooldown_hours ?? 4);
+    const sibling = await getSiblingBotsActivity({
+      userId:       bot.user_id,
+      broker:       bot.broker,
+      excludeBotId: bot.id,
+      cooldownHours,
+    });
+    const _blockedHeld = [];
+    const _blockedCd   = [];
+    const filteredCandidates = candidates.filter(sym => {
+      const symU = sym.toUpperCase();
+      if (sibling.held.has(symU))     { _blockedHeld.push(symU); return false; }
+      if (sibling.cooldown.has(symU)) { _blockedCd.push(symU);   return false; }
+      return true;
+    });
+    if (_blockedHeld.length || _blockedCd.length) {
+      console.log(`[bot-advance/scan] bot=${bot.id} cross-bot filter: ` +
+        `held=${_blockedHeld.length}${_blockedHeld.length ? `[${_blockedHeld.slice(0,5).join(',')}]` : ''} ` +
+        `cooldown=${_blockedCd.length}${_blockedCd.length ? `[${_blockedCd.slice(0,5).join(',')}]` : ''} ` +
+        `survived=${filteredCandidates.length}/${candidates.length}`);
+    }
+
+    if (!filteredCandidates.length) {
+      await logDecision({
+        botId:      bot.id,
+        action:     'skip_sibling_block',
+        notes:      `all ${candidates.length} candidates blocked by sibling-bot fleet: ` +
+                    `held=${_blockedHeld.length}, cooldown=${_blockedCd.length} (${cooldownHours}h)`,
+        shadowMode: bot.shadow_mode,
+      });
+      return { action: 'skip_sibling_block', held: _blockedHeld.length, cooldown: _blockedCd.length };
+    }
+
     // 3. For each candidate, build context and run rule cascade
     const matches = [];
     let _built = 0, _failed = 0, _firstFailSym = null;
     const _failedSyms = [];
-    for (const sym of candidates) {
+    // 2026-06-02: iterate the cross-bot-filtered list, not the raw candidates.
+    // Saves expensive buildContext() calls on symbols that are already held by a
+    // sibling bot or in cool-down — and prevents the duplicate-buy / re-entry bugs.
+    for (const sym of filteredCandidates) {
       let ctx;
       try {
         ctx = await buildContext(sym);
@@ -144,7 +257,7 @@ export async function scanBotAdvance(bot) {
     }
 
     // ── OBSERVABILITY ────────────────────────────────────────────────────────
-    console.log(`[bot-advance/scan] bot=${bot.id} processed=${_built}/${candidates.length} ` +
+    console.log(`[bot-advance/scan] bot=${bot.id} processed=${_built}/${filteredCandidates.length} ` +
                 `failed=${_failed} matched=${matches.length} ` +
                 `winners=${matches.map(m => `${m.symbol}:${m.rule.id}`).join(',') || 'none'}` +
                 (_failedSyms.length ? ` failed_syms=[${_failedSyms.join(',')}${_failed > _failedSyms.length ? ',…' : ''}]` : '') +
@@ -154,7 +267,7 @@ export async function scanBotAdvance(bot) {
       await logDecision({
         botId:      bot.id,
         action:     'skip_no_match',
-        notes:      `${candidates.length} candidates evaluated, ${JSON.stringify(breakdown)}`,
+        notes:      `${filteredCandidates.length} candidates evaluated (${candidates.length} pre-filter), ${JSON.stringify(breakdown)}`,
         shadowMode: bot.shadow_mode,
       });
       return { action: 'skip_no_match', candidates: candidates.length };

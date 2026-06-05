@@ -117,6 +117,11 @@ export const POOR_SECTORS_DEFAULT = [
  * @param {object} opts
  * @param {string} opts.date              YYYY-MM-DD; default = latest with data
  * @param {number} opts.minPrice          default 5
+ * @param {number} opts.maxPrice          default null. If set, filter to symbols with reg_close <= maxPrice.
+ *                                        Useful when caller has a per-position $-cap (e.g. $1000) — a $971
+ *                                        stock fits only 1 share, which then triggers `insufficient_capital`
+ *                                        in the executor and bleeds 7 retries before cool-down kicks in.
+ *                                        Pre-filtering here avoids that whole loop.
  * @param {number} opts.minVolume         default 500000 shares
  * @param {number} opts.limit             max rows to return (default 100)
  * @param {boolean} opts.explain          include top features per row (default false)
@@ -130,7 +135,7 @@ export const POOR_SECTORS_DEFAULT = [
  */
 export async function scoreUniverse(opts = {}) {
   const {
-    date, minPrice = 5, minVolume = 500_000, limit = 100, explain = false,
+    date, minPrice = 5, maxPrice = null, minVolume = 500_000, limit = 100, explain = false,
     maxPerSector = null,
     excludeSectors = null, capBand = null, dowFilter = false,
     bullishMin = null, bullishMax = null,
@@ -146,7 +151,10 @@ export async function scoreUniverse(opts = {}) {
 
   const { weights, modelId, auc, trainedAt } = await getV2Weights();
 
-  // Pull all liquid rows for that date
+  // Pull all liquid rows for that date.
+  // maxPrice (2026-06-02): exclude symbols too expensive for the caller's position cap.
+  // Without this, bot 4 ($1000 cap) kept scoring MU @ $971 → executor → insufficient_capital
+  // failure on every scan (7× in 3.5h on 2026-06-01).
   const { rows } = await query(`
     SELECT
       v.symbol, v.price_date, v.sector, v.market_cap_usd, v.reg_close,
@@ -156,8 +164,9 @@ export async function scoreUniverse(opts = {}) {
       JOIN daily_intraday_features dif ON dif.symbol = v.symbol AND dif.price_date = v.price_date
      WHERE v.price_date = $1::date
        AND v.reg_close  >= $2
+       AND ($4::numeric IS NULL OR v.reg_close <= $4::numeric)
        AND dif.total_volume >= $3
-  `, [resolvedDate, minPrice, minVolume]);
+  `, [resolvedDate, minPrice, minVolume, maxPrice]);
 
   const scored = rows.map(r => {
     const prob = scoreRow(weights, r);

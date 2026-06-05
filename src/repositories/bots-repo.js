@@ -49,6 +49,12 @@ export async function getActiveBots() {
  * Symbols held in OPEN trades by OTHER bots belonging to the same user.
  * Used to deduplicate candidates across a single user's bots so two bots
  * don't both buy NVDA simultaneously.
+ *
+ * NOTE (2026-06-02): kept for backwards-compat with callers that don't
+ * yet pass broker scope. New code should use `getSiblingBotsActivity()`
+ * which (a) scopes by broker so a user's Alpaca and Tiger positions don't
+ * cross-contaminate, (b) sees BOTH bot-engine and bot-advance trades, and
+ * (c) also surfaces the recently-closed/failed cool-down list.
  */
 export async function getOtherBotsHeldSymbols(userId, excludeBotId) {
   const { rows } = await query(
@@ -61,6 +67,143 @@ export async function getOtherBotsHeldSymbols(userId, excludeBotId) {
     [userId, excludeBotId]
   );
   return rows.map(r => r.symbol);
+}
+
+/**
+ * Cross-bot situational awareness for an autonomous bot.
+ *
+ * Returns the union of:
+ *   • `held`     — symbols currently OPEN/PENDING on any sibling bot
+ *                  in the same broker account (both engines).
+ *                  Blocks duplicate entries (the position already exists in
+ *                  the broker so a 2nd buy would just stack risk).
+ *   • `cooldown` — symbols any sibling bot CLOSED or FAILED within the
+ *                  cool-down window. Blocks re-entry pingpong.
+ *
+ * Why both engines? `pavan_acct2` runs the legacy engine. `admin` runs both
+ * legacy AND bot-advance against the same Alpaca paper account. If only one
+ * table were checked, the two engines would step on each other.
+ *
+ * Why broker scope? A user can have alpaca + tiger accounts — those are
+ * different real-world capital pools, so they shouldn't deconflict against
+ * each other. (Two bots on alpaca paper SHOULD; one bot on alpaca + one
+ * bot on tiger should NOT.)
+ *
+ * Returns:
+ *   {
+ *     held:     Map<SYMBOL, {bot_id, bot_name, opened_at, engine}>,
+ *     cooldown: Map<SYMBOL, {bot_id, bot_name, closed_at, exit_reason, hours_left, engine}>,
+ *   }
+ *
+ * Both keys are UPPERCASE symbols. Caller does set-style lookups.
+ *
+ * Cost: 4 cheap indexed queries. Cache hint: caller should fetch ONCE per
+ * scan (not per candidate). The full scan loop is ~250 candidates, so even
+ * cached as a closure variable this is essentially free.
+ */
+export async function getSiblingBotsActivity({
+  userId, broker, excludeBotId, cooldownHours = 4,
+}) {
+  if (userId == null || !broker) {
+    return { held: new Map(), cooldown: new Map() };
+  }
+
+  // 1. Legacy bot-engine OPEN trades by sibling bots (same user + same broker)
+  const heldLegacyP = query(
+    `SELECT t.symbol, b.id AS bot_id, b.name AS bot_name, t.opened_at
+       FROM trades t
+       JOIN bots b ON b.id = t.bot_id
+      WHERE t.status = 'open'
+        AND b.user_id = $1 AND b.broker = $2
+        AND b.id <> $3
+        AND t.symbol IS NOT NULL`,
+    [userId, broker, excludeBotId ?? -1]
+  );
+
+  // 2. bot-advance OPEN/PENDING trades by sibling bots (same user + same broker)
+  const heldAdvanceP = query(
+    `SELECT bat.symbol, ba.id AS bot_id, ba.name AS bot_name, bat.opened_at
+       FROM bot_advance_trades bat
+       JOIN bots_advance ba ON ba.id = bat.bot_id
+      WHERE bat.status IN ('open', 'pending')
+        AND ba.user_id = $1 AND ba.broker = $2
+        AND ba.id <> $3
+        AND bat.symbol IS NOT NULL`,
+    [userId, broker, excludeBotId ?? -1]
+  );
+
+  // 3. Recently-closed legacy trades (cool-down candidates).
+  //    Includes own bot — a bot must respect its OWN cool-down too. The
+  //    `excludeBotId` only excludes for held-set deconfliction, not cool-down.
+  const cdLegacyP = query(
+    `SELECT t.symbol, b.id AS bot_id, b.name AS bot_name, t.closed_at,
+            t.exit_reason
+       FROM trades t
+       JOIN bots b ON b.id = t.bot_id
+      WHERE t.status IN ('closed', 'failed')
+        AND b.user_id = $1 AND b.broker = $2
+        AND t.closed_at > NOW() - ($3::int * INTERVAL '1 hour')
+        AND t.symbol IS NOT NULL`,
+    [userId, broker, cooldownHours]
+  );
+
+  // 4. Recently-closed/failed bot-advance trades
+  const cdAdvanceP = query(
+    `SELECT bat.symbol, ba.id AS bot_id, ba.name AS bot_name,
+            COALESCE(bat.closed_at, bat.opened_at) AS closed_at,
+            bat.exit_reason
+       FROM bot_advance_trades bat
+       JOIN bots_advance ba ON ba.id = bat.bot_id
+      WHERE bat.status IN ('closed', 'failed')
+        AND ba.user_id = $1 AND ba.broker = $2
+        AND COALESCE(bat.closed_at, bat.opened_at) > NOW() - ($3::int * INTERVAL '1 hour')
+        AND bat.symbol IS NOT NULL`,
+    [userId, broker, cooldownHours]
+  );
+
+  const [heldLegacy, heldAdvance, cdLegacy, cdAdvance] = await Promise.all([
+    heldLegacyP.catch(() => ({ rows: [] })),
+    heldAdvanceP.catch(() => ({ rows: [] })),
+    cdLegacyP.catch(() => ({ rows: [] })),
+    cdAdvanceP.catch(() => ({ rows: [] })),
+  ]);
+
+  const held = new Map();
+  for (const r of heldLegacy.rows) {
+    held.set(String(r.symbol).toUpperCase(),
+      { bot_id: r.bot_id, bot_name: r.bot_name, opened_at: r.opened_at, engine: 'legacy' });
+  }
+  for (const r of heldAdvance.rows) {
+    // bot-advance takes precedence if same symbol shows up twice — same broker account anyway
+    held.set(String(r.symbol).toUpperCase(),
+      { bot_id: r.bot_id, bot_name: r.bot_name, opened_at: r.opened_at, engine: 'advance' });
+  }
+
+  const cooldown = new Map();
+  const cdMs = cooldownHours * 3_600_000;
+  const now  = Date.now();
+  const addCd = (rows, engine) => {
+    for (const r of rows) {
+      const sym = String(r.symbol).toUpperCase();
+      const closedAt = r.closed_at ? new Date(r.closed_at).getTime() : now;
+      const hoursLeft = Math.max(0, +(((closedAt + cdMs) - now) / 3_600_000).toFixed(1));
+      // Keep the most-recent (longest remaining cool-down) on conflict
+      const prev = cooldown.get(sym);
+      if (prev && new Date(prev.closed_at).getTime() >= closedAt) continue;
+      cooldown.set(sym, {
+        bot_id:      r.bot_id,
+        bot_name:    r.bot_name,
+        closed_at:   r.closed_at,
+        exit_reason: r.exit_reason || 'unknown',
+        hours_left:  hoursLeft,
+        engine,
+      });
+    }
+  };
+  addCd(cdLegacy.rows,  'legacy');
+  addCd(cdAdvance.rows, 'advance');
+
+  return { held, cooldown };
 }
 
 // ─── Status transitions ─────────────────────────────────────────────────────

@@ -52,6 +52,13 @@ export async function recordDecision({ botId, action, symbol, composite, factorB
  * configured staleness window. Used by bot-executor every minute to
  * decide whether to place an order.
  *
+ * 2026-06-03 fix (ELMT/CLS double-execute catastrophe): exclude decisions
+ * whose symbol has ANY trade row (open, closed, failed) from the SAME bot
+ * within the freshness window. Without this guard the executor processed
+ * the same 09:30 scan's "buy ELMT" decision twice (09:31 and 09:33), losing
+ * -$532 because the first trade had already stopped out and re-buying at
+ * the same stale price produced the same loss. Likewise CLS × 3 on bot 25.
+ *
  * Returns the decision row or null.
  *
  * @param {number} botId
@@ -59,12 +66,18 @@ export async function recordDecision({ botId, action, symbol, composite, factorB
  */
 export async function getFreshestBuyDecision(botId, freshnessMin) {
   const { rows } = await query(
-    `SELECT * FROM bot_decisions
-     WHERE bot_id = $1
-       AND action = 'buy'
-       AND symbol IS NOT NULL
-       AND scanned_at > NOW() - ($2::int * INTERVAL '1 minute')
-     ORDER BY composite_score DESC
+    `SELECT d.* FROM bot_decisions d
+     WHERE d.bot_id = $1
+       AND d.action = 'buy'
+       AND d.symbol IS NOT NULL
+       AND d.scanned_at > NOW() - ($2::int * INTERVAL '1 minute')
+       AND NOT EXISTS (
+         SELECT 1 FROM trades t
+          WHERE t.bot_id = d.bot_id
+            AND UPPER(t.symbol) = UPPER(d.symbol)
+            AND t.opened_at >= d.scanned_at
+       )
+     ORDER BY d.composite_score DESC
      LIMIT 1`,
     [botId, freshnessMin]
   );

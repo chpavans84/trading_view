@@ -342,6 +342,34 @@ async function _tryOpenPosition(bot) {
   const price = quote.ask ?? quote.mid ?? quote.bid;
   if (!price || price <= 0) return { action: 'skip_bad_price', symbol };
 
+  // 3a. 2026-06-03 (CLS/ELMT catastrophe): LIVE-QUOTE VALIDATION.
+  // Compare the broker's live quote against the cached price the scan used.
+  // If they diverge by more than `max_entry_quote_divergence_pct` (default 5%),
+  // reject the trade — the cache is stale and the scan's thesis was built on
+  // wrong numbers. CLS lost -$500 (cache $507 → real $385), ELMT -$532 (cache
+  // $22 → fill $24.99, real $18.62) because this check didn't exist.
+  const cachedPriceFromScan = Number(
+    decision.factor_breakdown?.indicators?.liquidity?.last_price
+  );
+  const maxQuoteDivergence = Number(
+    bot.rules?.entry_filters?.max_entry_quote_divergence_pct ?? 5
+  );
+  if (cachedPriceFromScan > 0 && maxQuoteDivergence > 0) {
+    const divergence = ((price - cachedPriceFromScan) / cachedPriceFromScan) * 100;
+    if (Math.abs(divergence) > maxQuoteDivergence) {
+      const reason = divergence > 0 ? 'live_quote_above_cache' : 'live_quote_below_cache';
+      console.warn(`[bot-executor] bot ${bot.id} SKIP ${symbol}: live=${price} cache=${cachedPriceFromScan} divergence=${divergence.toFixed(1)}% (>${maxQuoteDivergence}%) — stale-cache catastrophe protection`);
+      return {
+        action: 'skip_live_quote_diverged',
+        symbol,
+        live_price: price,
+        cached_price: cachedPriceFromScan,
+        divergence_pct: +divergence.toFixed(2),
+        reason,
+      };
+    }
+  }
+
   // 4. Size position (pure math in bot-sizing.js — unit-tested)
   const sizePct        = bot.rules?.sizing?.position_size_pct ?? 95;
   const stopLossUsd0   = bot.rules?.exit_rules?.stop_loss_usd  ?? 50;
@@ -602,13 +630,14 @@ async function _closeTrade(bot, trade, exitPrice, reason) {
     throw e;
   }
 
-  // Mark trade closed in DB
+  // Mark trade closed in DB — persist reason (2026-06-02 fix: column now exists).
   await closeTrade({
-    order_id:   trade.order_id,
+    order_id:    trade.order_id,
     symbol,
-    exit_price: exitPrice,
-    pnl_usd:    pnlUsd,
-    pnl_pct:    pnlPct,
+    exit_price:  exitPrice,
+    pnl_usd:     pnlUsd,
+    pnl_pct:     pnlPct,
+    exit_reason: reason,
   });
 
   // Update bot stats
