@@ -5404,6 +5404,10 @@ svg.mkt-spark {
   white-space: nowrap;
 }
 .home-panel-link:hover { text-decoration: underline; }
+.home-panel-asof {
+  font-size: 0.68rem; color: #6e7681; white-space: nowrap;
+  font-variant-numeric: tabular-nums; letter-spacing: 0.01em;
+}
 
 .home-empty { padding: 20px 8px; color: #6e7681; font-size: 0.82rem; text-align: center; }
 .home-skel-line {

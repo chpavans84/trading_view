@@ -2205,9 +2205,13 @@ app.get('/api/momentum', requireAuth, async (req, res) => {
     const data = await ttlCache(`momentum:race:${limit}`, 5000, async () => {
       const cols = `symbol, company_name, last_price, day_change_pct, day_volume, market_cap_usd, sector`;
       const filter = `last_price >= 5 AND market_cap_usd >= 1000000000 AND day_volume >= 500000 AND day_change_pct IS NOT NULL`;
-      const [{ rows: gainers }, { rows: decliners }] = await Promise.all([
+      const [{ rows: gainers }, { rows: decliners }, { rows: freshRows }] = await Promise.all([
         query(`SELECT ${cols} FROM tradable_universe WHERE ${filter} ORDER BY day_change_pct DESC LIMIT $1`, [limit]),
         query(`SELECT ${cols} FROM tradable_universe WHERE ${filter} ORDER BY day_change_pct ASC  LIMIT $1`, [limit]),
+        // Actual price-data freshness — the max price_synced_at written by the
+        // screener:snapshot cron. This is what tells the user how fresh the race
+        // really is (NOT the cache-build time below). Frozen value = sync cron down.
+        query(`SELECT MAX(price_synced_at) AS synced_at FROM tradable_universe WHERE ${filter}`),
       ]);
       const mapRow = (r) => ({
         symbol:        r.symbol,
@@ -2222,6 +2226,7 @@ app.get('/api/momentum', requireAuth, async (req, res) => {
         gainers:   gainers.map(mapRow),
         decliners: decliners.map(mapRow),
         as_of:     new Date().toISOString(),
+        synced_at: freshRows?.[0]?.synced_at ? new Date(freshRows[0].synced_at).toISOString() : null,
       };
     });
     res.json(data);

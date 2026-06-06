@@ -540,7 +540,7 @@ async function backfillSignals() {
     ),
     signals_synced_at = NOW()
     FROM (SELECT symbol, pct_from_52w_high, rsi_14, above_sma_200, rvol_30d FROM screener_technicals) t
-    -- FIXED 2026-06-01: the `OR (t.symbol IS NULL AND u.symbol IS NOT NULL)` clause was a
+    -- FIXED 2026-06-01: the OR (t.symbol IS NULL AND u.symbol IS NOT NULL) clause was a
     -- no-op (subquery never returns NULL symbols) and made the UPDATE's match semantics
     -- confusing. The backstop UPDATE below already handles rows without technicals; here
     -- we only want to update matched rows.

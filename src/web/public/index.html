@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=v62">
+<link rel="stylesheet" href="/css/dashboard.css?v=v63">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -16606,21 +16606,27 @@ async function loadHome(force = false) {
 
 // ── Home page momentum race — fast 6s polling so bars actually move ──────
 let _homeMomTimer = null;
+async function _homeMomFetch() {
+  try {
+    const r = await fetch('/api/momentum?limit=10', { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    _renderHomeMovers({
+      gainers:   (d.gainers   || []).map(g => ({ symbol: g.symbol, chg_pct: g.chg_pct, price: g.price })),
+      decliners: (d.decliners || []).map(g => ({ symbol: g.symbol, chg_pct: g.chg_pct, price: g.price })),
+      synced_at: d.synced_at || null,
+    });
+  } catch (e) { /* silent — next poll will retry */ }
+}
 function _homeStartMomPoll() {
   clearInterval(_homeMomTimer);
-  _homeMomTimer = setInterval(async () => {
+  // Fire once immediately so the "As of" stamp is correct on load (don't wait 6s)
+  _homeMomFetch();
+  _homeMomTimer = setInterval(() => {
     // Pause when Home is hidden or tab is in background — saves bandwidth
     if (document.visibilityState !== 'visible') return;
     if (!document.getElementById('page-home')?.classList.contains('active')) return;
-    try {
-      const r = await fetch('/api/momentum?limit=10', { cache: 'no-store' });
-      if (!r.ok) return;
-      const d = await r.json();
-      _renderHomeMovers({
-        gainers:   (d.gainers   || []).map(g => ({ symbol: g.symbol, chg_pct: g.chg_pct, price: g.price })),
-        decliners: (d.decliners || []).map(g => ({ symbol: g.symbol, chg_pct: g.chg_pct, price: g.price })),
-      });
-    } catch (e) { /* silent — next poll will retry */ }
+    _homeMomFetch();
   }, 6000);
 }
 
@@ -16682,6 +16688,7 @@ function _homeShellHtml() {
       <section class="home-panel home-panel-momentum" style="grid-column:span 12" id="homePanelMovers">
         <div class="home-panel-head">
           <h3>🌊 Momentum Race <span class="home-panel-sub">Live race · top 10 each · bars and ranks update every 6s</span></h3>
+          <span class="home-panel-asof" id="homeMoversAsOf" title="When the underlying price snapshot was last refreshed">·</span>
         </div>
         <div class="home-mom-grid" id="homeMoversGrid">
           <div class="home-skel-line"></div><div class="home-skel-line"></div>
@@ -16997,6 +17004,27 @@ function _renderHomeSmartMoney(smart) {
 function _renderHomeMovers(m) {
   const el = document.getElementById('homeMoversGrid');
   if (!el) return;
+
+  // Stamp "As of" with the real price-snapshot freshness (price_synced_at from
+  // the screener:snapshot cron) — NOT the API cache time. Shows a stale warning
+  // if the snapshot cron has gone quiet (>30 min during the day = something broke).
+  const asOfEl = document.getElementById('homeMoversAsOf');
+  if (asOfEl) {
+    if (m?.synced_at) {
+      const d = new Date(m.synced_at);
+      const mins = Math.round((Date.now() - d) / 60000);
+      const time = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      const stale = mins > 30;
+      asOfEl.textContent = `As of ${time} · ${timeAgo(m.synced_at)}`;
+      asOfEl.style.color = stale ? '#f0883e' : '';
+      asOfEl.title = stale
+        ? `⚠ Prices are ${timeAgo(m.synced_at)} — the screener:snapshot cron may be down`
+        : 'When the underlying price snapshot was last refreshed';
+    } else {
+      asOfEl.textContent = '';
+    }
+  }
+
   const gainers   = (m?.gainers   || []).slice(0, 10);
   const decliners = (m?.decliners || []).slice(0, 10);
   if (!gainers.length && !decliners.length) {
