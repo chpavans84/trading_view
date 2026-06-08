@@ -245,3 +245,41 @@ path for the live app's small window.
 - **`bot_decisions` columns** — code inserts `setup_type`/`thesis` not present in the
   db.js base DDL (added by a later ALTER). Pull live columns from `information_schema`
   at job build time rather than hardcoding.
+
+---
+
+## 11. Running on the external Archive drive (CONFIRMED HDD)
+
+The OWC 24TB Archive volume is a **spinning-disk (HDD) RAID enclosure, not flash SSD**
+(user-confirmed). The Spark+Iceberg+DuckDB stack runs fine on it — no HDFS needed, just
+`file:///Volumes/Archive/...` — but HDD makes the tuning below mandatory, not optional:
+
+1. **Keep all scratch OFF the HDD.** Point Spark shuffle/spill and DuckDB temp at the
+   Studio's internal NVMe. On HDD, intermediate random IO is the killer.
+   ```properties
+   spark.local.dir   /Users/pavan/spark-tmp        # internal SSD — NOT /Volumes/Archive
+   ```
+   ```sql
+   SET temp_directory = '/Users/pavan/duckdb-tmp';  -- internal SSD
+   ```
+   Only the lake (raw + warehouse) and Iceberg catalog metadata live on the HDD.
+
+2. **Favor sequential IO; avoid random IO.** HDD sustains decent sequential throughput
+   (~200–500 MB/s over Thunderbolt) but is terrible at random seeks. So:
+   - Partition + **sort-within-partition by (symbol, ts)** so per-symbol backtests read
+     contiguous Parquet row groups instead of seeking.
+   - Target larger Parquet files (256–512MB) and run Iceberg `rewrite_data_files`
+     compaction aggressively — the small-file problem is far more painful on HDD.
+   - Prefer full-partition scans with predicate pushdown over many tiny point lookups.
+
+3. **Confirm the interface in Phase 0** (`diskutil info /Volumes/Archive`): Thunderbolt
+   gives full bandwidth; USB will bottleneck large conversions. Note real sequential MB/s
+   to set conversion-time expectations (trades backfill is throughput-bound).
+
+4. **Mount-health guard + single-copy risk.** External HDD can unmount mid-job — add a
+   mount check at the top of each `spark-submit` (jobs are idempotent → just re-run).
+   `raw/` (2.9TB) remains the only copy of the Polygon source on one HDD; back it up
+   separately. The warehouse is reproducible from raw, raw is not.
+
+> Expectation-setting: on HDD the **trades** backfill (billions of rows) will be the slow
+> phase — measure on a single month first before committing to the full 2017+ range.
