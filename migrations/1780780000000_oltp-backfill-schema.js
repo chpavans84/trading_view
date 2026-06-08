@@ -18,9 +18,14 @@
  * Reversible via `down`.
  */
 
-exports.shorthands = undefined;
+// ESM exports (package.json is "type":"module"). Syntax-only conversion from
+// CommonJS so this file parses at load time. ⚠️ PARKED — this migration is
+// intentionally NOT applied (pending the OLTP-backfill pipeline architecture
+// session). It is excluded from `npm run migrate:up` via the --ignore-pattern in
+// scripts/migrate.mjs. To un-park: remove it from that pattern, then run migrate.
+export const shorthands = undefined;
 
-exports.up = (pgm) => {
+export const up = (pgm) => {
   // ─── 1. polygon_financials — quarterly income / balance / cash flow ──────
   pgm.createTable('polygon_financials', {
     id:                 'id',
@@ -117,7 +122,7 @@ exports.up = (pgm) => {
   pgm.createIndex('vix_history', 'price_date');
 };
 
-exports.down = (pgm) => {
+export const down = (pgm) => {
   pgm.dropTable('vix_history');
   pgm.dropTable('macro_data');
   pgm.dropTable('corporate_actions');

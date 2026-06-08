@@ -12,16 +12,19 @@
  * VARCHAR(40) matches bot_advance_trades.exit_reason (VARCHAR(30) + small headroom
  * for future legacy-only reasons like 'alpaca_reconcile_phantom').
  */
-exports.shorthands = undefined;
+// ESM exports — package.json declares "type": "module", so this file must use
+// `export const`, not CommonJS `exports.` (the latter throws at load time and
+// crashes `npm run migrate:up` for ALL migrations). Bodies use idempotent raw
+// SQL because on prod the column was applied via a manual ALTER TABLE before
+// this migration was tracked; idempotency makes any re-run a safe no-op.
+export const shorthands = undefined;
 
-exports.up = (pgm) => {
-  pgm.addColumns('trades', {
-    exit_reason: { type: 'varchar(40)', notNull: false },
-  });
-  pgm.createIndex('trades', 'exit_reason');
+export const up = (pgm) => {
+  pgm.sql(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_reason varchar(40)`);
+  pgm.sql(`CREATE INDEX IF NOT EXISTS trades_exit_reason_index ON trades (exit_reason)`);
 };
 
-exports.down = (pgm) => {
-  pgm.dropIndex('trades', 'exit_reason');
-  pgm.dropColumns('trades', ['exit_reason']);
+export const down = (pgm) => {
+  pgm.sql(`DROP INDEX IF EXISTS trades_exit_reason_index`);
+  pgm.sql(`ALTER TABLE trades DROP COLUMN IF EXISTS exit_reason`);
 };

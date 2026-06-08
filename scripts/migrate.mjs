@@ -25,6 +25,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
 const MIGRATIONS_DIR = join(REPO_ROOT, 'migrations');
 
+// PARKED migrations: present on disk + syntax-valid, but intentionally NOT
+// applied (e.g. the OLTP-backfill schema, pending its pipeline-architecture
+// session). Excluded from `migrate:up`/`down` via --ignore-pattern AND labelled
+// distinctly in `migrate:status` so "pending" never silently means "parked".
+// To un-park: remove the name here, then run migrate.
+const PARKED = ['1780780000000_oltp-backfill-schema'];
+
 if (!process.env.DATABASE_URL) {
   console.error('[migrate] DATABASE_URL is not set — check .env');
   process.exit(2);
@@ -82,7 +89,10 @@ const result = spawnSync(
     ...args,
     '--migrations-dir', MIGRATIONS_DIR,
     '--database-url-var', 'DATABASE_URL',
-    '--ignore-pattern', '(README|.*\\.md)',
+    // README/markdown + any PARKED migration (matched anywhere in the filename,
+    // incl. extension) are excluded so `migrate:up` (which applies ALL pending)
+    // can't create parked schema. See the PARKED constant above.
+    '--ignore-pattern', `(README|.*\\.md|${PARKED.map(p => `.*${p}.*`).join('|')})`,
   ],
   { stdio: 'inherit', cwd: REPO_ROOT }
 );
@@ -111,8 +121,12 @@ async function showStatus() {
     ? readdirSync(MIGRATIONS_DIR).filter(f => /\.(cjs|js|sql)$/.test(f) && f !== 'README.md').sort()
     : [];
 
+  const isParked = (f) => PARKED.some(p => f.includes(p));
+  const parkedCount = files.filter(isParked).length;
+  const pendingCount = files.filter(f => !isParked(f) && !applied.has(f.replace(/\.(cjs|js|sql)$/, ''))).length;
+
   console.log(`Migrations directory: ${MIGRATIONS_DIR}`);
-  console.log(`Total migrations: ${files.length}   Applied: ${rows.length}   Pending: ${files.length - rows.length}\n`);
+  console.log(`Total: ${files.length}   Applied: ${rows.length}   Pending: ${pendingCount}   Parked: ${parkedCount}\n`);
 
   if (files.length === 0) {
     console.log('(no migrations yet — schema baseline lives in src/core/db.js initDb)');
@@ -120,7 +134,9 @@ async function showStatus() {
     for (const f of files) {
       const name = f.replace(/\.(cjs|js|sql)$/, '');
       const row = rows.find(r => r.name === name);
-      const status = row ? `✓ applied ${new Date(row.run_on).toISOString()}` : '· pending';
+      const status = isParked(f) ? '⊘ parked (excluded from migrate:up)'
+        : row ? `✓ applied ${new Date(row.run_on).toISOString()}`
+        : '· pending';
       console.log(`  ${status.padEnd(40)} ${f}`);
     }
   }
