@@ -317,27 +317,30 @@
     text-shadow: 0 0 14px rgba(248,81,73,0.55), 0 0 28px rgba(248,81,73,0.25);
   }
   .nav-brand.pnl-neu { color: #8b949e; text-shadow: none; }
-  .nav-tabs { display: flex; align-items: stretch; }
+  /* 2026-06-12: compact bordered chip tabs (was 42px underline tabs with emoji
+     labels — overflowed/wrapped tall on wide screens; user asked for borders + space). */
+  .nav-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; row-gap: 3px; }
   .tab {
     display: inline-flex; align-items: center;
-    padding: 0 14px; height: 42px;
-    cursor: pointer; font-size: 0.8rem; font-weight: 500;
+    padding: 0 11px; height: 30px;
+    cursor: pointer; font-size: 0.78rem; font-weight: 500;
     color: var(--muted);
-    border: none; border-bottom: 2px solid transparent;
-    background: none;
+    border: 1px solid #2b333c; border-radius: 7px;
+    background: rgba(13,17,23,0.5);
     margin: 0;
     white-space: nowrap;
-    transition: color 0.15s, border-color 0.15s;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
     transform: none !important;
   }
   .tab:hover {
     color: var(--text2);
-    border-bottom-color: rgba(255,255,255,0.15);
+    border-color: #424a54;
+    background: rgba(22,27,34,0.8);
   }
   .tab.active {
     color: var(--accent-l);
-    border-bottom-color: var(--accent-l);
-    background: none;
+    border-color: var(--accent-l);
+    background: rgba(22,27,34,0.9);
     box-shadow: none;
     text-shadow: none;
   }

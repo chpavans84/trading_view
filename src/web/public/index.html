@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="/css/dashboard.css?v=v63">
+<link rel="stylesheet" href="/css/dashboard.css?v=v64">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#161b22">
@@ -162,29 +162,31 @@
 
 <nav>
   <div class="nav-tabs">
-    <button class="tab active" id="tab-home" onclick="showPage('home',this)">🏠 Home</button>
+    <button class="tab active" id="tab-home" onclick="showPage('home',this)">Home</button>
     <button class="tab" id="tab-dashboard" onclick="showPage('dashboard',this)">P&amp;L Dashboard</button>
     <button class="tab" onclick="showPage('market',this)">Market</button>
     <button class="tab" onclick="showPage('research',this)">Research</button>
     <button class="tab" id="tab-calendar" onclick="showPage('calendar',this)">Forecast Lab</button>
-    <button class="tab" id="tab-discover" onclick="showPage('discover',this)">🔥 Discover</button>
-    <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)" title="Earnings calendar + reaction analysis + catalysts">📅 Earnings</button>
+    <button class="tab" id="tab-discover" onclick="showPage('discover',this)">Discover</button>
+    <button class="tab" id="tab-signal-center" onclick="showPage('signal-center',this)" title="Earnings calendar + reaction analysis + catalysts">Earnings</button>
     <button class="tab" id="tab-trading-desk" onclick="showPage('trading-desk',this)">Trading Desk</button>
-    <button class="tab" id="tab-uw" onclick="showPage('uw',this)" title="Unusual Whales — flow / insider / congress / correlations / history">🐋 UW</button>
-    <button class="tab" id="tab-bots" onclick="showPage('bots',this)">🤖 Bots</button>
-    <button class="tab" id="tab-bot-advance" onclick="showPage('bot-advance',this)" title="Challenger bot — entry-rule ensemble in shadow mode">🧪 Bot Advance</button>
-    <button class="tab" id="tab-screener" onclick="showPage('screener',this)" title="Finviz-style screener over 8K+ US stocks">🔎 Screener</button>
-    <button class="tab" id="tab-ext-hours" onclick="showPage('ext-hours',this)" title="Pre-market and post-market moving stocks">🌙 Ext Hours</button>
-    <button class="tab" id="tab-retrospective" onclick="showPage('retrospective',this)" title="Daily ±3% movers with reasons (news, UW, insider, bot caught)">🔍 Retrospective</button>
-    <button class="tab" id="tab-top-picks" onclick="showPage('top-picks',this)" title="ML-ranked best stocks to buy today (v2 model: AUC 0.58, +3.4% avg 5d return)">🎯 Top Picks</button>
-    <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">🔍 Explorer</button>
-    <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">🤖 Bot Rules</button>
-    <button class="tab" id="tab-backtests" onclick="showPage('backtests',this)" title="Strategy replay results" style="display:none">📊 Backtests</button>
-    <button class="tab" id="tab-health" onclick="showPage('health',this)" title="System health invariants + Claude API stats" style="display:none">🩺 Health &amp; Stats</button>
-    <button class="tab" id="tab-advisor" onclick="showPage('advisor',this)" title="Portfolio Advisor — personal risk + hedge + picks" style="display:none">💼 Advisor</button>
+    <button class="tab" id="tab-uw" onclick="showPage('uw',this)" title="Unusual Whales — flow / insider / congress / correlations / history">UW</button>
+    <button class="tab" id="tab-bots" onclick="showPage('bots',this)">Bots</button>
+    <button class="tab" id="tab-bot-advance" onclick="showPage('bot-advance',this)" title="Challenger bot — entry-rule ensemble in shadow mode">Bot Advance</button>
+    <button class="tab" id="tab-screener" onclick="showPage('screener',this)" title="Finviz-style screener over 8K+ US stocks">Screener</button>
+    <button class="tab" id="tab-ownership" onclick="showPage('ownership',this)" title="Float + institutional ownership, volume vs float, PE, earnings">Ownership</button>
+    <button class="tab" id="tab-ext-hours" onclick="showPage('ext-hours',this)" title="Pre-market and post-market moving stocks">Ext Hours</button>
+    <button class="tab" id="tab-retrospective" onclick="showPage('retrospective',this)" title="Daily ±3% movers with reasons (news, UW, insider, bot caught)">Retrospective</button>
+    <button class="tab" id="tab-top-picks" onclick="showPage('top-picks',this)" title="ML-ranked best stocks to buy today (v2 model: AUC 0.58, +3.4% avg 5d return)">Top Picks</button>
+    <button class="tab" id="tab-explorer" onclick="toggleFloatExplorer()" title="Stock Explorer">Explorer</button>
+    <button class="tab" id="tab-bot-rules" onclick="showPage('bot',this)">Bot Rules</button>
+    <button class="tab" id="tab-backtests" onclick="showPage('backtests',this)" title="Strategy replay results" style="display:none">Backtests</button>
+    <button class="tab" id="tab-health" onclick="showPage('health',this)" title="System health invariants + Claude API stats" style="display:none">Health &amp; Stats</button>
+    <button class="tab" id="tab-bot_sim" onclick="showPage('bot-sim',this)" title="BOT_SIM — minute-replay strategy simulation, no-lookahead proof, self-learning" style="display:none">🧪 BOT_SIM</button>
+    <button class="tab" id="tab-advisor" onclick="showPage('advisor',this)" title="Portfolio Advisor — personal risk + hedge + picks" style="display:none">Advisor</button>
     <!-- tab-stats merged into tab-health (2026-05-25). Removed. -->
     <button class="tab" id="tab-users" onclick="showPage('users',this)" style="display:none">Users</button>
-    <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">🔐 Admin</button>
+    <button class="tab" id="tab-admin" onclick="showPage('admin',this)" style="display:none">Admin</button>
   </div>
   <div class="nav-bot">
     <button class="nav-notif-btn" id="notesDrawerToggle" onclick="toggleNotesDrawer()" title="Notes & Reminders">📝</button>
@@ -2229,6 +2231,88 @@
 </div>
 
 <!-- ── Screener Tab (Finviz-style 8K+ stock filter) ─────────────────────── -->
+<div class="page" id="page-ownership">
+  <div style="padding:12px">
+    <h2 style="margin:0 0 4px">📊 Ownership Screener — S&amp;P 500 + NASDAQ-100
+      <span id="ownCount" style="font-size:.72rem;color:#8b949e"></span>
+      <span onclick="document.getElementById('ownDocs').style.display = document.getElementById('ownDocs').style.display==='none' ? 'block':'none'"
+            title="Sources &amp; computation" style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1px solid #30363d;color:#8b949e;font-size:.7rem;margin-left:6px">?</span>
+    </h2>
+    <div id="ownDocs" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:.74rem;color:#9aa5b1;line-height:1.5;max-width:900px">
+      <b style="color:#e6edf3">Universe</b> — S&amp;P 500 constituents (datahub) + NASDAQ-100 (Wikipedia), 516 names, table <code>index_membership</code> (refresh anytime for reconstitutions).<br>
+      <b style="color:#e6edf3">Close / Chg%</b> — latest daily close (Alpaca, refreshed daily; matches broker to the cent). <b>Day Vol</b> — Moomoo broker (fresh, consolidated). <b>30d AvgVol</b> — lake <code>market_bars_daily</code> (Polygon consolidated), mean of the last 30 trading days. <b>RVOL</b> = Day Vol ÷ 30d AvgVol. <i>(Volume never uses Alpaca/IEX — that reports ~3% of real volume.)</i><br>
+      <b style="color:#e6edf3">Vol/Float%</b> = Day Vol ÷ Float shares × 100.<br>
+      <b style="color:#e6edf3">Float / Inst% / Inst-Float% / Insider%</b> — Yahoo <code>quoteSummary</code> (float, institutional %, insider %). Institutional is <i>quarterly</i> 13F-sourced, so <b>Inst Δ1d / Δ30d</b> (diff of daily snapshots) are usually ~0 until a new filing.<br>
+      <b style="color:#e6edf3">PE (trailing)</b> — Moomoo OpenD (broker) → Yahoo → universe, in that order. <b>“Loss”</b> = negative earnings (no meaningful trailing PE). <b>Fwd PE</b> — Yahoo/universe (the Moomoo <i>API</i> has no forward PE; the app's figure isn't exposed).<br>
+      <b style="color:#e6edf3">Next Earn / Days→Earn</b> — <code>earnings_calendar</code>.
+    </div>
+    <div id="ownTableWrap" style="overflow:auto;max-height:74vh"><div style="color:#8b949e">Loading…</div></div>
+  </div>
+</div>
+<script>
+let _ownRows = [];
+let _ownSort = { key: 'avg_volume_30d', dir: -1 };   // default: highest volume first (NVDA on top)
+const _OWN_STR_COLS = new Set(['symbol', 'exchange', 'in_sp500', 'next_earnings']);
+
+function _ownSortVal(row, key) {
+  if (key === 'in_sp500') return (row.in_ndx100 ? 2 : 0) + (row.in_sp500 ? 1 : 0);   // sort the Index badge
+  return row[key];
+}
+function _ownSortBy(key) {
+  if (_ownSort.key === key) _ownSort.dir *= -1;
+  else _ownSort = { key, dir: _OWN_STR_COLS.has(key) ? 1 : -1 };   // strings asc, numbers desc by default
+  _ownRender();
+}
+function _ownRender() {
+  const wrap = document.getElementById('ownTableWrap');
+  if (!wrap) return;
+  const cN = v => v == null ? '' : Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(v);
+  const f = (v, d = 2) => v == null ? '' : Number(v).toFixed(d);
+  const cols = [
+    ['symbol', 'Symbol', v => v], ['exchange', 'Exch', v => v || ''],
+    ['in_sp500', 'Index', (v, row) => [row.in_sp500 ? 'SPX' : '', row.in_ndx100 ? 'NDX' : ''].filter(Boolean).join('·')],
+    ['last_price', 'Close', v => f(v)], ['day_change_pct', 'Chg%', v => f(v)],
+    ['avg_volume_30d', '30d AvgVol', cN], ['day_volume', 'Day Vol', cN], ['rvol', 'RVOL', v => f(v)],
+    ['float_shares', 'Float', cN], ['pct_vol_vs_float', 'Vol/Float%', v => f(v, 3)],
+    ['pe_ratio', 'PE', (v, row) => v != null ? f(v, 1) : (row.pe_loss ? 'Loss' : '')], ['forward_pe', 'Fwd PE', v => f(v, 1)],
+    ['inst_pct', 'Inst%', v => f(v, 1)], ['inst_float_pct', 'Inst/Float%', v => f(v, 1)],
+    ['inst_shares', 'Inst Sh', cN], ['insiders_pct', 'Insider%', v => f(v, 2)],
+    ['inst_chg_1d', 'Inst Δ1d', cN], ['inst_chg_30d', 'Inst Δ30d', cN],
+    ['next_earnings', 'Next Earn', v => v ? String(v).slice(0, 10) : ''], ['days_to_earnings', 'Days→Earn', v => v == null ? '' : v],
+  ];
+  const { key, dir } = _ownSort;
+  const isStr = _OWN_STR_COLS.has(key);
+  const sorted = [..._ownRows].sort((a, b) => {
+    let av = _ownSortVal(a, key), bv = _ownSortVal(b, key);
+    const an = av == null || av === '', bn = bv == null || bv === '';
+    if (an && bn) return 0; if (an) return 1; if (bn) return -1;   // nulls always last
+    const c = isStr ? String(av).localeCompare(String(bv)) : (Number(av) - Number(bv));
+    return c * dir;
+  });
+  let h = '<table style="width:100%;font-size:.78rem;border-collapse:collapse"><thead><tr>';
+  h += cols.map((c, i) => {
+    const arrow = c[0] === key ? (dir === -1 ? ' ▾' : ' ▴') : '';
+    return `<th onclick="_ownSortBy('${c[0]}')" title="Sort by ${c[1]}" style="position:sticky;top:0;background:#161b22;padding:4px 8px;cursor:pointer;user-select:none;text-align:${i === 0 ? 'left' : 'right'};border-bottom:1px solid #30363d;${c[0] === key ? 'color:#58a6ff' : ''}">${c[1]}${arrow}</th>`;
+  }).join('');
+  h += '</tr></thead><tbody>';
+  for (const row of sorted) h += '<tr>' + cols.map((c, i) => `<td style="padding:3px 8px;text-align:${i === 0 ? 'left' : 'right'};border-bottom:1px solid #21262d">${c[2](row[c[0]], row)}</td>`).join('') + '</tr>';
+  wrap.innerHTML = h + '</tbody></table>';
+}
+async function loadOwnership() {
+  const wrap = document.getElementById('ownTableWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="color:#8b949e">Loading…</div>';
+  try {
+    const r = await fetch('/api/screener/ownership', { credentials: 'same-origin' });
+    const j = await r.json();
+    _ownRows = j.rows || [];
+    const cnt = document.getElementById('ownCount'); if (cnt) cnt.textContent = _ownRows.length ? (_ownRows.length + ' stocks') : '';
+    if (!_ownRows.length) { wrap.innerHTML = '<div style="color:#8b949e">No data yet.</div>'; return; }
+    _ownRender();
+  } catch (e) { wrap.innerHTML = '<div style="color:#f85149">Error: ' + (e.message || e) + '</div>'; }
+}
+</script>
+
 <div class="page" id="page-screener">
   <div class="screener-wrap">
     <div class="screener-head">
@@ -3178,58 +3262,258 @@ node --env-file=.env tests/bot-engine/replay-harness.js \
   <div id="adv-help-body" style="padding:20px;color:#c9d1d9;font-size:0.88rem;line-height:1.65"></div>
 </div>
 
-<!-- ── System Health page (admin diagnostics) ──────────────────────────── -->
+<!-- ── System Health page (admin diagnostics — ops console, revamped 2026-06-12) ── -->
 <div class="page" id="page-health">
 
-  <!-- Explainer + verdict banner -->
-  <div class="table-wrap" style="margin-bottom:16px">
-    <div class="table-head">
-      <h3>🩺 System Health — invariants that should always be true</h3>
-      <div style="display:flex;align-items:center;gap:8px">
-        <span id="hc-last-check" style="font-size:0.78rem;color:#8b949e"></span>
-        <button class="refresh-btn" onclick="loadHealth()">↻ Refresh</button>
+  <style>
+    /* ════ Health ops console — scoped to #page-health ════ */
+    #page-health { --hc-ok:#3fb950; --hc-warn:#f0883e; --hc-fail:#f85149;
+                   --hc-panel:var(--panel,#161b22); --hc-bg:var(--bg,#0d1117);
+                   --hc-border:var(--border,#30363d); --hc-line:var(--border-soft,#21262d);
+                   --hc-text:var(--text,#e6edf3); --hc-dim:var(--muted,#8b949e); }
+
+    /* ── status banner ── */
+    #page-health .hc-banner { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+      background:linear-gradient(135deg, var(--hc-panel) 0%, var(--hc-bg) 100%);
+      border:1px solid var(--hc-border); border-radius:10px; padding:18px 22px; margin-bottom:14px; position:relative; overflow:hidden; }
+    #page-health .hc-banner::before { content:''; position:absolute; inset:0; pointer-events:none; opacity:.35;
+      background:repeating-linear-gradient(90deg, transparent 0 23px, rgba(110,118,129,0.05) 23px 24px); }
+    #page-health .hc-beacon { width:14px; height:14px; border-radius:50%; flex-shrink:0; position:relative; }
+    #page-health .hc-beacon::after { content:''; position:absolute; inset:-5px; border-radius:50%; border:1.5px solid currentColor; opacity:.5; animation:hc-ping 2.2s ease-out infinite; }
+    @keyframes hc-ping { 0%{transform:scale(.6);opacity:.7} 80%{transform:scale(1.5);opacity:0} 100%{opacity:0} }
+    @media (prefers-reduced-motion: reduce) { #page-health .hc-beacon::after { animation:none; } }
+    #page-health .hc-verdict { font-family:'Share Tech Mono', ui-monospace, monospace; font-size:1.25rem; letter-spacing:.12em; color:var(--hc-text); }
+    #page-health .hc-meta { font-size:.76rem; color:var(--hc-dim); margin-top:4px; font-family:ui-monospace,monospace; letter-spacing:.02em; }
+    #page-health .hc-controls { display:flex; align-items:center; gap:10px; position:relative; }
+    #page-health .hc-auto { display:flex; align-items:center; gap:6px; font-size:.74rem; color:var(--hc-dim); font-family:ui-monospace,monospace; cursor:pointer; user-select:none;
+      border:1px solid var(--hc-border); border-radius:6px; padding:5px 10px; background:var(--hc-bg); }
+    #page-health .hc-auto.on { color:var(--hc-ok); border-color:rgba(63,185,80,.4); }
+    #page-health .hc-runbtn { background:var(--hc-bg); border:1px solid var(--hc-border); color:var(--hc-text); border-radius:6px; padding:5px 14px; font-size:.78rem; cursor:pointer; font-family:ui-monospace,monospace; }
+    #page-health .hc-runbtn:hover { border-color:var(--accent,#58a6ff); color:var(--accent,#58a6ff); }
+
+    /* ── failing chips ── */
+    #page-health .hc-failchips { display:flex; flex-wrap:wrap; gap:6px; margin:-4px 0 12px; }
+    #page-health .hc-failchips:empty { display:none; }
+    #page-health .hc-chip { font-size:.72rem; font-family:ui-monospace,monospace; padding:3px 10px; border-radius:12px; cursor:pointer; }
+    #page-health .hc-chip.fail { background:rgba(248,81,73,.12); border:1px solid rgba(248,81,73,.45); color:var(--hc-fail); }
+    #page-health .hc-chip.warn { background:rgba(240,136,62,.10); border:1px solid rgba(240,136,62,.4); color:var(--hc-warn); }
+
+    /* ── at-a-glance board: one big color-coded tile per section ── */
+    #page-health .hc-glance { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:10px; margin-bottom:16px; }
+    #page-health .hc-gtile { display:flex; gap:12px; align-items:flex-start; border-radius:10px; padding:13px 14px; cursor:pointer;
+      border:1px solid var(--hc-line); background:var(--hc-panel); transition:transform .1s, border-color .1s; }
+    #page-health .hc-gtile:hover { transform:translateY(-1px); border-color:var(--hc-dim); }
+    #page-health .hc-gtile .gi { font-size:1.5rem; line-height:1; width:34px; height:34px; border-radius:8px; flex-shrink:0;
+      display:flex; align-items:center; justify-content:center; font-family:'Share Tech Mono', ui-monospace, monospace; }
+    #page-health .hc-gtile .gt { font-size:.64rem; color:var(--hc-dim); text-transform:uppercase; letter-spacing:.13em; margin-bottom:4px; white-space:nowrap; }
+    #page-health .hc-gtile .gv { font-family:'Share Tech Mono', ui-monospace, monospace; font-size:1.12rem; line-height:1.1; color:var(--hc-text); }
+    #page-health .hc-gtile .gv .gu { font-size:.7rem; color:var(--hc-dim); letter-spacing:.04em; }
+    #page-health .hc-gtile .gs { font-size:.68rem; color:var(--hc-dim); margin-top:3px; font-family:ui-monospace,monospace; }
+    #page-health .hc-gtile.g-ok   { background:linear-gradient(135deg, rgba(46,160,67,.13), var(--hc-panel) 70%); border-color:rgba(46,160,67,.35); }
+    #page-health .hc-gtile.g-ok .gi   { background:rgba(46,160,67,.18); color:var(--hc-ok); }
+    #page-health .hc-gtile.g-warn { background:linear-gradient(135deg, rgba(240,136,62,.15), var(--hc-panel) 70%); border-color:rgba(240,136,62,.45); }
+    #page-health .hc-gtile.g-warn .gi { background:rgba(240,136,62,.18); color:var(--hc-warn); }
+    #page-health .hc-gtile.g-warn .gv { color:var(--hc-warn); }
+    #page-health .hc-gtile.g-fail { background:linear-gradient(135deg, rgba(248,81,73,.18), var(--hc-panel) 70%); border-color:rgba(248,81,73,.55); }
+    #page-health .hc-gtile.g-fail .gi { background:rgba(248,81,73,.2); color:var(--hc-fail); animation:hc-blink 1.1s step-end infinite; }
+    #page-health .hc-gtile.g-fail .gv { color:var(--hc-fail); }
+    #page-health .hc-gtile.g-info .gi { background:rgba(88,166,255,.15); color:var(--accent,#58a6ff); }
+    #page-health .hc-gtile .glake { display:flex; align-items:center; gap:6px; font-size:.74rem; color:var(--hc-text); margin-top:3px; font-family:ui-monospace,monospace; }
+    #page-health .hc-gtile .glake em { font-style:normal; color:var(--hc-dim); font-size:.66rem; margin-left:auto; }
+    #page-health .hc-gtile .ld { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    #page-health .hc-gtile .ld.ok { background:var(--hc-ok); } #page-health .hc-gtile .ld.warn { background:var(--hc-warn); }
+    #page-health .hc-gtile .ld.fail { background:var(--hc-fail); animation:hc-blink 1.1s step-end infinite; }
+    #page-health .hc-gtile .ld.none { background:#484f58; }
+
+    /* ── run table ── */
+    #page-health .hc-tablewrap { background:var(--hc-panel); border:1px solid var(--hc-border); border-radius:10px; overflow-x:auto; }
+    #page-health table.hc-table { width:100%; border-collapse:collapse; font-size:.82rem; min-width:760px; }
+    #page-health .hc-table thead th { position:sticky; top:0; z-index:2; background:var(--hc-bg); color:var(--hc-dim);
+      font-size:.66rem; text-transform:uppercase; letter-spacing:.14em; font-weight:600; text-align:left;
+      padding:9px 12px; border-bottom:1px solid var(--hc-border); white-space:nowrap; }
+    #page-health .hc-table th.num, #page-health .hc-table td.num { text-align:right; }
+    #page-health .hc-cat td { background:var(--hc-bg); color:var(--hc-text); font-weight:700; font-size:.78rem;
+      padding:8px 12px; border-top:1px solid var(--hc-border); border-bottom:1px solid var(--hc-line); letter-spacing:.04em; }
+    #page-health .hc-cat .cat-counts { float:right; font-family:ui-monospace,monospace; font-weight:400; font-size:.72rem; color:var(--hc-dim); }
+    #page-health .hc-row td { padding:9px 12px; border-bottom:1px solid var(--hc-line); vertical-align:top; }
+    #page-health .hc-row { cursor:pointer; }
+    #page-health .hc-row:hover td { background:rgba(110,118,129,.07); }
+    #page-health .hc-row.st-fail td:first-child { box-shadow:inset 3px 0 0 var(--hc-fail); }
+    #page-health .hc-row.st-warn td:first-child { box-shadow:inset 3px 0 0 var(--hc-warn); }
+    #page-health .hc-status { display:inline-flex; align-items:center; gap:6px; font-family:ui-monospace,monospace; font-size:.74rem; font-weight:700; letter-spacing:.06em; }
+    #page-health .hc-status .dot { width:8px; height:8px; border-radius:50%; }
+    #page-health .hc-status.ok   { color:var(--hc-ok); }   #page-health .hc-status.ok .dot   { background:var(--hc-ok); }
+    #page-health .hc-status.warn { color:var(--hc-warn); } #page-health .hc-status.warn .dot { background:var(--hc-warn); }
+    #page-health .hc-status.fail { color:var(--hc-fail); } #page-health .hc-status.fail .dot { background:var(--hc-fail); animation:hc-blink 1.1s step-end infinite; }
+    @keyframes hc-blink { 50% { opacity:.25; } }
+    #page-health .hc-name { color:var(--hc-text); font-weight:600; }
+    #page-health .hc-id { color:var(--hc-dim); font-family:ui-monospace,monospace; font-size:.68rem; margin-top:2px; }
+    #page-health .hc-val { font-family:ui-monospace,monospace; color:var(--hc-text); font-size:.78rem; line-height:1.5; }
+    #page-health .hc-thr { font-family:ui-monospace,monospace; color:var(--hc-dim); font-size:.74rem; white-space:nowrap; }
+    #page-health .hc-ms  { font-family:ui-monospace,monospace; color:var(--hc-dim); font-size:.74rem; white-space:nowrap; }
+    #page-health .hc-chev { color:var(--hc-dim); font-size:.7rem; transition:transform .15s; display:inline-block; }
+    #page-health .hc-row.open .hc-chev { transform:rotate(90deg); }
+
+    /* ── expandable runbook row ── */
+    #page-health .hc-doc { display:none; }
+    #page-health .hc-doc.open { display:table-row; }
+    #page-health .hc-doc > td { padding:0 12px 14px; border-bottom:1px solid var(--hc-line); background:rgba(13,17,23,.5); }
+    #page-health .hc-docgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:12px 4px 0; }
+    #page-health .hc-doccell { font-size:.78rem; color:var(--hc-text); opacity:.92; line-height:1.6; }
+    #page-health .hc-doccell b { display:block; font-size:.64rem; text-transform:uppercase; letter-spacing:.14em; margin-bottom:5px; }
+    #page-health .hc-doccell.dwhat b { color:var(--accent,#58a6ff); }
+    #page-health .hc-doccell.dwhy  b { color:#a371f7; }
+    #page-health .hc-doccell.dred  b { color:var(--hc-fail); }
+
+    /* ── section label (shared with Claude API stats below) ── */
+    #page-health .hc-seclabel { display:flex; align-items:center; gap:10px; font-size:.7rem; font-weight:700; color:var(--hc-dim);
+      text-transform:uppercase; letter-spacing:.16em; margin:26px 0 12px; font-family:'Share Tech Mono', ui-monospace, monospace; }
+    #page-health .hc-seclabel::after { content:''; flex:1; height:1px; background:var(--hc-line); }
+
+    /* ── collapsible panels (history, etc.) ── */
+    #page-health .hc-panel { background:var(--hc-panel); border:1px solid var(--hc-border); border-radius:10px; margin-bottom:16px; overflow:hidden; }
+    #page-health .hc-panelhead { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; cursor:pointer; user-select:none;
+      font-family:'Share Tech Mono', ui-monospace, monospace; font-size:.74rem; letter-spacing:.14em; color:var(--hc-dim); background:var(--hc-bg); border-bottom:1px solid var(--hc-line); }
+    #page-health .hc-panelhead:hover { color:var(--hc-text); }
+    #page-health .hc-panelchev { transition:transform .15s; font-size:.7rem; }
+    #page-health .hc-panel.collapsed .hc-panelchev { transform:rotate(-90deg); }
+    #page-health .hc-panel.collapsed .hc-panelbody { display:none; }
+    #page-health .hc-panel.collapsed .hc-panelhead { border-bottom:none; }
+    #page-health .hc-panelbody { padding:14px 16px; }
+
+    /* ── per-check 24h status strip ── */
+    #page-health .hc-strip { display:flex; gap:1px; height:16px; width:150px; align-items:stretch; }
+    #page-health .hc-strip i { flex:1; border-radius:1px; background:rgba(110,118,129,.18); min-width:1px; }
+    #page-health .hc-strip i.s1 { background:rgba(46,160,67,.55); }
+    #page-health .hc-strip i.s2 { background:#f0883e; }
+    #page-health .hc-strip i.s3 { background:#f85149; }
+    #page-health .hc-striplabel { font-size:.6rem; color:var(--hc-dim); font-family:ui-monospace,monospace; margin-top:3px; display:flex; justify-content:space-between; width:150px; }
+
+    /* ── collapsible categories ── */
+    #page-health .hc-cat td { cursor:pointer; user-select:none; }
+    #page-health .hc-cat .cat-chev { display:inline-block; transition:transform .15s; margin-right:8px; color:var(--hc-dim); font-size:.66rem; }
+    #page-health tbody.hc-tb.collapsed .cat-chev { transform:rotate(-90deg); }
+    #page-health tbody.hc-tb.collapsed .hc-row, #page-health tbody.hc-tb.collapsed .hc-doc { display:none; }
+
+    /* ── 📜 log monitor panel ── */
+    #page-health .hc-logbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+    #page-health .hc-logbar select, #page-health .hc-logbar input {
+      background:var(--hc-bg); border:1px solid var(--hc-border); color:var(--hc-text); border-radius:6px;
+      padding:5px 8px; font-size:.74rem; font-family:ui-monospace,monospace; }
+    #page-health .hc-logbar select { max-width:320px; }
+    #page-health .hc-logbar input { flex:1; min-width:140px; }
+    #page-health .hc-loglvl { display:flex; gap:1px; background:var(--hc-bg); border:1px solid var(--hc-border); border-radius:6px; padding:2px; }
+    #page-health .hc-loglvl button { background:none; border:none; color:var(--hc-dim); font-size:.7rem; font-family:ui-monospace,monospace;
+      padding:3px 9px; border-radius:4px; cursor:pointer; }
+    #page-health .hc-loglvl button.on { background:var(--hc-line); color:var(--hc-text); }
+    #page-health .hc-logview { background:var(--hc-bg); border:1px solid var(--hc-line); border-radius:8px;
+      max-height:420px; overflow:auto; padding:10px 12px; font-family:ui-monospace,monospace; font-size:.72rem;
+      line-height:1.55; white-space:pre-wrap; word-break:break-all; }
+    #page-health .hc-logview .ll { display:block; color:var(--hc-dim); }
+    #page-health .hc-logview .ll.ll-warn  { color:var(--hc-warn); }
+    #page-health .hc-logview .ll.ll-error { color:var(--hc-fail); }
+    #page-health #hc-log-live { cursor:pointer; }
+    #page-health #hc-log-live.on { color:var(--hc-ok); border-color:rgba(63,185,80,.4); }
+
+    /* ── collapsible Claude-stats sections ── */
+    #page-health details.hc-sec { background:var(--hc-panel); border:1px solid var(--hc-border); border-radius:10px; margin-bottom:14px; overflow:hidden; }
+    #page-health details.hc-sec > summary { list-style:none; display:flex; align-items:center; gap:8px; padding:11px 16px; cursor:pointer; user-select:none;
+      color:var(--hc-text); font-size:.86rem; font-weight:600; background:var(--hc-bg); }
+    #page-health details.hc-sec > summary::-webkit-details-marker { display:none; }
+    #page-health details.hc-sec > summary::before { content:'▸'; color:var(--hc-dim); font-size:.7rem; transition:transform .15s; }
+    #page-health details.hc-sec[open] > summary::before { transform:rotate(90deg); }
+    #page-health details.hc-sec[open] > summary { border-bottom:1px solid var(--hc-line); }
+  </style>
+
+  <!-- ── status banner ── -->
+  <div class="hc-banner">
+    <div style="display:flex;align-items:center;gap:14px;min-width:0">
+      <div class="hc-beacon" id="hc-beacon" style="background:#484f58;color:#484f58"></div>
+      <div style="min-width:0">
+        <div class="hc-verdict" id="hc-verdict">RUNNING CHECKS…</div>
+        <div class="hc-meta" id="hc-meta">batch invariant monitor · click any row for its runbook</div>
       </div>
     </div>
-    <div style="padding:16px;line-height:1.55;color:#c9d1d9;font-size:0.9rem">
-      <p style="margin:0 0 10px">
-        Every box below is a single invariant — a thing that should always be true. <strong style="color:#3fb950">Green</strong> = healthy. <strong style="color:#f0883e">Amber</strong> = warning, look soon. <strong style="color:#f85149">Red</strong> = something is broken, act now. Click the <strong>❓</strong> on any box for what it checks, why it matters, and what to do when it goes red.
-      </p>
-      <div id="hc-summary"></div>
+    <div class="hc-controls">
+      <span class="hc-auto on" id="hc-auto" onclick="hcToggleAuto()" title="Re-run all checks automatically">⟳ AUTO 60s <span id="hc-countdown"></span></span>
+      <button class="hc-runbtn" onclick="loadHealth()">▶ RUN NOW</button>
     </div>
   </div>
 
-  <!-- Check grid by category -->
-  <div id="hc-grid"><div class="loading" style="padding:24px">Loading checks…</div></div>
+  <!-- failing/warning quick-jump chips -->
+  <div class="hc-failchips" id="hc-failchips"></div>
+
+  <!-- at-a-glance board: section tiles + Lake ELT + Claude API -->
+  <div class="hc-glance" id="hc-glance"></div>
+
+  <!-- 24h history panel (overall status timeline + run-duration trend) -->
+  <div class="hc-panel" id="hc-panel-hist">
+    <div class="hc-panelhead" onclick="hcTogglePanel('hist')">
+      <span>▙ 24-HOUR HISTORY <span id="hc-hist-meta" style="letter-spacing:0;color:inherit"></span></span>
+      <span class="hc-panelchev">▾</span>
+    </div>
+    <div class="hc-panelbody" id="hc-histbody"><div class="loading">Loading history…</div></div>
+  </div>
+
+  <!-- 📜 log monitor (same backend as the MCP log_sources/log_tail tools) -->
+  <div class="hc-panel collapsed" id="hc-panel-logs">
+    <div class="hc-panelhead" onclick="hcTogglePanel('logs')">
+      <span>▤ LOG MONITOR <span id="hc-log-meta" style="letter-spacing:0"></span></span>
+      <span class="hc-panelchev">▾</span>
+    </div>
+    <div class="hc-panelbody">
+      <div class="hc-logbar">
+        <select id="hc-log-source" onchange="hcLogRefresh()"></select>
+        <select id="hc-log-lines" onchange="hcLogRefresh()">
+          <option value="100">100 lines</option>
+          <option value="200" selected>200 lines</option>
+          <option value="500">500 lines</option>
+          <option value="1000">1000 lines</option>
+        </select>
+        <input id="hc-log-grep" placeholder="filter (substring, Enter to apply)…"
+               onkeydown="if(event.key==='Enter')hcLogRefresh()">
+        <div class="hc-loglvl">
+          <button id="hc-lf-all" class="on" onclick="hcLogLevel('all')">ALL</button>
+          <button id="hc-lf-warn" onclick="hcLogLevel('warn')">WARN+</button>
+          <button id="hc-lf-error" onclick="hcLogLevel('error')">ERR</button>
+        </div>
+        <span class="hc-auto" id="hc-log-live" onclick="hcLogToggleLive()" title="Re-tail every 5 s while open">● LIVE</span>
+        <button class="hc-runbtn" onclick="hcLogRefresh()">↻</button>
+      </div>
+      <div class="hc-logview" id="hc-log-view"><div class="loading">Loading sources…</div></div>
+    </div>
+  </div>
+
+  <!-- run table -->
+  <div class="hc-tablewrap" id="hc-grid"><div class="loading" style="padding:24px">Loading checks…</div></div>
 
   <!-- ── Claude API usage stats (merged from old Stats tab, 2026-05-25) ── -->
-  <div style="margin-top:24px;padding-top:16px;border-top:2px solid #21262d">
-    <div style="font-size:0.78rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">
-      Claude API Stats
-    </div>
+  <div style="margin-top:8px">
+    <div class="hc-seclabel">▚ Claude API Stats</div>
 
     <!-- Claude API Cost Per Day -->
-    <div class="table-wrap" style="margin-bottom:16px">
-      <div class="table-head"><h3>Claude API Cost Per Day (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+    <details class="hc-sec" open>
+      <summary>Claude API Cost Per Day (Last 30 Days) <button class="doc-btn" onclick="event.preventDefault();event.stopPropagation();openResearchDoc('stats')" title="How this works">?</button></summary>
       <div id="statsCostPerDay"><div class="loading">Loading…</div></div>
-    </div>
+    </details>
 
     <!-- Claude API Summary by Source -->
-    <div class="table-wrap" style="margin-bottom:16px">
-      <div class="table-head"><h3>Claude API — By Source (Last 30 Days) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+    <details class="hc-sec" open>
+      <summary>Claude API — By Source (Last 30 Days) <button class="doc-btn" onclick="event.preventDefault();event.stopPropagation();openResearchDoc('stats')" title="How this works">?</button></summary>
       <div id="statsSource"><div class="loading">Loading…</div></div>
-    </div>
+    </details>
 
     <!-- Daily breakdown -->
-    <div class="table-wrap" style="margin-bottom:16px">
-      <div class="table-head"><h3>Daily Token Usage <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+    <details class="hc-sec">
+      <summary>Daily Token Usage <button class="doc-btn" onclick="event.preventDefault();event.stopPropagation();openResearchDoc('stats')" title="How this works">?</button></summary>
       <div id="statsDaily"><div class="loading">Loading…</div></div>
-    </div>
+    </details>
 
     <!-- Recent calls log -->
-    <div class="table-wrap">
-      <div class="table-head"><h3>Recent API Calls (Last 50) <button class="doc-btn" onclick="openResearchDoc('stats')" title="How this works">?</button></h3></div>
+    <details class="hc-sec">
+      <summary>Recent API Calls (Last 50) <button class="doc-btn" onclick="event.preventDefault();event.stopPropagation();openResearchDoc('stats')" title="How this works">?</button></summary>
       <div id="statsRecent"><div class="loading">Loading…</div></div>
-    </div>
+    </details>
   </div>
 </div>
 
@@ -3241,6 +3525,82 @@ node --env-file=.env tests/bot-engine/replay-harness.js \
     <button onclick="hideHealthHelp()" style="background:none;border:none;color:#8b949e;font-size:1.3rem;cursor:pointer;padding:0 4px" title="Close">✕</button>
   </div>
   <div id="hc-help-body" style="padding:20px;color:#c9d1d9;font-size:0.88rem;line-height:1.65"></div>
+</div>
+
+<!-- ── BOT_SIM page (admin: minute-replay sim results + no-lookahead proof) ── -->
+<div class="page" id="page-bot-sim">
+  <style>
+    #page-bot-sim { --bs-bg:var(--bg,#0d1117); --bs-panel:var(--panel,#161b22); --bs-border:var(--border,#30363d);
+      --bs-line:var(--border-soft,#21262d); --bs-text:var(--text,#e6edf3); --bs-dim:var(--muted,#8b949e);
+      --bs-ok:#3fb950; --bs-warn:#f0883e; --bs-fail:#f85149; --bs-accent:var(--accent,#58a6ff); }
+    #page-bot-sim .bs-head { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:14px; }
+    #page-bot-sim h2 { margin:0; font-size:1.2rem; color:var(--bs-text); }
+    #page-bot-sim .bs-sub { font-size:.78rem; color:var(--bs-dim); margin-top:3px; }
+    #page-bot-sim select, #page-bot-sim button.bs-btn { background:var(--bs-bg); border:1px solid var(--bs-border); color:var(--bs-text);
+      border-radius:6px; padding:6px 10px; font-size:.8rem; font-family:ui-monospace,monospace; cursor:pointer; }
+    #page-bot-sim .bs-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:16px; }
+    #page-bot-sim .bs-kpi { background:var(--bs-panel); border:1px solid var(--bs-line); border-radius:8px; padding:12px 14px; }
+    #page-bot-sim .bs-kpi .n { font-family:'Share Tech Mono',ui-monospace,monospace; font-size:1.5rem; line-height:1; color:var(--bs-text); }
+    #page-bot-sim .bs-kpi .l { font-size:.64rem; color:var(--bs-dim); text-transform:uppercase; letter-spacing:.12em; margin-top:6px; }
+    #page-bot-sim .pos { color:var(--bs-ok); } #page-bot-sim .neg { color:var(--bs-fail); }
+    #page-bot-sim .bs-panel { background:var(--bs-panel); border:1px solid var(--bs-border); border-radius:10px; margin-bottom:16px; overflow:hidden; }
+    #page-bot-sim .bs-ph { padding:11px 16px; font-family:'Share Tech Mono',ui-monospace,monospace; font-size:.74rem; letter-spacing:.12em;
+      color:var(--bs-dim); background:var(--bs-bg); border-bottom:1px solid var(--bs-line); }
+    #page-bot-sim .bs-pb { padding:6px 0; }
+    /* no-lookahead proof */
+    #page-bot-sim .bs-proof { display:flex; align-items:flex-start; gap:10px; padding:11px 16px; border-bottom:1px solid var(--bs-line); }
+    #page-bot-sim .bs-proof:last-child { border-bottom:none; }
+    #page-bot-sim .bs-proof .ic { width:22px; height:22px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:.8rem; font-weight:700; }
+    #page-bot-sim .bs-proof.ok .ic { background:rgba(63,185,80,.16); color:var(--bs-ok); }
+    #page-bot-sim .bs-proof.bad .ic { background:rgba(248,81,73,.18); color:var(--bs-fail); }
+    #page-bot-sim .bs-proof .lbl { color:var(--bs-text); font-size:.84rem; }
+    #page-bot-sim .bs-proof .val { color:var(--bs-dim); font-size:.74rem; font-family:ui-monospace,monospace; margin-top:2px; }
+    #page-bot-sim .bs-method { padding:12px 16px; font-size:.78rem; color:var(--bs-dim); line-height:1.6; background:rgba(88,166,255,.05); }
+    #page-bot-sim table.bs-table { width:100%; border-collapse:collapse; font-size:.78rem; }
+    #page-bot-sim .bs-table th { position:sticky; top:0; background:var(--bs-bg); color:var(--bs-dim); text-align:left; font-size:.64rem;
+      text-transform:uppercase; letter-spacing:.1em; padding:8px 12px; border-bottom:1px solid var(--bs-border); white-space:nowrap; }
+    #page-bot-sim .bs-table td { padding:7px 12px; border-bottom:1px solid var(--bs-line); font-family:ui-monospace,monospace; white-space:nowrap; }
+    #page-bot-sim .bs-table tr:hover td { background:rgba(110,118,129,.06); }
+    #page-bot-sim .bs-scroll { max-height:440px; overflow:auto; }
+    #page-bot-sim .bs-lesson { padding:12px 16px; border-bottom:1px solid var(--bs-line); }
+    #page-bot-sim .bs-lesson .meta { font-size:.72rem; color:var(--bs-dim); font-family:ui-monospace,monospace; margin-bottom:5px; }
+    #page-bot-sim .bs-lesson .body { font-size:.84rem; color:var(--bs-text); line-height:1.55; }
+    #page-bot-sim .bs-tag { display:inline-block; font-size:.62rem; padding:1px 7px; border-radius:10px; font-family:ui-monospace,monospace; margin-left:6px; }
+    #page-bot-sim .bs-tag.adopt { background:rgba(63,185,80,.14); color:var(--bs-ok); }
+    #page-bot-sim .bs-tag.noop { background:rgba(139,148,158,.14); color:var(--bs-dim); }
+  </style>
+
+  <div class="bs-head">
+    <div>
+      <h2>🧪 BOT_SIM — strategy simulation</h2>
+      <div class="bs-sub">Minute-by-minute replay in an isolated <code>sim</code> schema. Production is never touched. Pick a run:</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="bs-run" onchange="loadBotSimRun()"></select>
+      <button class="bs-btn" onclick="loadBotSim()">↻</button>
+    </div>
+  </div>
+
+  <div class="bs-kpis" id="bs-kpis"></div>
+
+  <!-- the no-lookahead proof the operator can audit -->
+  <div class="bs-panel">
+    <div class="bs-ph">▤ NO-LOOKAHEAD PROOF — verified live against this run's data</div>
+    <div id="bs-verify"><div class="loading" style="padding:16px">…</div></div>
+    <div class="bs-method" id="bs-method"></div>
+  </div>
+
+  <!-- the learning / "intelligence" -->
+  <div class="bs-panel">
+    <div class="bs-ph">▤ SELF-LEARNING — what Claude (Max sub) changed each night & why</div>
+    <div id="bs-lessons" class="bs-pb"><div class="loading" style="padding:16px">…</div></div>
+  </div>
+
+  <!-- the trades, with minute-level timestamps -->
+  <div class="bs-panel">
+    <div class="bs-ph">▤ TRADES — minute-level entry/exit (fill is the NEXT bar after the decision price)</div>
+    <div class="bs-scroll" id="bs-trades"><div class="loading" style="padding:16px">…</div></div>
+  </div>
 </div>
 
 <!-- ── Admin AI Chat page ─────────────────────────────── -->
@@ -6122,6 +6482,8 @@ const TAB_PAGE_MAP = {
   ext_hours:     'ext-hours',
   retrospective: 'retrospective',
   top_picks:     'top-picks',
+  ownership:     'ownership',
+  bot_sim:       'bot-sim',
 };
 
 function _rebuildSourceDropdown() {
@@ -10016,7 +10378,7 @@ function showPage(name, btn) {
   if (page) page.classList.add('active');
   if (btn) btn.classList.add('active');
   _showPageCurrent = name;
-  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadBzOptions(); }, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, 'bot-advance': () => { loadBotAdvance(true); _baStartPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, /* Stats merged into Health (2026-05-25): one tab loads both */ health: () => { loadHealth(); loadStats(); }, stats: () => { showPage('health'); }, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); }, screener: () => { if (typeof loadScreener === 'function') loadScreener(); }, 'ext-hours': () => { loadExtHours(); _ehStartPoll(); }, 'retrospective': () => { loadRetrospective(); }, 'top-picks': () => { loadTopPicks(); } };
+  const loaders = { home: loadHome, dashboard: () => { loadDashboard(); loadPnl(); }, market: () => { loadMarket(); loadBzOptions(); }, docs: initDocs, users: loadUsers, research: loadResearch, bot: loadBotRules, calendar: () => { loadCalendar(); loadBzFDA(); loadBzDividends(); }, discover: discOnShow, 'signal-center': () => { scOnShow?.(); if (typeof loadTomorrowCatalysts === 'function') loadTomorrowCatalysts(); }, 'trading-desk': loadTradingDesk, bots: () => { _botRenderKpiStrip(); loadBots(); _botStartFeedPoll(); }, 'bot-advance': () => { loadBotAdvance(true); _baStartPoll(); }, backtests: () => { loadBacktests(); loadSignalValidation(); }, /* Stats merged into Health (2026-05-25): one tab loads both */ health: () => { loadHealth(); loadStats(); }, stats: () => { showPage('health'); }, advisor: loadAdvisor, uw: () => { if (typeof switchUwSubTab === 'function') switchUwSubTab('flow'); }, screener: () => { if (typeof loadScreener === 'function') loadScreener(); }, 'ext-hours': () => { loadExtHours(); _ehStartPoll(); }, 'retrospective': () => { loadRetrospective(); }, 'top-picks': () => { loadTopPicks(); }, ownership: () => { loadOwnership(); }, 'bot-sim': () => { loadBotSim(); } };
   loaders[name]?.();
 }
 
@@ -14079,6 +14441,21 @@ async function loadStats() {
         models: {},
       })).sort((a, b) => b.date.localeCompare(a.date));
 
+  // feed the Health glance board's Claude API tile (if that page is rendered)
+  try {
+    const gl = document.getElementById('hc-glance-claude');
+    if (gl) {
+      const todayKey = new Date().toLocaleDateString('en-CA');
+      const t = costRows.find(r => r.date === todayKey);
+      const tot30 = costRows.reduce((s, r) => s + (r.cost || 0), 0);
+      const tok30 = costRows.reduce((s, r) => s + (r.input || 0) + (r.output || 0), 0);
+      gl.innerHTML = `
+        <div class="gv">$${(t?.cost ?? 0).toFixed(2)}<span class="gu"> today</span></div>
+        <div class="gs">${t ? `${t.calls} calls · ${((t.input + t.output) / 1000).toFixed(0)}k tok` : 'no calls today'}</div>
+        <div class="gs">30d: $${tot30.toFixed(2)} · ${(tok30 / 1e6).toFixed(1)}M tok</div>`;
+    }
+  } catch { /* glance tile is optional */ }
+
   if (costRows.length > 0) {
     const maxCost = Math.max(...costRows.map(r => r.cost), 0.0001);
     const totalCost = costRows.reduce((s, r) => s + r.cost, 0);
@@ -14903,49 +15280,70 @@ async function sendChat() {
   const timeoutMs = chatMode === 'desktop' ? 130_000 : 90_000;
   const timeoutId = setTimeout(() => _chatAbort?.abort(), timeoutMs);
 
-  // ── Desktop mode: one-shot non-streaming call to /api/chat/desktop ──────
-  // Uses Claude Code CLI subprocess with Max-sub auth. Returns full text once.
+  // ── Desktop mode (2026-06-12): STREAMING call to /api/chat/desktop/stream ──
+  // Tokens type into the bubble live; tool calls show as progress chips.
+  // 30-60s deep answers now show first words in ~3s instead of a blank bubble.
   if (chatMode === 'desktop') {
     try {
       const el = document.getElementById(assistantId);
-      if (el) el.innerHTML = `<span style="color:#8b949e;animation:pulse 1s ease-in-out infinite">🖥 Asking Claude Desktop (no streaming — ~10-30s)…</span>`;
-      // Build a small history payload from the rendered messages (last 10)
+      if (el) el.innerHTML = `<span style="color:#8b949e;animation:pulse 1s ease-in-out infinite">🖥 Claude is working…</span>`;
       const history = [...msgs.querySelectorAll('.chat-msg')].slice(-12, -2).map(div => ({
         role: div.classList.contains('user') ? 'user' : 'assistant',
         content: div.textContent.trim().slice(0, 2000),
       }));
-      const resp = await fetch('/api/chat/desktop', {
+      const resp = await fetch('/api/chat/desktop/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, history }),
         signal: _chatAbort.signal,
       });
-      const data = await resp.json().catch(() => ({}));
-      const el2 = document.getElementById(assistantId);
-      if (!resp.ok) {
-        if (el2) el2.innerHTML = `<span style="color:#f85149">⚠ Desktop chat error: ${(data.error || resp.statusText).slice(0, 200)}</span>`;
-      } else {
-        if (el2) {
-          // Render markdown (headers, bold, bullets, tables) just like the API
-          // path does. Without this, Claude Desktop responses come back as raw
-          // text with **literal asterisks**, hash-marks, and pipe-tables that
-          // never get formatted — matched the user's "not structured" complaint.
-          const renderedHtml = (typeof renderMarkdown === 'function')
-            ? renderMarkdown(data.text || '(empty)')
-            : (data.text || '(empty)').replace(/</g,'&lt;');
-          el2.innerHTML = renderedHtml
-            + `<div style="margin-top:8px;font-size:0.7rem;color:#6e7681;border-top:1px solid #21262d;padding-top:6px">via Claude Desktop · ${(data.duration_ms/1000).toFixed(1)}s</div>`;
-          // Hyperlink any ticker symbols in the response. typeof check guards
-          // against ReferenceError — optional-chaining (?.()) doesn't save us
-          // when the identifier itself isn't in scope; it only handles
-          // null/undefined values on a defined identifier.
-          try { if (typeof _linkifyTickers === 'function') _linkifyTickers(el2); } catch (e) { console.warn('[chat-desktop] linkify failed:', e); }
+      if (!resp.ok || !resp.body) throw new Error('stream unavailable (' + resp.status + ')');
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '', acc = '', toolsLine = '', finished = false;
+      const esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+      const paint = () => {
+        const el2 = document.getElementById(assistantId);
+        if (!el2) return;
+        const toolsHtml = toolsLine ? `<div style="font-size:0.72rem;color:#8b949e;margin-bottom:6px">${toolsLine}</div>` : '';
+        el2.innerHTML = toolsHtml + `<span style="white-space:pre-wrap">${esc(acc)}</span><span style="color:#58a6ff">▌</span>`;
+        msgs.scrollTop = msgs.scrollHeight;
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          let d; try { d = JSON.parse(line.slice(5)); } catch { continue; }
+          if (d.delta) { acc += d.delta; paint(); }
+          else if (d.tool) { toolsLine += (toolsLine ? ' · ' : '🔧 ') + esc(d.tool); paint(); }
+          else if (d.error) { throw new Error(d.error); }
+          else if (d.done) {
+            finished = true;
+            const el2 = document.getElementById(assistantId);
+            if (el2) {
+              const finalText = d.text || acc || '(empty)';
+              const renderedHtml = (typeof renderMarkdown === 'function') ? renderMarkdown(finalText) : esc(finalText);
+              el2.innerHTML = renderedHtml
+                + `<div style="margin-top:8px;font-size:0.7rem;color:#6e7681;border-top:1px solid #21262d;padding-top:6px">via Claude Desktop (streamed) · ${(d.duration_ms/1000).toFixed(1)}s</div>`;
+              try { if (typeof _linkifyTickers === 'function') _linkifyTickers(el2); } catch (e) {}
+              try { if (_ttsEnabled && typeof speakText === 'function') speakText(finalText); } catch (e) {}
+            }
+          }
         }
-        try { if (_ttsEnabled && typeof speakText === 'function') speakText(data.text); } catch (e) { console.warn('[chat-desktop] tts failed:', e); }
+      }
+      if (!finished && acc) {
+        // stream ended without a done event — render what we have
+        const el2 = document.getElementById(assistantId);
+        if (el2) el2.innerHTML = (typeof renderMarkdown === 'function') ? renderMarkdown(acc) : esc(acc);
       }
     } catch (e) {
       const el = document.getElementById(assistantId);
-      if (el) el.innerHTML = `<span style="color:#f85149">⚠ ${e.name === 'AbortError' ? 'Timed out / cancelled' : e.message}</span>`;
+      if (el) el.innerHTML = `<span style="color:#f85149">⚠ ${e.name === 'AbortError' ? 'Timed out / cancelled' : String(e.message).replace(/</g,'&lt;').slice(0,200)}</span>`;
     } finally {
       clearTimeout(timeoutId);
       _chatAbort = null;
@@ -16737,11 +17135,21 @@ function _renderHomeHero(indices) {
   const sparks = indices?.sparklines || {};
   if (!s) { heroEl.innerHTML = '<div style="grid-column:1/-1;padding:18px;color:#8b949e">Market data unavailable</div>'; return; }
 
-  // Update the market-open pill
+  // Update the market-open pill.
+  // NOTE: market_status is a DISPLAY STRING from sentiment.js ('🟢 Market OPEN',
+  // '🟡 Pre-market', '🔴 After hours', 'Market closed (weekend)') — never the bare
+  // word 'open'. The old `=== 'open'` check could never match, so this pill said
+  // MARKET CLOSED 24/7 since the Home page shipped (fixed 2026-06-12).
   const pill = document.getElementById('homeMktPill');
   if (pill && s.market_status) {
-    pill.className = `home-mkt-pill ${s.market_status === 'open' ? 'open' : 'closed'}`;
-    pill.innerHTML = `<span class="home-mkt-dot"></span> ${s.market_status === 'open' ? 'MARKET OPEN' : 'MARKET CLOSED'}`;
+    const st     = String(s.market_status);
+    const isOpen = st.includes('OPEN');
+    const label  = isOpen ? 'MARKET OPEN'
+                 : st.includes('Pre-market')  ? 'PRE-MARKET'
+                 : st.includes('After hours') ? 'AFTER HOURS'
+                 : 'MARKET CLOSED';
+    pill.className = `home-mkt-pill ${isOpen ? 'open' : 'closed'}`;
+    pill.innerHTML = `<span class="home-mkt-dot"></span> ${label}`;
   }
 
   const cards = [
@@ -27582,6 +27990,206 @@ document.addEventListener('keydown', e => {
   // ────────────────────────────────────────────────────────────────────────
 
   let _hcData = null;
+  let _hcHist = null;          // raw /api/health/history payload
+  let _hcStrips = null;        // bucketized history (overall + per-check + durations)
+  // Row expansion state survives auto-refresh: explicit opens + explicit closes.
+  // fail/warn rows auto-open unless the user closed them.
+  const _hcOpen   = new Set();
+  const _hcClosed = new Set();
+  let _hcAuto    = true;
+  let _hcNextRun = 0;
+  let _hcTicker  = null;
+  const _HC_SEV  = { fail: 0, warn: 1, ok: 2 };
+  const _hcCatsCollapsed   = new Set(JSON.parse(localStorage.getItem('hcCatsCollapsed')   || '[]'));
+  const _hcPanelsCollapsed = new Set(JSON.parse(localStorage.getItem('hcPanelsCollapsed') || '[]'));
+
+  function _hcIsOpen(chk) {
+    return _hcOpen.has(chk.id) || (chk.status !== 'ok' && !_hcClosed.has(chk.id));
+  }
+
+  // Bucket history runs into nBuckets equal time slices; keep the WORST status
+  // seen per bucket (overall + per check id) and the max run duration per bucket.
+  function _hcBucketize(runs, nBuckets, hours) {
+    const end = Date.now(), span = hours * 3600e3, start = end - span;
+    const overall = new Array(nBuckets).fill(0);   // 0 none · 1 ok · 2 warn · 3 fail
+    const durs    = new Array(nBuckets).fill(null);
+    const per     = new Map();
+    for (const run of runs) {
+      const t = new Date(run.run_at).getTime();
+      let b = Math.floor((t - start) / span * nBuckets);
+      if (b < 0) b = 0; if (b >= nBuckets) b = nBuckets - 1;
+      const sev = run.fail > 0 ? 3 : run.warn > 0 ? 2 : 1;
+      if (sev > overall[b]) overall[b] = sev;
+      if (run.duration_ms != null) durs[b] = Math.max(durs[b] ?? 0, run.duration_ms);
+      for (const c of (Array.isArray(run.checks) ? run.checks : [])) {
+        let arr = per.get(c.id);
+        if (!arr) { arr = new Array(nBuckets).fill(0); per.set(c.id, arr); }
+        const s = c.status === 'fail' ? 3 : c.status === 'warn' ? 2 : 1;
+        if (s > arr[b]) arr[b] = s;
+      }
+    }
+    return { overall, durs, per, start, end, bucketMs: span / nBuckets, n: nBuckets };
+  }
+
+  function _hcBucketLabel(i) {
+    if (!_hcStrips) return '';
+    const t = new Date(_hcStrips.start + i * _hcStrips.bucketMs);
+    return t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  const _HC_SEG_NAMES = ['no data', 'ok', 'warn', 'fail'];
+
+  function _hcStripHtml(id, width) {
+    const arr = _hcStrips?.per?.get(id);
+    if (!arr) return '<span style="color:#484f58;font-size:.68rem;font-family:ui-monospace,monospace">no history yet</span>';
+    const w = width ? `style="width:${width}"` : '';
+    return `<div class="hc-strip" ${w}>` +
+      arr.map((s, i) => `<i class="s${s}" title="${_hcBucketLabel(i)} — ${_HC_SEG_NAMES[s]}"></i>`).join('') +
+      `</div>`;
+  }
+
+  function renderHealthHistory() {
+    const body = document.getElementById('hc-histbody');
+    const meta = document.getElementById('hc-hist-meta');
+    if (!body) return;
+    if (!_hcStrips) {
+      if (meta) meta.textContent = '';
+      body.innerHTML = '<div style="color:#8b949e;font-size:.78rem;font-family:ui-monospace,monospace">' +
+        'no history yet — runs are sampled every 5 minutes (plus every manual refresh); the timeline appears after a few runs</div>';
+      return;
+    }
+    const runs = _hcHist.runs, n = runs.length;
+    const healthy = runs.filter(r => !r.fail).length;
+    if (meta) meta.textContent = ` · ${n} runs · ${(healthy / n * 100).toFixed(1)}% healthy`;
+
+    const seg = _hcStrips.overall
+      .map((s, i) => `<i class="s${s}" title="${_hcBucketLabel(i)} — ${s === 0 ? 'no data' : s === 1 ? 'all ok' : s === 2 ? 'warnings' : 'FAILURES'}"></i>`)
+      .join('');
+
+    const durs = _hcStrips.durs;
+    const maxD = Math.max(...durs.filter(d => Number.isFinite(d)), 1);
+    const pts = [];
+    durs.forEach((d, i) => {
+      if (d != null) pts.push(`${(i / (durs.length - 1) * 300).toFixed(1)},${(34 - d / maxD * 28).toFixed(1)}`);
+    });
+    const lbl = 'font-size:.62rem;color:#8b949e;text-transform:uppercase;letter-spacing:.12em;margin-bottom:6px;font-family:ui-monospace,monospace';
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:minmax(280px,1fr) minmax(180px,300px);gap:24px;align-items:start">
+        <div>
+          <div style="${lbl}">Overall status — worst result per 30-min bucket</div>
+          <div class="hc-strip" style="width:100%;height:30px">${seg}</div>
+          <div class="hc-striplabel" style="width:100%"><span>24h ago</span><span>now</span></div>
+        </div>
+        <div>
+          <div style="${lbl}">Run duration · peak ${(maxD / 1000).toFixed(1)}s</div>
+          <svg viewBox="0 0 300 36" preserveAspectRatio="none" style="width:100%;height:34px;display:block">
+            <polyline points="${pts.join(' ')}" fill="none" stroke="#58a6ff" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+          </svg>
+          <div class="hc-striplabel" style="width:100%"><span>24h ago</span><span>now</span></div>
+        </div>
+      </div>`;
+  }
+
+  function hcTogglePanel(name) {
+    const p = document.getElementById('hc-panel-' + name);
+    if (!p) return;
+    const c = p.classList.toggle('collapsed');
+    if (c) _hcPanelsCollapsed.add(name); else _hcPanelsCollapsed.delete(name);
+    localStorage.setItem('hcPanelsCollapsed', JSON.stringify([..._hcPanelsCollapsed]));
+  }
+
+  function hcToggleCat(catId) {
+    const tb = document.getElementById('hc-tb-' + catId);
+    if (!tb) return;
+    const c = tb.classList.toggle('collapsed');
+    if (c) _hcCatsCollapsed.add(catId); else _hcCatsCollapsed.delete(catId);
+    localStorage.setItem('hcCatsCollapsed', JSON.stringify([..._hcCatsCollapsed]));
+  }
+
+  function hcGlanceJump(catId) {
+    const tb = document.getElementById('hc-tb-' + catId);
+    if (!tb) return;
+    if (tb.classList.contains('collapsed')) hcToggleCat(catId);
+    tb.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ── 📜 Log Monitor ────────────────────────────────────────────────────
+  let _hcLogSources = null, _hcLogData = null, _hcLogLvl = 'all';
+  let _hcLogLive = false, _hcLogTimer = null;
+  const _hcEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const _hcBytes = b => b >= 1048576 ? (b / 1048576).toFixed(1) + 'M' : b >= 1024 ? (b / 1024).toFixed(0) + 'K' : b + 'B';
+
+  async function hcLogInit() {
+    if (_hcLogSources) return;
+    try {
+      const r = await fetch('/api/logs/sources', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      _hcLogSources = (await r.json()).sources || [];
+      const sel = document.getElementById('hc-log-source');
+      if (!sel) return;
+      sel.innerHTML = _hcLogSources
+        .map(s => `<option value="${s.source}">${s.source} · ${_hcBytes(s.size_bytes)}</option>`).join('');
+      if (_hcLogSources.some(s => s.source === 'pm2:trading-dashboard-error.log')) {
+        sel.value = 'pm2:trading-dashboard-error.log';
+      }
+      hcLogRefresh();
+    } catch { /* panel stays in loading state; refresh button retries */ }
+  }
+
+  async function hcLogRefresh() {
+    const sel = document.getElementById('hc-log-source');
+    const view = document.getElementById('hc-log-view');
+    if (!sel?.value || !view) return;
+    const lines = document.getElementById('hc-log-lines')?.value || 200;
+    const grep  = document.getElementById('hc-log-grep')?.value?.trim() || '';
+    try {
+      const qs = new URLSearchParams({ source: sel.value, lines });
+      if (grep) qs.set('grep', grep);
+      const r = await fetch('/api/logs/tail?' + qs, { credentials: 'same-origin' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'tail failed');
+      _hcLogData = j;
+      _hcLogRender();
+    } catch (e) {
+      view.innerHTML = `<span class="ll ll-error">Error: ${_hcEsc(e.message)}</span>`;
+    }
+  }
+
+  function _hcLogRender() {
+    const view = document.getElementById('hc-log-view');
+    const meta = document.getElementById('hc-log-meta');
+    if (!view || !_hcLogData) return;
+    const keep = _hcLogLvl === 'all' ? null : _hcLogLvl === 'warn' ? ['warn', 'error'] : ['error'];
+    const rows = _hcLogData.lines.filter(l => !keep || keep.includes(l.lvl));
+    view.innerHTML = rows.length
+      ? rows.map(l => `<span class="ll ll-${l.lvl}">${_hcEsc(l.t)}</span>`).join('')
+      : '<span class="ll">— no matching lines —</span>';
+    view.scrollTop = view.scrollHeight;
+    if (meta) meta.textContent = ` · ${_hcLogData.source} · ${_hcBytes(_hcLogData.size_bytes)} · ` +
+      `${_hcLogData.errors} err / ${_hcLogData.warns} warn in last ${_hcLogData.returned}`;
+  }
+
+  function hcLogLevel(lvl) {
+    _hcLogLvl = lvl;
+    for (const k of ['all', 'warn', 'error']) {
+      document.getElementById('hc-lf-' + k)?.classList.toggle('on', k === lvl);
+    }
+    _hcLogRender();
+  }
+
+  function hcLogToggleLive() {
+    _hcLogLive = !_hcLogLive;
+    document.getElementById('hc-log-live')?.classList.toggle('on', _hcLogLive);
+    if (_hcLogLive && !_hcLogTimer) {
+      _hcLogTimer = setInterval(() => {
+        const visible = document.getElementById('page-health')?.offsetParent !== null;
+        const open = !document.getElementById('hc-panel-logs')?.classList.contains('collapsed');
+        if (_hcLogLive && visible && open) hcLogRefresh();
+      }, 5000);
+    } else if (!_hcLogLive && _hcLogTimer) {
+      clearInterval(_hcLogTimer); _hcLogTimer = null;
+    }
+  }
 
   const HC_CATEGORIES = [
     { id: 'data',      label: '📡 Data Pipeline',  blurb: 'External feeds the bot depends on' },
@@ -27594,69 +28202,200 @@ document.addEventListener('keydown', e => {
   async function loadHealth() {
     const grid = document.getElementById('hc-grid');
     if (!grid) return;
-    grid.innerHTML = '<div class="loading" style="padding:24px">Loading checks…</div>';
+    // Only blank the panel on first load — auto-refresh repaints in place (no flicker)
+    if (!grid.querySelector('table')) grid.innerHTML = '<div class="loading" style="padding:24px">Loading checks…</div>';
     try {
-      const r = await fetch('/api/health/checks', { credentials: 'same-origin' });
+      const [r, hr] = await Promise.all([
+        fetch('/api/health/checks',  { credentials: 'same-origin' }),
+        fetch('/api/health/history?hours=24', { credentials: 'same-origin' }).catch(() => null),
+      ]);
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'fetch failed');
       _hcData = j;
+      _hcHist = null;
+      try { if (hr?.ok) _hcHist = await hr.json(); } catch { /* history is optional */ }
+      _hcStrips = _hcHist?.runs?.length ? _hcBucketize(_hcHist.runs, 48, _hcHist.hours || 24) : null;
       renderHealth(j);
+      renderHealthHistory();
     } catch (e) {
       grid.innerHTML = `<div style="padding:24px;color:#f85149">Error: ${e.message}</div>`;
+      const v = document.getElementById('hc-verdict');
+      if (v) { v.textContent = 'MONITOR UNREACHABLE'; }
+      const b = document.getElementById('hc-beacon');
+      if (b) { b.style.background = '#f85149'; b.style.color = '#f85149'; }
+    } finally {
+      _hcNextRun = Date.now() + 60_000;
+      _hcStartTicker();
+      hcLogInit();   // one-time: populate the Log Monitor source list
     }
   }
 
   function renderHealth(data) {
-    // Summary header
-    const s = data.summary;
+    const s  = data.summary;
     const mh = data.market_hours;
-    const summaryHtml = `
-      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:4px">
-        <span style="background:#0d2818;border:1px solid #2ea043;color:#3fb950;padding:4px 10px;border-radius:14px;font-size:0.82rem;font-weight:600">${s.ok} OK</span>
-        <span style="background:#2d1b00;border:1px solid #9e6a03;color:#f0883e;padding:4px 10px;border-radius:14px;font-size:0.82rem;font-weight:600">${s.warn} WARN</span>
-        <span style="background:#3d0e0e;border:1px solid #6d2929;color:#f85149;padding:4px 10px;border-radius:14px;font-size:0.82rem;font-weight:600">${s.fail} FAIL</span>
-        <span style="color:#8b949e;font-size:0.82rem;margin-left:8px">${s.total} checks · ${data.duration_ms}ms ·
-          ${mh.isMarketHours ? '<span style="color:#3fb950">🟢 market open</span>' : '<span style="color:#8b949e">🔴 market closed</span>'}
-        </span>
-      </div>`;
-    document.getElementById('hc-summary').innerHTML = summaryHtml;
-    document.getElementById('hc-last-check').textContent = 'Last run: ' + new Date(data.generated_at).toLocaleTimeString();
 
-    // Render by category
-    const grid = document.getElementById('hc-grid');
-    let html = '';
+    // ── banner verdict + beacon ──
+    const verdict = s.fail > 0 ? `SYSTEM DEGRADED — ${s.fail} FAILING`
+                  : s.warn > 0 ? `OPERATIONAL · ${s.warn} WARNING${s.warn > 1 ? 'S' : ''}`
+                  : 'ALL SYSTEMS OPERATIONAL';
+    const vColor = s.fail > 0 ? '#f85149' : s.warn > 0 ? '#f0883e' : '#3fb950';
+    document.getElementById('hc-verdict').textContent = verdict;
+    const beacon = document.getElementById('hc-beacon');
+    beacon.style.background = vColor; beacon.style.color = vColor;
+    document.getElementById('hc-meta').textContent =
+      `${s.ok} ok · ${s.warn} warn · ${s.fail} fail · last run ${new Date(data.generated_at).toLocaleTimeString()} · ` +
+      `${(data.duration_ms / 1000).toFixed(1)}s · market ${mh.isMarketHours ? 'OPEN' : 'CLOSED'}`;
+
+    // ── quick-jump chips for everything not green ──
+    document.getElementById('hc-failchips').innerHTML = data.checks
+      .filter(c => c.status !== 'ok')
+      .sort((a, b) => _HC_SEV[a.status] - _HC_SEV[b.status])
+      .map(c => `<span class="hc-chip ${c.status}" onclick="hcJump('${c.id}')">${c.status === 'fail' ? '✗' : '⚠'} ${c.title}</span>`)
+      .join('');
+
+    // ── at-a-glance board: one tile per category + Lake ELT + Claude API ──
+    const LAKE_IDS = ['lake_bronze', 'lake_silver', 'lake_gold'];
+    let glance = '';
     for (const cat of HC_CATEGORIES) {
-      const inCat = data.checks.filter(c => c.category === cat.id);
+      const inCat = data.checks.filter(c => c.category === cat.id && !LAKE_IDS.includes(c.id));
       if (!inCat.length) continue;
-      html += `
-        <div class="table-wrap" style="margin-bottom:16px">
-          <div class="table-head">
-            <h3>${cat.label}</h3>
-            <span style="font-size:0.8rem;color:#8b949e">${cat.blurb}</span>
+      const f = inCat.filter(c => c.status === 'fail').length;
+      const w = inCat.filter(c => c.status === 'warn').length;
+      const cls  = f ? 'g-fail' : w ? 'g-warn' : 'g-ok';
+      const icon = f ? '✗' : w ? '⚠' : '✓';
+      const main = f ? `${f} FAIL` : w ? `${w} WARN` : 'ALL OK';
+      glance += `
+        <div class="hc-gtile ${cls}" onclick="hcGlanceJump('${cat.id}')" title="${cat.blurb}">
+          <div class="gi">${icon}</div>
+          <div style="min-width:0">
+            <div class="gt">${cat.label.replace(/^\S+\s/, '')}</div>
+            <div class="gv">${main}</div>
+            <div class="gs">${inCat.length - f - w}/${inCat.length} checks ok</div>
           </div>
-          <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">`;
-      for (const chk of inCat) {
-        const colorMap = { ok: '#3fb950', warn: '#f0883e', fail: '#f85149' };
-        const bgMap    = { ok: '#0d2818', warn: '#2d1b00', fail: '#3d0e0e' };
-        const iconMap  = { ok: '✓', warn: '⚠', fail: '✗' };
-        const c = colorMap[chk.status];
-        const b = bgMap[chk.status];
-        html += `
-          <div style="background:${b};border:1px solid ${c}33;border-left:4px solid ${c};border-radius:6px;padding:12px 14px">
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px;gap:8px">
-              <div style="font-weight:600;color:#e6edf3;font-size:0.88rem;line-height:1.3">${chk.title}</div>
-              <button onclick="showHealthHelp('${chk.id}')" title="What does this check?" style="background:#0d1117;border:1px solid #30363d;color:#8b949e;width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:0.75rem;flex-shrink:0">?</button>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-              <span style="color:${c};font-weight:700;font-size:0.85rem">${iconMap[chk.status]} ${chk.status.toUpperCase()}</span>
-            </div>
-            <div style="color:#c9d1d9;font-size:0.83rem;line-height:1.5">${chk.value}</div>
-            ${chk.threshold ? `<div style="color:#8b949e;font-size:0.75rem;margin-top:4px;font-style:italic">threshold: ${chk.threshold}</div>` : ''}
-          </div>`;
-      }
-      html += '</div></div>';
+        </div>`;
     }
-    grid.innerHTML = html;
+    // Lake ELT tile — Bronze / Silver / Gold job status with last-write age
+    const lake = LAKE_IDS.map(id => data.checks.find(c => c.id === id));
+    if (lake.some(Boolean)) {
+      const worst = lake.reduce((m, c) => Math.max(m, c ? (c.status === 'fail' ? 3 : c.status === 'warn' ? 2 : 1) : 0), 0);
+      const cls = worst === 3 ? 'g-fail' : worst === 2 ? 'g-warn' : 'g-ok';
+      const rows = LAKE_IDS.map((id, i) => {
+        const c = lake[i];
+        const name = id.replace('lake_', '');
+        const label = name.charAt(0).toUpperCase() + name.slice(1);
+        if (!c) return `<div class="glake"><span class="ld none"></span>${label} <em>n/a</em></div>`;
+        const age = (String(c.value).match(/written (.+)$/) || [])[1] || (c.status === 'fail' ? 'FAIL' : '—');
+        return `<div class="glake"><span class="ld ${c.status}"></span>${label} <em>${age}</em></div>`;
+      }).join('');
+      glance += `
+        <div class="hc-gtile ${cls}" onclick="hcJump('lake_bronze')" title="Daily 09:00 SGT lake load — click for details">
+          <div class="gi">▙</div>
+          <div style="min-width:0;flex:1">
+            <div class="gt">Lake ELT Jobs</div>
+            ${rows}
+          </div>
+        </div>`;
+    }
+    // Claude API tile — filled by loadStats() once cost data arrives
+    glance += `
+      <div class="hc-gtile g-info" onclick="document.getElementById('statsCostPerDay')?.scrollIntoView({behavior:'smooth'})" title="Claude API usage — click for full tables">
+        <div class="gi">⚡</div>
+        <div style="min-width:0">
+          <div class="gt">Claude API</div>
+          <div id="hc-glance-claude"><div class="gs">loading…</div></div>
+        </div>
+      </div>`;
+    document.getElementById('hc-glance').innerHTML = glance;
+
+    // ── grouped run table: one collapsible <tbody> per category, severity-sorted ──
+    let bodies = '';
+    for (const cat of HC_CATEGORIES) {
+      const inCat = data.checks.filter(c => c.category === cat.id)
+        .sort((a, b) => _HC_SEV[a.status] - _HC_SEV[b.status]);
+      if (!inCat.length) continue;
+      const cOk   = inCat.filter(c => c.status === 'ok').length;
+      const cWarn = inCat.filter(c => c.status === 'warn').length;
+      const cFail = inCat.filter(c => c.status === 'fail').length;
+      let rows = `<tr class="hc-cat" onclick="hcToggleCat('${cat.id}')"><td colspan="7"><span class="cat-chev">▼</span>${cat.label}
+        <span style="font-weight:400;color:#8b949e;font-size:.72rem;margin-left:8px">${cat.blurb}</span>
+        <span class="cat-counts">${cFail ? `<span style="color:#f85149">${cFail} fail</span> · ` : ''}${cWarn ? `<span style="color:#f0883e">${cWarn} warn</span> · ` : ''}${cOk} ok</span></td></tr>`;
+      for (const chk of inCat) {
+        const open = _hcIsOpen(chk);
+        rows += `
+          <tr class="hc-row st-${chk.status}${open ? ' open' : ''}" id="hc-row-${chk.id}" onclick="hcToggleRow('${chk.id}')">
+            <td><span class="hc-status ${chk.status}"><span class="dot"></span>${chk.status.toUpperCase()}</span></td>
+            <td><div class="hc-name">${chk.title}</div><div class="hc-id">${chk.id}</div></td>
+            <td><div class="hc-val">${chk.value}</div></td>
+            <td>${_hcStripHtml(chk.id)}</td>
+            <td><span class="hc-thr">${chk.threshold || '—'}</span></td>
+            <td class="num"><span class="hc-ms">${Number.isFinite(chk.ms) ? chk.ms.toLocaleString() : '—'}</span></td>
+            <td><span class="hc-chev">▶</span></td>
+          </tr>
+          <tr class="hc-doc${open ? ' open' : ''}" id="hc-doc-${chk.id}"><td colspan="7">
+            <div class="hc-docgrid">
+              <div class="hc-doccell dwhat"><b>What this checks</b>${chk.doc?.what ?? '—'}</div>
+              <div class="hc-doccell dwhy"><b>Why it matters</b>${chk.doc?.why ?? '—'}</div>
+              <div class="hc-doccell dred"><b>If red</b>${chk.doc?.if_red ?? '—'}</div>
+            </div>
+          </td></tr>`;
+      }
+      bodies += `<tbody class="hc-tb${_hcCatsCollapsed.has(cat.id) ? ' collapsed' : ''}" id="hc-tb-${cat.id}">${rows}</tbody>`;
+    }
+    document.getElementById('hc-grid').innerHTML = `
+      <table class="hc-table">
+        <thead><tr>
+          <th style="width:86px">Status</th><th>Check</th><th>Latest value</th>
+          <th style="width:160px">History (24h)</th>
+          <th style="width:170px">Threshold</th><th class="num" style="width:64px">ms</th><th style="width:30px"></th>
+        </tr></thead>
+        ${bodies}
+      </table>`;
+
+    // restore persisted panel state (history panel collapse)
+    document.getElementById('hc-panel-hist')?.classList.toggle('collapsed', _hcPanelsCollapsed.has('hist'));
+  }
+
+  function hcToggleRow(id) {
+    const row = document.getElementById('hc-row-' + id);
+    const doc = document.getElementById('hc-doc-' + id);
+    if (!row || !doc) return;
+    const nowOpen = !row.classList.contains('open');
+    row.classList.toggle('open', nowOpen);
+    doc.classList.toggle('open', nowOpen);
+    if (nowOpen) { _hcOpen.add(id); _hcClosed.delete(id); }
+    else         { _hcOpen.delete(id); _hcClosed.add(id); }
+  }
+
+  function hcJump(id) {
+    const row = document.getElementById('hc-row-' + id);
+    if (!row) return;
+    const tb = row.closest('tbody.hc-tb');
+    if (tb?.classList.contains('collapsed')) hcToggleCat(tb.id.replace('hc-tb-', ''));
+    if (!row.classList.contains('open')) hcToggleRow(id);
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function hcToggleAuto() {
+    _hcAuto = !_hcAuto;
+    const el = document.getElementById('hc-auto');
+    el.classList.toggle('on', _hcAuto);
+    if (_hcAuto) _hcNextRun = Date.now() + 60_000;
+    else document.getElementById('hc-countdown').textContent = '· off';
+  }
+
+  function _hcStartTicker() {
+    if (_hcTicker) return;
+    _hcTicker = setInterval(() => {
+      const cd = document.getElementById('hc-countdown');
+      if (!cd) return;
+      if (!_hcAuto) { cd.textContent = '· off'; return; }
+      const left = Math.max(0, Math.round((_hcNextRun - Date.now()) / 1000));
+      cd.textContent = `· ${left}s`;
+      // only refetch while the Health page is actually visible
+      const visible = document.getElementById('page-health')?.offsetParent !== null;
+      if (left === 0 && visible) { _hcNextRun = Date.now() + 60_000; loadHealth(); }
+      else if (left === 0) { _hcNextRun = Date.now() + 60_000; }   // page hidden: skip, re-arm
+    }, 1000);
   }
 
   function showHealthHelp(checkId) {
@@ -27702,6 +28441,116 @@ document.addEventListener('keydown', e => {
   window.loadHealth      = loadHealth;
   window.showHealthHelp  = showHealthHelp;
   window.hideHealthHelp  = hideHealthHelp;
+  window.hcToggleRow     = hcToggleRow;
+  window.hcJump          = hcJump;
+  window.hcToggleAuto    = hcToggleAuto;
+  window.hcToggleCat     = hcToggleCat;
+  window.hcTogglePanel   = hcTogglePanel;
+  window.hcGlanceJump    = hcGlanceJump;
+  window.hcLogRefresh    = hcLogRefresh;
+  window.hcLogLevel      = hcLogLevel;
+  window.hcLogToggleLive = hcLogToggleLive;
+
+  // ════════════════════════════════════════════════════════════════════
+  // ── 🧪 BOT_SIM ──────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════
+  const _bsEsc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const _bsNum = (v, d=2) => (v==null||isNaN(v)) ? '—' : Number(v).toFixed(d);
+  const _bsTs  = v => v ? new Date(v).toISOString().slice(0,16).replace('T',' ') : '—';
+
+  async function loadBotSim() {
+    const sel = document.getElementById('bs-run');
+    if (!sel) return;
+    try {
+      const r = await fetch('/api/sim/runs', { credentials:'same-origin' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'fetch failed');
+      const runs = (j.runs||[]).filter(x => x.summary);   // finished runs with results
+      if (!runs.length) { document.getElementById('bs-kpis').innerHTML = '<div style="color:#8b949e;padding:8px">No sim runs yet. Run <code>node src/sim/run.mjs</code>.</div>'; return; }
+      const prev = sel.value;
+      sel.innerHTML = runs.map(x => `<option value="${_bsEsc(x.run_id)}">${_bsEsc(x.run_id)} · ${x.window_from}→${x.window_to}</option>`).join('');
+      // default to a meaningful run if present
+      // Default to the most recent run, not the old losing control (sim_baseline = −0.28%
+      // pre-fix). runs come back started_at DESC, so runs[0] is the latest meaningful run.
+      const pref = runs[0];
+      sel.value = (prev && runs.some(x=>x.run_id===prev)) ? prev : pref.run_id;
+      _bsRuns = Object.fromEntries(runs.map(x=>[x.run_id, x]));
+      loadBotSimRun();
+    } catch(e) { document.getElementById('bs-kpis').innerHTML = `<div style="color:#f85149;padding:8px">Error: ${_bsEsc(e.message)}</div>`; }
+  }
+  let _bsRuns = {};
+
+  async function loadBotSimRun() {
+    const runId = document.getElementById('bs-run')?.value;
+    if (!runId) return;
+    const run = _bsRuns[runId];
+    const s = run?.summary || {};
+    // KPI strip
+    const retCls = (s.return_pct>=0)?'pos':'neg';
+    document.getElementById('bs-kpis').innerHTML = `
+      <div class="bs-kpi"><div class="n ${retCls}">${s.return_pct>=0?'+':''}${_bsNum(s.return_pct)}%</div><div class="l">Return</div></div>
+      <div class="bs-kpi"><div class="n">${s.trades??'—'}</div><div class="l">Trades</div></div>
+      <div class="bs-kpi"><div class="n">${_bsNum(s.win_pct,1)}%</div><div class="l">Win rate</div></div>
+      <div class="bs-kpi"><div class="n ${(s.pnl_usd>=0)?'pos':'neg'}">$${_bsNum(s.pnl_usd,0)}</div><div class="l">Net P&amp;L</div></div>
+      <div class="bs-kpi"><div class="n">${_bsNum((s.avg_hold_min||0)/1440,1)}d</div><div class="l">Avg hold</div></div>
+      <div class="bs-kpi"><div class="n">${_bsNum(s.avg_slip_bps,1)}</div><div class="l">Slippage bps</div></div>`;
+    // fire the three section loads
+    bsLoadVerify(runId); bsLoadLessons(runId); bsLoadTrades(runId);
+  }
+
+  async function bsLoadVerify(runId) {
+    const host = document.getElementById('bs-verify');
+    try {
+      const j = await (await fetch('/api/sim/verify?run_id='+encodeURIComponent(runId), {credentials:'same-origin'})).json();
+      host.innerHTML = (j.checks||[]).map(c => `
+        <div class="bs-proof ${c.pass?'ok':'bad'}">
+          <div class="ic">${c.pass?'✓':'✗'}</div>
+          <div><div class="lbl">${_bsEsc(c.label)}</div><div class="val">${_bsEsc(c.value)}</div></div>
+        </div>`).join('');
+      document.getElementById('bs-method').textContent = j.method || '';
+    } catch(e) { host.innerHTML = `<div style="color:#f85149;padding:12px">Error: ${_bsEsc(e.message)}</div>`; }
+  }
+
+  async function bsLoadLessons(runId) {
+    const host = document.getElementById('bs-lessons');
+    try {
+      const j = await (await fetch('/api/sim/lessons?run_id='+encodeURIComponent(runId), {credentials:'same-origin'})).json();
+      const L = j.lessons||[];
+      if (!L.length) { host.innerHTML = '<div style="color:#8b949e;padding:14px 16px;font-size:.82rem">No learning in this run (run with <code>--learn</code> to enable nightly Claude reflection).</div>'; return; }
+      host.innerHTML = L.map(x => `
+        <div class="bs-lesson">
+          <div class="meta">${x.sim_date} · ${x.closed_n} closed trades
+            <span class="bs-tag ${x.adopted?'adopt':'noop'}">${x.adopted?'policy changed':'no change'}</span></div>
+          <div class="body">${_bsEsc(x.narrative)||'—'}</div>
+        </div>`).join('');
+    } catch(e) { host.innerHTML = `<div style="color:#f85149;padding:12px">Error: ${_bsEsc(e.message)}</div>`; }
+  }
+
+  async function bsLoadTrades(runId) {
+    const host = document.getElementById('bs-trades');
+    try {
+      const j = await (await fetch('/api/sim/trades?run_id='+encodeURIComponent(runId), {credentials:'same-origin'})).json();
+      const T = j.trades||[];
+      if (!T.length) { host.innerHTML = '<div style="color:#8b949e;padding:14px 16px">No trades.</div>'; return; }
+      host.innerHTML = `<table class="bs-table"><thead><tr>
+        <th>Symbol</th><th>Entry (minute)</th><th>Decision px</th><th>Fill px</th><th>Slip bps</th>
+        <th>Exit (minute)</th><th>Hold</th><th>Exit reason</th><th>P&amp;L%</th></tr></thead><tbody>` +
+        T.map(t => `<tr>
+          <td>${_bsEsc(t.symbol)}</td>
+          <td>${_bsTs(t.entry_ts)}</td>
+          <td>${_bsNum(t.ref_px)}</td>
+          <td>${_bsNum(t.entry_px)}</td>
+          <td>${_bsNum(t.slippage_bps,1)}</td>
+          <td>${_bsTs(t.exit_ts)}</td>
+          <td>${t.hold_minutes!=null?(t.hold_minutes/1440).toFixed(1)+'d':'—'}</td>
+          <td>${_bsEsc(t.exit_reason)||(t.status==='open'?'(open)':'—')}</td>
+          <td class="${(t.pnl_pct>=0)?'pos':'neg'}">${t.pnl_pct!=null?(t.pnl_pct>=0?'+':'')+_bsNum(t.pnl_pct):'—'}</td>
+        </tr>`).join('') + '</tbody></table>';
+    } catch(e) { host.innerHTML = `<div style="color:#f85149;padding:12px">Error: ${_bsEsc(e.message)}</div>`; }
+  }
+
+  window.loadBotSim    = loadBotSim;
+  window.loadBotSimRun = loadBotSimRun;
 
   // ════════════════════════════════════════════════════════════════════
   // ── Portfolio Advisor ───────────────────────────────────────────────

@@ -8,6 +8,9 @@
 // of how the process was launched. See src/core/env-loader.js for the why.
 import '../core/env-loader.js';
 
+// Dashboard tabs/widgets/permissions — single source of truth (see src/web/registry.js)
+import { ALL_TABS, ALL_WIDGETS, DEFAULT_PERMISSIONS } from './registry.js';
+
 import os from 'os';
 import net from 'net';
 import fs from 'fs';
@@ -59,7 +62,7 @@ import { getImpactAnalysis } from '../core/graph-impact.js';
 import { getStockPrediction } from '../core/predictor.js';
 import { marked } from 'marked';
 import YahooFinance from 'yahoo-finance2';
-const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const _yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 // Persist Yahoo Finance cookie jar (crumb) to DB so it survives restarts
 const _YF_COOKIE_KEY = 'yf_cookie_jar';
@@ -213,6 +216,20 @@ function ttlCache(key, ttlMs, fn) {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ─── Log hygiene: redact yahoo-finance2 URL spam ─────────────────────────────
+// yahoo-finance2@3.x hardcodes `console.error(url)` on every non-OK HTTP response
+// (yahooFinanceFetch.js) — during rate-limit bursts this floods the error log with
+// hundreds of bare URLs INCLUDING the session crumb token. The lib also throws, and
+// our callers log those errors meaningfully, so the raw-URL line is pure noise + a
+// token leak. Narrow filter: only swallows bare Yahoo-API-URL strings, nothing else.
+const _origConsoleError = console.error.bind(console);
+console.error = (...args) => {
+  if (args.length === 1 && typeof args[0] === 'string'
+      && /^https:\/\/query[12]\.finance\.yahoo\.com\//.test(args[0])) return;
+  _origConsoleError(...args);
+};
+
 const app  = express();
 const PORT = process.env.DASHBOARD_PORT || 3000;
 const driftLimit = parseFloat(process.env.SENTINEL_DRIFT_TOLERANCE || '0.02');
@@ -283,15 +300,9 @@ async function migrateUsersToDb() {
 
 // ─── Permissions ──────────────────────────────────────────────────────────────
 
-// 'stats' merged into 'health' (2026-05-25). Both keys accepted for backwards
-// compat — TAB_PAGE_MAP in index.html aliases 'stats' → 'health'.
-const ALL_TABS    = ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'health', 'stats', 'docs', 'research', 'admin_bot', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener', 'ext_hours', 'retrospective', 'top_picks'];
-const ALL_WIDGETS = ['moomoo', 'alpaca_live', 'tiger', 'force_trade', 'chat', 'stock_explorer', 'notifications'];
-
-const DEFAULT_PERMISSIONS = {
-  admin:  { tabs: ALL_TABS,    widgets: ALL_WIDGETS },
-  viewer: { tabs: ['home', 'dashboard', 'trades', 'scores', 'market', 'news', 'research', 'bot_rules', 'calendar', 'watchlist', 'signal_center', 'trading_desk', 'discover', 'bots', 'screener', 'ext_hours', 'retrospective', 'top_picks'], widgets: ['alpaca_live', 'chat', 'stock_explorer', 'notifications'] },
-};
+// ALL_TABS, ALL_WIDGETS, DEFAULT_PERMISSIONS are imported from ./registry.js (single source of
+// truth — added 2026-06-09). 'stats' merged into 'health' (2026-05-25); both kept for back-compat
+// (TAB_PAGE_MAP in index.html aliases 'stats' → 'health'). To add a tab/widget, edit registry.js.
 
 function getPermissions(user) {
   const roleDefaults = DEFAULT_PERMISSIONS[user.role] || DEFAULT_PERMISSIONS.viewer;
@@ -424,6 +435,19 @@ app.get('/', (req, res, next) => {
   const isMobile = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
   if (isMobile) return res.redirect('/mobile.html');
   next();
+});
+
+// ─── Pre-auth shell gate ──────────────────────────────────────────────────────
+// The app shells (index/mobile, ~1.6MB with all dashboard logic inline) must NOT be
+// served to anonymous visitors — only the ~11KB login page is public. Before this
+// gate, express.static shipped the full app pre-login and index.html bounced to
+// /login.html client-side AFTER the download (information disclosure + wasted MB).
+// Static assets (css/icons/sw.js/manifest/login/register/terms) stay public.
+const PROTECTED_SHELLS = new Set(['/', '/index.html', '/mobile.html', '/mobile-v1.html']);
+app.use((req, res, next) => {
+  if (!PROTECTED_SHELLS.has(req.path)) return next();
+  if (req.session?.authenticated) return next();
+  return res.redirect(302, '/login.html');
 });
 
 // Central cache policy — sets explicit Cache-Control on every response before
@@ -2267,6 +2291,66 @@ app.get('/api/screener/meta', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('[screener/meta]', e);
     res.status(500).json({ error: 'Failed to load screener meta' });
+  }
+});
+
+// Ownership/float screener — float, institutional holdings, volume vs float, PE, earnings.
+// Ownership from screener_ownership (daily Yahoo snapshot); change cols from snapshot history.
+app.get('/api/screener/ownership', requireAuth, async (req, res) => {
+  try {
+    // Restricted to S&P 500 + NASDAQ-100 constituents (index_membership table).
+    const { rows } = await query(`
+      WITH snap AS (
+        SELECT symbol, snapshot_date, float_shares, shares_outstanding, inst_pct, inst_float_pct,
+               inst_shares, insiders_pct, pe_ratio, forward_pe,
+               row_number() OVER (PARTITION BY symbol ORDER BY snapshot_date DESC) AS rn
+        FROM screener_ownership
+      ),
+      own AS (SELECT * FROM snap WHERE rn = 1),
+      y   AS (SELECT symbol, inst_shares FROM snap WHERE rn = 2),
+      m   AS (SELECT symbol, inst_shares FROM snap WHERE rn = 22)   -- ~30 calendar days back
+      SELECT tu.symbol, tu.exchange,
+             im.in_sp500, im.in_ndx100,
+             -- Close/chg from the FRESH daily price (tradable_universe = Alpaca, updated daily;
+             -- price is accurate on IEX, only volume isn't). Lake close is a fallback — it lags
+             -- (Polygon flatfiles publish late) so it must NOT win over the fresh price.
+             COALESCE(tu.last_price, sv.close)              AS last_price,
+             COALESCE(tu.day_change_pct, sv.chg_pct)        AS day_change_pct,
+             COALESCE(sv.avg_vol_30d, tu.avg_volume_30d)    AS avg_volume_30d,
+             -- Day volume: Moomoo (fresh + consolidated) first → lake (consolidated but lags) → universe.
+             -- NOT tu.day_volume alone (that's Alpaca/IEX ≈ 3% of real). RVOL & vol-vs-float derive from it.
+             COALESCE(mf.day_volume, sv.day_vol, tu.day_volume) AS day_volume,
+             round(COALESCE(mf.day_volume, sv.day_vol, tu.day_volume)::numeric
+                   / NULLIF(COALESCE(sv.avg_vol_30d, tu.avg_volume_30d), 0), 2) AS rvol,
+             own.float_shares, own.shares_outstanding,
+             round(100.0 * COALESCE(mf.day_volume, sv.day_vol, tu.day_volume)
+                   / NULLIF(own.float_shares, 0), 4)        AS pct_vol_vs_float,
+             -- Trailing PE: Moomoo (broker) first → Yahoo → universe. NULL when all null.
+             COALESCE(mf.pe_ttm, own.pe_ratio, tu.pe_ratio)  AS pe_ratio,
+             -- "Loss" marker: Moomoo says this name has negative earnings (no meaningful PE).
+             mf.is_loss                              AS pe_loss,
+             -- Forward PE: Moomoo's API has none → Yahoo → universe.
+             COALESCE(own.forward_pe, tu.forward_pe) AS forward_pe,
+             round(own.inst_pct * 100, 2)        AS inst_pct,
+             round(own.inst_float_pct * 100, 2)  AS inst_float_pct,
+             own.inst_shares,
+             round(own.insiders_pct * 100, 2)    AS insiders_pct,
+             (own.inst_shares - y.inst_shares)   AS inst_chg_1d,
+             (own.inst_shares - m.inst_shares)   AS inst_chg_30d,
+             ec.next_earnings, ec.last_earnings,
+             (ec.next_earnings - CURRENT_DATE)   AS days_to_earnings
+      FROM index_membership im
+      JOIN tradable_universe tu ON tu.symbol = im.symbol
+      LEFT JOIN screener_volume sv ON sv.symbol = tu.symbol
+      LEFT JOIN moomoo_fundamentals mf ON mf.symbol = tu.symbol
+      LEFT JOIN own ON own.symbol = tu.symbol
+      LEFT JOIN y   ON y.symbol   = tu.symbol
+      LEFT JOIN m   ON m.symbol   = tu.symbol
+      LEFT JOIN earnings_calendar ec ON ec.symbol = tu.symbol
+      ORDER BY COALESCE(sv.avg_vol_30d, tu.avg_volume_30d) DESC NULLS LAST`);
+    res.json({ rows, count: rows.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -6304,17 +6388,19 @@ app.get('/api/ask', requireAuth, async (req, res) => {
           newsLines ? `Recent News:\n${newsLines}` : '',
         ].filter(Boolean).join('\n');
 
-        const msg = await _anthropic.messages.create({
-          model: MODEL_LIGHTWEIGHT,
-          max_tokens: 280,
-          messages: [{
-            role: 'user',
-            content: `User asked: "${rawQuery}"\n\nCurrent data for ${sym}:\n${context}\n\nAnswer their specific question in 3–5 sentences. Be direct and data-driven. Start with the most important insight for their question. No fluff, no disclaimers.`,
-          }],
-        });
-        aiAnswer = msg.content[0]?.text?.trim() || null;
+        if (anthropicAvailable()) {
+          const msg = await _anthropic.messages.create({
+            model: MODEL_LIGHTWEIGHT,
+            max_tokens: 280,
+            messages: [{
+              role: 'user',
+              content: `User asked: "${rawQuery}"\n\nCurrent data for ${sym}:\n${context}\n\nAnswer their specific question in 3–5 sentences. Be direct and data-driven. Start with the most important insight for their question. No fluff, no disclaimers.`,
+            }],
+          });
+          aiAnswer = msg.content[0]?.text?.trim() || null;
+        }
       } catch (e) {
-        console.warn('[ask] Haiku failed:', e.message);
+        if (!reportAnthropicError(e, 'ask')) console.warn('[ask] Haiku failed:', e.message);
       }
     }
 
@@ -6765,6 +6851,60 @@ app.post('/api/chat/clear', requireAuth, (req, res) => {
 // `pushHistory()` so /api/chat/history returns both API-mode AND desktop-mode
 // turns. Without this, closing the chat widget mid-response and reopening it
 // silently deleted desktop-mode turns (server-side history overwrote localStorage).
+// Streaming variant (2026-06-12): SSE-style chunked response so the widget can
+// type the answer live. Events: {delta}, {tool}, {done,text,duration_ms}, {error}.
+// Same auth/history semantics as the one-shot route; X-Chat-Test: 1 skips history.
+app.post('/api/chat/desktop/stream', requireAuth, chatLimiter, async (req, res) => {
+  try {
+    const { message, history } = req.body || {};
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'message is required' });
+    }
+    const username = req.session?.username;
+    const isTestCall = req.headers['x-chat-test'] === '1';
+    const chatId = (!isTestCall && username) ? userChatId(username) : null;
+    const trimmed = message.trim();
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+    const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} };
+
+    if (chatId) {
+      try {
+        const { pushHistory } = await import('../core/ai-chat.js');
+        pushHistory(chatId, { role: 'user', content: trimmed });
+      } catch (e) { console.warn('[chat/desktop/stream] save user msg failed:', e.message); }
+    }
+
+    const { chatViaClaudeStream } = await import('../core/claude-desktop-chat.js');
+    await chatViaClaudeStream({
+      message: trimmed,
+      history: Array.isArray(history) ? history.slice(-10) : [],
+      onEvent: async (evt) => {
+        if (evt.delta) send({ delta: evt.delta });
+        else if (evt.tool) send({ tool: evt.tool });
+        else if (evt.error) { send({ error: evt.error }); res.end(); }
+        else if (evt.done) {
+          if (chatId && evt.text) {
+            try {
+              const { pushHistory } = await import('../core/ai-chat.js');
+              pushHistory(chatId, { role: 'assistant', content: evt.text });
+            } catch (e) { console.warn('[chat/desktop/stream] save assistant msg failed:', e.message); }
+          }
+          send({ done: true, text: evt.text, duration_ms: evt.ms });
+          res.end();
+        }
+      },
+    });
+  } catch (err) {
+    console.error('[chat/desktop/stream]', err);
+    try { res.write(`data: ${JSON.stringify({ error: err.message || 'Internal error' })}\n\n`); res.end(); }
+    catch { res.status(500).json({ error: err.message || 'Internal error' }); }
+  }
+});
+
 app.post('/api/chat/desktop', requireAuth, chatLimiter, async (req, res) => {
   try {
     const { message, history } = req.body || {};
@@ -6775,7 +6915,11 @@ app.post('/api/chat/desktop', requireAuth, chatLimiter, async (req, res) => {
       return res.status(400).json({ error: 'message too long (max 4000 chars)' });
     }
     const username = req.session?.username;
-    const chatId = username ? userChatId(username) : null;
+    // 2026-06-12: diagnostic calls (Claude Code verification tests) must NOT pollute
+    // the user's chat history — earlier tests trimmed real conversations out of the
+    // 40-message window. X-Chat-Test: 1 → answer normally but skip history writes.
+    const isTestCall = req.headers['x-chat-test'] === '1';
+    const chatId = (!isTestCall && username) ? userChatId(username) : null;
     const trimmed = message.trim();
 
     // Save user message BEFORE the long-running call. If claude CLI crashes or
@@ -7281,6 +7425,9 @@ app.get('/api/chat/poll', requireAuth, (req, res) => {
 // ─── Daily Briefing ───────────────────────────────────────────────────────────
 
 const _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Shared circuit breaker: when credits are exhausted / key invalid, skip calls
+// for 6h instead of logging the same 400 every cron tick (2026-06-12 audit).
+import { anthropicAvailable, reportAnthropicError } from '../core/anthropic-breaker.js';
 
 const MODEL_CRITICAL    = 'claude-sonnet-4-6';         // reasoning, user chat, tool use
 const MODEL_LIGHTWEIGHT = 'claude-haiku-4-5-20251001'; // templated summaries, high-frequency calls
@@ -7407,6 +7554,10 @@ Write a concise EOD summary (under 150 words):
     });
 
     const content = result.text ?? '';
+    if (!content) {                 // all AI backends unavailable — don't save an empty briefing
+      console.warn('[eod] no AI backend produced a summary — skipping save');
+      return null;
+    }
     await saveDailyBriefing({ date: today, type: 'eod', content, regime: context?.regime, direction: context?.direction, vix: context?.vix });
     pushToChat(`📊 EOD Summary — ${today}\n\n${content}`, 'eod_summary');
     console.log(`[eod] Summary generated for ${today}`);
@@ -8195,6 +8346,7 @@ app.get('/api/news/analysis', requireAuth, async (req, res) => {
   if (_newsAnalysisCache && Date.now() - _newsAnalysisCacheAt < 60 * 60_000) {
     return res.json(_newsAnalysisCache);
   }
+  if (!anthropicAvailable()) return res.json([]);   // breaker open: skip silently
   try {
     const news = isBenzingaConfigured() ? await getBzNews({ limit: 6 }) : null;
     const articles = news?.articles ?? [];
@@ -8231,7 +8383,7 @@ Reply ONLY as a JSON array — no prose, no markdown fences:
     _newsAnalysisCacheAt = Date.now();
     res.json(analyzed);
   } catch (e) {
-    console.error('[news/analysis]', e.message);
+    if (!reportAnthropicError(e, 'news/analysis')) console.error('[news/analysis]', e.message);
     res.json([]);
   }
 });
@@ -8245,6 +8397,9 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
   if (req.query.force !== '1') {
     const hit = _notifCache.get(username);
     if (hit && Date.now() - hit.ts < NOTIF_TTL) return res.json(hit.data);
+  }
+  if (!anthropicAvailable()) {                       // breaker open: skip silently
+    return res.json({ notifications: [], generated_at: new Date().toISOString() });
   }
   try {
     // 1. Portfolio — Moomoo first, fall back to Alpaca paper
@@ -8445,7 +8600,7 @@ Rules:
     _notifCache.set(username, { data, ts: Date.now() });
     res.json(data);
   } catch (e) {
-    console.error('[notifications]', e.message);
+    if (!reportAnthropicError(e, 'notifications')) console.error('[notifications]', e.message);
     res.json({ notifications: [], generated_at: new Date().toISOString() });
   }
 });
@@ -11277,6 +11432,28 @@ cron.schedule('15 16 * * 1-5', async () => {
   } catch (err) { console.error('[forecast] EOD fill cron error:', err.message); }
 }, { timezone: 'America/New_York' });
 
+// Daily 5:30 PM ET retry — SQL fallback fill from backtest_prices (which the 5 PM
+// refresh-prices cron just updated). Yahoo rate-limiting made the 4:15 fill return
+// ZERO on 2026-06-10; this self-heals any past unfilled day without any API.
+cron.schedule('30 17 * * 1-5', async () => {
+  try {
+    const { rowCount } = await query(`
+      UPDATE stock_predictions sp
+      SET actual_price = bp.close,
+          actual_change_pct = CASE WHEN sp.base_price IS NOT NULL AND sp.base_price <> 0
+            THEN round(((bp.close - sp.base_price)/sp.base_price*100)::numeric, 4) END,
+          error_pct = CASE WHEN sp.predicted_price IS NOT NULL AND sp.predicted_price <> 0
+            THEN round(((bp.close - sp.predicted_price)/sp.predicted_price*100)::numeric, 4) END,
+          updated_at = NOW()
+      FROM backtest_prices bp
+      WHERE bp.symbol = sp.symbol AND bp.price_date = sp.target_date
+        AND sp.target_date <= (NOW() AT TIME ZONE 'America/New_York')::date
+        AND sp.target_date > CURRENT_DATE - 21
+        AND sp.actual_price IS NULL`);
+    if (rowCount > 0) console.log(`[forecast] SQL fallback filled ${rowCount} prediction actuals`);
+  } catch (err) { console.error('[forecast] fallback fill error:', err.message); }
+}, { timezone: 'America/New_York' });
+
 // 2026-05-28: Daily bot digest at 4:30 PM ET — 15 min after EOD fill so latest P&L is in the data.
 // One per-bot summary email + short Telegram. User in Singapore reads ~4-5 AM SGT next morning.
 // Mon-Fri only (no trading on weekends → no digest).
@@ -11299,6 +11476,32 @@ cron.schedule('0 17 * * 1-5', async () => {
     console.log('[refresh-prices] cron done:', JSON.stringify(result));
   } catch (err) { console.error('[refresh-prices] cron error:', err.message); }
 }, { timezone: 'America/New_York' });
+
+// 2026-06-18: STARTUP CATCH-UP. The 5 PM cron is in-process, so a restart at the
+// wrong moment silently skips a day's refresh — which is exactly what left
+// backtest_prices stuck at 06-16 (heatmap showed "old numbers"). On boot, if the
+// data is behind the most-recent CLOSED weekday, run the refresh once. Self-heals
+// any missed session regardless of when/why the process restarted. Prod only.
+if (!process.env.DASHBOARD_PORT) {
+  setTimeout(async () => {
+    try {
+      if (!isDbAvailable()) return;
+      const { rows } = await query(`
+        SELECT (SELECT max(price_date) FROM backtest_prices) AS latest,
+               (SELECT max(d)::date FROM generate_series(CURRENT_DATE - 7, CURRENT_DATE - 1, INTERVAL '1 day') d
+                 WHERE EXTRACT(dow FROM d) BETWEEN 1 AND 5) AS expected`);
+      const { latest, expected } = rows[0];
+      if (latest && expected && String(latest) < String(expected)) {
+        console.log(`[refresh-prices] startup catch-up: backtest_prices latest ${latest} < expected ${expected} — refreshing…`);
+        const { refreshPrices } = await import('../research/refresh-prices.js');
+        const result = await refreshPrices({ daysBack: 5 });
+        console.log('[refresh-prices] startup catch-up done:', JSON.stringify(result));
+      } else {
+        console.log(`[refresh-prices] startup catch-up: data current (latest ${latest}) — skip`);
+      }
+    } catch (err) { console.error('[refresh-prices] startup catch-up error:', err.message); }
+  }, 45_000);
+}
 
 // 2026-05-28: Bot-advance challenger crons. Completely isolated from the existing bot
 // engine — own scanner, own tables, own scripts. Defaults to shadow mode (logs would_buy
@@ -13046,14 +13249,169 @@ app.get('/api/portfolio/best-buys', requireAuth, async (req, res) => {
 // so it surfaces within minutes next time it breaks.
 import { runAllChecks } from './health-checks.js';
 
+// Every run (manual tab refresh or the 5-min sampling cron) is persisted so the
+// dashboard can draw per-check 24h status strips + trend lines. Slim payload:
+// id/status/ms/value only — full docs are static and re-derivable.
+let _healthRunsReady = false;
+async function ensureHealthRunsTable() {
+  if (_healthRunsReady) return;
+  await query(`CREATE TABLE IF NOT EXISTS health_check_runs (
+    id          bigserial PRIMARY KEY,
+    run_at      timestamptz NOT NULL DEFAULT now(),
+    source      text NOT NULL DEFAULT 'manual',
+    duration_ms int,
+    ok          int, warn int, fail int,
+    checks      jsonb
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_health_runs_at ON health_check_runs (run_at DESC)`);
+  _healthRunsReady = true;
+}
+
+async function recordHealthRun(result, source) {
+  try {
+    await ensureHealthRunsTable();
+    const slim = result.checks.map(c => ({
+      id: c.id, status: c.status, ms: c.ms ?? null,
+      value: String(c.value ?? '').slice(0, 200),
+    }));
+    await query(
+      `INSERT INTO health_check_runs (source, duration_ms, ok, warn, fail, checks)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [source, result.duration_ms, result.summary.ok, result.summary.warn, result.summary.fail, JSON.stringify(slim)]
+    );
+  } catch (e) { console.error('[health/history] record failed:', e.message); }
+}
+
 app.get('/api/health/checks', requireAdmin, async (req, res) => {
   try {
     const result = await runAllChecks(query);
     res.json(result);
+    recordHealthRun(result, 'manual');     // fire-and-forget — never delays the response
   } catch (e) {
     console.error('[health/checks]', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// History for the dashboard timeline graphics. ?hours=1..168 (default 24).
+app.get('/api/health/history', requireAdmin, async (req, res) => {
+  try {
+    await ensureHealthRunsTable();
+    const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
+    const r = await query(
+      `SELECT run_at, source, duration_ms, ok, warn, fail, checks
+       FROM health_check_runs
+       WHERE run_at > now() - ($1 || ' hours')::interval
+       ORDER BY run_at ASC
+       LIMIT 2500`, [String(hours)]
+    );
+    res.json({ hours, runs: r.rows });
+  } catch (e) {
+    console.error('[health/history]', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Sampling cron (prod only — same gate as bot crons): one run every 5 minutes
+// so history exists even when nobody has the tab open. 14-day retention.
+if (!process.env.DASHBOARD_PORT) {
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const result = await runAllChecks(query);
+      await recordHealthRun(result, 'cron');
+      await query(`DELETE FROM health_check_runs WHERE run_at < now() - interval '14 days'`);
+    } catch (e) { console.error('[health/history] cron error:', e.message); }
+  });
+}
+
+// ─── Log Monitor (📜 panel on the Health tab; same backend feeds the MCP
+//     log_sources/log_tail tools — src/core/log-monitor.js) ─────────────────
+import { listLogSources, tailLog } from '../core/log-monitor.js';
+
+app.get('/api/logs/sources', requireAdmin, async (req, res) => {
+  try { res.json(await listLogSources()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/logs/tail', requireAdmin, async (req, res) => {
+  try {
+    const { source, lines, grep } = req.query;
+    if (!source) return res.status(400).json({ error: 'source required (e.g. pm2:trading-dashboard-error.log)' });
+    res.json(await tailLog(source, { lines, grep }));
+  } catch (e) {
+    res.status(/unknown log root|invalid|bad source|escapes/.test(e.message) ? 400 : 500)
+       .json({ error: e.message });
+  }
+});
+
+// ─── BOT_SIM — read-only window into the isolated `sim` schema ───────────────
+// The 🧪 BOT_SIM tab. The sim engine writes via the restricted sim_runner role;
+// the dashboard (owner) only READS sim.* here. Surfaces run results, the trades
+// (minute-level), the Claude-driven learning, and a live NO-LOOKAHEAD proof.
+app.get('/api/sim/runs', requireAdmin, async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT run_id, window_from, window_to, status, started_at, finished_at, params, summary
+        FROM sim.runs ORDER BY started_at DESC LIMIT 200`);
+    res.json({ runs: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/sim/trades', requireAdmin, async (req, res) => {
+  try {
+    const runId = String(req.query.run_id || '');
+    if (!runId) return res.status(400).json({ error: 'run_id required' });
+    const r = await query(`
+      SELECT symbol, setup, regime, qty, entry_ts, entry_px, ref_px, slippage_bps,
+             exit_ts, exit_px, exit_reason, pnl, pnl_pct, hold_minutes, status, policy_version
+        FROM sim.trades WHERE run_id=$1 ORDER BY entry_ts LIMIT 1000`, [runId]);
+    res.json({ run_id: runId, trades: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/sim/lessons', requireAdmin, async (req, res) => {
+  try {
+    const runId = String(req.query.run_id || '');
+    if (!runId) return res.status(400).json({ error: 'run_id required' });
+    const lessons = (await query(`
+      SELECT sim_date, closed_n, adopted, stats_verdict, narrative
+        FROM sim.lessons WHERE run_id=$1 ORDER BY sim_date`, [runId])).rows;
+    const policy = (await query(`
+      SELECT version, effective_date, source, rationale, params
+        FROM sim.policy WHERE run_id=$1 ORDER BY version`, [runId])).rows;
+    res.json({ run_id: runId, lessons, policy });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// The auditability endpoint the user asked for: live no-lookahead proof.
+app.get('/api/sim/verify', requireAdmin, async (req, res) => {
+  try {
+    const runId = String(req.query.run_id || 'sim_baseline');
+    const fwdCols = (await query(`SELECT count(*)::int n FROM information_schema.columns
+      WHERE table_schema='sim' AND (column_name LIKE 'fwd%' OR column_name LIKE '%forward%' OR column_name LIKE 'future%')`)).rows[0].n;
+    const fills = (await query(`
+      SELECT count(*)::int total,
+             count(*) FILTER (WHERE d.ts < t.entry_ts)::int fills_after_decision,
+             count(*) FILTER (WHERE d.ts >= t.entry_ts)::int violations
+        FROM sim.trades t
+        JOIN sim.decisions d ON d.run_id=t.run_id AND d.symbol=t.symbol AND d.ts <= t.entry_ts AND d.action='would_buy'
+       WHERE t.run_id=$1`, [runId])).rows[0];
+    const gran = (await query(`
+      SELECT count(*)::int trades,
+             count(DISTINCT date_trunc('minute', entry_ts))::int distinct_entry_minutes,
+             count(DISTINCT entry_ts::date)::int distinct_days
+        FROM sim.trades WHERE run_id=$1`, [runId])).rows[0];
+    const checks = [
+      { id: 'no_fwd_cols', label: 'Sim schema contains zero forward-return columns',
+        pass: fwdCols === 0, value: `${fwdCols} forward/future columns` },
+      { id: 'fills_next_bar', label: 'Every fill is strictly AFTER its decision (next-bar execution)',
+        pass: fills && Number(fills.violations) === 0, value: `${fills?.fills_after_decision}/${fills?.total} fills after decision, ${fills?.violations} violations` },
+      { id: 'minute_level', label: 'Entries occur at minute resolution across many days',
+        pass: gran && Number(gran.distinct_entry_minutes) > 5, value: `${gran?.distinct_entry_minutes} distinct entry minutes over ${gran?.distinct_days} days` },
+    ];
+    res.json({ run_id: runId, all_pass: checks.every(c => c.pass), checks,
+      method: 'Every data read (price, daily features, regime, UW flow, news) is gated to the sim clock in src/sim/feed.mjs: minute bars ts≤T, daily features & regime d<date(T) (prior session close), events known_at≤T. Forward-return columns are never loaded. Fills execute on the next minute bar + slippage.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Backtest reports (replay harness) ──────────────────────────────────────

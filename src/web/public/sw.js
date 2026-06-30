@@ -6,7 +6,7 @@
 // - Trade POSTs: background-sync queue while offline
 // - Push notifications + notificationclick deep-link (Phase 5)
 
-const CACHE = 'trading-v25';
+const CACHE = 'trading-v26';
 
 const STATIC_PRECACHE = [
   '/mobile.html',
@@ -17,6 +17,19 @@ const SWR_PATTERNS = [
   '/api/dashboard',
   '/api/forecast',
   '/api/uw/flow-alerts',
+];
+
+// Slow admin/analysis endpoints that legitimately run longer than the 5 s
+// offline timeout (health checks ~6 s, advisor holdings/best-buys, signal
+// validation). The SW must NOT intercept these: aborting them mid-flight made
+// the desktop Health tab show "Error: fetch failed" (2026-06-12). They are
+// desktop-only admin surfaces — offline fallback is pointless for them anyway.
+const SW_BYPASS = [
+  '/api/health/checks',
+  '/api/portfolio/',
+  '/api/signal-validation/',
+  '/api/stats/detail',
+  '/api/backtests',
 ];
 
 // ── Install: precache shell ───────────────────────────────────────────────────
@@ -46,6 +59,9 @@ self.addEventListener('fetch', e => {
 
   // Skip cross-origin requests
   if (url.origin !== self.location.origin) return;
+
+  // Slow admin endpoints: let the browser fetch natively (no SW timeout/abort)
+  if (SW_BYPASS.some(p => url.pathname.startsWith(p))) return;
 
   // Stale-while-revalidate for key dashboard APIs
   const isSWR = SWR_PATTERNS.some(p => url.pathname.startsWith(p));

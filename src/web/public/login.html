@@ -3,18 +3,367 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trading Bot — Sign In</title>
-<link rel="stylesheet" href="/css/login.css">
+<title>DLP Trading — AI Trading Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060809; --bg2: #0a0d10; --panel: #0d1117; --line: #1c2128;
+    --txt: #e8edf2; --dim: #7d8590; --faint: #3d444d;
+    --neon: #c8ff00;            /* lime — signature accent */
+    --green: #00ff88; --red: #ff4d5e;
+    --glow: 0 0 24px rgba(200,255,0,.35);
+    --accent: #c8ff00;          /* live accent — recolored by the strategy scene */
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { background:var(--bg); color:var(--txt); font-family:'Space Grotesk',-apple-system,sans-serif; overflow-x:hidden; }
+  ::selection { background:var(--neon); color:#000; }
+
+  /* ── Nav ─────────────────────────────────────────── */
+  nav { position:fixed; top:0; left:0; right:0; z-index:50; display:flex; justify-content:space-between; align-items:center;
+        padding:18px 4vw; backdrop-filter:blur(14px); background:rgba(6,8,9,.55); border-bottom:1px solid rgba(255,255,255,.04); }
+  .logo { font-family:'Archivo Black'; font-size:1.05rem; letter-spacing:.04em; color:var(--txt); text-decoration:none; }
+  .logo b { color:var(--neon); }
+  .nav-cta { font-weight:700; font-size:.85rem; letter-spacing:.12em; text-transform:uppercase;
+             color:#000; background:var(--neon); padding:10px 22px; border-radius:999px; text-decoration:none; transition:.25s;
+             box-shadow:var(--glow); }
+  .nav-cta:hover { transform:translateY(-2px); box-shadow:0 0 36px rgba(200,255,0,.55); }
+
+  /* ── Hero ────────────────────────────────────────── */
+  .hero { position:relative; min-height:100svh; display:flex; flex-direction:column; justify-content:center; padding:0 4vw; }
+  #chartCanvas { position:absolute; inset:0; width:100%; height:100%; opacity:.5; }
+  .hero-inner { position:relative; z-index:2; max-width:1200px; }
+  .kicker { font-size:.8rem; font-weight:600; letter-spacing:.35em; text-transform:uppercase; color:var(--neon); margin-bottom:18px; }
+  .mega { font-family:'Archivo Black'; text-transform:uppercase; line-height:.92; font-size:clamp(3rem, 11vw, 9.5rem); }
+  .mega .row { display:block; }
+  .mega .outline { color:transparent; -webkit-text-stroke:2px rgba(232,237,242,.85); }
+  .mega .lime { color:var(--neon); text-shadow:var(--glow); }
+  .hero-sub { margin-top:26px; max-width:520px; color:var(--dim); font-size:1.05rem; font-weight:300; line-height:1.65; }
+  .hero-ctas { margin-top:38px; display:flex; gap:16px; flex-wrap:wrap; }
+  .btn-solid { font-weight:700; letter-spacing:.1em; text-transform:uppercase; font-size:.85rem; color:#000; background:var(--neon);
+               padding:16px 34px; border-radius:999px; text-decoration:none; transition:.25s; box-shadow:var(--glow); }
+  .btn-solid:hover { transform:translateY(-3px); box-shadow:0 0 42px rgba(200,255,0,.6); }
+  .btn-ghost { font-weight:600; letter-spacing:.1em; text-transform:uppercase; font-size:.85rem; color:var(--txt);
+               border:1px solid var(--faint); padding:16px 34px; border-radius:999px; text-decoration:none; transition:.25s; }
+  .btn-ghost:hover { border-color:var(--neon); color:var(--neon); }
+  .scroll-hint { position:absolute; bottom:26px; left:50%; transform:translateX(-50%); color:var(--faint); font-size:1.4rem;
+                 animation:bob 2s ease-in-out infinite; z-index:2; }
+  @keyframes bob { 0%,100%{transform:translate(-50%,0)} 50%{transform:translate(-50%,10px)} }
+
+  /* ── Ticker tape ─────────────────────────────────── */
+  .tape { border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:var(--bg2); overflow:hidden; white-space:nowrap; }
+  .tape-track { display:inline-block; padding:14px 0; animation:tape 36s linear infinite; }
+  .tape:hover .tape-track { animation-play-state:paused; }
+  @keyframes tape { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+  .tk { display:inline-flex; gap:8px; align-items:baseline; margin:0 28px; font-size:.9rem; font-weight:600; letter-spacing:.04em; }
+  .tk .s { color:var(--txt); } .tk .up { color:var(--green); } .tk .dn { color:var(--red); }
+
+  /* ── Stats band ──────────────────────────────────── */
+  .stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); gap:1px; background:var(--line); border-bottom:1px solid var(--line); }
+  .stat { background:var(--bg); padding:54px 4vw; text-align:center; }
+  .stat .num { font-family:'Archivo Black'; font-size:clamp(2rem,4.5vw,3.4rem); color:var(--txt); }
+  .stat .num em { color:var(--neon); font-style:normal; }
+  .stat .lbl { margin-top:8px; color:var(--dim); font-size:.78rem; letter-spacing:.25em; text-transform:uppercase; }
+
+  /* ════════════════════════════════════════════════════════════════════
+     SCENE 1 — HORIZONTAL SCROLL: "Inside the platform"
+     Vertical scrolling drives the track sideways (Lando-style pinned pan).
+     ════════════════════════════════════════════════════════════════════ */
+  .hwrap { position:relative; height:420vh; }
+  .hsticky { position:sticky; top:0; height:100svh; overflow:hidden; display:flex; flex-direction:column; justify-content:center; }
+  .htitle { padding:86px 4vw 22px; }
+  .htitle h2 { font-family:'Archivo Black'; text-transform:uppercase; font-size:clamp(1.8rem,4.6vw,3.4rem); }
+  .htitle h2 em { font-style:normal; color:var(--neon); }
+  .htrack { display:flex; gap:3.5vw; padding:0 8vw; will-change:transform; }
+  .hpanel { flex:0 0 auto; width:min(620px, 80vw); background:linear-gradient(165deg, var(--panel), var(--bg2));
+            border:1px solid var(--line); border-radius:24px; padding:42px 40px; min-height:58svh;
+            display:flex; flex-direction:column; justify-content:flex-end; position:relative; overflow:hidden; }
+  /* real app screenshot behind each panel */
+  .hpanel .shot { position:absolute; inset:0; z-index:0; }
+  .hpanel .shot img { width:100%; height:100%; object-fit:cover; object-position:center top; opacity:.55;
+                      filter:saturate(1.1); transition:opacity .4s, transform .6s ease; }
+  .hpanel:hover .shot img { opacity:.8; transform:scale(1.025); }
+  .hpanel .shot::after { content:''; position:absolute; inset:0;
+                         background:linear-gradient(to top, rgba(7,9,11,.97) 26%, rgba(7,9,11,.62) 55%, rgba(7,9,11,.18)); }
+  .hpanel > :not(.shot) { position:relative; z-index:1; }
+  .hpanel h3 { font-family:'Archivo Black'; text-transform:uppercase; font-size:1.35rem; margin:26px 0 10px; }
+  .hpanel p { color:var(--dim); font-weight:300; font-size:.94rem; line-height:1.65; }
+  .hpanel .hp-tag { display:inline-block; margin-top:18px; font-size:.7rem; font-weight:700; letter-spacing:.22em;
+                    text-transform:uppercase; color:var(--neon); }
+
+  /* ════════════════════════════════════════════════════════════════════
+     WIDGET ARSENAL — counter-scrolling marquee rows of live widgets.
+     Click any card → glass info modal. Replaces the old logo-disc scene.
+     ════════════════════════════════════════════════════════════════════ */
+  .awrap { position:relative; height:560vh; }
+  .asticky { position:sticky; top:0; height:100svh; overflow:hidden; display:flex; flex-direction:column; justify-content:center;
+             background:radial-gradient(1000px 500px at 50% 0%, rgba(200,255,0,.05), transparent 70%); }
+  .asticky .ars-head { padding:0 4vw 16px; display:flex; align-items:baseline; gap:18px; flex-wrap:wrap; }
+  .ars-head h2 { font-family:'Archivo Black'; text-transform:uppercase; font-size:clamp(1.5rem,3vw,2.3rem); }
+  .ars-head h2 em { font-style:normal; color:var(--neon); }
+  .ars-head p { color:var(--dim); font-weight:300; font-size:.85rem; }
+  /* Two staggered rows pan horizontally as the user scrolls (eased). */
+  .atrack { display:flex; flex-direction:column; gap:18px; padding:0 7vw; will-change:transform; align-items:flex-start; }
+  .arow { display:flex; gap:20px; }
+  .arow:nth-child(2) { margin-left:280px; }     /* brick offset, like the reference wall */
+  .ars-card { flex:0 0 auto; width:540px; position:relative; overflow:hidden;
+              background:#0a0d10; border:1px solid #4a525c; border-radius:12px; cursor:pointer;
+              transition:border-color .3s, box-shadow .3s, transform .3s; }
+  .ars-card:hover { border-color:var(--neon); box-shadow:0 16px 50px rgba(200,255,0,.16); }
+  .ars-card .shotwrap { height:336px; overflow:hidden; background:#0d1117; }
+  .ars-card.t-sm .shotwrap { height:288px; }
+  .ars-card.t-lg .shotwrap { height:380px; }
+  .ars-card .shotimg { width:100%; height:100%; object-fit:cover; object-position:center;
+                       transition:transform .5s ease; }
+  .ars-card:hover .shotimg { transform:scale(1.03); }
+  /* caption tab — notched into the bottom-right corner, curved top-left (reference style) */
+  .ars-card .cap { position:absolute; right:-1px; bottom:-1px; z-index:3; display:flex; align-items:baseline; gap:10px;
+                   padding:10px 18px 10px 22px; background:#0a0d10; max-width:calc(100% - 24px);
+                   border:1px solid #4a525c; border-right:none; border-bottom:none;
+                   border-top-left-radius:18px; border-bottom-right-radius:12px; }
+  .cap b { font-family:'Archivo Black'; font-size:1.12rem; text-transform:uppercase; color:#fff; letter-spacing:.02em; white-space:nowrap; }
+  .cap span { font-size:.82rem; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--neon); white-space:nowrap; }
+  /* hover detail sheet — slides up under the caption tab */
+  .ars-card .desc { position:absolute; left:0; right:0; bottom:0; z-index:2; transform:translateY(102%);
+                    transition:transform .45s cubic-bezier(.22,.61,.36,1);
+                    background:rgba(8,10,13,.95); border-top:1px solid #4a525c; padding:14px 16px 46px; }
+  .ars-card:hover .desc { transform:none; }
+  .desc p { color:#b9c1c9; font-size:.94rem; font-weight:300; line-height:1.55; }
+  .desc .more { display:inline-block; margin-top:8px; font-size:.66rem; font-weight:700;
+                letter-spacing:.2em; text-transform:uppercase; color:var(--neon); }
+  .ars-modal { position:fixed; inset:0; z-index:90; display:none; align-items:center; justify-content:center; padding:5vw; }
+  .ars-modal.open { display:flex; }
+  .ars-modal .back { position:absolute; inset:0; background:rgba(4,6,8,.72); backdrop-filter:blur(8px); }
+  .ars-modal .box { position:relative; max-width:560px; width:100%; background:rgba(13,17,23,.94);
+                    border:1px solid var(--line); border-top:3px solid var(--c,#c8ff00); border-radius:22px;
+                    padding:38px 40px; box-shadow:0 40px 120px rgba(0,0,0,.65); }
+  .ars-modal h3 { font-family:'Archivo Black'; text-transform:uppercase; font-size:1.4rem; color:var(--c,#c8ff00); }
+  .ars-modal .tag { font-size:.7rem; font-weight:700; letter-spacing:.25em; text-transform:uppercase; color:var(--dim); margin-top:6px; }
+  .ars-modal p { margin-top:16px; color:#b6bec7; font-weight:300; line-height:1.7; font-size:.95rem; }
+  .ars-modal .x { position:absolute; top:14px; right:20px; background:none; border:none; color:var(--dim); font-size:1.5rem; cursor:pointer; }
+  .ars-modal .x:hover { color:#fff; }
+  .ars-modal .cta { display:inline-block; margin-top:24px; }
+
+  /* ── Features (kept) ────────────────────────────── */
+  .features { padding:110px 4vw; max-width:1280px; margin:0 auto; }
+  .sec-title { font-family:'Archivo Black'; text-transform:uppercase; font-size:clamp(1.9rem,5vw,3.6rem); line-height:1.02; margin-bottom:14px; }
+  .sec-title em { font-style:normal; color:var(--neon); }
+  .sec-sub { color:var(--dim); max-width:560px; font-weight:300; margin-bottom:56px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:22px; }
+  .card-f { background:linear-gradient(160deg, var(--panel), var(--bg2)); border:1px solid var(--line); border-radius:18px;
+            padding:34px 30px; transition:.3s; position:relative; overflow:hidden; }
+  .card-f::after { content:''; position:absolute; inset:0; border-radius:18px; opacity:0; transition:.3s;
+                   box-shadow:inset 0 0 0 1px var(--neon), 0 18px 50px rgba(200,255,0,.07); }
+  .card-f:hover { transform:translateY(-6px); }
+  .card-f:hover::after { opacity:1; }
+  .card-f h3 { font-size:1.12rem; font-weight:700; margin-bottom:10px; text-transform:uppercase; }
+  .card-f p { color:var(--dim); font-size:.92rem; font-weight:300; line-height:1.65; }
+
+  /* ── Sign-in ─────────────────────────────────────── */
+  .signin { padding:110px 4vw 130px; background:radial-gradient(900px 480px at 50% 0%, rgba(200,255,0,.06), transparent 70%); }
+  .card { max-width:430px; margin:0 auto; background:rgba(13,17,23,.82); backdrop-filter:blur(10px);
+          border:1px solid var(--line); border-radius:22px; padding:42px 38px; box-shadow:0 30px 80px rgba(0,0,0,.5); }
+  .card h1 { font-family:'Archivo Black'; font-size:1.45rem; text-transform:uppercase; text-align:center; }
+  .card h1 b { color:var(--neon); }
+  .subtitle { text-align:center; color:var(--dim); font-size:.9rem; margin:10px 0 26px; }
+  .step { display:none; } .step.active { display:block; }
+  label { display:block; font-size:.74rem; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); margin-bottom:8px; }
+  input { width:100%; background:var(--bg); border:1px solid var(--faint); border-radius:10px; color:var(--txt);
+          padding:13px 15px; font-size:.95rem; font-family:inherit; outline:none; transition:.2s; }
+  input:focus { border-color:var(--neon); box-shadow:0 0 0 3px rgba(200,255,0,.12); }
+  .code-input { text-align:center; font-size:1.7rem; letter-spacing:.6em; font-weight:700; }
+  button.primary { width:100%; margin-top:18px; background:var(--neon); color:#000; border:none; border-radius:999px;
+                   padding:14px; font-size:.88rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+                   font-family:inherit; cursor:pointer; transition:.25s; box-shadow:var(--glow); }
+  button.primary:hover { transform:translateY(-2px); box-shadow:0 0 38px rgba(200,255,0,.5); }
+  button.primary:disabled { opacity:.55; cursor:default; transform:none; }
+  .email-display { text-align:center; color:var(--neon); font-weight:600; margin-bottom:14px; word-break:break-all; }
+  .msg { display:none; margin-top:14px; font-size:.84rem; text-align:center; }
+  .msg.error { color:var(--red); } .msg.success { color:var(--green); }
+  .resend-link { margin-top:18px; text-align:center; font-size:.8rem; color:var(--dim); }
+  .resend-link button { background:none; border:none; color:var(--neon); cursor:pointer; font-size:.8rem; font-family:inherit; }
+  .divider { display:flex; align-items:center; gap:12px; color:var(--faint); font-size:.74rem; letter-spacing:.2em;
+             text-transform:uppercase; margin:26px 0 14px; }
+  .divider::before, .divider::after { content:''; flex:1; height:1px; background:var(--line); }
+  .admin-toggle { width:100%; background:none; border:none; color:var(--dim); font-size:.8rem; cursor:pointer; font-family:inherit; padding:4px; }
+  .admin-toggle:hover { color:var(--txt); }
+  .admin-section { display:none; margin-top:6px; }
+  .register-link { margin-top:24px; text-align:center; font-size:.82rem; color:var(--dim); }
+  .register-link a { color:var(--neon); text-decoration:none; font-weight:600; }
+
+  footer { border-top:1px solid var(--line); padding:34px 4vw; display:flex; justify-content:space-between; align-items:center;
+           flex-wrap:wrap; gap:12px; color:var(--faint); font-size:.76rem; letter-spacing:.06em; }
+  footer .f-logo { font-family:'Archivo Black'; color:var(--dim); }
+  footer .f-logo b { color:var(--neon); }
+
+  /* Scroll reveal */
+  .rv { opacity:0; transform:translateY(26px); transition:opacity .7s ease, transform .7s ease; }
+  .rv.in { opacity:1; transform:none; }
+
+  /* ── Motion fallbacks: small screens & reduced motion get plain stacking ── */
+  @media (prefers-reduced-motion: reduce), (max-width: 720px) {
+    .hwrap, .awrap { height:auto; }
+    .hsticky, .asticky { position:static; height:auto; overflow:visible; }
+    .htrack { flex-direction:column; transform:none !important; padding:0 6vw 30px; gap:18px; }
+    .hpanel { width:100%; min-height:0; }
+    .awrap { height:auto; }
+    .asticky { position:static; height:auto; overflow:visible; }
+    .atrack { transform:none !important; padding:10px 6vw 30px; }
+    .arow { flex-direction:column; margin-left:0 !important; }
+    .ars-card { width:100%; }
+    .ars-card .desc { position:static; transform:none; }   /* description always visible on touch */
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tape-track, .scroll-hint { animation:none; }
+    .rv { opacity:1; transform:none; transition:none; }
+  }
+  @media (max-width:560px) {
+    .hero-sub { font-size:.95rem; } .card { padding:34px 24px; }
+  }
+</style>
 </head>
 <body>
+
+<nav>
+  <a class="logo" href="#top">DLP<b>//</b>TRADING</a>
+  <a class="nav-cta" href="#signin">Sign In</a>
+</nav>
+
+<!-- ── HERO ─────────────────────────────────────────── -->
+<header class="hero" id="top">
+  <canvas id="chartCanvas"></canvas>
+  <div class="hero-inner">
+    <div class="kicker">AI-Powered Market Intelligence</div>
+    <h1 class="mega">
+      <span class="row outline">Trade</span>
+      <span class="row">Smarter<span class="lime">.</span></span>
+      <span class="row lime">Not Harder.</span>
+    </h1>
+    <p class="hero-sub">
+      A self-hosted trading intelligence platform — machine-learning signals, a
+      10-year market data lake, and disciplined, evidence-backed execution. Built for one trader. Tuned by data.
+    </p>
+    <div class="hero-ctas">
+      <a class="btn-solid" href="#signin">Enter Platform</a>
+      <a class="btn-ghost" href="#inside">Explore ↓</a>
+    </div>
+  </div>
+  <div class="scroll-hint">▾</div>
+</header>
+
+<!-- ── TICKER TAPE ─────────────────────────────────── -->
+<div class="tape" aria-hidden="true"><div class="tape-track" id="tapeTrack"></div></div>
+
+<!-- ── STATS ────────────────────────────────────────── -->
+<section class="stats">
+  <div class="stat rv"><div class="num"><em data-count="25000">0</em>+</div><div class="lbl">Symbols Tracked</div></div>
+  <div class="stat rv"><div class="num"><em data-count="10">0</em> yrs</div><div class="lbl">Market History</div></div>
+  <div class="stat rv"><div class="num"><em data-count="161">0</em>B</div><div class="lbl">Trade Records</div></div>
+  <div class="stat rv"><div class="num">24<em>/</em>7</div><div class="lbl">Autonomous Signals</div></div>
+</section>
+
+<!-- ════════ SCENE 1: HORIZONTAL SCROLL — INSIDE THE PLATFORM ════════ -->
+<section class="hwrap" id="inside" data-hscroll>
+  <div class="hsticky">
+    <div class="htitle"><h2>Inside the <em>platform</em> →</h2></div>
+    <div class="htrack" id="htrack">
+      <div class="hpanel" data-n="01">
+        <div class="shot"><img src="/landing/dashboard.jpg" alt="" loading="lazy"></div>
+        <h3>Command Dashboard</h3>
+        <p>Positions, P&amp;L, live signals and system health on one screen — the cockpit view of everything the engine is doing, refreshed in real time.</p>
+        <span class="hp-tag">Live P&amp;L · Positions · Alerts</span>
+      </div>
+      <div class="hpanel" data-n="02">
+        <div class="shot"><img src="/landing/toppicks.jpg" alt="" loading="lazy"></div>
+        <h3>AI Top Picks</h3>
+        <p>A machine-learned model ranks the entire universe daily and surfaces the highest-conviction setups — each pick carrying its own probability evidence.</p>
+        <span class="hp-tag">ML Ranking · Diversified · Quality-filtered</span>
+      </div>
+      <div class="hpanel" data-n="03">
+        <div class="shot"><img src="/landing/screener.jpg" alt="" loading="lazy"></div>
+        <h3>Pro Screeners</h3>
+        <p>Finviz-class filters fused with proprietary edge: insider clusters, smart-money options flow, congressional activity, float &amp; institutional ownership.</p>
+        <span class="hp-tag">Ownership · Flow · Insiders</span>
+      </div>
+      <div class="hpanel" data-n="04">
+        <div class="shot"><img src="/landing/bots.jpg" alt="" loading="lazy"></div>
+        <h3>Bot War Room</h3>
+        <p>Autonomous paper-trading bots with distinct personalities compete under hard risk rules — every decision logged, explained and reviewable.</p>
+        <span class="hp-tag">Fleet View · Decision Logs · Guardrails</span>
+      </div>
+      <div class="hpanel" data-n="05">
+        <div class="shot"><img src="/landing/research.jpg" alt="" loading="lazy"></div>
+        <h3>Research Lake</h3>
+        <p>Ten years of consolidated-tape history — billions of trades, minute bars, splits and fundamentals — query-ready for backtests in seconds.</p>
+        <span class="hp-tag">161B Trades · Survivorship-free</span>
+      </div>
+      <div class="hpanel" data-n="06">
+        <div class="shot"><img src="/landing/mobile.jpg" alt="" loading="lazy"></div>
+        <h3>Anywhere Access</h3>
+        <p>A full PWA with push alerts, biometric sign-in and offline support — the same intelligence in your pocket, at the desk or on the move.</p>
+        <span class="hp-tag">PWA · Push · Biometrics</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="ars-modal" id="arsModal" role="dialog" aria-modal="true">
+  <div class="back" onclick="arsClose()"></div>
+  <div class="box" id="arsBox">
+    <button class="x" onclick="arsClose()" aria-label="Close">×</button>
+    <h3 id="arsT"></h3>
+    <div class="tag" id="arsTag"></div>
+    <p id="arsP"></p>
+    <a class="btn-solid cta" href="#signin" onclick="arsClose()">Try it inside →</a>
+  </div>
+</div>
+
+<!-- ── PHILOSOPHY CARDS ────────────────────────────── -->
+<section class="features" id="features">
+  <h2 class="sec-title rv">Built on <em>data.</em><br>Run with <em>discipline.</em></h2>
+  <p class="sec-sub rv">Every rule is backtested before it ships. Every signal carries its own evidence. No folk wisdom — just measured edge.</p>
+  <div class="cards">
+    <div class="card-f rv">
+      <h3>ML Signal Engine</h3>
+      <p>Machine-learned conviction scores across the full tradable universe — momentum, insider flow, options activity and news sentiment fused into one ranked view, re-trained on a decade of regimes.</p>
+    </div>
+    <div class="card-f rv">
+      <h3>Deep Data Lake</h3>
+      <p>Tick-level history at consolidated-tape fidelity: billions of trades, minute bars and daily aggregates — survivorship-free, split-adjusted, and queryable in seconds.</p>
+    </div>
+    <div class="card-f rv">
+      <h3>Risk Discipline</h3>
+      <p>Position guardians, drift detectors, pre-close sentinels and hard circuit breakers. The system challenges every trade with data before a single order goes out.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ WIDGET ARSENAL — pinned wall, scroll pans it horizontally ════════ -->
+<section class="awrap" id="arsenal">
+  <div class="asticky">
+    <div class="ars-head">
+      <h2>The widget <em>arsenal</em> →</h2>
+      <p>Thirteen live widgets working the market for you — tap any card for details.</p>
+    </div>
+    <div class="atrack" id="atrack">
+      <div class="arow"></div>
+      <div class="arow"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── SIGN IN ─────────────────────────────────────── -->
+<section class="signin" id="signin">
 <div class="card">
-  <h1>📈 Trading Bot</h1>
+  <h1>Enter <b>Platform</b></h1>
   <p class="subtitle" id="subtitle">Sign in with your email</p>
 
   <!-- Step 1: Enter email -->
   <div class="step active" id="step1">
     <label>Email address</label>
-    <input type="email" id="emailInput" placeholder="you@example.com" autofocus autocomplete="email">
+    <input type="email" id="emailInput" placeholder="you@example.com" autocomplete="email">
     <button class="primary" id="sendBtn" onclick="requestOtp()">Send code →</button>
     <div class="msg error" id="step1Err"></div>
   </div>
@@ -48,8 +397,227 @@
 
   <div class="register-link">No account? <a href="/register.html">Create one free →</a></div>
 </div>
+</section>
+
+<footer>
+  <div class="f-logo">DLP<b>//</b>INNOVATIONS</div>
+  <div>Paper-trading research platform · Not financial advice</div>
+</footer>
 
 <script>
+  const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const SMALL   = matchMedia('(max-width: 720px)').matches;
+  const MOTION  = !REDUCED && !SMALL;
+
+  /* ── Hero canvas: neon live-chart animation ──────────────────────────── */
+  (function () {
+    const cv = document.getElementById('chartCanvas');
+    const cx = cv.getContext('2d');
+    let W, H, pts = [], t = 0;
+    function size() {
+      W = cv.width = cv.offsetWidth * devicePixelRatio;
+      H = cv.height = cv.offsetHeight * devicePixelRatio;
+      const n = Math.ceil(W / (8 * devicePixelRatio)) + 2;
+      pts = []; let v = H * .58;
+      for (let i = 0; i < n; i++) { v += (Math.random() - .49) * H * .02; pts.push(v); }
+    }
+    size(); addEventListener('resize', size);
+    function draw() {
+      cx.clearRect(0, 0, W, H);
+      const px = devicePixelRatio;
+      cx.strokeStyle = 'rgba(255,255,255,.045)'; cx.lineWidth = 1;
+      const gs = 64 * px;
+      for (let x = (t * -.4 % gs); x < W; x += gs) { cx.beginPath(); cx.moveTo(x, 0); cx.lineTo(x, H); cx.stroke(); }
+      for (let y = 0; y < H; y += gs) { cx.beginPath(); cx.moveTo(0, y); cx.lineTo(W, y); cx.stroke(); }
+      const step = 8 * px;
+      cx.beginPath();
+      pts.forEach((p, i) => i ? cx.lineTo(i * step, p) : cx.moveTo(0, p));
+      cx.strokeStyle = 'rgba(200,255,0,.9)'; cx.lineWidth = 2 * px;
+      cx.shadowColor = 'rgba(200,255,0,.8)'; cx.shadowBlur = 18 * px;
+      cx.stroke(); cx.shadowBlur = 0;
+      cx.lineTo(W, H); cx.lineTo(0, H); cx.closePath();
+      const g = cx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, 'rgba(200,255,0,.10)'); g.addColorStop(1, 'rgba(200,255,0,0)');
+      cx.fillStyle = g; cx.fill();
+      const lx = (pts.length - 1) * step, ly = pts[pts.length - 1];
+      cx.beginPath(); cx.arc(lx - step, ly, (3 + Math.sin(t * .1) * 1.5) * px, 0, 7);
+      cx.fillStyle = '#c8ff00'; cx.shadowColor = '#c8ff00'; cx.shadowBlur = 24 * px; cx.fill(); cx.shadowBlur = 0;
+    }
+    function tick() {
+      t++;
+      if (t % 4 === 0) {
+        const last = pts[pts.length - 1];
+        let nv = last + (Math.random() - .493) * H * .018;
+        nv = Math.max(H * .2, Math.min(H * .85, nv));
+        pts.push(nv); pts.shift();
+      }
+      draw();
+      requestAnimationFrame(tick);
+    }
+    if (REDUCED) { draw(); } else { requestAnimationFrame(tick); }
+  })();
+
+  /* ── Ticker tape ─────────────────────────────────────────────────────── */
+  (function () {
+    const names = [['NVDA','+1.7'],['AAPL','+0.4'],['TSLA','-3.8'],['MSFT','+1.5'],['AMD','+5.1'],['META','-1.3'],
+                   ['GOOGL','-1.4'],['AMZN','+2.6'],['MU','+4.7'],['NFLX','+0.7'],['INTC','+0.8'],['AVGO','+3.1']];
+    const html = names.map(([s, c]) => {
+      const up = !c.startsWith('-');
+      return `<span class="tk"><span class="s">${s}</span><span class="${up ? 'up' : 'dn'}">${up ? '▲' : '▼'} ${c}%</span></span>`;
+    }).join('');
+    document.getElementById('tapeTrack').innerHTML = html + html;
+  })();
+
+  /* ── Scroll engine — eased (lerp). Platform: single track pan.
+        Arsenal: the two rows pan at DIFFERENT speeds (depth), and every card
+        rides a gentle wave — rising and tilting as it crosses mid-screen —
+        so the wall flows instead of sliding flat. ──────────────────────────── */
+  (function () {
+    if (!MOTION) return;
+    const prog = el => {
+      const r = el.getBoundingClientRect();
+      const span = el.offsetHeight - innerHeight;
+      return Math.min(1, Math.max(0, -r.top / span));
+    };
+    const hwrap  = document.querySelector('[data-hscroll].hwrap');
+    const htrack = document.getElementById('htrack');
+    const awrap  = document.getElementById('arsenal');
+    const arows  = awrap ? [...awrap.querySelectorAll('.arow')] : [];
+    const ROWSPEED = [1, 1.22];                   // bottom row drifts faster → depth
+    const WAVE = 26, TILT = 1.6;                  // px rise / deg tilt at mid-screen
+    let hCur = 0, aCur = 0;
+    const EASE = .075;
+    let rowCards = null;
+    function frame() {
+      if (htrack) {
+        const t = prog(hwrap);
+        hCur += (t - hCur) * EASE;
+        const max = htrack.scrollWidth - innerWidth + innerWidth * .16;
+        htrack.style.transform = `translate3d(${(-hCur * max).toFixed(1)}px,0,0)`;
+      }
+      if (arows.length) {
+        if (!rowCards) rowCards = arows.map(r => [...r.querySelectorAll('.ars-card')]);
+        const t = prog(awrap);
+        aCur += (t - aCur) * EASE;
+        const base = Math.max(...arows.map(r => r.offsetLeft + r.scrollWidth)) - innerWidth + innerWidth * .16;
+        arows.forEach((row, ri) => {
+          const x = -aCur * base * ROWSPEED[ri] ;
+          row.style.transform = `translate3d(${x.toFixed(1)}px,0,0)`;
+          for (const card of rowCards[ri]) {
+            const cx = row.offsetLeft + card.offsetLeft + x + card.offsetWidth / 2;   // screen-x center
+            const ph = Math.min(1, Math.max(0, cx / innerWidth)) * Math.PI;
+            const y  = -Math.sin(ph) * WAVE;                 // rises mid-screen
+            const rot = Math.cos(ph) * TILT;                 // tilts in, levels, tilts out
+            card.style.transform = `translate3d(0,${y.toFixed(1)}px,0) rotate(${rot.toFixed(2)}deg)`;
+          }
+        });
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  })();
+
+  /* ── Widget Arsenal: 16 live widgets, marquee rows + info modal ──────── */
+  const WIDGETS = [
+    ['Trade Suggestions', 'ML Picks · Daily', '#c8ff00', 'trade-suggestions',
+     'The model ranks the entire universe overnight and hands you its highest-conviction picks.',
+     'Every market night the machine-learning engine scores thousands of symbols on momentum, volume, options flow, insider activity and news sentiment — then publishes its top-ranked picks with the evidence attached: conviction score, setup type and the exact factors that fired.'],
+    ['Momentum Race', 'Live · 6s refresh', '#00ff88', 'momentum-race',
+     'A live leaderboard where the day\u2019s strongest movers race in real time.',
+     'Top gainers and decliners race on animated bars that re-rank every six seconds. Watch leadership rotate live — who\u2019s breaking away, who\u2019s fading — and catch rotation as it happens, not after the close.'],
+    ['Pro Screener', 'Presets + Edge', '#00d4ff', 'screener',
+     'Finviz-class filters fused with proprietary edge — insider clusters, smart money, hot setups.',
+     'Classic filters (caps, RSI, golden cross) sit next to edge presets no retail screener has: insider $1M+ clusters, smart-money options flow, congressional activity and signal-stacked hot setups. One click, full universe.'],
+    ['Daily Positions', 'Live P&L', '#b07bff', 'daily-positions',
+     'Every open position with live P&L, daily history and one-tap actions.',
+     'The cockpit ledger: open positions with cost basis, live marks and unrealized P&L, a daily P&L bar history, and quick actions on every row. The whole book, one glance.'],
+    ['Bot War Room', 'Autonomous Fleet', '#ffb800', 'bot-warroom',
+     'Autonomous paper-trading bots with distinct personalities compete under hard risk rules.',
+     'A fleet of bots — each with its own strategy DNA — trades a simulated book around the clock. Every decision is logged with full reasoning: what fired, what blocked, and why. The leaderboard shows which personality is beating the market right now.'],
+    ['Bot Builder', 'Paper Simulation', '#ff4d8e', 'auto-bot',
+     'Spin up a new strategy bot in seconds — capital, broker, strategy — then watch it trade.',
+     'Pick a strategy (momentum, mean-reversion, breakout…), assign paper capital and a broker, hit create. The bot scans, decides and books simulated trades on its own — pause, edit or retire it any time. No real orders, all real lessons.'],
+    ['UW Conviction', 'Bull / Strong Bull', '#c8ff00', 'uw-conviction',
+     'Per-stock smart-money read: bullish vs bearish premium, bias and confidence.',
+     'For any ticker, see the last 24 hours of options-flow positioning: bullish vs bearish premium with a conviction label — Bull, Strong Bull, Bear — plus alert count, confidence and recent insider activity. Know how the whales lean before you act.'],
+    ['AI Analyst Chat', 'GARUDA AI', '#00ff88', 'ai-chat',
+     'Ask anything — positions, signals, predictions — answered from your live data.',
+     'A built-in analyst that reads the portfolio, runs the prediction engines, scans for setups and pulls live quotes mid-conversation. Voice mode included. It answers from the platform\u2019s own data, not generic internet takes.'],
+    ['AI Search', 'Ask Anything', '#00d4ff', 'ai-search',
+     '\u201cIs NVDA a buy right now?\u201d — one search box for stocks, earnings and analysis.',
+     'A spotlight-style command bar: type a ticker or a question — \u201cWhat\u2019s moving Tesla today?\u201d, \u201cMSFT analyst price target\u201d, \u201cAMD vs NVDA\u201d — and get an instant, data-grounded answer with the relevant widgets linked.'],
+    ['Stock Explorer', 'Deep Dive', '#b07bff', 'stock-explorer',
+     'Everything about one symbol on a single panel — rating, news, flow, insiders.',
+     'The deep-dive panel: analyst ratings and price targets, recent news with sentiment, unusual options flow, insider activity and the bot\u2019s own conviction breakdown — assembled per symbol, updated live.'],
+    ['Latest News', 'Sentiment Feed', '#ffb800', 'latest-news',
+     'A live market news stream, every headline tagged with tickers and sentiment.',
+     'Real-time financial newsfeed with per-story ticker tags and sentiment labels. Filter to your watchlist or a single name and see exactly which headlines are moving it — the same feed the bot\u2019s news factor reads.'],
+    ['News Alerts', 'Movers · Push', '#ff4d8e', 'news-alerts',
+     'When news actually moves a stock, you get pinged — not for every headline.',
+     'The alert engine watches the news stream and price action together: only when a story coincides with a real move does it fire — to the dashboard, Telegram and push. Signal, not noise.'],
+    ['Reminders', 'Never Miss', '#c8ff00', 'reminders',
+     'Tell the AI to remind you — earnings, exits, reviews — and it follows through.',
+     '\u201cRemind me to review NVDA before earnings.\u201d Set reminders in plain language from chat or the panel; they surface in the dashboard and notifications exactly when due. The platform remembers so you don\u2019t have to.'],
+  ];
+  (function () {
+    const rows = [...document.querySelectorAll('#atrack .arow')];
+    const SIZE = ['', 't-lg', 't-sm', '', 't-sm', 't-lg', ''];   // image-height rhythm along each row
+    WIDGETS.forEach((w, i) => {
+      const row = rows[i < Math.ceil(WIDGETS.length / 2) ? 0 : 1];
+      const k = row.children.length;
+      const div = document.createElement('div');
+      div.innerHTML = `
+        <div class="ars-card ${SIZE[k % SIZE.length]}" style="--c:${w[2]}" data-i="${i}" role="button" tabindex="0">
+          <div class="shotwrap"><img class="shotimg" src="/landing/${w[3]}.jpg" alt="${w[0]}" loading="lazy"></div>
+          <div class="desc"><p>${w[4]}</p><span class="more">Tap for details +</span></div>
+          <div class="cap"><b>${w[0]}</b><span>${w[1]}</span></div>
+        </div>`;
+      row.appendChild(div.firstElementChild);
+    });
+    const open = i => {
+      const w = WIDGETS[i]; if (!w) return;
+      document.getElementById('arsBox').style.setProperty('--c', w[2]);
+      document.getElementById('arsT').textContent = w[0];
+      document.getElementById('arsT').style.color = w[2];
+      document.getElementById('arsTag').textContent = w[1];
+      document.getElementById('arsP').textContent = w[5];
+      document.getElementById('arsModal').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    };
+    window.arsClose = () => {
+      document.getElementById('arsModal').classList.remove('open');
+      document.body.style.overflow = '';
+    };
+    document.addEventListener('click', e => {
+      const c = e.target.closest('.ars-card'); if (c) open(+c.dataset.i);
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') arsClose();
+      if (e.key === 'Enter' && e.target.classList?.contains('ars-card')) open(+e.target.dataset.i);
+    });
+  })();
+
+  /* ── Scroll reveal + stat count-up ───────────────────────────────────── */
+  (function () {
+    const io = new IntersectionObserver(es => es.forEach(e => {
+      if (!e.isIntersecting) return;
+      e.target.classList.add('in');
+      e.target.querySelectorAll('[data-count]').forEach(el => {
+        if (el._done) return; el._done = true;
+        const target = +el.dataset.count, t0 = performance.now(), dur = 1400;
+        (function step(now) {
+          const k = Math.min(1, (now - t0) / dur), eased = 1 - Math.pow(1 - k, 3);
+          el.textContent = Math.round(target * eased).toLocaleString();
+          if (k < 1) requestAnimationFrame(step);
+        })(t0);
+      });
+      io.unobserve(e.target);
+    }), { threshold: .25 });
+    document.querySelectorAll('.rv').forEach(el => io.observe(el));
+    window._rvObserve = el => io.observe(el);
+  })();
+
+  /* ── Auth logic (unchanged) ──────────────────────────────────────────── */
   let _email = '';
 
   document.getElementById('emailInput').addEventListener('keydown', e => {
@@ -61,7 +629,6 @@
   document.getElementById('pw').addEventListener('keydown', e => {
     if (e.key === 'Enter') adminLogin();
   });
-  // Auto-submit when 6 digits entered
   document.getElementById('codeInput').addEventListener('input', e => {
     e.target.value = e.target.value.replace(/\D/g, '');
     if (e.target.value.length === 6) verifyOtp();
@@ -182,7 +749,7 @@
 </script>
 
 <!-- ── Public Trading Coach Chat Widget ───────────────────────────────────── -->
-<div id="publicChatWidget" style="position:fixed;bottom:24px;right:24px;z-index:1000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<div id="publicChatWidget" style="position:fixed;bottom:24px;right:24px;z-index:1000;font-family:'Space Grotesk',-apple-system,sans-serif;">
 
   <!-- Chat panel (hidden by default) -->
   <div id="publicChatPanel" style="display:none;flex-direction:column;width:340px;height:460px;background:#0d1117;border:1px solid #30363d;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.5);margin-bottom:12px;overflow:hidden;">
@@ -196,7 +763,7 @@
     </div>
     <!-- Messages -->
     <div id="publicChatMessages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
-      <div style="background:#0d1117;border:1px solid #1f6feb;border-left:3px solid #1f6feb;border-radius:8px;padding:10px 12px;font-size:0.83rem;color:#c9d1d9;">
+      <div style="background:#0d1117;border:1px solid #c8ff00;border-left:3px solid #c8ff00;border-radius:8px;padding:10px 12px;font-size:0.83rem;color:#c9d1d9;">
         Hi! Ask me anything about trading — RSI, MACD, stop losses, strategies, patterns. I run locally on Ollama, completely free.
       </div>
     </div>
@@ -205,12 +772,12 @@
       <input id="publicChatInput" type="text" placeholder="e.g. What is RSI divergence?"
         style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#e6edf3;padding:8px 12px;font-size:0.85rem;outline:none;"
         onkeydown="if(event.key==='Enter')sendPublicChat()" />
-      <button onclick="sendPublicChat()" style="background:#1f6feb;color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:0.85rem;font-weight:600;">Send</button>
+      <button onclick="sendPublicChat()" style="background:#c8ff00;color:#000;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:0.85rem;font-weight:700;">Send</button>
     </div>
   </div>
 
   <!-- Collapsed toggle button -->
-  <button id="chatToggle" onclick="togglePublicChat()" style="background:#1f6feb;color:#fff;border:none;border-radius:50px;padding:12px 20px;cursor:pointer;font-size:0.9rem;font-weight:600;box-shadow:0 4px 12px rgba(31,111,235,0.4);display:flex;align-items:center;gap:8px;">
+  <button id="chatToggle" onclick="togglePublicChat()" style="background:#c8ff00;color:#000;border:none;border-radius:50px;padding:12px 20px;cursor:pointer;font-size:0.9rem;font-weight:700;box-shadow:0 4px 16px rgba(200,255,0,0.35);display:flex;align-items:center;gap:8px;">
     📚 Trading Coach
   </button>
 </div>
@@ -233,13 +800,11 @@
     input.value = '';
     input.disabled = true;
 
-    // User bubble
     const userDiv = document.createElement('div');
     userDiv.style.cssText = 'background:#21262d;border-radius:8px;padding:8px 12px;font-size:0.83rem;color:#e6edf3;align-self:flex-end;max-width:85%;word-break:break-word;';
     userDiv.textContent = text;
     msgs.appendChild(userDiv);
 
-    // Thinking indicator
     const thinking = document.createElement('div');
     thinking.style.cssText = 'color:#484f58;font-size:0.78rem;padding:4px 2px;';
     thinking.textContent = 'Thinking…';
@@ -256,7 +821,7 @@
       thinking.remove();
 
       const answerDiv = document.createElement('div');
-      answerDiv.style.cssText = 'background:#0d1117;border:1px solid #1f6feb;border-left:3px solid #1f6feb;border-radius:8px;padding:10px 12px;font-size:0.83rem;color:#c9d1d9;line-height:1.55;white-space:pre-wrap;word-break:break-word;';
+      answerDiv.style.cssText = 'background:#0d1117;border:1px solid #c8ff00;border-left:3px solid #c8ff00;border-radius:8px;padding:10px 12px;font-size:0.83rem;color:#c9d1d9;line-height:1.55;white-space:pre-wrap;word-break:break-word;';
       answerDiv.textContent = data.answer ?? data.error ?? 'No response.';
       msgs.appendChild(answerDiv);
     } catch {

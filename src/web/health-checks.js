@@ -24,6 +24,7 @@
 
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
+import { promises as fsp } from 'node:fs';
 
 const execFileAsync = promisify(execFile);
 
@@ -196,16 +197,21 @@ async function checkDanglingTradePointers(query) {
 }
 
 async function checkStalePredictions(query) {
+  // Only count rows whose target_date was an actual trading day (SPY has a bar).
+  // Predictions generated for weekends/holidays can never fill — they are a
+  // generation artifact, not an EOD-fill-cron gap (238 such rows found 2026-06-12).
   const r = await query(`
     SELECT COUNT(*) AS n
-    FROM stock_predictions
-    WHERE actual_price IS NULL AND target_date < CURRENT_DATE - INTERVAL '3 days'
+    FROM stock_predictions sp
+    WHERE sp.actual_price IS NULL AND sp.target_date < CURRENT_DATE - INTERVAL '3 days'
+      AND EXISTS (SELECT 1 FROM backtest_prices spy
+                  WHERE spy.symbol = 'SPY' AND spy.price_date = sp.target_date)
   `);
   const { n } = r.rows[0];
   const doc = {
-    what: 'Counts stock_predictions rows where the forecast target date has passed by ≥ 3 days but actual_price was never backfilled.',
-    why:  'Calibration training uses (prediction, actual) pairs. Stale unfilled rows skew the model toward stale data and indicate the EOD fill cron has gaps.',
-    if_red: 'Run the prediction-actuals backfill (POST /api/forecast/train-calibration). Check `fillTodayActuals` cron in pm2 logs.',
+    what: 'Counts stock_predictions rows where the forecast target date was a trading day, has passed by ≥ 3 days, but actual_price was never backfilled. Non-trading-day targets (weekend/holiday generation artifacts) are excluded — they can never fill.',
+    why:  'Calibration training uses (prediction, actual) pairs. Stale unfilled rows skew the model toward stale data and indicate the EOD fill cron has gaps, or that symbols dropped out of backtest_prices (e.g. ticker renames like SQ→XYZ).',
+    if_red: 'Run the prediction-actuals backfill (POST /api/forecast/train-calibration). Check `fillTodayActuals` cron in pm2 logs. If counts persist, check whether the affected symbols still exist in backtest_prices (renames/delistings).',
   };
   const val = `${fmt.number(n)} unfilled predictions older than 3 days`;
   const threshold = '< 50';
@@ -231,8 +237,18 @@ async function checkUniverseSyncRecency(query) {
 }
 
 async function checkBotScanHeartbeat(query) {
-  // Look for any bot_decisions write in last 10 min (market hours) or 24 h (off-hours)
-  const r = await query(`SELECT MAX(scanned_at) AS last_at, COUNT(*) FILTER (WHERE scanned_at > NOW() - INTERVAL '1 hour') AS recent FROM bot_decisions`);
+  // Heartbeat across BOTH fleets: legacy bot_decisions (now dormant) AND the
+  // active bot_advance_decisions. Monitor whichever is scanning (2026-06-17 fix:
+  // was watching only the legacy table → false FAIL after the legacy fleet was
+  // stopped, while the active bot_advance fleet scanned fine every 5 min).
+  const r = await query(`
+    SELECT MAX(scanned_at) AS last_at,
+           COUNT(*) FILTER (WHERE scanned_at > NOW() - INTERVAL '1 hour') AS recent
+    FROM (
+      SELECT scanned_at FROM bot_decisions
+      UNION ALL
+      SELECT scanned_at FROM bot_advance_decisions
+    ) d`);
   const { last_at, recent } = r.rows[0];
   const ageMs = last_at ? Date.now() - new Date(last_at).getTime() : Infinity;
   const mh = isMarketHours();
@@ -418,30 +434,139 @@ async function checkActiveBots(query) {
   return ok('active_bots', 'process', 'Active bots', val, 'informational', doc);
 }
 
+// ─── Data-lake ELT checks (Bronze / Silver / Gold on /Volumes/Archive) ───────
+// All three layers are loaded by the daily 09:00 SGT launchd job
+// (com.pavan.polygon-daily → scripts/polygon-daily-incremental.sh).
+// Freshness is measured from filesystem mtimes — no DuckDB needed, runs in ms.
+
+const LAKE_LAYERS = [
+  {
+    id: 'lake_bronze', title: 'Lake ELT: Bronze (OLTP dump)',
+    root: '/Volumes/Archive/bronze/oltp', unit: 'tables',
+    loader: 'scripts/dump-oltp-to-bronze.mjs step of the daily job',
+  },
+  {
+    id: 'lake_silver', title: 'Lake ELT: Silver (conformed bars/signals)',
+    root: '/Volumes/Archive/silver', unit: 'datasets',
+    loader: 'lake.sync_daily (+ build_adjusted) step of the daily job',
+  },
+  {
+    id: 'lake_gold', title: 'Lake ELT: Gold (features/forward returns)',
+    root: '/Volumes/Archive/gold', unit: 'datasets',
+    loader: 'lake.gold / build_features step of the daily job',
+  },
+];
+
+async function checkLakeLayer({ id, title, root, unit, loader }) {
+  const doc = {
+    what: `Newest write time + latest dated hive partition across all ${unit} under ${root}. Loaded by ${loader} — daily 09:00 SGT launchd job com.pavan.polygon-daily.`,
+    why:  'The lake (Bronze=raw OLTP archive, Silver=conformed market bars/signals, Gold=ML features + forward returns) feeds backtests and model retrains. If the daily job dies, the lake silently drifts from OLTP and any retrain/backtest uses stale data.',
+    if_red: 'Check the job log: ~/Library/Logs/com.pavan.polygon-daily.log. Verify /Volumes/Archive is mounted. Run the failed step by hand from scripts/polygon-daily-incremental.sh. EPERM here means the server process lacks Full Disk Access to /Volumes/Archive (TCC).',
+  };
+  const threshold = 'written < 30 h ago';
+
+  let entries;
+  try {
+    entries = (await fsp.readdir(root, { withFileTypes: true })).filter(d => d.isDirectory());
+  } catch (e) {
+    const msg = e.code === 'ENOENT' ? `${root} missing — is /Volumes/Archive mounted?`
+              : (e.code === 'EPERM' || e.code === 'EACCES') ? `no disk access to ${root} (grant Full Disk Access / TCC)`
+              : e.message;
+    return fail(id, 'data', title, msg, threshold, doc);
+  }
+  if (!entries.length) return fail(id, 'data', title, `0 ${unit} under ${root}`, threshold, doc);
+
+  let newestMs = 0;
+  let latestDate = null;   // best "data as of" date parsed from partition names
+  for (const ent of entries) {
+    const dir = `${root}/${ent.name}`;
+    const st = await fsp.stat(dir).catch(() => null);
+    if (st) newestMs = Math.max(newestMs, st.mtimeMs);
+
+    const children = await fsp.readdir(dir).catch(() => []);
+    // Dated hive partitions (dt=YYYY-MM-DD / d=YYYY-MM-DD / y=YYYY); last sorted = newest
+    const parts = children.filter(n => /^(dt|d|y)=\d/.test(n)).sort();
+    const last = parts[parts.length - 1];
+    if (last) {
+      const pst = await fsp.stat(`${dir}/${last}`).catch(() => null);
+      if (pst) newestMs = Math.max(newestMs, pst.mtimeMs);
+      const dateStr = last.split('=')[1];
+      if (!latestDate || dateStr > latestDate) latestDate = dateStr;
+    } else {
+      // Unpartitioned dataset (e.g. gold/signal_forward_returns/data.parquet):
+      // dir mtime misses in-place rewrites, so stat the files directly.
+      for (const f of children.slice(0, 20)) {
+        const fst = await fsp.stat(`${dir}/${f}`).catch(() => null);
+        if (fst?.isFile()) newestMs = Math.max(newestMs, fst.mtimeMs);
+      }
+    }
+  }
+
+  const ageH = (Date.now() - newestMs) / 3_600_000;
+  const val = `${entries.length} ${unit} · latest partition ${latestDate ?? 'n/a'} · written ${fmt.age(new Date(newestMs))}`;
+  if (ageH > 54) return fail(id, 'data', title, val, threshold, doc);
+  if (ageH > 30) return warn(id, 'data', title, val, threshold, doc);
+  return               ok(  id, 'data', title, val, threshold, doc);
+}
+
+// ─── Log growth (2026-06-12 logging audit) ───────────────────────────────────
+// Caught: 46MB pm2 error log (no rotation) + a 10.4GB orphaned job log.
+// pm2-logrotate now caps pm2 logs; this check catches anything that escapes.
+async function checkLogGrowth() {
+  const doc = {
+    what: 'Total size of ~/.pm2/logs plus ~/Library/Logs. pm2-logrotate (10MB × keep-14, compressed) caps the PM2 side; job logs are trimmed by the daily script.',
+    why:  'Unbounded logs ate 10.4GB once (trades-convert.log, held open by an orphaned python resource_tracker). Big logs also mean noisy logs — real errors become unfindable.',
+    if_red: 'du -sh ~/.pm2/logs ~/Library/Logs, find the offender, check it is not held open (lsof <file>) before deleting. Verify pm2-logrotate is still installed (pm2 list | grep logrotate).',
+  };
+  const threshold = '< 500 MB combined';
+  try {
+    const home = process.env.HOME;
+    const { stdout } = await execFileAsync('du', ['-sk', `${home}/.pm2/logs`, `${home}/Library/Logs`]);
+    const totalKb = stdout.trim().split('\n').reduce((s, l) => s + (parseInt(l, 10) || 0), 0);
+    const totalMb = totalKb / 1024;
+    const val = `${totalMb >= 1024 ? (totalMb / 1024).toFixed(1) + ' GB' : totalMb.toFixed(0) + ' MB'} across pm2 + Library logs`;
+    if (totalMb > 2048) return fail('log_growth', 'process', 'Log growth', val, threshold, doc);
+    if (totalMb > 500)  return warn('log_growth', 'process', 'Log growth', val, threshold, doc);
+    return                     ok(  'log_growth', 'process', 'Log growth', val, threshold, doc);
+  } catch (e) {
+    return warn('log_growth', 'process', 'Log growth', `du failed: ${e.message}`, threshold, doc);
+  }
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export async function runAllChecks(query) {
   const t0 = Date.now();
+  // Time each check individually (shown as a DURATION column in the dashboard).
+  // PM2 returns an array — the elapsed ms is attached to every entry it yields.
+  const timed = p => {
+    const ts = Date.now();
+    return p.then(r => {
+      const ms = Date.now() - ts;
+      return Array.isArray(r) ? r.map(c => ({ ...c, ms })) : { ...r, ms };
+    });
+  };
   const checks = await Promise.allSettled([
-    checkTradableUniverse(query),
-    checkUwFlowAlerts(query),
-    checkBenzingaNews(query),
-    checkUwTopMovers(query),
-    checkBacktestPrices(query),
-    checkConvictionScoresToday(query),
-    checkUniverseSyncRecency(query),
-    checkBotScanHeartbeat(query),
-    checkExecutorHeartbeat(query),
-    checkDanglingTradePointers(query),
-    checkStalePredictions(query),
-    checkLastModelTraining(query),
-    checkModelAuc(query),
-    checkSignalVariance(query),
-    checkActiveBots(query),
-    checkDbLatency(query),
-    checkAnthropicKey(),
-    // PM2 check returns an array — wrap so allSettled handles it uniformly
-    checkPm2Processes(),
+    timed(checkTradableUniverse(query)),
+    timed(checkUwFlowAlerts(query)),
+    timed(checkBenzingaNews(query)),
+    timed(checkUwTopMovers(query)),
+    timed(checkBacktestPrices(query)),
+    timed(checkConvictionScoresToday(query)),
+    ...LAKE_LAYERS.map(l => timed(checkLakeLayer(l))),
+    timed(checkUniverseSyncRecency(query)),
+    timed(checkBotScanHeartbeat(query)),
+    timed(checkExecutorHeartbeat(query)),
+    timed(checkDanglingTradePointers(query)),
+    timed(checkStalePredictions(query)),
+    timed(checkLastModelTraining(query)),
+    timed(checkModelAuc(query)),
+    timed(checkSignalVariance(query)),
+    timed(checkActiveBots(query)),
+    timed(checkDbLatency(query)),
+    timed(checkAnthropicKey()),
+    timed(checkLogGrowth()),
+    timed(checkPm2Processes()),
   ]);
 
   // Flatten results; rejected checks get a synthetic fail entry with a unique id
