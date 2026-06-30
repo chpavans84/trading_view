@@ -18,7 +18,9 @@
  *   - Pull symbols from `tradable_universe` (12K rows).
  *   - Chunk into batches of 50.
  *   - For each batch: GET /v2/stocks/bars?symbols=...&timeframe=1Day&start=...
- *   - Upsert each (symbol, date) into backtest_prices ON CONFLICT.
+ *   - Upsert each (symbol, date) OHLC/close into backtest_prices ON CONFLICT.
+ *     VOLUME is intentionally NOT written (Alpaca free = IEX-only ≈3% of tape);
+ *     the lake→backtest_prices sync in polygon-daily-incremental.sh owns volume.
  *   - Track per-batch failures, fire a system_alert if &lt; 80% success.
  *   - daysBack=5 by default so we catch any data the bot needs to backfill
  *     after a weekend/holiday gap, not just yesterday's close.
@@ -97,17 +99,24 @@ async function _upsertBar(symbol, bar) {
   // Alpaca bar shape: { t: "2026-05-27T04:00:00Z", o, h, l, c, v, n, vw }
   // price_date stored as DATE (no time) — use the UTC date portion of `t`.
   const priceDate = bar.t.slice(0, 10);
+  // VOLUME IS DELIBERATELY NOT WRITTEN HERE. Alpaca's free tier is IEX-only
+  // (~3% of consolidated tape — NVDA reads ~5M instead of ~150M). Writing it
+  // clobbered the correct full-tape volume and 30×-deflated the bot's ADV /
+  // rvol features (the ≥$5M liquidity gate then wrongly blocked liquid names).
+  // The authoritative volume writer is the daily lake→backtest_prices sync in
+  // scripts/polygon-daily-incremental.sh (Polygon CONSOLIDATED volume). This
+  // refresh is now OHLC/close/freshness-only. New rows get NULL volume until
+  // the next lake sync fills them. See GOTCHAS.md (IEX volume contamination).
   await query(
     `INSERT INTO backtest_prices (symbol, price_date, open, high, low, close, volume, adj_close)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     VALUES ($1, $2, $3, $4, $5, $6, NULL, $7)
      ON CONFLICT (symbol, price_date) DO UPDATE SET
        open      = EXCLUDED.open,
        high      = EXCLUDED.high,
        low       = EXCLUDED.low,
        close     = EXCLUDED.close,
-       volume    = EXCLUDED.volume,
        adj_close = EXCLUDED.adj_close`,
-    [symbol, priceDate, bar.o ?? null, bar.h ?? null, bar.l ?? null, bar.c, bar.v ?? null, bar.c]
+    [symbol, priceDate, bar.o ?? null, bar.h ?? null, bar.l ?? null, bar.c, bar.c]
   );
 }
 

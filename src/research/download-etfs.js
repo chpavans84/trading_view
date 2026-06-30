@@ -21,7 +21,7 @@ import YahooFinance from 'yahoo-finance2';
 import pg from 'pg';
 import { fileURLToPath } from 'url';
 
-const yahooFinance = new YahooFinance({ suppressNotices: ['ripHistorical'] });
+const yahooFinance = new YahooFinance({ suppressNotices: ['ripHistorical'], validation: { logErrors: false } });
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 

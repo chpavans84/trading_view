@@ -7,7 +7,7 @@
  */
 
 import YahooFinance from 'yahoo-finance2';
-const yahooFinance = new YahooFinance({ suppressNotices: ['ripHistorical'] });
+const yahooFinance = new YahooFinance({ suppressNotices: ['ripHistorical'], validation: { logErrors: false } });
 import pg from 'pg';
 import { SP500, NASDAQ100, MARKET_SYMBOLS } from './sp500.js';
 

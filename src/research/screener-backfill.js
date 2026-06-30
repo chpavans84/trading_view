@@ -34,7 +34,7 @@ import { query, isDbAvailable, initDb } from '../core/db.js';
 import YahooFinance from 'yahoo-finance2';
 import pLimit from 'p-limit';
 
-const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 // Tune these if Yahoo gets cranky
 const CONCURRENCY    = 6;

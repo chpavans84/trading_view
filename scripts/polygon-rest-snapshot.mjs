@@ -118,6 +118,7 @@ async function fetchPaginated(url, max = Infinity) {
     const data = await fetchJson(next);
     if (data?._forbidden || data?._notfound) return { results, _terminal: data };
     if (Array.isArray(data?.results)) results.push(...data.results);
+    else if (data?.results) results.push(data.results); // single-object endpoints (e.g. ticker details)
     next = data?.next_url || null;
     pages++;
     if (pages > 1000) { log('  hit 1000 page cap, stopping'); break; }
