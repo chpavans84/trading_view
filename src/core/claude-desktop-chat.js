@@ -32,7 +32,67 @@ import path from 'node:path';
 const CLAUDE_BIN = '/Users/pavan/.local/bin/claude';   // hardcoded for now; could resolve via $PATH
 const TIMEOUT_MS = 120_000;
 const MAX_CONCURRENT = 3;
-const PROJECT_DIR = '/Users/pavan/Documents/Claude_Projects/trading_view/tradingview-mcp';
+// 2026-06-12 perf: cwd moved to a slim workspace. The project root's 419-line
+// CLAUDE.md (dev docs) was auto-loaded into EVERY chat message — thousands of
+// irrelevant tokens per call. The workspace CLAUDE.md is 14 analyst-focused lines.
+const PROJECT_DIR = '/Users/pavan/Documents/Claude_Projects/trading_view/tradingview-mcp/src/core/chat-workspace';
+
+const ALLOWED_TOOLS = [
+  // Built-in Claude Code tools — WebSearch is critical for live market context.
+  // Without these the dashboard chat couldn't pull breaking news while the raw
+  // `claude` CLI could (verified 2026-05-27 — CLI returned live S&P numbers via
+  // WebSearch, dashboard said "I can't access market data").
+  'WebSearch',
+  'WebFetch',
+  // Read-only analysis tools (the bot intelligence MCP layer)
+  'mcp__tradingview__bot_verdict',
+  'mcp__tradingview__portfolio_advisor',
+  'mcp__tradingview__why_didnt_bot_buy',
+  'mcp__tradingview__signal_edge_report',
+  'mcp__tradingview__weekly_bot_retrospective',
+  'mcp__tradingview__signal_track_record',
+  'mcp__tradingview__system_health',
+  'mcp__tradingview__hedge_recommendation',
+  // Raw market data tools (UW + Benzinga)
+  'mcp__tradingview__uw_flow_get',
+  'mcp__tradingview__uw_insider_get',
+  'mcp__tradingview__uw_top_movers_get',
+  'mcp__tradingview__uw_congress_get',
+  'mcp__tradingview__benzinga_news_get',
+  // Chart + price tools (read-only)
+  'mcp__tradingview__quote_get',
+  'mcp__tradingview__chart_get_state',
+  'mcp__tradingview__data_get_ohlcv',
+  'mcp__tradingview__data_get_study_values',
+  'mcp__tradingview__portfolio_chart_snapshot',
+  'mcp__tradingview__symbol_info',
+  'mcp__tradingview__symbol_search',
+  'mcp__tradingview__news_get_symbol',
+  'mcp__tradingview__news_get_earnings',
+  // 2026-06-12: more read-only tools (user request) — Pine graphics (custom
+  // indicator levels/labels/tables the chat previously couldn't see), SEC
+  // filings/financials, earnings calendar+scanner, TV health, broker accounts.
+  'mcp__tradingview__data_get_pine_lines',
+  'mcp__tradingview__data_get_pine_labels',
+  'mcp__tradingview__data_get_pine_tables',
+  'mcp__tradingview__news_get_filings',
+  'mcp__tradingview__news_get_financials',
+  'mcp__tradingview__news_get_earnings_calendar',
+  'mcp__tradingview__news_scan_earnings',
+  'mcp__tradingview__tv_health_check',
+  'mcp__tradingview__moomoo_get_accounts',
+  // Chart navigation — needed so model can query arbitrary symbols. quote_get
+  // only reads the CURRENT chart symbol; without chart_set_symbol the chat
+  // returned whatever was on Pavan's screen (FTNT once) for SPY/QQQ/VIX
+  // queries (verified 2026-05-27). System prompt instructs to RESTORE the
+  // original symbol after the lookup.
+  'mcp__tradingview__chart_set_symbol',
+  'mcp__tradingview__chart_set_timeframe',
+  // Moomoo read tools
+  'mcp__tradingview__moomoo_get_positions',
+  'mcp__tradingview__moomoo_get_funds',
+  'mcp__tradingview__moomoo_get_orders',
+];
 
 let _inFlight = 0;
 
@@ -40,12 +100,21 @@ let _inFlight = 0;
 // having to infer from training cutoff (which caused "May 26 was Memorial Day"
 // hallucination 2026-05-27 — May 25 was actually the holiday).
 function buildSystemPrompt() {
-  const now = new Date();
+  // 2026-06-12 perf: round the clock to 5-minute buckets. A to-the-minute timestamp
+  // changed the system prompt EVERY message → guaranteed prompt-cache miss → slower
+  // first token. 5-min buckets keep follow-up messages on a warm cache.
+  const now = new Date(Math.floor(Date.now() / 300_000) * 300_000);
   const sgt = now.toLocaleString('en-US', { timeZone: 'Asia/Singapore', dateStyle: 'full', timeStyle: 'short' });
   const et  = now.toLocaleString('en-US', { timeZone: 'America/New_York',  dateStyle: 'full', timeStyle: 'short' });
   return `You are the in-dashboard trading assistant for Pavan's TradingView MCP bot.
 
-CURRENT DATE/TIME ANCHORS (use these instead of guessing from training data):
+READ-ONLY CHARTER (non-negotiable):
+  • You are a data analyst, not a developer. You have NO file, shell, or code access.
+  • NEVER offer to patch, edit, fix, or write code/files — you cannot, and offering confuses the user.
+  • If you find a bug or data problem, REPORT it clearly (tool name, what you observed) and say
+    "flag this to Claude Code to fix" — nothing more.
+
+CURRENT DATE/TIME ANCHORS (accurate to ~5 minutes — use instead of guessing):
   • Now in Singapore (SGT): ${sgt}
   • Now in New York (ET):    ${et}
   • US market open:  09:30 ET = 21:30 SGT (Mon–Fri)
@@ -71,6 +140,11 @@ CHART NAVIGATION RULE: quote_get and data_get_* read the CURRENT chart symbol.
 To inspect ANY other symbol, you MUST first call chart_set_symbol(X) to switch.
 After you're done, RESTORE the original symbol by calling chart_get_state first
 and chart_set_symbol(original) at the end. Otherwise you'll leave Pavan's chart on something he didn't pick.
+SEQUENCING: tools NEVER disagree within one call — each reads the focused chart at its
+own instant (responses carry as_of). If two calls show different symbols, the chart
+CHANGED between them (your own chart_set_symbol, or Pavan clicking in TradingView).
+A quote_get mismatch error reports the chart as it was BEFORE your switch — that is
+expected, not a bug. Do not flag symbol differences across calls as tool bugs.
 
 HARD RULES:
 1. NEVER guess at numbers — call a tool. If a tool fails, say so explicitly.
@@ -121,50 +195,8 @@ export async function chatViaClaude({ message, history = [], cwd = PROJECT_DIR }
     // every tool call, which manifests as the model returning "I need approval
     // for X" instead of actually executing the call. The MCP server is named
     // "tradingview" in Pavan's ~/.claude/.mcp.json — verified 2026-05-27.
-    const ALLOWED_TOOLS = [
-      // Built-in Claude Code tools — WebSearch is critical for live market context.
-      // Without these the dashboard chat couldn't pull breaking news while the raw
-      // `claude` CLI could (verified 2026-05-27 — CLI returned live S&P numbers via
-      // WebSearch, dashboard said "I can't access market data").
-      'WebSearch',
-      'WebFetch',
-      // Read-only analysis tools (the bot intelligence MCP layer)
-      'mcp__tradingview__bot_verdict',
-      'mcp__tradingview__portfolio_advisor',
-      'mcp__tradingview__why_didnt_bot_buy',
-      'mcp__tradingview__signal_edge_report',
-      'mcp__tradingview__weekly_bot_retrospective',
-      'mcp__tradingview__signal_track_record',
-      'mcp__tradingview__system_health',
-      'mcp__tradingview__hedge_recommendation',
-      // Raw market data tools (UW + Benzinga)
-      'mcp__tradingview__uw_flow_get',
-      'mcp__tradingview__uw_insider_get',
-      'mcp__tradingview__uw_top_movers_get',
-      'mcp__tradingview__uw_congress_get',
-      'mcp__tradingview__benzinga_news_get',
-      // Chart + price tools (read-only)
-      'mcp__tradingview__quote_get',
-      'mcp__tradingview__chart_get_state',
-      'mcp__tradingview__data_get_ohlcv',
-      'mcp__tradingview__data_get_study_values',
-      'mcp__tradingview__portfolio_chart_snapshot',
-      'mcp__tradingview__symbol_info',
-      'mcp__tradingview__symbol_search',
-      'mcp__tradingview__news_get_symbol',
-      'mcp__tradingview__news_get_earnings',
-      // Chart navigation — needed so model can query arbitrary symbols. quote_get
-      // only reads the CURRENT chart symbol; without chart_set_symbol the chat
-      // returned whatever was on Pavan's screen (FTNT once) for SPY/QQQ/VIX
-      // queries (verified 2026-05-27). System prompt instructs to RESTORE the
-      // original symbol after the lookup.
-      'mcp__tradingview__chart_set_symbol',
-      'mcp__tradingview__chart_set_timeframe',
-      // Moomoo read tools
-      'mcp__tradingview__moomoo_get_positions',
-      'mcp__tradingview__moomoo_get_funds',
-      'mcp__tradingview__moomoo_get_orders',
-    ];
+    // ALLOWED_TOOLS hoisted to module scope 2026-06-12 (shared with streaming variant)
+
 
     // --allowedTools is variadic in commander.js — it will greedily swallow
     // any trailing positional arg (the prompt). Workaround: pass the prompt
@@ -175,9 +207,19 @@ export async function chatViaClaude({ message, history = [], cwd = PROJECT_DIR }
     // 2026-05-27 — without this flag, the model has no tradingview tools).
     const args = [
       '-p',                                              // headless / print mode
-      '--append-system-prompt', buildSystemPrompt(),  // dynamic — includes current SGT + ET timestamps
+      // 2026-06-12 perf: pin Sonnet (fast) instead of inheriting the user's CLI
+      // default (fable-5 = most capable, slowest). Dashboard Q&A wants latency;
+      // override with CHAT_CLI_MODEL in .env if depth ever matters more.
+      '--model', process.env.CHAT_CLI_MODEL || 'sonnet',
+      '--append-system-prompt', buildSystemPrompt(),  // dynamic — 5-min-bucketed timestamps
       '--effort', 'medium',                              // balance speed vs depth
-      '--mcp-config', '/Users/pavan/.claude/.mcp.json',   // explicit MCP server config
+      // 2026-06-12 (user directive): the chat is STRICTLY read-only. Headless
+      // default-deny already blocks non-allowlisted tools, but disallow the
+      // file/shell tools explicitly so it can never edit code, run commands, or
+      // read local files (e.g. .env secrets) even if defaults ever change.
+      // (WebSearch/WebFetch stay available — citing sources is reading, not writing.)
+      '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'Read', 'Glob', 'Grep',
+      '--mcp-config', '/Users/pavan/.claude/.mcp.json',   // explicit MCP server config (terminates the variadic above)
       '--allowedTools', ...ALLOWED_TOOLS,                // pre-approve read-only MCP tools (variadic — keep LAST)
     ];
 
@@ -195,7 +237,11 @@ export async function chatViaClaude({ message, history = [], cwd = PROJECT_DIR }
       child.on('close', code => {
         clearTimeout(killer);
         if (code === 0) return resolve(stdout.trim());
-        reject(new Error(`claude CLI exited ${code}: ${stderr.trim().slice(0, 500)}`));
+        // -p mode often reports errors on STDOUT; stderr alone was empty in the
+        // 2026-06-12 prod failures, which made this undiagnosable. Surface both.
+        const detail = (stderr.trim() || stdout.trim() || '(no output)').slice(0, 500);
+        console.error('[claude-desktop-chat] CLI failed', { code, bin: CLAUDE_BIN, detail });
+        reject(new Error(`claude CLI exited ${code}: ${detail}`));
       });
       // Send prompt via stdin and close — avoids argv parsing ambiguity with the
       // variadic --allowedTools flag.
@@ -223,4 +269,103 @@ export async function pingClaudeCli() {
     error: result.error,
     duration_ms: result.ms,
   };
+}
+
+/**
+ * chatViaClaudeStream — same as chatViaClaude but emits events as they happen.
+ * 2026-06-12: built because deep multi-tool answers take 30-60s and the widget
+ * showed NOTHING until completion. Streaming shows first tokens in ~3s.
+ *
+ * onEvent receives:
+ *   { delta: string }            — assistant text chunk (top-level turns only)
+ *   { tool: string }             — a tool call started (prefix-stripped name)
+ *   { done: true, text, ms }     — finished; text = accumulated visible text
+ *   { error: string }            — fatal failure
+ */
+export async function chatViaClaudeStream({ message, history = [], cwd = PROJECT_DIR, onEvent }) {
+  if (_inFlight >= MAX_CONCURRENT) {
+    onEvent({ error: `Concurrency limit (${MAX_CONCURRENT}) reached — try again in a moment.` });
+    return;
+  }
+  if (!message || typeof message !== 'string') { onEvent({ error: 'message is required' }); return; }
+
+  const transcript = history.map(h => `[${h.role.toUpperCase()}]\n${h.content}`).join('\n\n');
+  const fullPrompt = transcript ? `${transcript}\n\n[USER]\n${message}` : message;
+
+  _inFlight++;
+  const t0 = Date.now();
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+
+  const args = [
+    '-p',
+    '--model', process.env.CHAT_CLI_MODEL || 'sonnet',
+    '--append-system-prompt', buildSystemPrompt(),
+    '--effort', 'medium',
+    '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'Read', 'Glob', 'Grep',
+    '--mcp-config', '/Users/pavan/.claude/.mcp.json',
+    '--allowedTools', ...ALLOWED_TOOLS,
+  ];
+
+  await new Promise((resolve) => {
+    const child = spawn(CLAUDE_BIN, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let acc = '';      // accumulated visible text (all top-level turns)
+    let buf = '';
+    let settled = false;
+    const finish = (evt) => {
+      if (settled) return; settled = true;
+      _inFlight--;
+      onEvent(evt);
+      resolve();
+    };
+    const killer = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch {}
+      finish(acc ? { done: true, text: acc + '\n\n_(timed out mid-answer)_', ms: Date.now() - t0 }
+                 : { error: `Timed out after ${TIMEOUT_MS / 1000}s` });
+    }, TIMEOUT_MS);
+
+    child.stdout.on('data', d => {
+      buf += d.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        try {
+          if (ev.type === 'stream_event' && ev.parent_tool_use_id == null) {
+            const e = ev.event;
+            if (e?.type === 'content_block_delta' && e.delta?.type === 'text_delta' && e.delta.text) {
+              if (acc && !acc.endsWith('\n') && e.delta.text && acc.endsWith('.') === false && false) { /* noop */ }
+              acc += e.delta.text;
+              onEvent({ delta: e.delta.text });
+            }
+          } else if (ev.type === 'assistant' && ev.parent_tool_use_id == null) {
+            for (const blk of (ev.message?.content || [])) {
+              if (blk.type === 'tool_use') {
+                onEvent({ tool: String(blk.name || 'tool').replace(/^mcp__tradingview__/, '') });
+              }
+            }
+          } else if (ev.type === 'result') {
+            clearTimeout(killer);
+            const text = acc.trim() || String(ev.result || '').trim() || '(empty)';
+            finish(ev.is_error ? { error: text.slice(0, 500) } : { done: true, text, ms: Date.now() - t0 });
+          }
+        } catch (_) { /* never let one bad event kill the stream */ }
+      }
+    });
+    let stderr = '';
+    child.stderr.on('data', d => { stderr += d.toString(); });
+    child.on('error', err => { clearTimeout(killer); finish({ error: err.message }); });
+    child.on('close', code => {
+      clearTimeout(killer);
+      if (!settled) {
+        if (code === 0 && acc) finish({ done: true, text: acc.trim(), ms: Date.now() - t0 });
+        else finish({ error: `claude CLI exited ${code}: ${(stderr.trim() || acc.trim() || '(no output)').slice(0, 400)}` });
+      }
+    });
+    child.stdin.write(fullPrompt);
+    child.stdin.end();
+  });
 }

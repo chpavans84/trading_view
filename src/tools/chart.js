@@ -1,17 +1,56 @@
 import { z } from 'zod';
 import { jsonResult } from './_format.js';
 import * as core from '../core/chart.js';
+import { initDb, query as dbQuery, isDbAvailable } from '../core/db.js';
+
+let _dbReady = null;
+async function _ensureDb() {
+  if (_dbReady === null) _dbReady = initDb().then(() => isDbAvailable()).catch(() => false);
+  return _dbReady;
+}
+
+/**
+ * Exchange-qualify bare US-equity tickers (2026-06-12).
+ * TradingView resolves bare symbols ambiguously — quote_get("NVDA") once returned a
+ * Uniswap NVDA token instead of the stock. If the ticker exists in our own
+ * tradable_universe on NASDAQ/NYSE, pin it (→ NASDAQ:NVDA). Prefixed symbols
+ * (NYMEX:CL1!), futures (ES1!), crypto pairs, and non-universe symbols pass through.
+ */
+async function resolveEquitySymbol(symbol) {
+  const s = String(symbol).trim().toUpperCase();
+  if (!/^[A-Z]{1,5}(\.[A-Z])?$/.test(s)) return symbol;          // already prefixed / futures / pair
+  try {
+    if (!await _ensureDb()) return symbol;
+    const { rows } = await dbQuery(
+      `SELECT exchange FROM tradable_universe WHERE symbol = $1 LIMIT 1`, [s]);
+    const ex = rows[0]?.exchange;
+    if (ex === 'NASDAQ' || ex === 'NYSE') return `${ex}:${s}`;
+    return symbol;                                                // ARCA/BATS ETFs resolve fine bare
+  } catch { return symbol; }
+}
 
 export function registerChartTools(server) {
   server.tool('chart_get_state', 'Get current chart state (symbol, timeframe, chart type, indicators)', {}, async () => {
-    try { return jsonResult(await core.getState()); }
+    try {
+      const state = await core.getState();
+      // Temporal honesty (2026-06-12): the "current chart" is whatever is focused at
+      // THIS instant — it can change between tool calls (user clicks, async loads).
+      state.as_of = new Date().toISOString();
+      state.note  = 'Snapshot of the focused chart at as_of. It can differ across calls if the chart changed in between.';
+      return jsonResult(state);
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
   server.tool('chart_set_symbol', 'Change the chart symbol', {
     symbol: z.string().describe('Symbol to set (e.g., BTCUSD, AAPL, ES1!, NYMEX:CL1!)'),
   }, async ({ symbol }) => {
-    try { return jsonResult(await core.setSymbol({ symbol })); }
+    try {
+      const resolved = await resolveEquitySymbol(symbol);
+      const result = await core.setSymbol({ symbol: resolved });
+      if (resolved !== symbol) result.resolved_from = symbol;
+      return jsonResult(result);
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

@@ -20,6 +20,7 @@ const PROTO = {
   GetBasicQot:          3004,
   GetKL:                3006,
   GetOrderBook:         3014,
+  GetSecuritySnapshot:  3203,
   // Trade (Trd) — read
   GetAccList:           2001,
   GetFunds:             2101,
@@ -725,6 +726,52 @@ export async function getQuotes(symbols) {
 
     await qotSub(client, tickers, [SUB_TYPE.Basic], false).catch(() => {});
     return { success: true, source: 'moomoo', quotes };
+  });
+}
+
+/**
+ * Get fundamental snapshots (PE, EPS, shares, PB, dividend) for US stocks from OpenD.
+ * Qot_GetSecuritySnapshot does NOT require a subscription but IS rate-limited by Futu
+ * (~400 securities / 30s). We chunk to 200/request. NOTE: OpenD exposes trailing PE
+ * (peTTMRate) and static PE (peRate) only — there is NO forward-PE field in the protocol
+ * (the Moomoo app computes that from analyst estimates separately). Float/institutional
+ * are also NOT in snapshots — those still come from Yahoo.
+ * Returns: [{ symbol, pe_ttm, pe_static, eps, pb, shares_out, shares_issued, market_cap }]
+ */
+export async function getSnapshots(symbols) {
+  const tickers = (Array.isArray(symbols) ? symbols : [symbols]).map(s => s.toUpperCase());
+  const out = [];
+  return withClient(async (client) => {
+    for (let i = 0; i < tickers.length; i += 200) {
+      const chunk = tickers.slice(i, i + 200);
+      const resp = await client.sendProto(
+        PROTO.GetSecuritySnapshot, 'Qot_GetSecuritySnapshot.Request', 'Qot_GetSecuritySnapshot.Response',
+        { c2s: { securityList: chunk.map(usSecurity) } }
+      );
+      if (resp.retType !== 0) throw new Error(resp.retMsg || 'GetSecuritySnapshot failed');
+      for (const s of (resp.s2c?.snapshotList || [])) {
+        const ex = s.equityExData || {};
+        const norm = v => (v === 0 || v == null) ? null : v;   // Futu sends 0 for "no PE" (loss)
+        const b = s.basic || {};
+        out.push({
+          symbol: b.security?.code || '',
+          name: b.name || null,
+          cur_price: b.curPrice ?? null,
+          last_close: b.lastClosePrice ?? null,
+          day_volume: b.volume ? Number(b.volume) : null,
+          w52_high: b.highest52WeeksPrice ?? null,
+          w52_low: b.lowest52WeeksPrice ?? null,
+          pe_ttm: norm(ex.peTTMRate),
+          pe_static: norm(ex.peRate),
+          eps: ex.earningsPershare ?? null,
+          pb: norm(ex.pbRate),
+          shares_out: ex.outstandingShares ? Number(ex.outstandingShares) : null,
+          shares_issued: ex.issuedShares ? Number(ex.issuedShares) : null,
+          market_cap: ex.outstandingMarketVal ?? ex.issuedMarketVal ?? null,
+        });
+      }
+    }
+    return { success: true, source: 'moomoo', snapshots: out };
   });
 }
 

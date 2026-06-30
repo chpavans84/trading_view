@@ -252,60 +252,81 @@ export function registerUwTools(server) {
       try {
         const sym = symbol.trim().toUpperCase();
 
-        // Pull from conviction_scores which stores the news signal as part of factor_breakdown
+        // 2026-06-12 FIX: this tool previously queried conviction_scores.factor_breakdown,
+        // a column that NEVER existed (the column is `breakdown`, and neither it nor
+        // `signals` carries news_sentiment keys) — the tool errored on every call.
+        // The real, live Benzinga signal sources are:
+        //   1. benzinga_news table — per-article sentiment, ingested every few minutes.
+        //   2. conviction_scores.signals — bz_options_sentiment / bz_guidance_* enrichment.
+
+        // Aggregate per-article sentiment for the window
+        const { rows: aggRows } = await dbQuery(
+          `SELECT count(*)::int AS articles,
+                  count(*) FILTER (WHERE sentiment = 'positive')::int AS positive,
+                  count(*) FILTER (WHERE sentiment = 'negative')::int AS negative,
+                  count(*) FILTER (WHERE sentiment NOT IN ('positive','negative') OR sentiment IS NULL)::int AS neutral
+           FROM benzinga_news
+           WHERE tickers ? $1
+             AND published_at > NOW() - ($2 * INTERVAL '1 hour')`,
+          [sym, hours]
+        );
+        const agg = aggRows[0] || { articles: 0, positive: 0, negative: 0, neutral: 0 };
+        const net = agg.positive - agg.negative;
+        const newsLabel = agg.articles === 0 ? 'no_articles'
+          : net >  Math.max(1, agg.articles * 0.2) ? 'bullish'
+          : net < -Math.max(1, agg.articles * 0.2) ? 'bearish'
+          : 'neutral';
+        const confidence = agg.articles > 0 ? Math.abs(net) / agg.articles : 0;
+
+        // Headlines (always fetch a few; raw=true returns more)
+        const { rows: artRows } = await dbQuery(
+          `SELECT published_at, title, sentiment, url
+           FROM benzinga_news
+           WHERE tickers ? $1
+             AND published_at > NOW() - ($2 * INTERVAL '1 hour')
+           ORDER BY published_at DESC
+           LIMIT ${raw ? 25 : 5}`,
+          [sym, hours]
+        );
+
+        // Bot enrichment from the latest conviction score (options flow + guidance reads)
         const { rows: scoreRows } = await dbQuery(
           `SELECT scored_at, score, grade,
-                  factor_breakdown->>'news_sentiment' AS news_sentiment,
-                  factor_breakdown->>'news_label'     AS news_label,
-                  factor_breakdown->>'news_confidence' AS news_confidence,
-                  factor_breakdown->>'news_article_count' AS article_count
+                  signals->>'bz_options_sentiment'  AS bz_options_sentiment,
+                  signals->>'bz_guidance_direction' AS bz_guidance_direction,
+                  signals->>'guidance_signal'       AS guidance_signal
            FROM conviction_scores
            WHERE symbol = $1
-             AND scored_at > NOW() - ($2 * INTERVAL '1 hour')
            ORDER BY scored_at DESC
-           LIMIT 10`,
-          [sym, hours]
+           LIMIT ${raw ? 5 : 1}`,
+          [sym]
         );
-
-        // Also look for bot_decisions factor_breakdown for this symbol (richer data)
-        const { rows: decRows } = await dbQuery(
-          `SELECT scanned_at, composite_score,
-                  factor_breakdown->>'news' AS news_score,
-                  factor_breakdown->>'news_label' AS news_label,
-                  factor_breakdown->>'news_sentiment' AS news_sentiment,
-                  notes
-           FROM bot_decisions
-           WHERE symbol = $1
-             AND scanned_at > NOW() - ($2 * INTERVAL '1 hour')
-             AND factor_breakdown IS NOT NULL
-           ORDER BY scanned_at DESC
-           LIMIT 5`,
-          [sym, hours]
-        );
-
-        const latest = decRows[0] || scoreRows[0];
-        const newsLabel = latest?.news_label || latest?.news_sentiment || 'unknown';
-        const newsScore = decRows[0]?.news_score;
-        const articleCount = scoreRows[0]?.article_count;
 
         return jsonResult({
           symbol: sym,
           window_hours: hours,
           benzinga_signal: {
-            label:      newsLabel,
-            score:      newsScore != null ? Number(newsScore).toFixed(1) : null,
-            confidence: scoreRows[0]?.news_confidence != null ? Number(scoreRows[0].news_confidence).toFixed(2) : null,
-            article_count: articleCount != null ? Number(articleCount) : null,
-            bot_weight: '22% of composite score',
-            interpretation: newsLabel === 'bullish' ? 'Benzinga is reading positive sentiment — adds to composite score'
-              : newsLabel === 'bearish' ? 'Benzinga is reading negative sentiment — subtracts from composite score'
-              : 'Neutral or insufficient articles — minimal impact on composite',
+            label:         newsLabel,
+            article_count: agg.articles,
+            positive:      agg.positive,
+            negative:      agg.negative,
+            neutral:       agg.neutral,
+            confidence:    +confidence.toFixed(2),
+            interpretation: newsLabel === 'bullish' ? 'Benzinga coverage skews positive — supportive for the composite news factor'
+              : newsLabel === 'bearish' ? 'Benzinga coverage skews negative — drags the composite news factor'
+              : newsLabel === 'no_articles' ? `No Benzinga articles tagged ${sym} in the last ${hours}h`
+              : 'Mixed/neutral coverage — minimal impact on composite',
           },
-          recent_scores: raw ? scoreRows : scoreRows.slice(0, 2),
-          recent_bot_decisions: raw ? decRows : decRows.slice(0, 1),
-          note: !latest
-            ? `No Benzinga data found for ${sym} in the last ${hours} hours in conviction_scores or bot_decisions. The symbol may not have been scanned recently.`
-            : null,
+          recent_headlines: artRows,
+          bot_enrichment: scoreRows[0] ? {
+            scored_at:             scoreRows[0].scored_at,
+            conviction_score:      scoreRows[0].score,
+            grade:                 scoreRows[0].grade,
+            bz_options_sentiment:  scoreRows[0].bz_options_sentiment,
+            bz_guidance_direction: scoreRows[0].bz_guidance_direction,
+            guidance_signal:       scoreRows[0].guidance_signal,
+          } : null,
+          recent_scores: raw ? scoreRows : undefined,
         });
       } catch (err) {
         return jsonResult({ error: `Benzinga signal query failed: ${err.message}` }, true);

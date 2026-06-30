@@ -5,7 +5,7 @@
  */
 
 import YahooFinance from 'yahoo-finance2';
-const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 import { getPreEarningsDrift, getEarnings, getSymbolNews, getInsiderBuying, getEarningsSurprise } from './news.js';
 import { getRelativeStrength, getMarketSentiment, SECTOR_MAP } from './sentiment.js';

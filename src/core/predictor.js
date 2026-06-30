@@ -369,7 +369,7 @@ async function algoEarnings(symbol) {
   // Next earnings date via yahoo-finance2 (handles crumb auth)
   let daysToNext = null, nextEarningsDate = null;
   try {
-    const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+    const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
     const cal = await yf.quoteSummary(symbol, { modules: ['calendarEvents'] });
     const rawDates = cal?.calendarEvents?.earnings?.earningsDate ?? [];
     const today = new Date(); today.setHours(0, 0, 0, 0);

@@ -47,6 +47,7 @@
     "smoke": "node scripts/smoke-test.js 3000",
     "smoke:staging": "node scripts/smoke-test.js 3001",
     "test:dashboard": "node --test --test-reporter=spec tests/dashboard.test.js",
+    "test:contract": "node --test --test-reporter=spec tests/registry-contract.test.js",
     "test:sentinel": "node --experimental-test-module-mocks --test tests/sentinel.test.js",
     "research:download": "node --env-file=.env src/research/download-prices.js",
     "research:download-etfs": "node --env-file=.env src/research/download-etfs.js",

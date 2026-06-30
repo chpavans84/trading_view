@@ -17,7 +17,7 @@ import { sendTelegram, isTelegramConfigured } from './telegram.js';
 import { sendWhatsAppAlert, isWhatsAppConfigured } from './whatsapp.js';
 import { Resend } from 'resend';
 
-const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 // ─── Alert dispatch ────────────────────────────────────────────────────────────
 // Sends to every configured channel in parallel; always logs regardless.

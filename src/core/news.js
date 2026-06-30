@@ -355,7 +355,7 @@ export async function getEarnings({ symbol } = {}) {
   // Next earnings date — Yahoo Finance calendarEvents (primary), Nasdaq calendar (fallback)
   let nextEarningsDates = [];
   try {
-    const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+    const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
     const cal = await yf.quoteSummary(ticker, { modules: ['calendarEvents'] });
     const dates = cal?.calendarEvents?.earnings?.earningsDate ?? [];
     const today = new Date(); today.setHours(0,0,0,0);

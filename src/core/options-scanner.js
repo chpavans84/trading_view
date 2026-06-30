@@ -13,7 +13,7 @@
 
 import YahooFinance from 'yahoo-finance2';
 
-const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 const VOL_THRESHOLD = 500;
 const RATIO_THRESHOLD = 2;      // vol / OI must exceed this

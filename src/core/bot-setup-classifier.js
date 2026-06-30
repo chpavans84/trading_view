@@ -115,7 +115,7 @@ async function _volumeOnBreakoutDay(symbol) {
 
 function _catalystThesis({ articleCount, todayChangePct, uwScore, flowPremium }) {
   return {
-    text: `Catalyst-driven entry. ${articleCount} positive articles in last 24h, price up ${(todayChangePct * 100).toFixed(1)}%, UW flow at ${uwScore ?? 'n/a'} with premium $${Math.round((flowPremium ?? 0) / 1000)}K. Move already underway, exit when momentum exhausts.`,
+    text: `Catalyst-driven entry. ${articleCount} articles (positive tone) in last 24h, price up ${(todayChangePct * 100).toFixed(1)}%, UW flow at ${uwScore ?? 'n/a'} with premium $${Math.round((flowPremium ?? 0) / 1000)}K. Move already underway, exit when momentum exhausts.`,
     articleCount, todayChangePct, uwScore, flowPremium,
   };
 }
@@ -411,10 +411,15 @@ export async function classifySetup({ signals, indicators, rsi, fundamentals, la
     if (hasGrade)      drivers.push(`Grade ${conv.grade}`);
     if (hasBigFlow)    drivers.push(`$${(recentFlowPremium/1e6).toFixed(1)}M bullish flow`);
     if (hasInsiderBuy) drivers.push(`$${(insiderNetUsd/1e6).toFixed(1)}M insider buy`);
-    if (hasBullNews)   drivers.push(`${articleCount} positive articles`);
+    // 2026-06-12 honesty fix (caught by the dashboard chat on NVDA): articleCount is
+    // TOTAL articles, not positive ones — "94 positive articles" was a lie when only
+    // 15 were positive. Label by tone, not a fabricated positive count.
+    if (hasBullNews)   drivers.push(`${articleCount} articles, ${newsLabel} tone`);
     return {
       setup_type: 'signal_stack',
-      thesis: `Strong composite — ${drivers.join(' + ')}. No specific 5-setup match but signals align bullishly.`,
+      // Was "Strong composite — …": this branch fires on STACKED SIGNALS (grade/flow/
+      // insider/news), not the composite score, which can simultaneously be negative.
+      thesis: `Signal stack — ${drivers.join(' + ')}. No specific 5-setup match but signals align bullishly.`,
       expected_hold_days_min: 3,
       expected_hold_days_max: 10,
     };

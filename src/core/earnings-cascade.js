@@ -7,7 +7,7 @@
 import YahooFinance from 'yahoo-finance2';
 import { getSympathyTrades, isGraphConfigured } from './graph.js';
 
-const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 const GRAPH_TICKERS = [
   // Semiconductor Equipment

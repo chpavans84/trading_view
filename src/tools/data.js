@@ -35,10 +35,31 @@ export function registerDataTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('quote_get', 'Get real-time quote data for a symbol (price, OHLC, volume)', {
-    symbol: z.string().optional().describe('Symbol to quote (blank = current chart symbol)'),
+  server.tool('quote_get', 'Get real-time quote data from the CURRENT chart (price, OHLC, volume). To quote a different symbol, call chart_set_symbol first — the symbol param only validates, it cannot quote off-chart.', {
+    symbol: z.string().optional().describe('Expected symbol (blank = current chart symbol). If this does not match the chart, the tool errors instead of returning the wrong instrument.'),
   }, async ({ symbol }) => {
-    try { return jsonResult(await core.getQuote({ symbol })); }
+    try {
+      const quote = await core.getQuote({});
+      // 2026-06-12 FIX: bars always come from the CURRENT chart — the old code
+      // relabeled them with the requested symbol (an "NVDA quote" was actually a
+      // Uniswap pair's bars). A mismatch now errors loudly instead of lying.
+      if (symbol) {
+        const base = s => { s = String(s).toUpperCase(); return s.includes(':') ? s.split(':').pop() : s; };
+        const cur = base(quote?.symbol || '');
+        const want = base(symbol.trim());
+        if (cur && want && cur !== want) {
+          return jsonResult({
+            success: false,
+            error: `quote_get reads the CURRENT chart (${quote.symbol}) — it cannot quote ${symbol} directly. ` +
+                   `Call chart_set_symbol('${symbol}') first, then quote_get, then restore the original symbol.`,
+            current_chart_symbol: quote.symbol,
+            requested: symbol,
+          }, true);
+        }
+      }
+      quote.as_of = new Date().toISOString();
+      return jsonResult(quote);
+    }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 

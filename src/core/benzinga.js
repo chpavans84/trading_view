@@ -19,14 +19,46 @@ async function _cached(cacheKey, ttlMs, fn) {
     _cache.set(cacheKey, { ts: Date.now(), data });
     return data;
   } catch (e) {
-    console.error(`[benzinga] ${cacheKey}:`, e.message);
+    if (!e._quiet) console.error(`[benzinga] ${cacheKey}:`, e.message);
     return null;
   }
 }
 
+// ─── Auth circuit breaker + log hygiene (2026-06-12 logging audit) ───────────
+// An expired token produced an identical 401 line (with the token in the URL!)
+// on every call. Now: URLs are redacted, and after AUTH_TRIP consecutive 401s
+// per host the breaker opens for 12h — failures become quiet null returns.
+const AUTH_TRIP = 5;
+const AUTH_RETRY_MS = 12 * 60 * 60 * 1000;
+const _auth = new Map();   // host -> { consec401, downUntil }
+const _redact = s => String(s).replace(/(token|apiKey)=[^&\s]+/gi, '$1=***');
+function _authState(url) {
+  const h = new URL(url).host;
+  let st = _auth.get(h);
+  if (!st) { st = { consec401: 0, downUntil: 0 }; _auth.set(h, st); }
+  return st;
+}
+
 async function _get(url) {
+  const st = _authState(url);
+  if (Date.now() < st.downUntil) {
+    throw Object.assign(new Error('benzinga auth breaker open'), { _quiet: true });
+  }
   const r = await fetch(url, { headers: HDR, signal: AbortSignal.timeout(6000) });
-  if (!r.ok) throw new Error(`HTTP ${r.status}: ${url}`);
+  if (r.status === 401) {
+    st.consec401++;
+    if (st.consec401 >= AUTH_TRIP) {
+      // first-trip guard: a startup burst of parallel requests can all cross
+      // the threshold together — only the one that opens the breaker logs
+      const firstTrip = Date.now() >= st.downUntil;
+      st.downUntil = Date.now() + AUTH_RETRY_MS;
+      if (firstTrip) console.error(`[benzinga] ${new URL(url).host}: ${st.consec401} consecutive 401s — token invalid/expired, disabling calls for 12h`);
+      throw Object.assign(new Error(`HTTP 401: ${_redact(url)}`), { _quiet: true });
+    }
+    throw new Error(`HTTP 401: ${_redact(url)}`);
+  }
+  st.consec401 = 0;
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${_redact(url)}`);
   return r.json();
 }
 

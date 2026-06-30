@@ -11,7 +11,7 @@ import YahooFinance from 'yahoo-finance2';
 import { query, isDbAvailable } from './db.js';
 import { getAlpacaAssets } from '../brokers/alpaca.js';
 
-const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 // Added 'ARCA' + 'BATS' (2026-05-27): the original {NYSE,NASDAQ}-only filter
 // silently excluded *every* major sector + leveraged ETF that trades on NYSE

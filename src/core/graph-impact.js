@@ -12,7 +12,7 @@ import YahooFinance from 'yahoo-finance2';
 import { getSympathyTrades } from './graph.js';
 import { query, isDbAvailable } from './db.js';
 
-const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 
 const THRESHOLD = 3; // % move considered "significant"
 

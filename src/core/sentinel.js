@@ -27,7 +27,7 @@ import {
   insertSentinelRun, insertPendingAction, getSentinelRecipients,
 } from './db.js';
 
-const yf         = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
+const yf         = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ─── Secret validation ────────────────────────────────────────────────────────

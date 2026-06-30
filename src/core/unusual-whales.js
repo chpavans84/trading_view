@@ -360,10 +360,13 @@ export async function getTopMovers({ direction = 'gainers', limit = 20 } = {}) {
   const json = await uw('/market/movers', {}, 'movers');
   if (!json?.data) return null;
   const d = json.data;
+  // UW renamed the keys (gainers → top_gainers, losers → top_losers) — accept both.
+  // The old names made this return [] forever; the Top Movers widget sat silently
+  // empty (caught in the 2026-06-12 endpoint-data audit).
   let list;
-  if (direction === 'losers')  list = d.losers       || [];
+  if (direction === 'losers')  list = d.top_losers  || d.losers  || [];
   else if (direction === 'active') list = d.most_active || [];
-  else                         list = d.gainers      || [];
+  else                         list = d.top_gainers || d.gainers || [];
   return list.slice(0, limit).map(m => ({
     ticker:         m.ticker,
     price:          m.price,

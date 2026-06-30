@@ -34,7 +34,9 @@ export async function runPendingMigrations() {
   let runner;
   try {
     const mod = await import('node-pg-migrate');
-    runner = mod.default ?? mod;
+    // v8 exports the runner as a NAMED export `runner`; older versions used `default`.
+    runner = mod.runner ?? mod.default ?? mod;
+    if (typeof runner !== 'function') throw new Error('node-pg-migrate runner export not found');
   } catch (e) {
     // Module not installed (e.g. production deploy without devDeps) — that's fine.
     // Skip migrations and let boot proceed with the baseline schema.
