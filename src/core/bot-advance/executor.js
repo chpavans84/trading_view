@@ -17,10 +17,12 @@
 import cron from 'node-cron';
 import { query, isDbAvailable } from '../db.js';
 import { decryptCredential } from '../crypto.js';
-import { placeQuickTrade, closePosition, getLatestPrice, getUserPositions } from '../trader.js';
+import { placeQuickTrade, closePosition, getLatestPrice, getUserPositions, pollOrderFill } from '../trader.js';
 import { placeTigerOrder, closeTigerPosition, getTigerQuote } from '../tiger.js';
 import { sendTelegram } from '../telegram.js';
 import { getRule } from './entry-rules.js';
+import { computeSlippageCents } from './slippage.js';
+import { estimateRoundTripCost } from './costs.js';
 
 const ADVANCE_PREFIX = '🧪';
 const DECISION_FRESHNESS_MIN = 6;
@@ -327,10 +329,53 @@ async function _openOneSymbol(bot, creds, d) {
       await query(`UPDATE bot_advance_trades SET status='failed', exit_reason='broker_skip' WHERE id=$1`, [pendingId]);
       return rawOrder;
     }
-    const order = _normalizeOrder(rawOrder, price);
+    // ── ORDER-PATH FIX (BUGFIXES_ORDER_PATH.md BUG 1, applied 2026-06-12) ──
+    // NO scan-price fallback for the open decision: only a REAL broker fill may
+    // promote pending → open. The old fallback fabricated entries at stale scan
+    // prices (HUT −$4,754 "1-minute" trade) that the broker never executed.
+    const order = _normalizeOrder(rawOrder, null);
+    // Persist order_id on the pending row NOW, so a crash/timeout leaves a
+    // resolvable row (the stale-pending sweeper re-polls it next tick).
+    if (order.order_id) {
+      await query(`UPDATE bot_advance_trades SET order_id=$1 WHERE id=$2`, [order.order_id, pendingId]);
+    }
+
+    if (!(order.fill_price > 0) && bot.broker === 'alpaca' && order.order_id) {
+      // Market orders fill async — poll the broker for the real outcome.
+      const polled = await pollOrderFill(order.order_id, { timeoutMs: 8000 });
+      if (polled.status === 'filled') {
+        order.fill_price = polled.fill_price;
+        order.fill_qty   = polled.fill_qty || qty;
+      } else if (['rejected', 'canceled', 'expired', 'done_for_day'].includes(polled.status)) {
+        await query(`UPDATE bot_advance_trades SET status='failed', exit_reason=$1 WHERE id=$2`,
+          [`broker_${polled.status}`.slice(0, 30), pendingId]);
+        return { action: 'broker_' + polled.status, symbol };
+      } else {
+        // Still working after timeout — leave the row PENDING (dedup blocks a
+        // duplicate buy); the sweeper resolves it on a later tick. Never open blind.
+        console.warn(`[bot-advance/exec] bot ${bot.id} ${symbol}: order ${order.order_id} unfilled after poll (${polled.status}) — leaving pending`);
+        return { action: 'pending_unfilled', symbol, order_id: order.order_id };
+      }
+    }
     if (!(order.fill_price > 0)) {
       await query(`UPDATE bot_advance_trades SET status='failed', exit_reason='no_fill_price' WHERE id=$1`, [pendingId]);
       return { action: 'error', error: 'order returned no fill price' };
+    }
+
+    // BUG 3 + order-path #2 (2026-06-14): record TRUE execution slippage = fill
+    // vs the live quote THIS executor fetched and sized the order against
+    // (`price`, line ~290 — divergence-validated against the scan cache).
+    //   Previously used rawOrder.estimated_price, a SEPARATE quote re-fetched deep
+    // inside trader.js/placeQuickTrade. That value was stale/wrong for some names and
+    // produced absurd "slippage" — NUVL −1750¢ (−14% of price), GLXY −204¢ (−6%) on
+    // 2026-06-13 — i.e. it measured decision-anchor drift, not execution. The
+    // executor's own `price` is the honest reference.
+    //   Sanity-clamp: a liquid market order can't realistically slip >5%/share; beyond
+    // that the reference is bad, so record null rather than a fictional number.
+    const expectedPx = Number(price) > 0 ? Number(price) : (Number(rawOrder?.estimated_price) || null);
+    const slippageCents = computeSlippageCents(order.fill_price, expectedPx);
+    if (slippageCents == null && expectedPx) {
+      console.warn(`[bot-advance/exec] ${symbol}: implausible slippage ref (fill ${order.fill_price} vs ${expectedPx}) — recording null`);
     }
 
     const stopLossPrice = +(order.fill_price * (1 - rule.exits.hard_sl_pct)).toFixed(2);
@@ -343,7 +388,7 @@ async function _openOneSymbol(bot, creds, d) {
       ? (d.entry_rule === 'ml_v2_intelligence' ? rawScore : rawScore / 100)
       : null;
 
-    // Promote pending → open with full fill data
+    // Promote pending → open with full REAL fill data
     await query(`
       UPDATE bot_advance_trades
          SET status='open',
@@ -351,9 +396,10 @@ async function _openOneSymbol(bot, creds, d) {
              qty=$2, entry_price=$3, dollars_invested=$4,
              stop_loss_price=$5,
              entry_score=$7,
+             slippage_cents=$8,
              opened_at=NOW()
        WHERE id=$6
-    `, [order.order_id, qty, order.fill_price, +(qty * order.fill_price).toFixed(2), stopLossPrice, pendingId, entryScore]);
+    `, [order.order_id, qty, order.fill_price, +(qty * order.fill_price).toFixed(2), stopLossPrice, pendingId, entryScore, slippageCents]);
 
     // For backwards compat / display, set current_trade_id to most-recent open trade
     await query(`UPDATE bots_advance SET current_trade_id=$1, updated_at=NOW() WHERE id=$2`, [pendingId, bot.id]);
@@ -427,7 +473,15 @@ async function _manageOnePosition(bot, trade) {
   if (!exitReason) {
     const hardSlUsd = dollarsInv * Number(trade.hard_sl_pct);
     const trailFraction = Number(trade.trail_pct) / 100;
-    const trailMinPeak = dollarsInv * 0.01;  // 1% peak gate before trail engages
+    // COST-AWARE trail arming (2026-06-19). The old 1% gate armed the trail almost
+    // immediately, so a 30% give-back of a tiny +1% peak exited on intraday noise
+    // within minutes (the retrospective's 42-min scalping — 53/56 exits, +0.4% avg
+    // that loses money after fees). Now the trail only engages once peak profit has
+    // cleared BOTH the round-trip platform cost (×3) AND a meaningful gain (default
+    // +4% of notional) — letting winners run to the time stop. Tunable: rules.exits.trail_arm_pct.
+    const rtCost   = estimateRoundTripCost(bot.broker, dollarsInv, bot);
+    const armPct   = Number(bot.rules?.exits?.trail_arm_pct ?? 0.04);
+    const trailMinPeak = Math.max(dollarsInv * armPct, rtCost * 3);
 
     if (currentPnl <= -hardSlUsd) {
       exitReason = 'hard_stop';
@@ -450,15 +504,19 @@ async function _manageOnePosition(bot, trade) {
   }
   const order = _normalizeOrder(rawOrder, px);
   const exitPrice = order.fill_price > 0 ? order.fill_price : px;
-  const pnlUsd = +((exitPrice - entry) * qty).toFixed(2);
-  const pnlPct = +(((exitPrice - entry) / entry) * 100).toFixed(3);
+  // NET P&L = gross − estimated round-trip platform charge (2026-06-19). The bot now
+  // books costs, so pnl_usd / cumulative / the daily-loss breaker all reflect reality.
+  const grossPnl = (exitPrice - entry) * qty;
+  const estCost  = estimateRoundTripCost(bot.broker, dollarsInv, bot);
+  const pnlUsd   = +(grossPnl - estCost).toFixed(2);
+  const pnlPct   = +((pnlUsd / dollarsInv) * 100).toFixed(3);
 
   await query(`
     UPDATE bot_advance_trades
        SET status='closed', exit_price=$1, exit_reason=$2,
-           pnl_usd=$3, pnl_pct=$4, peak_pnl_usd=$5, closed_at=NOW()
+           pnl_usd=$3, pnl_pct=$4, peak_pnl_usd=$5, est_cost_usd=$7, closed_at=NOW()
      WHERE id=$6
-  `, [exitPrice, exitReason, pnlUsd, pnlPct, peakPnl, trade.id]);
+  `, [exitPrice, exitReason, pnlUsd, pnlPct, peakPnl, trade.id, estCost]);
 
   // Clear current_trade_id if it pointed at this trade; recompute cumulative PnL
   await query(`
@@ -490,11 +548,56 @@ async function _manageOnePosition(bot, trade) {
 // then (2) try to open new positions if there's room under max_concurrent_positions.
 // The "1 position" model has been retired (current_trade_id is now just a
 // display hint pointing at the most recent open trade).
+/**
+ * Resolve 'pending' rows that have a broker order_id but never promoted —
+ * the poll timed out (or the process died) mid-open. Re-polls the broker:
+ * filled → open with the REAL fill; terminal-failed → failed; still working → leave.
+ * Part of the BUG-1 order-path fix: a pending row is a question for the broker,
+ * never something to guess about.
+ */
+async function _resolveStalePendings(bot) {
+  if (bot.broker !== 'alpaca') return;
+  // Safe without a freshness filter: processBotAdvance is serialized per bot
+  // (_runningBots) and this sweep runs BEFORE any new pending is inserted, so a
+  // pending row with an order_id here is always from a PREVIOUS tick.
+  const { rows } = await query(`
+    SELECT id, symbol, order_id, qty, hard_sl_pct
+      FROM bot_advance_trades
+     WHERE bot_id=$1 AND status='pending' AND order_id IS NOT NULL
+  `, [bot.id]).catch(() => ({ rows: [] }));
+  for (const p of rows) {
+    try {
+      const polled = await pollOrderFill(p.order_id, { timeoutMs: 3000 });
+      if (polled.status === 'filled' && polled.fill_price > 0) {
+        const fillQty = polled.fill_qty || Number(p.qty) || 0;
+        const stop = p.hard_sl_pct != null ? +(polled.fill_price * (1 - Number(p.hard_sl_pct))).toFixed(2) : null;
+        await query(`
+          UPDATE bot_advance_trades
+             SET status='open', qty=$1, entry_price=$2, dollars_invested=$3,
+                 stop_loss_price=COALESCE($4, stop_loss_price), opened_at=NOW()
+           WHERE id=$5 AND status='pending'`,
+          [fillQty, polled.fill_price, +(fillQty * polled.fill_price).toFixed(2), stop, p.id]);
+        console.log(`[bot-advance/exec] bot ${bot.id} resolved stale pending ${p.symbol} → OPEN @ $${polled.fill_price}`);
+      } else if (['rejected', 'canceled', 'expired', 'done_for_day'].includes(polled.status)) {
+        await query(`UPDATE bot_advance_trades SET status='failed', exit_reason=$1 WHERE id=$2 AND status='pending'`,
+          [`broker_${polled.status}`.slice(0, 30), p.id]);
+        console.log(`[bot-advance/exec] bot ${bot.id} resolved stale pending ${p.symbol} → failed (${polled.status})`);
+      }
+      // still working → leave pending; dedup keeps blocking duplicates
+    } catch (e) {
+      console.warn(`[bot-advance/exec] stale-pending resolve failed for trade ${p.id}:`, e.message);
+    }
+  }
+}
+
 export async function processBotAdvance(bot) {
   if (_runningBots.has(bot.id)) return { skipped: true, reason: 'inflight' };
   _runningBots.add(bot.id);
   try {
     if (bot.shadow_mode) return { skipped: true, reason: 'shadow_mode' };
+
+    // 0. Resolve any pending rows whose broker order outcome is still unknown
+    await _resolveStalePendings(bot).catch(() => {});
 
     // 1. Manage all currently open positions (exit checks)
     const { rows: openTrades } = await query(

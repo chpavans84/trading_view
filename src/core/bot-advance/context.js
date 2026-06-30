@@ -21,6 +21,7 @@
  */
 
 import { query } from '../db.js';
+import { getLatestPrice } from '../trader.js';
 
 /**
  * Fetch signal data for a candidate symbol.
@@ -44,7 +45,7 @@ export async function buildContext(symbol) {
       SELECT score, grade, signals, scored_at
         FROM conviction_scores
        WHERE symbol = $1
-         AND scored_at > NOW() - INTERVAL '24 hours'
+         AND scored_at > NOW() - INTERVAL '90 minutes'  -- was 24h: stale conviction anchored entries to dead prices (BUG 2)
        ORDER BY scored_at DESC
        LIMIT 1
     `, [sym]),
@@ -136,8 +137,24 @@ export async function buildContext(symbol) {
   const composite = csRow?.score != null ? Number(csRow.score) : null;
 
   const week52High = uRow?.week_52_high    != null ? Number(uRow.week_52_high)    : null;
-  const lastPrice  = liqRow?.last_price    != null ? Number(liqRow.last_price)
+  let lastPrice  = liqRow?.last_price    != null ? Number(liqRow.last_price)
                      : (uRow?.universe_price != null ? Number(uRow.universe_price) : null);
+  let priceIsLive = false;
+
+  // BUG 2 fix (BUGFIXES_ORDER_PATH.md, applied 2026-06-12): backtest_prices.close is
+  // the PRIOR day's close during a session — price-gated rules (52w-high etc.) were
+  // evaluating on dead data, then the live-quote-divergence guard rejected at execute
+  // time ("live_quote_diverged_up_X%"). If the daily bar isn't from today's ET trading
+  // day, pull a live quote so decisions anchor to the market that actually exists.
+  try {
+    const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const liqDate = liqRow?.last_date ? String(liqRow.last_date).slice(0, 10) : null;
+    if (liqDate !== todayET) {
+      const q = await getLatestPrice(sym);
+      const live = Number(q?.mid || q?.ask || q?.bid);
+      if (live > 0) { lastPrice = live; priceIsLive = true; }
+    }
+  } catch (_) { /* live quote unavailable — keep daily close */ }
 
   return {
     symbol:    sym,
@@ -150,6 +167,7 @@ export async function buildContext(symbol) {
     indicators: {
       liquidity: {
         last_price:         lastPrice,
+        price_is_live:      priceIsLive,
         last_date:          liqRow?.last_date ?? null,
         adv_dollar_vol_30d: uRow?.avg_volume_30d != null ? Number(uRow.avg_volume_30d) : null,
       },

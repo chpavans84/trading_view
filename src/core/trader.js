@@ -238,6 +238,49 @@ export async function cancelOrder(orderId) {
   return { cancelled: orderId };
 }
 
+/**
+ * pollOrderFill — poll an Alpaca order until it reaches a terminal state.
+ * THE order-path fix (BUGFIXES_ORDER_PATH.md BUG 1): market orders fill async, so
+ * `POST /v2/orders` returns with filled_avg_price=null; callers who treated the
+ * submit response as a fill created phantom positions at fabricated prices
+ * (HUT −$4,754 "in 1 minute" was a stale-price entry that never existed).
+ *
+ * Returns { status, fill_price, fill_qty, order }:
+ *   status 'filled'                          → real broker fill (use these numbers)
+ *   status 'rejected'|'canceled'|'expired'   → terminal failure (mark trade failed)
+ *   anything else (still 'new'/'accepted'…)  → NOT filled within timeout; caller
+ *     must keep the trade 'pending' and re-poll later — never promote to open.
+ */
+export async function pollOrderFill(orderId, { timeoutMs = 8000, intervalMs = 600, live = false } = {}) {
+  const TERMINAL_FAIL = ['rejected', 'canceled', 'expired', 'done_for_day'];
+  const t0 = Date.now();
+  let last = null;
+  for (;;) {
+    try {
+      last = await alpaca('GET', `/v2/orders/${orderId}`, undefined, { live });
+      if (last?.status === 'filled') {
+        return {
+          status: 'filled',
+          fill_price: parseFloat(last.filled_avg_price) || null,
+          fill_qty:   parseFloat(last.filled_qty) || null,
+          order: last,
+        };
+      }
+      if (TERMINAL_FAIL.includes(last?.status)) {
+        return { status: last.status, fill_price: null, fill_qty: null, order: last };
+      }
+    } catch (_) { /* transient API hiccup — keep polling until timeout */ }
+    if (Date.now() - t0 >= timeoutMs) break;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return {
+    status: last?.status || 'poll_timeout',
+    fill_price: parseFloat(last?.filled_avg_price) || null,
+    fill_qty:   parseFloat(last?.filled_qty) || null,
+    order: last,
+  };
+}
+
 export async function cancelAllOrders() {
   await alpaca('DELETE', '/v2/orders');
   return { cancelled: 'all' };

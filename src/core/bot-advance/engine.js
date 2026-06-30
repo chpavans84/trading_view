@@ -21,6 +21,7 @@ import {
   getRule,
 } from './entry-rules.js';
 import { buildContext } from './context.js';
+import { checkRegimeGate } from './regime-gate.js';
 import { getSiblingBotsActivity } from '../../repositories/bots-repo.js';
 import { getBrokerOpenSymbols } from '../drift-detector.js';
 
@@ -152,6 +153,21 @@ export async function scanBotAdvance(bot) {
       }
     }
 
+    // 2026-06-14 — MARKET REGIME GATE (promoted from BOT_SIM after the
+    // multi-regime replay: not trading while SPY < 200d turned COVID −12%→−5%
+    // and the 2022 bear −7%→0%). Blocks NEW entries only; never adds risk.
+    // Fails open on data gaps. Per-bot opt-out: rules.risk.regime_gate_enabled=false.
+    const gate = await checkRegimeGate(bot);
+    if (gate.blocked) {
+      await logDecision({
+        botId:      bot.id,
+        action:     'skip_regime_gate',
+        notes:      `risk-off regime — new entries paused. ${gate.detail}`,
+        shadowMode: bot.shadow_mode,
+      });
+      return { action: 'skip_regime_gate', regime: gate.regime, detail: gate.detail };
+    }
+
     const enabledRules = Array.isArray(bot.enabled_rules) ? bot.enabled_rules : [];
     if (!enabledRules.length) {
       await logDecision({
@@ -173,6 +189,8 @@ export async function scanBotAdvance(bot) {
       capitalUsd: Number(bot.capital_usd) || 10000,
       maxPositionUsd: _maxPositionUsd,
       maxPrice: Math.floor(_maxPositionUsd / 2),   // need to afford ≥ 2 shares
+      // Restrict candidates to S&P500/NDX100 (default ON; set rules.universe.index_only=false to disable)
+      indexOnly: bot.rules?.universe?.index_only !== false,
     };
     const { tickers: candidates, breakdown } = await buildAdvanceCandidateUniverse(enabledRules, botCtx);
     if (!candidates.length) {

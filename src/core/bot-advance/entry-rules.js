@@ -385,6 +385,18 @@ export function matchEntryRules(ctx, enabledRules) {
  *                                    Shape: { maxPrice, capitalUsd, ... }
  * @returns {Promise<string[]>}      deduplicated, uppercase tickers
  */
+// S&P 500 ∪ NASDAQ-100 membership, cached 1h. The bot restricts its candidate
+// universe to these ~516 liquid large-caps (2026-06-19, user request) instead of
+// the whole 8k+ tradable_universe — which pulled in junk micro-caps/ETFs.
+let _indexSet = null, _indexSetAt = 0;
+async function getIndexUniverse() {
+  if (_indexSet && Date.now() - _indexSetAt < 3_600_000) return _indexSet;
+  const { rows } = await query(`SELECT symbol FROM index_membership WHERE in_sp500 OR in_ndx100`);
+  _indexSet = new Set(rows.map(r => String(r.symbol).toUpperCase()));
+  _indexSetAt = Date.now();
+  return _indexSet;
+}
+
 export async function buildAdvanceCandidateUniverse(enabledRules, botCtx = {}) {
   const enabled = new Set(enabledRules || []);
   const active = ENTRY_RULES.filter(r => enabled.has(r.id));
@@ -403,7 +415,16 @@ export async function buildAdvanceCandidateUniverse(enabledRules, botCtx = {}) {
       breakdown[r.id] = 'ERROR';
     }
   }
-  return { tickers: [...universe], breakdown };
+
+  let tickers = [...universe];
+  // Restrict to S&P 500 / NASDAQ-100 unless explicitly disabled (default ON).
+  if (botCtx.indexOnly !== false) {
+    const idx = await getIndexUniverse();
+    const before = tickers.length;
+    tickers = tickers.filter(t => idx.has(t));
+    breakdown._index_filter = `${before} → ${tickers.length} (S&P500/NDX100 only)`;
+  }
+  return { tickers, breakdown };
 }
 
 /**
