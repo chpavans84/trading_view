@@ -1,6 +1,11 @@
 # TradingView MCP — Claude Instructions
 
-~99 tools total: ~80 for reading/controlling a live TradingView Desktop chart via CDP (port 9222), ~9 Moomoo broker tools, **5 portfolio/health/validation tools** (`portfolio_advisor`, `bot_verdict`, `system_health`, `signal_track_record`, `hedge_recommendation`), plus **5 Unusual Whales + Benzinga tools added 2026-05-24** (`uw_flow_get`, `uw_insider_get`, `uw_congress_get`, `uw_top_movers_get`, `benzinga_news_get` — see Decision Tree below).
+> **READ FIRST: [`GOTCHAS.md`](GOTCHAS.md)** — invariants + every past bug (so none recurs) + deploy/code discipline.
+> **Dashboard tabs/widgets/permissions live in [`src/web/registry.js`](src/web/registry.js)** (single source of truth — `server.js` imports them). Add a tab/widget/endpoint THERE, then run `npm run test:contract` (walks every endpoint; fails on 404/500).
+> **When you fix a bug:** add one line to `GOTCHAS.md` + a regression test. A mistake should only be possible once.
+> Data platform (OLTP→Bronze→Silver→Gold lake, DuckDB): see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+~101 tools total: ~80 for reading/controlling a live TradingView Desktop chart via CDP (port 9222), ~9 Moomoo broker tools, **5 portfolio/health/validation tools** (`portfolio_advisor`, `bot_verdict`, `system_health`, `signal_track_record`, `hedge_recommendation`), **5 Unusual Whales + Benzinga tools added 2026-05-24** (`uw_flow_get`, `uw_insider_get`, `uw_congress_get`, `uw_top_movers_get`, `benzinga_news_get` — see Decision Tree below), plus **2 log-monitoring tools added 2026-06-12** (`log_sources`, `log_tail` — list/tail PM2 + launchd job logs with level classification and grep; same backend as the 📜 Log Monitor panel on the Health tab; use when diagnosing "why is X broken").
 
 ## Decision Tree — Which Tool When
 

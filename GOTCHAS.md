@@ -1,0 +1,251 @@
+# GOTCHAS — read this FIRST (high-signal, low-noise)
+
+Invariants + every past mistake, so none recurs. Keep this SHORT. When a new bug is found:
+add a one-line entry here **and** a regression test. A mistake should only be possible once.
+
+## Deploy / ops discipline (financial system — be careful)
+- **NEVER `pm2 restart` without explicit go-ahead.** Code can land on disk; deploy is separate.
+- **NEVER `pkill`.** Use `pm2 restart trading-dashboard trading-staging` (3 procs: bot + dashboard + staging).
+- After editing `.env`: `pm2 restart <app> --update-env` (plain restart won't re-read env).
+- Bootstrap files (sw.js etc.) MUST send no-cache headers — Cloudflare caches 24h (burned us 2026-05-21).
+
+## Web security
+- **App shells are auth-gated server-side** (added 2026-06-11): `/`, `/index.html`, `/mobile.html`,
+  `/mobile-v1.html` → 302 `/login.html` unless `req.session.authenticated`. Before: the full 1.6MB
+  dashboard (all logic/endpoints inline) shipped pre-login; index.html only bounced client-side after
+  download. Gate lives in server.js right after the mobile redirect, BEFORE express.static. Keep
+  login/register/terms/sw.js/manifest/css/icons public (login page + PWA need them). Regression tests
+  in registry-contract.test.js ("pre-auth shell gate"). Don't add new HTML shells without gating them.
+- **yahoo-finance2 spams `console.error(url)`** (with the crumb token!) on every non-OK response —
+  server.js wraps console.error at boot to drop bare query1/query2.finance.yahoo.com URL lines (the lib
+  also throws; callers log real errors). If Yahoo debugging is ever needed, comment out the filter.
+
+## Code-change discipline
+- **Read before edit. One file at a time.** Don't guess code state; grep before removing CSS/JS.
+- Stay in request scope. No speculative "while I'm here" fixes. No faith-based changes — backtest before ship.
+- **New tab/widget → add it to `src/web/registry.js`** (single source of truth: ALL_TABS / ALL_WIDGETS /
+  DEFAULT_PERMISSIONS + ENDPOINT_CONTRACTS). server.js imports these; the contract test walks them.
+  Don't redeclare permission lists anywhere else. Run `npm run test:contract` after dashboard changes.
+- Never silently drop user-visible rows to "clean up" — enrich/soft-delete/ask instead (sell-rows-vanished bug).
+
+## State correctness (the "how can I sell?" class — DB is NOT authoritative)
+- **`sentiment.js market_status` is a DISPLAY STRING** ('🟢 Market OPEN' / '🟡 Pre-market' / '🔴 After
+  hours' / 'Market closed (weekend)') — never a bare enum. Compare with `.includes('OPEN')`, NOT
+  `=== 'open'`. The Home pill did the latter and showed MARKET CLOSED 24/7 from 2026-05-25 to
+  2026-06-12 before anyone noticed. If a status compare looks exact-match, check what the API really returns.
+- **Cross-check the BROKER for any position / cash / P&L assertion** (Alpaca /v2/positions, Tiger, Moomoo).
+  Phantom-position bug: DB said 5 open, broker said 0 → bot paralyzed.
+- **Cross-check `NOW()` for any date/time assertion.** Wrong-"today" bug shipped once.
+- Earnings/market-hours: half-days & off-by-one (entry vs exit) have bitten — verify against calendar.
+
+## Data / timezone / shell
+- **ET vs UTC:** bars & "business day" partitions use America/New_York. Set session TZ; `window_start`/
+  `participant_timestamp` are nanoseconds (`/1e9`).
+- **macOS bash is 3.2** — no `declare -A` (assoc arrays), no GNU `timeout`. Write portable shell.
+- **BSD `date`: `-v` adjustments MUST come BEFORE `-f`** on Darwin 25 (Mac Studio). `date -j -f %F X -v+1d +%F`
+  silently ignores -v AND the output format (worked on the old Intel macOS) → next_day() returned long-format
+  → lexical date compares failed → ALL daily pulls (minute/day/trades/news) froze at 2026-06-08 for 3 days,
+  saying "up to date". Correct order: `date -j -v+1d -f %Y-%m-%d "$1" +%Y-%m-%d`. After ANY migration/OS
+  update, smoke-test date math in cron scripts.
+- **Do NOT `source .env` in bash** — `DASHBOARD_PASSWORD` contains a `$`-sequence that `set -u` aborts on.
+  Node scripts load `.env` via dotenv themselves; in bash read single vars with `grep|cut`.
+- Polygon REST single-object endpoints (ticker details) return one object, not an array — handle both,
+  or files write empty `[]` (silent-empty bug). Verify a sample file has content after any backfill.
+- A backtick inside a SQL comment inside a JS template literal crashes the file (screener freeze, 6 days).
+
+## DuckDB / lake
+- DuckDB reserved words bite as column aliases: **`dec`, `rows`** (and others). Alias as `decile`,
+  `n_rows`, etc. — `SELECT count(*) rows` → Parser Error.
+- DuckDB is EMBEDDED (no host:port). SQL interface: catalog `/Volumes/Archive/lake.duckdb` (83 views);
+  `duckdb <file>` CLI, `duckdb <file> -ui` browser UI, or DBeaver (DuckDB driver must be ≥1.5.x to open
+  a 1.5.3 file). SINGLE-WRITER — open read-only for shared/GUI access.
+- Cross-source validation: DuckDB `ATTACH 'postgresql://localhost/tradingbot' AS pg (TYPE POSTGRES,
+  READ_ONLY)` then join lake views vs `pg.public.*`. See `validation.sql` (OLTP↔lake parity, split
+  continuity, survivorship, freshness — all verified).
+- Postgres conn (DBeaver): localhost:5432 / db `tradingbot` / user `pavan` / no password (local trust).
+
+## Index constituents
+- S&P 500 + NASDAQ-100 membership lives in `index_membership` (symbol, in_sp500, in_ndx100), built by
+  `scripts/etl/ingest-index-membership.mjs`: S&P500 from datahub CSV (503), NASDAQ-100 from Wikipedia (~101).
+  The old `src/research/sp500.js` lists are STALE/incomplete (361/79) — don't use them for membership.
+  Class shares normalize to DOTS here (BRK.B / BF.B, not BRK-B). The screener (`/api/screener/ownership`)
+  INNER JOINs this table → restricted to ~516 names. Refresh anytime for reconstitutions (wired daily).
+
+## MCP chat tools (fixed 2026-06-12)
+- `benzinga_news_get` queried `conviction_scores.factor_breakdown` — a column that NEVER existed
+  (it's `breakdown`, and neither it nor `signals` holds news_* keys). The tool errored on every call
+  since it shipped. Now reads the live `benzinga_news` table (per-article sentiment aggregate) +
+  `signals->bz_*` enrichment. LESSON: when adding an MCP tool, run it once against real data — a
+  tool that never worked looks identical to one that "rarely has data".
+- `chart_set_symbol`/`quote_get` returned a UNISWAP token for "NVDA": bare tickers resolve
+  ambiguously in TradingView AND the user's chart can be parked on anything. Fix: tools/chart.js
+  `resolveEquitySymbol()` pins bare 1-5 letter tickers found in tradable_universe to NASDAQ:/NYSE:.
+  ETFs (ARCA/BATS), futures (ES1!), prefixed and crypto symbols pass through untouched.
+
+## Data sources
+- **`backtest_prices.volume` IEX-contamination — FIXED 2026-06-19.** History: the 5 PM `refresh-prices`
+  cron (`src/research/refresh-prices.js`) wrote volume from Alpaca's free **IEX** feed (`feed=iex`) ≈ **3%
+  of consolidated** (NVDA ~5M vs real ~150M, ~30× low for recent days). This 30×-deflated the bot's ADV /
+  rvol (`getLiquidityProfile` in `bot-indicators.js`, `bot-setup-classifier.js`) and wrongly tripped the
+  ≥$5M liquidity gate. FIX (two parts): (1) `refresh-prices.js` now writes **OHLC/close only** — `volume`
+  column is left untouched on conflict, NULL on insert; (2) `polygon-daily-incremental.sh` syncs the
+  trailing 15d of `backtest_prices.volume` FROM THE LAKE `market_bars_daily` (Polygon consolidated, same
+  source `screener_volume` uses). ⇒ `backtest_prices.volume` is now correct for days the lake covers;
+  the **latest 1-2 days are NULL** until the next nightly flatfile lands (lake lags 1 day) — readers must
+  treat NULL volume as "unknown", never 0. SIP feed needs paid Alpaca ($99/mo); user is no-API-spend, so
+  IEX was structural — hence lake-as-authority rather than upgrading the feed.
+- **Moomoo OpenD is the PRIMARY fundamentals source** (broker, free, local) via `getSnapshots()` in
+  `moomoo-tcp.js` (Qot_GetSecuritySnapshot 3203) → `moomoo_fundamentals` table. Gives TRAILING PE
+  (`peTTMRate`), EPS, PB, shares, market cap. **NO forward PE in the protocol** — the Moomoo *app*
+  computes forward PE from analyst estimates the API doesn't expose, so forward PE stays Yahoo/universe
+  (won't match the app's number). Loss-making names return negative PE → stored as is_loss=true ("Loss").
+  Screener PE COALESCE order: Moomoo → Yahoo → tradable_universe. OpenD must be up for the daily ingest;
+  the COALESCE fallback makes a down OpenD degrade gracefully. Snapshot is rate-limited (~400 syms/30s).
+- **Lake `market_bars_daily` LAGS by date** (Polygon flatfiles publish late; Polygon being dropped). It's
+  correct in *magnitude* but its newest row can be 2-3 days old → never use it for a "latest day" value
+  (close, today's volume). For latest close use `tradable_universe.last_price` (Alpaca daily, matches
+  Moomoo curPrice to the cent); for latest day volume use Moomoo `getSnapshots().day_volume` (fresh +
+  consolidated). Keep the lake only for historical aggregates (e.g. 30d avg volume). Bit the ownership
+  screener twice (stale 208 close, stale day-vol) — caught by a broker-truth audit.
+- `yahoo-finance2` is **v3**: default export is a CLASS — `import YahooFinance from 'yahoo-finance2'; const yf = new YahooFinance({suppressNotices:['yahooSurvey']});` then `yf.quoteSummary(...)`. The old `yahooFinance.quoteSummary(...)` throws "Call `const yahooFinance = new YahooFinance()` first". (Also: `.historical()` is deprecated/flaky for split-adjustment — use the lake's `build_adjusted` for adjusted prices.)
+- Float + institutional %: `quoteSummary(sym,{modules:['defaultKeyStatistics','majorHoldersBreakdown']})` → floatShares, sharesOutstanding, heldPercentInstitutions, institutionsFloatPercentHeld, heldPercentInsiders. Institutional data is QUARTERLY (13F)/snapshot — no true daily series. ETF-holdings-of-a-stock: NOT available in stack.
+
+## Migrations
+- `node-pg-migrate` v8 exports the runner as a NAMED export `mod.runner` (NOT `mod.default`).
+  migration-runner.js resolves `mod.runner ?? mod.default ?? mod` — auto-migrate-on-boot was silently
+  dead before this (fixed 2026-06-09). If migrations stop auto-applying after a pkg upgrade, check this.
+- Auto-migrate runs `direction: 'up'` on boot → any unapplied migration file applies on next restart.
+  Before deploying/restarting, check `comm -23 <files> <pgmigrations>` for surprises (esp. parked migs).
+
+## Scheduling (macOS)
+- **Every data table needs a SCHEDULED writer — "built once in a session" = silently frozen.**
+  The 2026-06-12 audit found earnings_calendar 12d stale, intraday_bars_1m/daily_intraday_features/
+  sector_rotation/stock_correlations 11d (one-shot scripts never cron'd; sector_rotation's writer
+  wasn't even committed). All now run in polygon-daily-incremental.sh. RULE: when a new table ships,
+  its refresh goes into the daily job IN THE SAME COMMIT, or it doesn't ship.
+- `cron` is unreliable + can't reach `/Volumes/Archive` (TCC). Use **launchd** user agents.
+- A launchd/cron-spawned process needs **Full Disk Access on `/bin/bash`** to write `/Volumes/Archive`.
+- launchd `StandardOutPath` must be in `~/Library/Logs`, NOT the external volume (else exit 78).
+- After editing a `.plist`: `launchctl unload && load` (start alone uses cached config).
+
+## Backtest / ML correctness (see memory: audit-backtest-correctness)
+- Keep feature windows **backward-only** (UW/insider leakage was fixed in v_ml_training_set v3 — don't regress).
+- Live model trains on only ~1yr (recent bull) → regime overfit. Use the 10yr Silver lake for retrains.
+- Use the survivorship-free universe (backtest_prices, 25k incl delisted) — not the 525-symbol set.
+- `stock_predictions` can contain target_dates on weekends/holidays (generation artifact) and symbols
+  that left backtest_prices (renames, e.g. SQ→XYZ) — those rows can NEVER fill actual_price. The
+  `stale_preds` health check excludes non-trading-day targets (fixed 2026-06-12 after a 2,310-row
+  backlog; 2,050 backfilled via the same SQL as the 17:30 ET fallback cron, which only looks back 21d).
+- **The PWA service worker (sw.js, scope `/`) intercepts ALL same-origin /api/* GETs with a 5s
+  abort** — any endpoint slower than 5s gets killed and replaced with `'{}'` 503 → desktop tabs show
+  "Error: fetch failed" (burned 2026-06-12: /api/health/checks takes ~6s). Slow admin endpoints must
+  be in sw.js `SW_BYPASS`. When adding an endpoint that can exceed 5s, add it there + bump CACHE ver.
+
+## Desktop AI chat (claude CLI) — keychain/session trap (fixed 2026-06-12)
+- **Chat history is per-username with a 40-row DB cap** (conversation_history) + 20-msg memory window.
+  Diagnostic chat calls as 'admin' TRIMMED the user's real conversations out (burned 2026-06-12).
+  ALL test/verification calls to /api/chat/desktop MUST send `X-Chat-Test: 1` (answers normally,
+  skips history writes). Never run chat tests against a real user's history without it.
+- The chat shells out to `claude -p` using the user's Max-sub OAuth from the macOS KEYCHAIN.
+  **If the PM2 daemon was spawned by launchd** (boot hook), its children get NO keychain session →
+  CLI prints "Not logged in · Please run /login" **to STDOUT** (stderr empty → looked like a silent
+  exit 1 until 2026-06-12 instrumentation). FIX used: `pm2 save && pm2 kill && pm2 resurrect` from an
+  interactive (keychain-capable) shell. ⚠️ AFTER EVERY REBOOT the launchd hook re-owns pm2 → chat
+  breaks again until either (a) daemon restarted from a terminal, or (b) THE DURABLE FIX: user runs
+  `claude setup-token` once and puts CLAUDE_CODE_OAUTH_TOKEN in .env (the chat spawner passes env
+  through; it only strips ANTHROPIC_API_KEY/AUTH_TOKEN).
+- Diagnosing CLI failures: -p mode errors often go to STDOUT. claude-desktop-chat.js now surfaces both.
+
+## Local AI (Ollama) — fixed 2026-06-12 after being dead since 2026-05-27
+- **Homebrew's ollama formula (0.30.x) ships NO llama-server runner** on this machine → every
+  /api/generate returned HTTP 500 ("llama-server binary not found") while /api/tags worked, so
+  `isOllamaAvailable()` lied. Every localAI call silently fell back to the Anthropic API → dead on
+  exhausted credits (user is no-API-spend) → EOD summaries, briefings, coach chat all dark.
+  FIX: runner binaries are COPIED from /Applications/Ollama.app/Contents/Resources into
+  /opt/homebrew/Cellar/ollama/<ver>/libexec/lib/ollama/. ⚠️ A `brew upgrade ollama` creates a new
+  keg WITHOUT them — re-copy (llama-server, llama-quantize, lib*.dylib, lib*.so, mlx_metal_*) after
+  any upgrade, then `brew services restart ollama`, then test /api/generate (NOT just /api/tags).
+- Ollama.app can't be used headless: quarantined (Gatekeeper needs one GUI launch) and xattr -d
+  on /Applications needs App-Management TCC the shell doesn't have. `cp` out of the bundle works.
+- `localAI()` (src/core/ollama.js): 90s timeout (cold 20GB trading-coach takes ~30s; old 15s
+  timeout guaranteed fallback), tries OLLAMA_MODEL → llama3.2:3b → Anthropic, and NEVER throws —
+  returns {text:null, source:'unavailable'}; callers must skip-on-null (EOD does).
+- Health check for "is local AI really working": curl POST /api/generate with a tiny prompt.
+  /api/tags returning 200 proves nothing.
+
+## Logging (streamlined 2026-06-12 — keep it that way)
+- **pm2-logrotate is installed** (10MB cap, keep 14, compressed, midnight rotate). If pm2 is ever
+  reinstalled, re-run: `pm2 install pm2-logrotate` + the `pm2 set pm2-logrotate:*` settings.
+- **Dead integrations must circuit-break, not retry-and-log.** Anthropic calls go through
+  `src/core/anthropic-breaker.js` (trips 6h on credit/auth errors, logs ONE line); Benzinga has a
+  per-host 401 breaker in `src/core/benzinga.js` (5 consecutive 401s → 12h quiet). Before this,
+  thousands of identical 400/401 lines made the error log unreadable (restart #8 cause was unfindable).
+- **Never log URLs containing tokens** — benzinga logs leaked `token=...` for weeks; `_redact()` now
+  strips token/apiKey query params. Apply the same rule to any new client.
+- yahoo-finance2 instances need `validation: { logErrors: false }` (schema dumps were most of the
+  22MB out-log). All 13 `new YahooFinance(...)` sites have it — copy that pattern for new ones.
+- New code: use `makeLog(tag)` from `src/core/log.js` (timestamp + level + module tag; DEBUG gated
+  by LOG_DEBUG=1) instead of bare console.*. PM2 processes are started with `--time` so stdout gets
+  timestamps; keep that flag if a process is ever re-created.
+- Long-running batch jobs (Python multiprocessing!): a finished/killed parent can leave a
+  resource_tracker holding the log file open — `rm` won't free the space. `lsof <log>` before delete.
+- `log_growth` health check watches ~/.pm2/logs + ~/Library/Logs (warn >500MB, fail >2GB).
+- Daily script trims `polygon-incremental_*.log` older than 14 days.
+- **Log Monitor**: 📜 panel on the Health tab + MCP `log_sources`/`log_tail` tools — BOTH wrap
+  `src/core/log-monitor.js` (whitelisted roots pm2:/jobs:, tail reads max 1MB from file END, never
+  the whole file). Add new log locations THERE, not in the route/tool. Claude Desktop must be
+  restarted to see newly added MCP tools.
+
+## Bot decision quality (retrospective + fixes 2026-06-19)
+- **Universe restricted to S&P500∪NDX100** (~516 names) in `buildAdvanceCandidateUniverse`
+  (entry-rules.js) — cached index_membership filter, default ON, per-bot opt-out via
+  `rules.universe.index_only=false`. Stops the bot scanning 8k+ junk micro-caps/ETFs.
+- **Platform charges now booked**: `src/core/bot-advance/costs.js` (alpaca ~0.10% RT, tiger ~0.20%,
+  override `rules.costs.round_trip_pct`). Close records NET pnl_usd (gross − est cost) + `est_cost_usd`
+  column. NOTE: historical pnl is GROSS, new trades NET — mixed when comparing across 2026-06-19.
+- **Cost-aware trailing stop (THE scalping fix):** old trail armed at +1% peak then exited on a 30%
+  give-back of tiny profit → 42-min scalps (retrospective: bot 4 = 53/56 trail exits, +0.4% avg that
+  loses to fees). Now arms only after peak clears max(4% notional, 3× round-trip cost) — executor.js
+  `_manageOnePosition`. Tunable `rules.exits.trail_arm_pct`. Modeled: 60% of last week's scalps → holds.
+- Trail trails on P&L not price; entries (ml_v2/insider/52w) are ~flat-positive — the EXIT was the
+  problem. Bot 2 (tiger) was PAUSED 2026-06-19 (left paused; Tiger API also throttled).
+
+## Data quality + health checks (fixed 2026-06-17)
+- **Split-adjustment glitches in backtest_prices:** the nightly Yahoo refresh can leave a few
+  UNADJUSTED rows among split-adjusted ones (KLAC 06-10/06-11 were ~10× the neighbors → 898% fake
+  move on the heatmap). Detector: rows >4× or <0.25× the symbol's 11-day median. Fix: ÷ split ratio
+  on OHLC, × ratio on volume for the offending rows. WATCH: the refresh may re-introduce them — a
+  systematic split-aware fix in the refresh is the real follow-up.
+- The heatmap (/api/market/sp500-heatmap) is PREVIOUS-CLOSE grade (last completed session, 10-min
+  cache) — not live intraday. Looking "stale" during market hours is by design.
+- **The 5 PM ET price refresh is an IN-PROCESS cron in trading-dashboard** — a restart at/around
+  5 PM ET silently skips that day (left backtest_prices stuck at 06-16 → "old numbers" 2026-06-17).
+  FIX: a startup catch-up (server.js, ~45s after boot, prod only) re-runs refreshPrices if
+  backtest_prices.max(price_date) < the most recent closed weekday. Manual catch-up:
+  `node -e "import('./src/research/refresh-prices.js').then(m=>m.refreshPrices({daysBack:5}))"`.
+  Real long-term fix would be moving it to a launchd job (independent of process restarts).
+- **bot_scan health check** now unions bot_decisions (legacy, dormant) + bot_advance_decisions
+  (active fleet). It used to watch only the legacy table → false FAIL after the legacy fleet was
+  stopped while the active bots scanned fine. Always point heartbeat checks at the ACTIVE table.
+
+## Bot-advance slippage metric (fixed 2026-06-14, order-path #2)
+- `slippage_cents` must be measured against the executor's OWN live quote (`price`, the
+  divergence-validated `_getLivePrice` at ~executor.js:290 that the order was sized on), NOT
+  `rawOrder.estimated_price` — that is a SEPARATE quote re-fetched inside trader.js/placeQuickTrade
+  and was stale/wrong for some names (NUVL −1750¢ = −14%/share, GLXY −6% on 2026-06-13). It was
+  measuring decision-anchor drift, not execution. Fix at executor.js:~364.
+- slippage_cents is a PURE METRIC — never used in any trade decision; safe to change/clamp.
+- New code clamps |fill−ref|/ref > 5% to null (honest "unknown" beats a fictional number).
+
+## Bot-advance market regime gate (deployed 2026-06-14, from BOT_SIM)
+- `src/core/bot-advance/regime-gate.js` blocks NEW entries when SPY < its 200-day SMA
+  (risk-off, regimes R3/R4). Validated in sim: turned COVID −12%→−5%, 2022 bear −7%→0%.
+- It can ONLY block — never places a trade. Fails OPEN on missing SPY data (won't freeze the bot).
+- Per-bot opt-out: `rules.risk.regime_gate_enabled = false`. Logs `skip_regime_gate` decisions.
+- Computes from backtest_prices SPY (needs the daily refresh current). Cached per SPY session.
+- Wired in engine.js right after the daily-loss circuit breaker; runs in trading-dashboard process.
+
+## Platform facts (current)
+- Compute is the **Mac Studio M3 Ultra (28-core/96GB)** since 2026-06-08. Apple Silicon `/opt/homebrew`.
+- Lake: Bronze (Node) `/Volumes/Archive/bronze/oltp`; Silver/Gold (Python `lake/`, DuckDB) `/Volumes/Archive/{silver,gold}`.
+- Engine is **DuckDB-first** (no Spark — slower single-node).

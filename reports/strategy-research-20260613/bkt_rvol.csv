@@ -1,0 +1,17 @@
+regime,bucket,n,win5,avg_ex5,med_ex5
+R4_down_vol,spike_down,3711,53.3,-0.51,-0.619
+R2_up_vol,spike_down,1564,51.5,0.174,-0.155
+R4_down_vol,spike_up,1898,43.6,-2.535,-1.285
+R3_down_calm,spike_down,3398,56.6,-0.333,-0.092
+R1_up_calm,spike_down,17742,48.3,-0.727,-0.437
+R4_down_vol,quiet_flat,51776,54.5,-0.188,-0.081
+R2_up_vol,other,488439,55.8,0.106,-0.039
+R3_down_calm,quiet_flat,81203,52.9,0.032,-0.011
+R4_down_vol,other,610864,55.8,-0.119,-0.113
+R1_up_calm,quiet_flat,718842,52.1,-0.141,-0.182
+R2_up_vol,spike_up,2295,49.3,-0.279,-0.765
+R1_up_calm,spike_up,21744,44.3,-1.879,-1.132
+R3_down_calm,other,655916,54.1,0.03,-0.02
+R2_up_vol,quiet_flat,48818,54.9,-0.002,-0.138
+R1_up_calm,other,4628551,50.9,-0.168,-0.209
+R3_down_calm,spike_up,2034,50.0,-1.218,-0.521
