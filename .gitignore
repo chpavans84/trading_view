@@ -37,3 +37,15 @@ certs/
 
 # Claude Code local settings
 .claude/
+
+# Python lake (Silver/Gold) venv
+.venv-lake/
+__pycache__/
+*.pyc
+
+# BOT_SIM restricted-role password (never commit)
+src/sim/.sim-secret
+
+# DuckDB / Parquet data artifacts (research outputs, never commit binaries)
+*.duckdb
+*.parquet
