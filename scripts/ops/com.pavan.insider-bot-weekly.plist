@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.pavan.insider-bot-weekly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>--env-file=.env</string>
+    <string>scripts/ops/insider-bot-weekly.mjs</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/pavan/Documents/Claude_Projects/trading_view/tradingview-mcp</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/opt/homebrew/opt/postgresql@18/bin:/usr/bin:/bin</string></dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/pavan/Library/Logs/insider-bot-weekly.log</string>
+  <key>StandardErrorPath</key><string>/Users/pavan/Library/Logs/insider-bot-weekly.log</string>
+</dict>
+</plist>
