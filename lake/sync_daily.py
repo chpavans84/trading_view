@@ -5,7 +5,9 @@ Runs AFTER scripts/dump-oltp-to-bronze.mjs (which appends yesterday's OLTP → B
 STEP 1 — SILVER signals (ALL proprietary OLTP tables): rebuild silver/signals/<table> from Bronze,
   then VALIDATE row count Silver == Bronze per table (data-integrity gate; aborts loud on mismatch).
   Full rebuild = cheap (proprietary tables ~100MB) and guarantees exact consistency, no drift.
-STEP 2 — SILVER market: append the latest archive trading day to market_bars_daily (+ split-adj).
+STEP 2  — SILVER market: append the latest archive trading day to market_bars_daily (+ split-adj).
+STEP 2b — SILVER market: forward-fill market_bars_daily from OLTP backtest_prices (Yahoo) for days
+  PAST the last Polygon flat-file — this keeps the lake current after the Polygon sub is cancelled.
 STEP 3 — GOLD: refresh features_daily from the adjusted bars.
 
 Market-data COPIES in OLTP (intraday_bars_1m, databento_ohlcv_1m, backtest_*, daily_intraday_features)
@@ -21,6 +23,23 @@ import shutil
 import argparse
 import duckdb
 from .common import connect, BRONZE, SILVER, GOLD, FLATFILES
+
+
+def _database_url():
+    """DATABASE_URL from env, falling back to the project-root .env (the daily shell wrapper
+    does not export it into this process). Returns None if unavailable."""
+    v = os.environ.get("DATABASE_URL")
+    if v:
+        return v
+    envp = os.path.join(os.path.dirname(__file__), "..", ".env")
+    try:
+        with open(envp) as f:
+            for line in f:
+                if line.startswith("DATABASE_URL="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return None
 
 MARKET_COPIES = {'intraday_bars_1m', 'databento_ohlcv_1m', 'backtest_prices',
                  'backtest_scores', 'backtest_returns', 'daily_intraday_features'}
@@ -85,6 +104,76 @@ def sync_market_daily(con):
     return len(todo)
 
 
+def sync_market_daily_from_oltp(con):
+    """Forward-fill market_bars_daily from OLTP `backtest_prices` for trading days STRICTLY AFTER
+    the last Polygon flat-file on disk.
+
+    This is what makes the lake self-sustaining once the Polygon subscription is cancelled:
+    Polygon stays authoritative for every historical day it has, and OLTP (Yahoo-fed, free,
+    current to yesterday) covers everything beyond the last archive day. Yahoo only stores
+    trading days, so no separate holiday calendar is needed. Idempotent; fails OPEN (a missing
+    DATABASE_URL / attach error just skips — never aborts the daily sync).
+
+    NOTE: volume comes from backtest_prices.volume, which must be populated from Yahoo
+    (scripts/etl/refresh-volume-yahoo.mjs) — Alpaca's IEX volume is ~3% of tape. Rows still
+    NULL at sync time are appended NULL and reported; the next run refills them.
+    OVERLAP CAVEAT: while still subscribed, a day Yahoo publishes before Polygon's T+1 file lands
+    is filled from OLTP and NOT later upgraded to the Polygon version. Harmless (one day's volume
+    source) and vanishes entirely once Polygon is cancelled."""
+    print("STEP 2b — SILVER market_bars_daily (OLTP forward-fill past the Polygon boundary):")
+    db = _database_url()
+    if not db:
+        print("  ⚠️ skipped: DATABASE_URL not available"); return 0
+    raw_days = sorted(os.path.basename(f)[:-7] for f in glob.glob(f"{FLATFILES}/day_aggs_v1/*/*/*.csv.gz"))
+    have = set(os.path.basename(p)[2:] for p in glob.glob(f"{SILVER}/market_bars_daily/d=*"))
+    boundary = raw_days[-1] if raw_days else (max(have) if have else "1900-01-01")
+    try:
+        con.execute("INSTALL postgres; LOAD postgres")
+        con.execute(f"ATTACH '{db}' AS pg (TYPE POSTGRES, READ_ONLY)")
+    except Exception as e:
+        print(f"  ⚠️ skipped: postgres attach failed ({e})"); return 0
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT strftime(price_date, '%Y-%m-%d') AS d FROM pg.public.backtest_prices "
+            f"WHERE price_date > DATE '{boundary}' ORDER BY d").fetchall()
+        todo = [r[0] for r in rows if r[0] not in have]
+        if not todo:
+            print(f"  up to date (Polygon boundary = {boundary})."); return 0
+        print(f"  {len(todo)} candidate day(s) after boundary {boundary}: {todo}")
+        # A real US trading day has thousands of symbols. Guard against holiday stray-rows
+        # (e.g. 2026-07-03 had 1 symbol) and partial-feed days polluting the lake.
+        MIN_SYMBOLS = int(os.environ.get("OLTP_MIN_SYMBOLS", "500"))
+        appended = 0
+        for d in todo:
+            n = con.execute(
+                f"SELECT count(*) FROM pg.public.backtest_prices "
+                f"WHERE price_date = DATE '{d}' AND close IS NOT NULL").fetchone()[0]
+            if n < MIN_SYMBOLS:
+                print(f"  skip d={d}: only {n} symbols (< {MIN_SYMBOLS}) — non-trading day / partial feed")
+                continue
+            dest = f"{SILVER}/market_bars_daily/d={d}"
+            shutil.rmtree(dest, ignore_errors=True); os.makedirs(dest)
+            con.execute(f"""COPY (
+                SELECT UPPER(symbol) AS symbol, (price_date::TIMESTAMPTZ) AS ts_utc,
+                       open::DOUBLE AS open, high::DOUBLE AS high, low::DOUBLE AS low, close::DOUBLE AS close,
+                       volume::DOUBLE AS volume, NULL::BIGINT AS transactions, 'yahoo_oltp' AS source
+                FROM pg.public.backtest_prices
+                WHERE price_date = DATE '{d}' AND close IS NOT NULL
+            ) TO '{dest}/data.parquet' (FORMAT PARQUET)""")
+            cnt = con.execute(f"SELECT count(*) FROM read_parquet('{dest}/data.parquet')").fetchone()[0]
+            nullvol = con.execute(
+                f"SELECT count(*) FROM read_parquet('{dest}/data.parquet') WHERE volume IS NULL").fetchone()[0]
+            warn = f" ⚠️ {nullvol} NULL volume (run refresh-volume-yahoo)" if nullvol else ""
+            print(f"  appended d={d} from OLTP — {cnt} symbols{warn}")
+            appended += 1
+        return appended
+    finally:
+        try:
+            con.execute("DETACH pg")
+        except Exception:
+            pass
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--signals-only', action='store_true')
@@ -92,7 +181,8 @@ def main():
     con = connect()
     sync_signals(con)
     if not args.signals_only:
-        sync_market_daily(con)
+        sync_market_daily(con)          # Polygon flat-files → authoritative for archived days
+        sync_market_daily_from_oltp(con)  # OLTP (Yahoo) → forward days past the Polygon boundary
         con.close()
         # STEP 3 — GOLD: rebuild split-adjusted bars then features (full rebuild = correctness-safe).
         import subprocess, sys

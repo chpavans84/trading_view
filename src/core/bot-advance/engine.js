@@ -23,7 +23,7 @@ import {
 import { buildContext } from './context.js';
 import { checkRegimeGate } from './regime-gate.js';
 import { getSiblingBotsActivity } from '../../repositories/bots-repo.js';
-import { getBrokerOpenSymbols } from '../drift-detector.js';
+import { getBrokerOpenSymbols, bookPhantomRow } from '../drift-detector.js';
 
 const ADVANCE_PREFIX = '🧪';   // marks all bot-advance telegrams so they're distinguishable
 const _runningBots = new Set();
@@ -85,7 +85,7 @@ export async function scanBotAdvance(bot) {
     // paralyzing the bot. Cross-check broker first; if it has fewer positions
     // than DB, auto-reconcile the phantom rows and use the broker count.
     const { rows: posRow } = await query(
-      `SELECT id, symbol FROM bot_advance_trades
+      `SELECT id, symbol, dollars_invested, entry_price, qty FROM bot_advance_trades
         WHERE bot_id=$1 AND status IN ('open','pending')`,
       [bot.id]
     );
@@ -99,14 +99,12 @@ export async function scanBotAdvance(bot) {
         const phantomRows = posRow.filter(r => !brokerResult.symbols.has(r.symbol.toUpperCase()));
         if (phantomRows.length > 0) {
           console.warn(`[bot-advance] bot ${bot.id} found ${phantomRows.length} PHANTOM positions vs broker — auto-reconciling`);
+          // Book each phantom via the shared helper: filled positions (dollars_invested>0)
+          // become real closes with P&L; never-filled orders stay 'failed'. See
+          // drift-detector.bookPhantomRow — the 2026-07-07 fix for the DB≠Alpaca P&L gap.
           for (const ph of phantomRows) {
-            await query(
-              `UPDATE bot_advance_trades
-                  SET status='failed',
-                      exit_reason=COALESCE(exit_reason, 'alpaca_reconcile_phantom'),
-                      closed_at=NOW()
-                WHERE id=$1`, [ph.id]
-            ).catch(e => console.error(`[bot-advance] reconcile ${ph.symbol}:`, e.message));
+            await bookPhantomRow('bot_advance_trades', ph)
+              .catch(e => console.error(`[bot-advance] reconcile ${ph.symbol}:`, e.message));
           }
           await query(`UPDATE bots_advance SET current_trade_id=NULL, updated_at=NOW() WHERE id=$1`, [bot.id]).catch(() => {});
           openCount = posRow.length - phantomRows.length;

@@ -91,8 +91,17 @@ else
   echo "  ⚠️ duckdb not on PATH — skipping bronze daily append"
 fi
 
+# --- T1.5 Volume: fill backtest_prices.volume from Yahoo (CONSOLIDATED, full tape) ---------
+# refresh-prices.js (5 PM cron) writes OHLC from Alpaca IEX and leaves volume NULL. This fills
+# it from Yahoo BEFORE the silver sync, so the OLTP→Silver forward-fill (sync_daily STEP 2b)
+# carries real volume forward once Polygon is cancelled. Scoped to recent NULL-volume rows;
+# self-healing + idempotent. Replaces the old lake→backtest_prices volume patch dependency.
+node --env-file=.env scripts/etl/refresh-volume-yahoo.mjs --days 7 || echo "  ⚠️ yahoo volume refresh failed"
+
 # --- T2 Silver: sync ALL OLTP tables Bronze→Silver (validated, lossless) + append market day ---
 # Aborts loud on any Bronze→Silver row-count mismatch (data-integrity gate).
+# STEP 2b (2026-07-07): forward-fills market_bars_daily from OLTP backtest_prices for days past
+# the last Polygon flat-file → the lake self-syncs daily after the Polygon subscription ends.
 if [ -x ./.venv-lake/bin/python ]; then
   ./.venv-lake/bin/python -m lake.sync_daily || echo "  ⚠️ silver sync exited non-zero (check log)"
 else

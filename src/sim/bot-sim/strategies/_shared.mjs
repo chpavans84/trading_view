@@ -24,6 +24,9 @@ export function swingExits(policy, fillPx, fillT) {
     peak: fillPx,
     trailing: false,
     timeStopT: fillT + (x.time_stop_days ?? 3) * 24 * 3600e3,
+    // Min-hold floor (2026-07-07): earliest time a NON-risk exit (trail_stop) may fire.
+    // Mirrors the live shouldVetoExit() gate under test. hard/gap/time always bypass.
+    minHoldT: fillT + (x.min_hold_hours ?? 0) * 3600e3,
     eodExit: !!x.eod_exit,
   };
 }

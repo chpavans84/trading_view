@@ -7,6 +7,7 @@ import openingRange from './opening-range.mjs';
 import reversal from './reversal.mjs';
 import breakout from './breakout.mjs';
 import regimeSwitch from './regime-switch.mjs';
+import insiderBuy from './insider-buy.mjs';
 
 export const STRATEGIES = {
   [pullback.name]:    pullback,
@@ -14,6 +15,7 @@ export const STRATEGIES = {
   [reversal.name]:    reversal,
   [breakout.name]:    breakout,
   [regimeSwitch.name]: regimeSwitch,
+  [insiderBuy.name]:  insiderBuy,
 };
 
 export function getStrategy(name = 'pullback') {

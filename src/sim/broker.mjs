@@ -71,7 +71,14 @@ export function checkExit(pos, bar, clockT) {
   const stop = pos.stopPx;
   if (stop != null) {
     if (bar.o <= stop) return { exitPx: sellSlip(bar.o), reason: 'stop_gap' };       // gapped through
-    if (bar.l <= stop) return { exitPx: sellSlip(stop), reason: pos.trailing ? 'trail_stop' : 'hard_stop' };
+    if (bar.l <= stop) {
+      const reason = pos.trailing ? 'trail_stop' : 'hard_stop';
+      // Min-hold floor (2026-07-07): veto ONLY the non-risk trail_stop while the
+      // position is younger than minHoldT. hard_stop (risk) and stop_gap always fire.
+      // Falls through to the time-stop check. Mirrors live executor shouldVetoExit().
+      const vetoed = reason === 'trail_stop' && pos.minHoldT && clockT < pos.minHoldT;
+      if (!vetoed) return { exitPx: sellSlip(stop), reason };
+    }
   }
   // time stop — exit at this bar's close once we're past the horizon
   if (pos.timeStopT != null && clockT >= pos.timeStopT) {

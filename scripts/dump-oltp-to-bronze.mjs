@@ -50,6 +50,17 @@ const PART_PRIORITY = [
   'observation_date','price_date','trade_date','as_of_date','target_date','event_date','date',
 ];
 
+// Tables whose EVENT-date column (filed_at/traded_at) can lag ingestion by days-to-weeks —
+// Congress files STOCK-Act disclosures 30-45d after the trade, insiders file Form-4 a few days
+// late. MODE=daily filters `WHERE partCol = yesterday`, so a row that ARRIVES today with an
+// event date weeks ago lands in a partition whose daily run already happened → permanently lost
+// (2026-07-08 audit: uw_congressional_trades lake was missing 190 back-dated rows). Partition
+// these by `ingested_at` (arrival) instead, so daily capture is complete. Scoped to small signal
+// tables only — NOT market tables (which must stay event-date partitioned for backfill).
+const ARRIVAL_PARTITION = new Set([
+  'uw_congressional_trades', 'uw_insider_trades',
+]);
+
 const log = (...a) => console.log(`[${new Date().toISOString()}]`, ...a);
 const sh = (sql) => execFileSync('duckdb', ['-c', sql], { encoding: 'utf8', stdio: ['ignore','pipe','pipe'] });
 const shJson = (sql) => { try { return JSON.parse(execFileSync('duckdb', ['-json','-c', sql], { encoding:'utf8' }) || '[]'); } catch { return []; } };
@@ -97,8 +108,10 @@ async function main() {
         drift.push(`⚠️ ${t}.${c} TYPE ${prev.columns[c]}→${colmap[c]} (manual Silver cast needed)`);
     }
 
-    // pick partition column
-    const partCol = PART_PRIORITY.find(c => c in colmap) || null;
+    // pick partition column — arrival-partition the lagging-event tables (see ARRIVAL_PARTITION)
+    const partCol = (ARRIVAL_PARTITION.has(t) && 'ingested_at' in colmap)
+      ? 'ingested_at'
+      : (PART_PRIORITY.find(c => c in colmap) || null);
     const isDateType = partCol && colmap[partCol] === 'date';
 
     // partition expression (business-day in ET for timestamps)

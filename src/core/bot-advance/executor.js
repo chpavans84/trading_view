@@ -28,6 +28,22 @@ const ADVANCE_PREFIX = '🧪';
 const DECISION_FRESHNESS_MIN = 6;
 const _runningBots = new Set();
 
+/**
+ * Minimum-hold floor decision (pure — exported for unit tests).
+ *
+ * Returns true when a would-be exit should be VETOED because the position is younger
+ * than min_hold_hours. Catastrophic/risk exits (hard_stop, catastrophic, stop_loss)
+ * always pass through, so downside is never trapped. See the 2026-07-07 retrospective:
+ * bot-advance exits fired at a ~34-min average hold, so the 5–14d swing thesis behind
+ * every entry rule never got time to develop and the bot bled the round-trip spread.
+ */
+export function shouldVetoExit({ exitReason, heldHours, minHoldHours }) {
+  if (!exitReason) return false;
+  if (!(minHoldHours > 0)) return false;
+  if (/catastroph|hard_stop|stop_loss/i.test(exitReason)) return false;
+  return heldHours < minHoldHours;
+}
+
 // ─── Active bots ─────────────────────────────────────────────────────────────
 async function getActiveAdvanceBots() {
   const { rows } = await query(`
@@ -490,6 +506,37 @@ async function _manageOnePosition(bot, trade) {
     } else {
       const heldDays = (Date.now() - new Date(trade.opened_at).getTime()) / 86_400_000;
       if (heldDays >= Number(trade.time_stop_days)) exitReason = 'time_stop';
+    }
+  }
+
+  // ── Minimum-hold floor (2026-07-07) ─────────────────────────────────────────
+  // Retrospective (Alpaca paper, 203 closed bot-advance trades): trail_stop and
+  // thesis_broken fired at a ~34-min (0.57h) AVERAGE hold — even AFTER the 2026-06-19
+  // trail-arm fix, which left hold time unchanged. The 5–14d swing thesis behind every
+  // entry rule never got time to develop; the bot behaved as an intraday scalper and
+  // bled the round-trip spread. Veto NON-catastrophic exits until the trade has aged
+  // past min_hold_hours. hard_stop and any intelligent catastrophic/stop_loss exit
+  // ALWAYS bypass (risk must never be trapped), and time_stop is naturally > floor.
+  // Tunable per bot via rules.exits.min_hold_hours (0 disables). Default 24h.
+  // NOTE: default is CONSERVATIVE, not yet sim-proven — calibrate in BOT_SIM before
+  // promoting to live. Downside stays capped by hard_sl_pct + the catastrophic floor.
+  if (exitReason) {
+    // Default 6h — BOT_SIM-calibrated (2026-07-07 sweep, R1 window): a small floor kills
+    // the sub-hour scalping the live bot showed (trail_stop 0.7h / thesis_broken 0.0h) at
+    // negligible cost (−0.1pp), while LARGE floors (≥24h) monotonically HURT in calm bull
+    // (−1.1pp at 72h — lengthening holds into R1 loses, matching the −5.6% learning lesson).
+    // hard_stop/catastrophic always bypass so downside stays capped regardless.
+    const minHoldHours = Number(bot.rules?.exits?.min_hold_hours ?? 6);
+    const heldHours    = (Date.now() - new Date(trade.opened_at).getTime()) / 3_600_000;
+    if (shouldVetoExit({ exitReason, heldHours, minHoldHours })) {
+      return {
+        action:      'hold',
+        symbol:      trade.symbol,
+        pnl:         currentPnl,
+        held_hours:  Number(heldHours.toFixed(2)),
+        vetoed_exit: exitReason,
+        note:        `min_hold_floor: ${heldHours.toFixed(1)}h < ${minHoldHours}h`,
+      };
     }
   }
 

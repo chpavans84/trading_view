@@ -27,6 +27,7 @@ export class Feed {
     this._regime = [];                 // [{d, regime, ...}] ASC
     this._uw = new Map();              // ticker -> [{known_at, bull, bear}] ASC
     this._news = new Map();            // symbol -> [{known_at, sentiment}] ASC
+    this._insider = new Map();         // ticker -> [{known_at, value}] ASC (open-market BUYS)
     this.sessions = [];                // [{date, minutes:[Date...]}]
   }
 
@@ -56,6 +57,12 @@ export class Feed {
       `SELECT symbol, known_at, sentiment FROM sim.events_news ORDER BY symbol, known_at`)).rows) {
       if (!this._news.has(r.symbol)) this._news.set(r.symbol, []);
       this._news.get(r.symbol).push({ t: +new Date(r.known_at), sentiment: r.sentiment });
+    }
+    // Insider open-market BUYS (known_at = Form-4 filed_at → public, no lookahead)
+    for (const r of (await simQuery(
+      `SELECT ticker, known_at, value FROM sim.events_insider ORDER BY ticker, known_at`)).rows) {
+      if (!this._insider.has(r.ticker)) this._insider.set(r.ticker, []);
+      this._insider.get(r.ticker).push({ t: +new Date(r.known_at), value: +r.value || 0 });
     }
 
     // Session calendar from the minute bars themselves (within window)
@@ -150,5 +157,15 @@ export class Feed {
       if (e.t > lo) { n++; if (e.sentiment === 'bullish') bullish++; else if (e.sentiment === 'bearish') bearish++; }
     }
     return { n, bullish, bearish };
+  }
+  /** Insider open-market BUYS within a trailing window ≤ clock (no lookahead).
+   *  Returns { n, maxValue } — n filings and the largest single BUY value seen. */
+  insiderBuys(symbol, days = 5) {
+    const arr = this._insider.get(symbol);
+    if (!arr) return { n: 0, maxValue: 0 };
+    const lo = this._clockMs - days * 86400e3;
+    let n = 0, maxValue = 0;
+    for (const e of arr) { if (e.t > this._clockMs) break; if (e.t > lo) { n++; if (e.value > maxValue) maxValue = e.value; } }
+    return { n, maxValue };
   }
 }

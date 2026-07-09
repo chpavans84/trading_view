@@ -202,29 +202,85 @@ export async function reconcileAllBots() {
   return summary;
 }
 
+/**
+ * Book a single phantom row — a trade the DB tracks as open/pending but the broker
+ * has no matching position for.
+ *
+ * ROOT-CAUSE FIX (2026-07-07). The old sweep dumped EVERY phantom as status='failed',
+ * which zeroes pnl_usd. But 119 of 170 historical phantoms HAD a real fill
+ * (dollars_invested > 0) — real positions that left the broker outside our own close
+ * path (a sibling order path, a manual/auto liquidation, or a lost close-write). Booking
+ * those as 'failed' silently deleted their P&L and is the main reason the DB ledger
+ * (−$1,605) disagreed with the Alpaca account (−$592).
+ *
+ * Now: a filled row is booked as a real CLOSE at last-known price (best available
+ * estimate) with a distinct, auditable exit_reason so it carries P&L. A never-filled
+ * row ($0) stays 'failed' — the order genuinely never became a position.
+ *
+ * Scoped to bot_advance_trades: the legacy `trades` table has ambiguous duplicate
+ * columns (entry_price vs entry_px, qty twice) so its P&L math is left untouched.
+ *
+ * @param {string} table  'bot_advance_trades' | 'trades'
+ * @param {{id:number, symbol:string, dollars_invested?:number, entry_price?:number, qty?:number}} row
+ * @returns {Promise<'closed'|'failed'>} the terminal status written
+ */
+/**
+ * Terminal status a phantom row should receive (pure — exported for unit tests).
+ * Only a filled advance trade (dollars_invested > 0) is booked as a real 'closed'
+ * with P&L; a never-filled order, or any non-advance table, is a genuine 'failed'.
+ */
+export function phantomTerminalStatus(table, dollarsInvested) {
+  return (table === 'bot_advance_trades' && Number(dollarsInvested) > 0) ? 'closed' : 'failed';
+}
+
+export async function bookPhantomRow(table, row) {
+  // Never filled, or a table we don't book P&L for → genuine failed order.
+  if (phantomTerminalStatus(table, row.dollars_invested) === 'failed') {
+    await query(
+      `UPDATE ${table} SET status='failed',
+              exit_reason=COALESCE(exit_reason, 'alpaca_reconcile_phantom'), closed_at=NOW()
+        WHERE id=$1`, [row.id]);
+    return 'failed';
+  }
+  // Had a fill → the position really existed and exited outside our path. Book a real
+  // close using last known price; fall back to entry (0 P&L) if the quote is unavailable
+  // — still better than dropping the row and its capital.
+  const entry = Number(row.entry_price) || 0;
+  const qty   = Number(row.qty) || 0;
+  let exitPx  = entry;
+  try {
+    const { getLatestPrice } = await import('./trader.js');
+    const px = await getLatestPrice(row.symbol);
+    if (px && px > 0) exitPx = px;
+  } catch { /* keep entry-price fallback */ }
+  const pnlUsd = (exitPx - entry) * qty;
+  const pnlPct = entry > 0 ? ((exitPx - entry) / entry) * 100 : 0;
+  await query(
+    `UPDATE ${table}
+        SET status='closed', exit_price=$1, exit_reason='reconciled_missing_from_broker',
+            pnl_usd=$2, pnl_pct=$3, closed_at=NOW()
+      WHERE id=$4`,
+    [exitPx, pnlUsd, pnlPct, row.id]);
+  return 'closed';
+}
+
 // Helper: variant of reconcileBot that takes pre-fetched broker symbols (cache hit)
 async function reconcileBotWithBrokerSymbols(bot, { symbols: brokerSymbols, available }) {
   if (!available) return { reconciled: [], orphans: [], skipped: true };
   const engine = bot._engine || 'legacy';
   const table = engine === 'advance' ? 'bot_advance_trades' : 'trades';
   const { rows: dbRows } = await query(
-    `SELECT id, symbol FROM ${table} WHERE bot_id=$1 AND status IN ('open','pending')`,
+    `SELECT id, symbol, dollars_invested, entry_price, qty
+       FROM ${table} WHERE bot_id=$1 AND status IN ('open','pending')`,
     [bot.id]
   );
-  const dbSymbols = new Map(dbRows.map(r => [r.symbol.toUpperCase(), r.id]));
+  const dbSymbols = new Map(dbRows.map(r => [r.symbol.toUpperCase(), r]));
   const reconciled = [];
-  for (const [sym, tid] of dbSymbols) {
+  for (const [sym, row] of dbSymbols) {
     if (!brokerSymbols.has(sym)) {
       try {
-        await query(
-          `UPDATE ${table}
-              SET status='failed',
-                  exit_reason=COALESCE(exit_reason, 'alpaca_reconcile_phantom'),
-                  closed_at=NOW()
-            WHERE id=$1`,
-          [tid]
-        );
-        reconciled.push({ symbol: sym, trade_id: tid });
+        const booked = await bookPhantomRow(table, row);
+        reconciled.push({ symbol: sym, trade_id: row.id, booked });
       } catch (e) {
         console.error(`[drift-detector] reconcile bot ${bot.id} ${sym}:`, e.message);
       }

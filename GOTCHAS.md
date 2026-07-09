@@ -249,3 +249,65 @@ add a one-line entry here **and** a regression test. A mistake should only be po
 - Compute is the **Mac Studio M3 Ultra (28-core/96GB)** since 2026-06-08. Apple Silicon `/opt/homebrew`.
 - Lake: Bronze (Node) `/Volumes/Archive/bronze/oltp`; Silver/Gold (Python `lake/`, DuckDB) `/Volumes/Archive/{silver,gold}`.
 - Engine is **DuckDB-first** (no Spark — slower single-node).
+
+## Bot-advance exit floor + phantom accounting (2026-07-07, from Alpaca retrospective)
+- RETROSPECTIVE FINDING: on the Alpaca paper account (live acct unfunded/$0) the bot-advance
+  fleet round-tripped 163 names for ~flat P&L, but every entry rule was net-negative because
+  exits fired at a ~34-min AVERAGE hold (trail_stop 0.7h, thesis_broken 0.0h) — the 5–14d swing
+  thesis never developed. The 2026-06-19 trail-arm fix did NOT change avg hold (0.57h before AND
+  after). Root cause was the EXIT layer scalping, not the entries.
+- FIX A — min-hold floor: `shouldVetoExit()` (executor.js) vetoes NON-risk exits (trail_stop,
+  thesis_broken) until a trade ages past `rules.exits.min_hold_hours` (default **6h**, 0 disables).
+  hard_stop / catastrophic / stop_loss ALWAYS bypass so downside is never trapped. time_stop is
+  naturally > floor.
+- BOT_SIM CALIBRATION (2026-07-07 sweep, R1 window, min_hold wired into sim broker.mjs/_shared.mjs):
+  a SMALL floor (≤12h) is ~free (−0.1pp); LARGE floors (≥24h) monotonically HURT in calm bull
+  (72h = −1.1pp, win 63→61%) — lengthening holds into R1 loses, matching the −5.6% learning lesson.
+  ⇒ default set to 6h (kills sub-hour scalping, negligible cost). CAVEAT: sim can't model the live
+  `thesis_broken` 0h-exit, so it proves "no harm at 6h", NOT that the floor fixes the live scalping.
+- FIX B — phantom accounting: 119 of 170 `alpaca_reconcile_phantom` rows HAD a real fill
+  (dollars_invested>0) but were dumped as status='failed', zeroing pnl_usd → this is why the DB
+  ledger (−$1,605) disagreed with the Alpaca account (−$592). `bookPhantomRow()` /
+  `phantomTerminalStatus()` (drift-detector.js) now book filled phantoms as real 'closed' with
+  P&L at last price + exit_reason='reconciled_missing_from_broker'; never-filled ($0) stay 'failed'.
+  Scoped to bot_advance_trades ONLY — the legacy `trades` table has ambiguous dup columns
+  (entry_price vs entry_px, qty twice) so its P&L math is left untouched.
+- STRUCTURAL: two independent order paths (legacy trader.js `bot_<sym>` + bot-advance) trade the
+  SAME Alpaca paper account — a prime source of phantom collisions. Consolidate to one path/account.
+- Regression tests: tests/bot-advance-exit-floor.test.js (11 pure-function cases, no DB).
+
+## Lake self-sync after Polygon cancellation (2026-07-07)
+- ROOT CAUSE (why the lake wasn't self-syncing): `lake/sync_daily.py sync_market_daily()` appended
+  `market_bars_daily` ONLY from Polygon flat-files (`FLATFILES/day_aggs_v1/*.csv.gz`). The live daily
+  source (`backtest_prices`, Yahoo-fed, current to yesterday, 25k syms) was EXCLUDED from the lake
+  sync (BRONZE_DEFER + MARKET_COPIES gate). So forward market data was 100% Polygon-dependent — the
+  lake could not sustain itself from live data. This is the gap POLYGON_EXIT_PLAN.md flagged.
+- FIX (2 parts):
+  1. `scripts/etl/refresh-volume-yahoo.mjs` — fills `backtest_prices.volume` from Yahoo CONSOLIDATED
+     volume (full tape). refresh-prices.js writes OHLC from Alpaca IEX and leaves volume NULL (IEX =
+     ~3% of tape). Wired into polygon-daily-incremental.sh BEFORE lake.sync_daily. Scoped to recent
+     NULL-volume rows; idempotent/self-healing. Replaces the old lake→backtest_prices volume patch.
+  2. `lake/sync_daily.py sync_market_daily_from_oltp()` (STEP 2b) — forward-fills `market_bars_daily`
+     from OLTP `backtest_prices` for trading days STRICTLY AFTER the last Polygon flat-file. Polygon
+     stays authoritative for archived days; OLTP (Yahoo) covers everything forward → lake self-syncs
+     after cancellation. source='yahoo_oltp'. Guard: OLTP_MIN_SYMBOLS=500 skips holiday/partial days
+     (2026-07-03 had 1 stray row). Fails OPEN (missing DATABASE_URL/attach just skips).
+- GOTCHA — pg DATE→UTC display shift: pg returns DATE as local-midnight; `.toISOString()` rolls it
+  back a day IN LOGS ONLY. The UPDATE matching (Yahoo row.date ↔ price_date) is exact — verified
+  A/AA July-6 volume landed on the correct price_date.
+- OVERLAP CAVEAT (pre-cancellation only): a day Yahoo publishes before Polygon's T+1 file is filled
+  from OLTP and not later upgraded to Polygon. Harmless (1 day's volume source); gone once cancelled.
+- Splits/divs still have no forward source (Polygon REST) → market_bars_daily_adj won't apply NEW
+  splits forward (history already adjusted; backtests unaffected). Separate follow-up if needed.
+
+## Bronze daily-append: lagging-event tables lose back-dated rows (fixed 2026-07-08)
+- `dump-oltp-to-bronze.mjs` MODE=daily dumps `WHERE <partition_col> = yesterday`. Auto-picked partition
+  col preferred EVENT dates (filed_at/traded_at) over ingested_at. For tables where the event date lags
+  ingestion (Congress files STOCK-Act disclosures 30-45d late; Form-4 a few days late), a row that ARRIVES
+  today with an event date weeks ago lands in a partition whose daily run already happened → PERMANENTLY
+  LOST. Audit found uw_congressional_trades lake missing 190 rows (pg 2097 / bronze 1907).
+- FIX: `ARRIVAL_PARTITION` set in dump-oltp-to-bronze.mjs = {uw_congressional_trades, uw_insider_trades}
+  → these partition by `ingested_at` (arrival) so daily capture is complete. Scoped to small signal tables
+  ONLY — market tables (intraday_bars_1m etc.) must stay event-date partitioned for backfill. Recovered via
+  one-time MODE=backfill ONLY=... (rebuilds clean, no double-count — backfill wipes the table dir).
+- If you add a UW/event table whose rows arrive after their event date, add it to ARRIVAL_PARTITION.
