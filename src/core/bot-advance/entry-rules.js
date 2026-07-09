@@ -112,10 +112,15 @@ export const ENTRY_RULES = [
       source:          'BOT_DESIGN.md Phase 4.1 (90-day backtest, 2026-05-28)',
     },
     position_size_multiplier: 1.0,
+    // Exits tuned to the 2026-07-09 backtest (insider ≥$100K, 1,656 trades, survivorship-free):
+    // holding ~20d with a WIDE stop beats tight stops on every metric — 8% stop = 48% win/+10.6%,
+    // 15% = 54%/+11.2%, no-stop/20d = 58%/+13.7%. Tight stops noise-out winners that recover
+    // (VSAT +16%, PLTR +11% AFTER an 8% stop). ⇒ 15% catastrophic backstop, NO trail (trail was
+    // the scalping leak: 130/186 exits at ~1h for +$4), 20-day time stop = the primary exit.
     exits: {
-      hard_sl_pct:    0.06,
-      trail_pct:      30,
-      time_stop_days: 10,
+      hard_sl_pct:    0.15,
+      trail_pct:      0,
+      time_stop_days: 20,
     },
     candidate_generator: async () => {
       // Tickers with 2+ Director/10%-Owner purchases ≥$100K in last 30 days.
