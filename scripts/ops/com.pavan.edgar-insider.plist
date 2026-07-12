@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.pavan.edgar-insider</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>--env-file=.env</string>
+    <string>scripts/etl/ingest-edgar-insider.mjs</string>
+    <string>--days</string><string>3</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/pavan/Documents/Claude_Projects/trading_view/tradingview-mcp</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/opt/homebrew/opt/postgresql@18/bin:/usr/bin:/bin</string></dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>30</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/pavan/Library/Logs/edgar-insider.log</string>
+  <key>StandardErrorPath</key><string>/Users/pavan/Library/Logs/edgar-insider.log</string>
+</dict>
+</plist>
