@@ -12360,7 +12360,11 @@ cron.schedule('*/2 9-16 * * 1-5', async () => {
         ]
       ).catch(() => {});
     }
-    scanAndAlertUWFlow().catch(() => {});
+    // UW flow Telegram alerts DISABLED 2026-07-12 (user request) — flow proven to have no
+    // tradeable edge (2026-07-11 backtests: no buy edge, weak vol, crowding filter failed),
+    // so the alerts were noise. Flow data still INGESTS above (kept for research). Re-enable
+    // by uncommenting. Insider/congress/movers alerts are unaffected.
+    // scanAndAlertUWFlow().catch(() => {});
   } catch (e) {
     console.error('[uw-cron/flow-alerts]', e.message);
     sysAlert({ key: 'uw-cron/flow-alerts', severity: 'critical', title: 'UW flow-alerts cron failed', detail: { error: e.message, stack: e.stack?.split('\n').slice(0, 5).join('\n') } }).catch(() => {});
