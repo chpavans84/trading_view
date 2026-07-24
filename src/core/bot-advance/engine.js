@@ -189,6 +189,12 @@ export async function scanBotAdvance(bot) {
       maxPrice: Math.floor(_maxPositionUsd / 2),   // need to afford ≥ 2 shares
       // Restrict candidates to S&P500/NDX100 (default ON; set rules.universe.index_only=false to disable)
       indexOnly: bot.rules?.universe?.index_only !== false,
+      // Liquidity + quality gate — opt-in alternative for mid/small-cap strategies (e.g. insider).
+      // Enable with rules.universe.quality_gate=true (usually paired with index_only=false).
+      qualityGate:       bot.rules?.universe?.quality_gate === true,
+      minPrice:          bot.rules?.universe?.min_price,        // default 5 in applyQualityGate
+      minAdvUsd:         bot.rules?.universe?.min_adv_usd,      // default 3,000,000
+      excludeIndustries: bot.rules?.universe?.exclude_industries, // default ['Asset Management']
     };
     const { tickers: candidates, breakdown } = await buildAdvanceCandidateUniverse(enabledRules, botCtx);
     if (!candidates.length) {

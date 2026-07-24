@@ -402,6 +402,58 @@ async function getIndexUniverse() {
   return _indexSet;
 }
 
+// Liquidity + quality gate. Alternative to index-only for strategies whose edge lives OUTSIDE
+// the large-cap index — notably insider cluster-buys, whose forward-return edge is concentrated
+// in mid/small caps (backtest 2026-07-24: off-index insider signals +11.4% excess vs SPY @20d
+// vs index-only −1.0%; n=13 index-only left the bot with ~0 tradable signals). This gate keeps
+// the mid/small edge while excluding the "junk" the 2026-06-19 index filter was meant to remove:
+//   • funds/CEFs/BDCs — industry ~ 'Asset Management' (TYG/MXF/PSBD etc.; backtest +2.0% = weak)
+//   • sub-$min_price names — thin, high-slippage
+//   • illiquid names — trailing 30d avg dollar-volume < min_adv_usd (backtest <$3M ADV = −0.5% excess)
+// The PASS bucket backtested at +11.0% excess / 70% win / 57% excess-win — the edge preserved and
+// the hit-rate improved. Fields default sensibly and are overridable per bot in rules.universe.
+async function getUniverseMeta(tickers) {
+  if (!tickers.length) return new Map();
+  const { rows } = await query(
+    `SELECT symbol, last_price, adv_dollar_30d, industry
+       FROM tradable_universe WHERE symbol = ANY($1)`,
+    [tickers]
+  );
+  return new Map(rows.map(r => [String(r.symbol).toUpperCase(), r]));
+}
+
+// Pure gate decision for one candidate. Returns a drop-reason string, or null to KEEP.
+// Exported for unit testing — the invariant (funds/thin/illiquid excluded, liquid kept) must
+// not silently regress. Missing meta / price / ADV → dropped (fail-closed on liquidity).
+export function classifyForGate(meta, opts = {}) {
+  const minPrice = opts.minPrice ?? 5;
+  const minAdvUsd = opts.minAdvUsd ?? 3_000_000;
+  const excludeIndustries = (opts.excludeIndustries ?? ['Asset Management']).map(s => s.toLowerCase());
+  if (!meta) return 'not_in_universe';
+  if (meta.industry && excludeIndustries.some(b => String(meta.industry).toLowerCase().includes(b))) return 'fund';
+  if (!(Number(meta.last_price) >= minPrice)) return `price<${minPrice}`;
+  if (!(Number(meta.adv_dollar_30d) >= minAdvUsd)) return `adv<${minAdvUsd / 1e6}M`;
+  return null;
+}
+
+// Apply the gate to a ticker list. One DB read, then pure classification per name. Returns
+// { kept, dropped, summary }. Every drop reason is recorded so the decision log is never silent.
+export async function applyQualityGate(tickers, opts = {}) {
+  const minPrice = opts.minPrice ?? 5;
+  const minAdvUsd = opts.minAdvUsd ?? 3_000_000;
+  const meta = await getUniverseMeta(tickers);
+  const kept = [], dropped = {};
+  for (const t of tickers) {
+    const reason = classifyForGate(meta.get(t), opts);
+    if (reason) dropped[t] = reason; else kept.push(t);
+  }
+  return {
+    kept,
+    dropped,
+    summary: `${tickers.length} → ${kept.length} (excl funds / <$${minPrice} / <$${minAdvUsd / 1e6}M ADV)`,
+  };
+}
+
 export async function buildAdvanceCandidateUniverse(enabledRules, botCtx = {}) {
   const enabled = new Set(enabledRules || []);
   const active = ENTRY_RULES.filter(r => enabled.has(r.id));
@@ -428,6 +480,19 @@ export async function buildAdvanceCandidateUniverse(enabledRules, botCtx = {}) {
     const before = tickers.length;
     tickers = tickers.filter(t => idx.has(t));
     breakdown._index_filter = `${before} → ${tickers.length} (S&P500/NDX100 only)`;
+  }
+  // Liquidity + quality gate (opt-in; the mid/small-cap alternative to index-only). See
+  // applyQualityGate. When BOTH are enabled the index filter runs first, then the quality gate —
+  // but they are normally mutually exclusive (index_only=false + quality_gate=true).
+  if (botCtx.qualityGate && tickers.length) {
+    const res = await applyQualityGate(tickers, {
+      minPrice: botCtx.minPrice,
+      minAdvUsd: botCtx.minAdvUsd,
+      excludeIndustries: botCtx.excludeIndustries,
+    });
+    tickers = res.kept;
+    breakdown._quality_gate = res.summary;
+    if (Object.keys(res.dropped).length) breakdown._quality_dropped = res.dropped;
   }
   return { tickers, breakdown };
 }
