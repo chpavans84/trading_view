@@ -41,8 +41,9 @@ import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 import { SP500, NASDAQ100 } from '../research/sp500.js';
 import { sectorOf, SECTOR_COLORS, ETF_EXCLUDE } from '../core/sp500-sectors.js';
-import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelAllOrders, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades, clearPnlCache } from '../core/trader.js';
+import { getAccount, getPositions, getOrders, getDailyPnL, getPortfolioHistory, placeTrade, closePosition, cancelOrder, getMarketStatus, getMarketRegime, moveStopToBreakeven, getLiveAccount, getLivePositions, getLiveOrders, hasLiveAccount, getUserAccount, getUserPositions, validateAlpacaCreds, getUserOrders, getUserDailyPnL, getUserPortfolioHistory, getLatestPrice, placeQuickTrade, syncClosedTrades, clearPnlCache } from '../core/trader.js';
 import cron from 'node-cron';
+import { runFlatten, shouldFlattenAt, isFlattenEnabled } from '../core/eod-flatten.js';
 import { getMarketSentiment, getSectorPerformance, getMarketMovers, getUniverseInfo, getDynamicUniverse, SECTOR_MAP, SECTOR_NAMES } from '../core/sentiment.js';
 import { getMarketNews, getEarningsCalendar, categoriseNews, getEarningsTrend, getSymbolNews, getEarnings } from '../core/news.js';
 import { getAccounts, getFunds, getPositions as getMoomooPositions, getMoomooTodayPnL, getOrders as getMoomooOrders, getQuotes as getMoomooQuotes, getQuote as getMoomooQuote, getKLines as getMoomooKLines, getAtrPct as getMoomooAtrPct, placeMoomooTrade, cancelMoomooOrder, cancelAllMoomooOrders, closeMoomooPosition, MOOMOO_IS_SIMULATE, MOOMOO_TRADE_ENV_VALUE } from '../core/moomoo-tcp.js';
@@ -10540,57 +10541,33 @@ async function sendEmailAlert(subject, body) {
 let _eodFlattenedDate = null; // prevent double-run on same day
 
 async function eodFlatten() {
-  const now = new Date();
-  const etStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
-  const et = new Date(etStr);
-  const dayOfWeek = et.getDay(); // 0=Sun, 6=Sat
-  if (dayOfWeek === 0 || dayOfWeek === 6) return; // skip weekends
-
-  const h = et.getHours();
-  const m = et.getMinutes();
-  if (h !== 15 || m !== 50) return; // only at exactly 3:50 PM ET
+  const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  if (!shouldFlattenAt(et)) return; // weekday 3:50 PM ET only
 
   const todayStr = et.toISOString().split('T')[0];
   if (_eodFlattenedDate === todayStr) return; // already ran today
   _eodFlattenedDate = todayStr;
 
-  console.log('[EOD] 3:50 PM ET — flattening all positions');
+  console.log('[EOD] 3:50 PM ET — flattening day-trade positions (swing holds protected)');
   try {
-    // 1. Cancel all open orders (bracket legs, limits, stops)
-    await cancelAllOrders().catch(() => {});
-
-    // 2. Close every open position
-    const positions = await getPositions().catch(() => []);
-    const results = [];
-    for (const pos of positions) {
-      try {
-        await closePosition(pos.symbol);
-        results.push(`✅ Closed ${pos.symbol} (${pos.qty} shares, P&L: $${pos.unrealized_pl?.toFixed(2)})`);
-      } catch (e) {
-        results.push(`⚠️ ${pos.symbol}: ${e.message}`);
-      }
-    }
-
-    // 3. Fetch today's final P&L
-    let pnlLine = '';
-    try {
-      const pnl = await getDailyPnL();
-      pnlLine = `\n💰 *Today's P&L: ${pnl.pnl >= 0 ? '+' : ''}$${pnl.pnl?.toFixed(2)} (${pnl.pnl_pct?.toFixed(2)}%)*`;
-    } catch {}
-
-    // 4. Notify via email
-    const posLines = results.length ? results.join('\n') : 'No open positions.';
-    const eodMsg = `🔔 *EOD Flatten — 3:50 PM ET*\n\n${posLines}${pnlLine}\n\n_All orders cancelled. No overnight exposure._`;
-    await sendEmailAlert('EOD Flatten — 3:50 PM ET', eodMsg).catch(() => {});
-    console.log('[EOD] Flatten complete:', results);
+    await runFlatten({ getPositions, closePosition, sendEmailAlert, getDailyPnL });
   } catch (e) {
     console.error('[EOD] Flatten error:', e.message);
-    const failMsg = `⚠️ *EOD Flatten failed*: ${e.message}`;
-    await sendEmailAlert('⚠ EOD Flatten Failed', failMsg).catch(() => {});
+    await sendEmailAlert('⚠ EOD Flatten Failed', `⚠️ *EOD Flatten failed*: ${e.message}`).catch(() => {});
   }
 }
 
-setInterval(eodFlatten, 60 * 1000); // check every minute
+// Gated on BOT_CRON_OWNER like every other scheduled job (bot-engine, bot-executor,
+// drift-detector, bot-advance/*). Previously this was a bare module-scope setInterval,
+// so `trading-staging` registered it too and could double-fire on the same Alpaca account.
+if (process.env.BOT_CRON_OWNER !== 'true') {
+  console.log('[EOD] flatten NOT scheduled (BOT_CRON_OWNER != true) — this process is a non-owner');
+} else if (!isFlattenEnabled()) {
+  console.log('[EOD] flatten DISABLED (EOD_FLATTEN_ENABLED=false)');
+} else {
+  setInterval(eodFlatten, 60 * 1000); // check every minute
+  console.log('[EOD] flatten scheduled — 3:50 PM ET weekdays (BOT_CRON_OWNER=true)');
+}
 
 // ─── Browser Terminal (admin-only WebSocket PTY) ──────────────────────────────
 
