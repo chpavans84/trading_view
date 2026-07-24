@@ -118,9 +118,9 @@ Same 5 tools are also available inside the in-dashboard AI chat with the same na
 - **`uw_insider_get`** with `symbol`, optional `days` (default 30), `transaction_type` → SEC Form 4 filings from `uw_insider_trades` (ingested every 15 min). Returns net buy/sell value, insider names/roles. Summary includes `net_buying` / `net_selling` / `neutral` signal.
 - **`uw_congress_get`** with optional `symbol`, `days` (default 90), `party` → STOCK Act congressional disclosures from `uw_congressional_trades` (ingested hourly). Omit symbol for all recent activity. Filter by party (Democrat/Republican).
 - **`uw_top_movers_get`** with optional `direction` (up/down) → Today's biggest movers by % change from `uw_top_movers` (captured every 5 min). Use for a quick market scan of what's moving right now.
-- **`benzinga_news_get`** with `symbol`, optional `hours` (default 24), `raw` → The exact Benzinga sentiment signal the bot uses as its 22%-weight news factor, pulled from `conviction_scores` / `bot_decisions`. Returns label (bullish/bearish/neutral), confidence, article count, and how it affected the composite score. This is the actual Benzinga signal, NOT Yahoo Finance headlines.
+- **`benzinga_news_get`** — ⚠️ **DEPRECATED. The Benzinga subscription was CANCELLED 2026-07-14** (forward-return testing showed the news factor had no edge; see the UW study). Ingestion has stopped: this tool now returns only the HISTORICAL `benzinga_news` archive and reports `no_articles` for anything recent. **An empty result means the feed is retired, NOT that there is no news.** Live news + earnings now come from Yahoo/Alpaca (`getSymbolNews`) and Yahoo `earningsHistory` (`getEarningsSurprise`) inside the scoring path. `BENZINGA_API` is commented out in `.env`.
 
-**Data freshness**: UW flow = 2 min lag · Insider = 15 min lag · Congress = 1 hr lag · Movers = 5 min lag · Benzinga = from last bot scan of that symbol. Run `system_health` first to confirm ingestion is live before drawing conclusions from these tools.
+**Data freshness**: UW flow = 2 min lag · Insider = 15 min lag · Congress = 1 hr lag · Movers = 5 min lag · ~~Benzinga~~ (retired). Run `system_health` first to confirm ingestion is live before drawing conclusions from these tools.
 
 ## Context Management Rules
 

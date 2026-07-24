@@ -107,6 +107,18 @@ async function checkUwFlowAlerts(query) {
 }
 
 async function checkBenzingaNews(query) {
+  // Benzinga subscription was CANCELLED 2026-07-14 (tested: no edge — see the UW/news
+  // forward-return study). With no key configured this check must NOT go red: a retired
+  // vendor is an intentional state, not an outage. Reporting a permanent fail here would
+  // train us to ignore the Health tab, and its old remediation text ("Validate
+  // BENZINGA_API_KEY") would send us chasing a key that is meant to be gone.
+  if (!process.env.BENZINGA_API_KEY && !process.env.BENZINGA_API) {
+    return ok('bz_news', 'data', 'Benzinga news (retired)', 'not configured — subscription cancelled 2026-07-14', 'n/a', {
+      what:   'Benzinga news ingestion. Retired: the subscription was cancelled after forward-return testing showed no edge from the news factor.',
+      why:    'Scoring now sources news + earnings from Yahoo/Alpaca/EDGAR (getSymbolNews / getEarningsSurprise). Nothing depends on Benzinga.',
+      if_red: 'Not applicable — this check is inert without a key. To re-enable, set BENZINGA_API and restart.',
+    });
+  }
   const r = await query(`SELECT MAX(published_at) AS last_at, COUNT(*) AS total FROM benzinga_news`);
   const { last_at, total } = r.rows[0];
   const ageMs = last_at ? Date.now() - new Date(last_at).getTime() : Infinity;

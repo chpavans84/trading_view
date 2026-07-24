@@ -241,7 +241,7 @@ export function registerUwTools(server) {
 
   server.tool(
     'benzinga_news_get',
-    'Get Benzinga news sentiment for a stock from the DB (the same signal the bot uses as its 22%-weight news factor). Returns the aggregated sentiment label (bullish/bearish/neutral), confidence score, article count, and the sentiment used in the bot\'s most recent composite score for this ticker. This is the actual Benzinga signal, not Yahoo Finance headlines. Pass raw=true to see individual article details.',
+    'DEPRECATED — the Benzinga subscription was CANCELLED 2026-07-14 (forward-return testing showed no edge from the news factor). Ingestion has stopped, so this returns only HISTORICAL rows from the benzinga_news table and will report no_articles / confidence 0 for anything recent. Do NOT treat an empty result as "no news" — it means the feed is retired. Live news now comes from Yahoo/Alpaca via the scoring path. Kept for querying the historical archive only.',
     {
       symbol: z.string().describe('Stock ticker, e.g. "NVDA", "AAPL"'),
       hours:  z.coerce.number().min(1).max(72).optional().describe('Lookback window in hours for aggregation (default 24)'),

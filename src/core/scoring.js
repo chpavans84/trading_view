@@ -41,10 +41,25 @@ async function getBenzingaEarnings(symbol) {
   const HDR    = { Accept: 'application/json' };
   const SIG    = { signal: AbortSignal.timeout(5000) };
 
+  // Throw on a non-OK response rather than swallowing it — see getBenzingaNews. A 401 here
+  // used to yield `hist = []`, which still returned a NON-NULL object with beat_streak: 0,
+  // so the `.catch()` → getEarningsSurprise (Yahoo/EDGAR) fallback never fired and every
+  // symbol silently lost up to 25 points of beat-streak credit.
+  const _get = async (url) => {
+    const r = await fetch(url, { ...SIG, headers: HDR });
+    if (!r.ok) throw new Error(`benzinga earnings HTTP ${r.status}`);
+    return r.json();
+  };
   const [histJson, upcomJson] = await Promise.allSettled([
-    fetch(`https://api.benzinga.com/api/v2.1/calendar/earnings?token=${key}&parameters[tickers]=${ticker}&parameters[date_from]=${fmt(yr_ago)}&parameters[date_to]=${fmt(today)}&pageSize=8`, { ...SIG, headers: HDR }).then(r => r.json()),
-    fetch(`https://api.benzinga.com/api/v2.1/calendar/earnings?token=${key}&parameters[tickers]=${ticker}&parameters[date_from]=${fmt(today)}&parameters[date_to]=${fmt(in_90d)}&pageSize=3`, { ...SIG, headers: HDR }).then(r => r.json()),
+    _get(`https://api.benzinga.com/api/v2.1/calendar/earnings?token=${key}&parameters[tickers]=${ticker}&parameters[date_from]=${fmt(yr_ago)}&parameters[date_to]=${fmt(today)}&pageSize=8`),
+    _get(`https://api.benzinga.com/api/v2.1/calendar/earnings?token=${key}&parameters[tickers]=${ticker}&parameters[date_from]=${fmt(today)}&parameters[date_to]=${fmt(in_90d)}&pageSize=3`),
   ]);
+
+  // If BOTH calls failed the vendor is down/unauthorised — reject so the caller falls back.
+  // (One failing is tolerable: a ticker can legitimately have history but no upcoming date.)
+  if (histJson.status === 'rejected' && upcomJson.status === 'rejected') {
+    throw new Error(`benzinga earnings unavailable: ${histJson.reason?.message}`);
+  }
 
   const hist   = (histJson.status === 'fulfilled'  ? histJson.value?.earnings  : null) ?? [];
   const upc    = (upcomJson.status === 'fulfilled' ? upcomJson.value?.earnings : null) ?? [];
@@ -80,7 +95,12 @@ async function getBenzingaNews(symbol) {
     `https://api.benzinga.com/api/v2/news?token=${key}&tickers=${ticker}&pageSize=10&displayOutput=full`,
     { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) }
   );
-  if (!r.ok) return null;
+  // MUST THROW, not `return null` (2026-07-14). The caller falls back to Yahoo/Alpaca via
+  // `.catch()` — but a resolved null FULFILLS the promise, so the catch is skipped and the
+  // fallback never runs. When the Benzinga sub lapsed (HTTP 401), that silently left `news`
+  // null on every scored symbol: guidance credit was never awarded and the working Yahoo
+  // path sat unreachable. A dead vendor must degrade to the fallback, never to a silent zero.
+  if (!r.ok) throw new Error(`benzinga news HTTP ${r.status}`);
   const raw = await r.json();
   const articles = (Array.isArray(raw) ? raw : []).map(a => ({
     title:         a.title,
@@ -335,7 +355,10 @@ export async function getConvictionScore({ symbol, positions = [] } = {}) {
   const earnings_quality  = earnings?.history?.[0]?.earnings_quality ?? null;
 
   // Earnings play: next earnings within 14 days → reduce bearish options penalty (pre-earnings flow is noisy)
-  const nextEd = surprise?.next_earnings_date;
+  // Field names differ by source: Benzinga → next_earnings_date, Yahoo/EDGAR fallback
+  // (getEarningsSurprise) → earnings_date. Read both, else the fallback silently makes
+  // isEarningsPlay permanently false.
+  const nextEd = surprise?.next_earnings_date ?? surprise?.earnings_date;
   const daysToEarnings = nextEd ? (new Date(nextEd) - Date.now()) / 86_400_000 : null;
   const isEarningsPlay = daysToEarnings != null && daysToEarnings >= 0 && daysToEarnings <= 14;
   const guidance_signal   = news?.guidance_signal        ?? 'neutral';

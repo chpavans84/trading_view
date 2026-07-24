@@ -10,6 +10,9 @@
  */
 
 import YahooFinance from 'yahoo-finance2';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 const YF_SEARCH    = 'https://query2.finance.yahoo.com';
 const ALPACA_NEWS  = 'https://data.alpaca.markets/v1beta1/news';
@@ -49,16 +52,63 @@ async function fetchJSON(url, headers, retries = 1) {
 // Cache CIK lookups to avoid re-fetching the tickers file
 const _cikCache = new Map();
 
+// ─── SEC ticker→CIK map, cached to DISK ──────────────────────────────────────
+// www.sec.gov (unlike data.sec.gov / efts.sec.gov) enforces an IP-level request-rate
+// threshold and returns 429 "Request Rate Threshold Exceeded" in bursts. company_tickers.json
+// is ~1 MB and was re-fetched on every cold start, so a throttled window made getCIK throw —
+// which silently zeroed BOTH earnings factors in scoring.js (beat_streak up to +25 and
+// earnings_quality up to +20) for every symbol. The data endpoints we actually need
+// (data.sec.gov XBRL) were answering 200 the whole time; only this lookup was blocked.
+// Cache the map on disk for a day so one successful fetch serves everything and a transient
+// 429 can no longer take earnings scoring down. (2026-07-14)
+const CIK_CACHE_FILE = path.join(os.tmpdir(), 'tvmcp-sec-company-tickers.json');
+const CIK_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+let _cikMapPromise = null;
+
+async function _loadCikMap() {
+  // 1. Fresh copy on disk? Use it — no network at all.
+  try {
+    const stat = await fs.stat(CIK_CACHE_FILE);
+    if (Date.now() - stat.mtimeMs < CIK_CACHE_TTL_MS) {
+      return JSON.parse(await fs.readFile(CIK_CACHE_FILE, 'utf8'));
+    }
+  } catch { /* no cache yet — fall through to fetch */ }
+
+  // 2. Fetch, with generous backoff: SEC's throttle window is measured in seconds, and a
+  //    429 here is transient. retries=4 rather than the default 1.
+  try {
+    const data = await fetchJSON('https://www.sec.gov/files/company_tickers.json', EDGAR_HEADERS, 4);
+    const map = {};
+    for (const c of Object.values(data)) {
+      if (c.ticker) map[String(c.ticker).toUpperCase()] = String(c.cik_str).padStart(10, '0');
+    }
+    await fs.writeFile(CIK_CACHE_FILE, JSON.stringify(map)).catch(() => {});
+    return map;
+  } catch (e) {
+    // 3. Fetch failed (throttled). A STALE cache still beats no cache — CIKs are effectively
+    //    immutable, so an expired map is perfectly usable. Only give up if we have nothing.
+    try {
+      return JSON.parse(await fs.readFile(CIK_CACHE_FILE, 'utf8'));
+    } catch {
+      throw new Error(`SEC ticker→CIK map unavailable (${e.message}) and no cached copy on disk`);
+    }
+  }
+}
+
 // Resolve ticker → zero-padded CIK using SEC tickers file
 async function getCIK(ticker) {
   const t = ticker.toUpperCase();
   if (_cikCache.has(t)) return _cikCache.get(t);
 
-  const data = await fetchJSON('https://www.sec.gov/files/company_tickers.json', EDGAR_HEADERS);
-  const match = Object.values(data).find(c => c.ticker?.toUpperCase() === t);
-  if (!match) throw new Error(`Ticker ${t} not found in SEC EDGAR — may be foreign-listed or delisted`);
+  // Single in-flight fetch shared by all concurrent callers (scoring fans out across symbols).
+  if (!_cikMapPromise) {
+    _cikMapPromise = _loadCikMap().catch((e) => { _cikMapPromise = null; throw e; });
+  }
+  const map = await _cikMapPromise;
 
-  const cik = String(match.cik_str).padStart(10, '0');
+  const cik = map[t];
+  if (!cik) throw new Error(`Ticker ${t} not found in SEC EDGAR — may be foreign-listed or delisted`);
+
   _cikCache.set(t, cik);
   return cik;
 }
@@ -596,7 +646,75 @@ export async function scanEarnings({ symbols, days_ahead = 14 } = {}) {
 
 // ─── Earnings Surprise (upcoming estimate vs historical beat streak) ──────────
 
+/**
+ * Yahoo earnings surprise — the FAITHFUL replacement for the retired Benzinga feed.
+ *
+ * SEMANTICS MATTER HERE (2026-07-14). Benzinga's beat_streak counted quarters that beat the
+ * ANALYST ESTIMATE (eps_surprise_percent > 0). The EDGAR fallback below counts quarters of
+ * YoY EPS GROWTH — its own comment calls it a proxy. Those are different signals carrying the
+ * same +25 weight in scoring.js, so when Benzinga lapsed the meaning of beat_streak silently
+ * changed. Yahoo's earningsHistory gives epsActual vs epsEstimate directly, restoring the
+ * original definition — and it needs no CIK, so it is immune to the www.sec.gov 429 throttle.
+ *
+ * Returns the same shape as the EDGAR path so callers need no changes.
+ */
+async function getEarningsSurpriseYahoo(ticker) {
+  const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'], validation: { logErrors: false } });
+  const r = await yf.quoteSummary(ticker, { modules: ['earningsHistory', 'calendarEvents'] });
+
+  const history = (r?.earningsHistory?.history || [])
+    .filter(q => q.epsActual != null && q.epsEstimate != null)
+    .sort((a, b) => new Date(b.quarter) - new Date(a.quarter)); // most recent first
+
+  if (!history.length) throw new Error(`no Yahoo earnings history for ${ticker}`);
+
+  // Consecutive most-recent quarters that beat the estimate.
+  let beat_streak = 0;
+  for (const q of history) {
+    const surprise = q.surprisePercent != null ? q.surprisePercent : (q.epsActual - q.epsEstimate);
+    if (surprise > 0) beat_streak++;
+    else break;
+  }
+
+  const surprises = history
+    .map(q => (q.surprisePercent != null ? q.surprisePercent * 100 : null))
+    .filter(v => v != null);
+  const avg_surprise_pct = surprises.length
+    ? +(surprises.reduce((a, b) => a + b, 0) / surprises.length).toFixed(1)
+    : null;
+
+  const nextRaw = r?.calendarEvents?.earnings?.earningsDate?.[0] ?? null;
+  const next_earnings_date = nextRaw ? new Date(nextRaw).toISOString().split('T')[0] : null;
+
+  return {
+    success: true,
+    symbol: ticker,
+    earnings_date:      next_earnings_date,
+    next_earnings_date,                       // both names — scoring.js reads either
+    eps_estimate:       history[0]?.epsEstimate ?? null,
+    eps_actual_last:    history[0]?.epsActual ?? null,
+    eps_surprise_pct:   history[0]?.surprisePercent != null ? +(history[0].surprisePercent * 100).toFixed(1) : null,
+    beat_streak,
+    beat_streak_known:  true,                 // we really did read the quarters
+    avg_surprise_pct,
+    sources_used: ['Yahoo'],
+    note: 'beat_streak = consecutive quarters beating the analyst EPS estimate (Yahoo earningsHistory)',
+  };
+}
+
 export async function getEarningsSurprise({ symbol } = {}) {
+  const _ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
+  // Yahoo first: correct semantics (beat-vs-estimate) and no SEC rate-limit exposure.
+  // EDGAR remains the fallback — authoritative, but its beat_streak is a YoY-growth proxy
+  // and it depends on the throttle-prone www.sec.gov ticker→CIK lookup.
+  try {
+    return await getEarningsSurpriseYahoo(_ticker);
+  } catch {
+    return await getEarningsSurpriseEdgar({ symbol });
+  }
+}
+
+async function getEarningsSurpriseEdgar({ symbol } = {}) {
   const ticker = symbol.toUpperCase().replace(/^(NASDAQ:|NYSE:|AMEX:)/, '');
 
   // 1. Scan Nasdaq calendar for next 30 days to find upcoming entry
