@@ -37,6 +37,65 @@ add a one-line entry here **and** a regression test. A mistake should only be po
   Phantom-position bug: DB said 5 open, broker said 0 → bot paralyzed.
 - **Cross-check `NOW()` for any date/time assertion.** Wrong-"today" bug shipped once.
 - Earnings/market-hours: half-days & off-by-one (entry vs exit) have bitten — verify against calendar.
+- **An account-wide liquidation MUST be strategy-scoped.** `eodFlatten` (3:50 PM ET, `server.js`) closed
+  EVERY Alpaca position with no bot/strategy filter — so it liquidated bot 4's `insider_director_cluster`
+  20-DAY swing hold the same afternoon it opened, every day (FISV: bought 09:31 ET, sold 15:50 ET, 15
+  round-trips, −$19.81; 141 round-trips account-wide = −$293.86 since 2026-06-20). It killed the ONLY
+  strategy with a proven edge and nobody saw it because the flatten closed at the BROKER without writing
+  to Postgres → the row was swept up as a phantom and booked at entry price = **$0.00 P&L**, so the DB
+  ledger looked flat while the account bled. Fixed 2026-07-14 → `src/core/eod-flatten.js`: positions
+  backing an open `bot_advance_trades` row with `time_stop_days >= 2` are PROTECTED; fails CLOSED (DB
+  down ⇒ flatten nothing rather than risk liquidating a swing hold). Tests: `tests/eod-flatten.test.js`.
+  ⚠️ Same unscoped pattern still lives in the VIX circuit breaker (`server.js` `runPositionMonitor`) —
+  it is a deliberate catastrophic backstop, but it does not know a swing hold from a day trade.
+- **Every scheduled job must be gated on `BOT_CRON_OWNER`.** `eodFlatten` was a bare module-scope
+  `setInterval` with no gate, so `trading-staging` registered it too and could double-fire on the same
+  Alpaca account. If you add a `setInterval`/`cron.schedule` that touches the broker or DB, gate it.
+
+## Bot candidate universe — index filter vs the insider edge (2026-07-24)
+- **The S&P500/NDX100 `index_only` filter kneecaps the insider strategy — its edge lives OFF-index.**
+  Bot 4 (`insider_director_cluster` only) went 7 days with ZERO picks: the rule found 8-9 valid
+  cluster-buys every scan but `_index_filter` dropped all of them (`8 → 0 (S&P500/NDX100 only)`).
+  Backtest (2026-07-24, survivorship-free, 226 signals, 20d hold): off-index insider signals
+  **+11.4% excess vs SPY** (60% win) vs index-only **−1.0% excess** (n=13 in 2.5y — the filter left
+  the bot almost nothing to trade). The filter was added 2026-06-19 to exclude junk micro-caps/funds,
+  but it also excludes the exact mid/small caps where the edge is.
+- **Fix = liquidity+quality gate, NOT naive filter removal.** `entry-rules.js` `applyQualityGate` /
+  `classifyForGate`: exclude funds/CEFs/BDCs (`industry ~ 'Asset Management'` — asset_class is 100%
+  NULL so it's useless), sub-$min_price names, and <$min_adv_usd trailing-ADV names. Backtested PASS
+  bucket = **+11.0% excess / 70% win / 57% excess-win** (edge preserved, hit-rate improved); the
+  excluded buckets (funds +2%, illiquid −0.5%) are weak. Config: `rules.universe.quality_gate=true`
+  + `index_only=false` (defaults: min_price 5, min_adv_usd 3M, exclude ['Asset Management']).
+  Tests: `tests/insider-quality-gate.test.js`.
+- **`index_only=false` is UNSAFE on old code.** Old engine.js reads `index_only` but not
+  `quality_gate`, so `index_only=false` alone = NO filter = buys funds/micro-caps. DEPLOY ORDER:
+  pm2 restart with the new code FIRST (bot stays safe on default index_only ON), THEN flip
+  `rules.universe` config. Never set index_only=false before the quality-gate code is live.
+- Missing price/ADV in tradable_universe → `classifyForGate` DROPS the name (fail-closed on
+  liquidity), but the reason is logged in the decision breakdown (`_quality_dropped`), never silent.
+  A legit name with stale/NULL ADV (e.g. HDSN) self-heals when the 06:00 universe sync repopulates it.
+
+## Vendor / fallback discipline (Benzinga retired 2026-07-14)
+- **A fetch wrapper guarded by `.catch(() => fallback)` MUST THROW on failure — never `return null`.**
+  A resolved `null` FULFILS the promise, so the `.catch()` is skipped and the fallback never runs.
+  `scoring.js` `getBenzingaNews` did `if (!r.ok) return null`, and `getBenzingaEarnings` swallowed
+  errors in an internal `allSettled` and still returned a non-null object. When the Benzinga sub was
+  cancelled (HTTP 401) that silently zeroed `beat_streak` (+25) and guidance (+15) on EVERY scored
+  symbol, with the working Yahoo fallback sitting one line away, unreachable. Scores were SKEWED
+  DOWN, not merely uninformed. Fixed + guarded by `tests/benzinga-retirement.test.js`.
+  (Note: `getRVOL`/`getWeeklyTrend` DO correctly `return null` — they have no fallback chain.)
+- **When you swap a data source, check the FIELD NAMES and the SEMANTICS, not just the shape.**
+  Benzinga `beat_streak` = quarters beating the ANALYST ESTIMATE. The EDGAR fallback silently
+  redefined it as YoY EPS GROWTH — a different signal on the same +25 weight. And Benzinga returns
+  `next_earnings_date` while the fallback returns `earnings_date`, so `isEarningsPlay` went
+  permanently false. Earnings-surprise is now Yahoo-primary (`getEarningsSurpriseYahoo`), which
+  restores beat-vs-estimate semantics and needs no CIK.
+- **`www.sec.gov` rate-limits by IP (429 "Request Rate Threshold Exceeded"); `data.sec.gov` and
+  `efts.sec.gov` do not.** `getCIK()` re-fetched the 1 MB `company_tickers.json` per cold start, so a
+  throttled window made it throw → BOTH earnings factors zeroed, even though the XBRL data endpoint
+  was answering 200. The map is now cached to disk (24 h TTL, stale-on-throttle — CIKs are immutable).
+- A RETIRED vendor is not an outage: `health-checks.js` `checkBenzingaNews` reports `ok` when no key
+  is configured. A permanent red trains you to ignore the Health tab.
 
 ## Data / timezone / shell
 - **ET vs UTC:** bars & "business day" partitions use America/New_York. Set session TZ; `window_start`/
