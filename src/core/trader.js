@@ -769,9 +769,11 @@ export async function closePosition(symbol) {
   const r = await alpaca('DELETE', `/v2/positions/${symbol}`);
   return {
     symbol,
+    order_id: r.id,          // needed to poll the ACTUAL fill price (2026-08-12)
     qty:  parseFloat(r.qty),
     side: r.side,
     status: r.status,
+    filled_avg_price: r.filled_avg_price != null ? parseFloat(r.filled_avg_price) : null,
   };
 }
 

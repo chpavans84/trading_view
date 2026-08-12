@@ -52,6 +52,24 @@ add a one-line entry here **and** a regression test. A mistake should only be po
   `setInterval` with no gate, so `trading-staging` registered it too and could double-fire on the same
   Alpaca account. If you add a `setInterval`/`cron.schedule` that touches the broker or DB, gate it.
 
+## Bot-advance exits + mark-to-market (2026-08-12)
+- **`trail_pct: 0` did NOT disable the trailing stop — it made it maximally tight.** The exit used
+  `currentPnl < peakPnl * (1 - trailFraction)`; with `trailFraction=0` that is `currentPnl < peakPnl`,
+  so it exited on ANY tick below peak. The insider rule sets trail_pct:0 meaning "hold to the 20-day
+  time stop" — instead ARTV/ENR/NTSK churned daily (sell 09:31 open / rebuy 13:41), the swing thesis
+  never developed, real Alpaca went slightly negative. Fix: `decideMechanicalExit` treats
+  `trailFraction <= 0` as NO trail (only hard_stop + time_stop apply). Tests: bot-advance-trail-disable.
+- **Exit P&L was booked off the ASK quote, not the real fill — fabricating phantom wins.** The exit
+  fell back to `px = getLatestPrice().ask`; on thin small-caps the IEX ask sits far above where a
+  market SELL fills (ARTV booked at $12.32 ask vs $10.74 real fill → +$185 phantom). DB read +$2,721
+  while the broker was −$173. Fix: poll the actual fill (`pollOrderFill` — closePosition now returns
+  `order_id`); estimate at the BID only if polling fails, never the ask.
+- **IEX single-exchange quotes on thin names are frequently BROKEN** (a 0 leg → corrupted mid; e.g.
+  PFE ask=0 → getLatestPrice mid=$12.78 for a $25 stock; 30-37% spreads). Never value a long off the
+  raw mid. `_saneQuotePrice`: both legs valid → mid, unless spread >25% → bid; one leg → that leg;
+  none → null (last-close fallback). Mark-to-market (`_getLivePrice`) now uses it; ALWAYS reconcile
+  bot P&L against the broker (this is the DB-is-not-authoritative class again — DB overstated by ~$2.9k).
+
 ## Bot candidate universe — index filter vs the insider edge (2026-07-24)
 - **The S&P500/NDX100 `index_only` filter kneecaps the insider strategy — its edge lives OFF-index.**
   Bot 4 (`insider_director_cluster` only) went 7 days with ZERO picks: the rule found 8-9 valid

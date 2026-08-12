@@ -44,6 +44,19 @@ export function shouldVetoExit({ exitReason, heldHours, minHoldHours }) {
   return heldHours < minHoldHours;
 }
 
+// Pure mechanical-exit decision (exported for unit tests). Returns the exit reason or null.
+// CRITICAL invariant (2026-08-12): trailFraction <= 0 means NO trailing stop. The prior inline
+// code used `currentPnl < peakPnl * (1 - trailFraction)`, which with trailFraction=0 exits on
+// any tick below peak — a hair-trigger trail that defeated the insider rule's 20-day hold and
+// churned positions daily. Only hard_stop and time_stop apply when the trail is disabled.
+export function decideMechanicalExit({ currentPnl, peakPnl, hardSlUsd, trailFraction, trailMinPeak, heldDays, timeStopDays }) {
+  if (currentPnl <= -hardSlUsd) return 'hard_stop';
+  const trailEnabled = trailFraction > 0;
+  if (trailEnabled && peakPnl > trailMinPeak && currentPnl < peakPnl * (1 - trailFraction)) return 'trail_stop';
+  if (heldDays >= timeStopDays) return 'time_stop';
+  return null;
+}
+
 // ─── Active bots ─────────────────────────────────────────────────────────────
 async function getActiveAdvanceBots() {
   const { rows } = await query(`
@@ -135,6 +148,23 @@ async function _placeSellOrder(bot, creds, symbol, qty) {
   throw new Error(`unsupported broker ${bot.broker}`);
 }
 
+// Fair-value price from a possibly-broken NBBO quote (exported for tests). IEX quotes on thin
+// small-caps often have a 0 leg (e.g. PFE ask=0 → getLatestPrice's precomputed mid=$12.78 for a
+// $25 stock) or a very wide spread. For MARK-TO-MARKET we want fair value, so:
+//   both legs valid → mid (the fair mark, even when the spread is wide — bid and ask are both
+//                     noise AROUND fair value; marking at the bid would fabricate false losses
+//                     and trip hard-stops on flat positions, e.g. ARTV bid 9.54 / mid 11.7 ≈ entry)
+//   one leg valid   → that leg (the only signal)
+//   nothing valid   → null (caller uses the last-close fallback)
+// NB: the EXIT-price estimate is a DIFFERENT question (where a market SELL actually fills) and is
+// handled at the close site, which prefers the bid. Do not conflate the two.
+export function _saneQuotePrice(q) {
+  const bid = Number(q?.bid) > 0 ? Number(q.bid) : null;
+  const ask = Number(q?.ask) > 0 ? Number(q.ask) : null;
+  if (bid && ask) return (bid + ask) / 2;
+  return bid ?? ask ?? (Number(q?.last) > 0 ? Number(q.last) : null);
+}
+
 // Try live quote first; fall back to last close from backtest_prices.
 // The fallback is only for SIZING — the actual stop_loss is computed from the
 // broker's real fill price, not from this estimate. Off-by-a-few-percent on
@@ -148,8 +178,14 @@ async function _getLivePrice(bot, creds, symbol) {
       // backtest_prices fallback to avoid console.error spam on every tick.
       live = null;
     } else {
+      // Value a LONG at what it can be SOLD for (2026-08-12). Using ask overvalued every open
+      // long, inflating currentPnl/peakPnl on thin small-caps (part of the ask-bias that also
+      // fabricated exit prices). But IEX quotes on these names are frequently BROKEN — one leg
+      // is 0 (e.g. PFE ask=0 → getLatestPrice's precomputed mid=$12.78 for a $25 stock) or the
+      // spread is absurd. So derive a SANE price from the raw legs: use mid only when BOTH legs
+      // are valid, else the single valid leg, else fall through to the last-close fallback.
       const q = await getLatestPrice(symbol);
-      live = q?.ask ?? q?.mid ?? q?.bid ?? null;
+      live = _saneQuotePrice(q);
     }
   } catch (_) {
     live = null;
@@ -498,15 +534,14 @@ async function _manageOnePosition(bot, trade) {
     const rtCost   = estimateRoundTripCost(bot.broker, dollarsInv, bot);
     const armPct   = Number(bot.rules?.exits?.trail_arm_pct ?? 0.04);
     const trailMinPeak = Math.max(dollarsInv * armPct, rtCost * 3);
+    const heldDays = (Date.now() - new Date(trade.opened_at).getTime()) / 86_400_000;
 
-    if (currentPnl <= -hardSlUsd) {
-      exitReason = 'hard_stop';
-    } else if (peakPnl > trailMinPeak && currentPnl < peakPnl * (1 - trailFraction)) {
-      exitReason = 'trail_stop';
-    } else {
-      const heldDays = (Date.now() - new Date(trade.opened_at).getTime()) / 86_400_000;
-      if (heldDays >= Number(trade.time_stop_days)) exitReason = 'time_stop';
-    }
+    // trail_pct <= 0 disables the trail (see decideMechanicalExit) — the position then runs to
+    // the 15% hard stop or the 20-day time stop, as the insider rule intends.
+    exitReason = decideMechanicalExit({
+      currentPnl, peakPnl, hardSlUsd, trailFraction, trailMinPeak,
+      heldDays, timeStopDays: Number(trade.time_stop_days),
+    });
   }
 
   // ── Minimum-hold floor (2026-07-07) ─────────────────────────────────────────
@@ -549,8 +584,27 @@ async function _manageOnePosition(bot, trade) {
     console.error(`[bot-advance/exec] bot ${bot.id} ${trade.symbol}: sell failed:`, e.message);
     return { action: 'error', error: e.message };
   }
-  const order = _normalizeOrder(rawOrder, px);
-  const exitPrice = order.fill_price > 0 ? order.fill_price : px;
+  const order = _normalizeOrder(rawOrder, null);
+  // Book the REAL fill, not the quote (2026-08-12). Previously exitPrice fell back to `px`,
+  // and `px` is getLatestPrice().ask — on a thin small-cap the ask sits far above where a
+  // market SELL actually fills (ARTV booked at $12.32 ask while the real fill was $10.74),
+  // fabricating +$185 phantom wins and making the DB ledger read +$2,721 while the broker was
+  // −$173. closePosition is a market order that fills async, so poll it like the entry path.
+  if (!(order.fill_price > 0) && bot.broker === 'alpaca' && order.order_id) {
+    try {
+      const polled = await pollOrderFill(order.order_id, { timeoutMs: 8000 });
+      if (polled?.fill_price > 0) order.fill_price = polled.fill_price;
+    } catch { /* fall through to conservative estimate below */ }
+  }
+  // If the fill still can't be read, estimate from a SANE quote (guards the broken-IEX-leg
+  // case), preferring the bid where a sell realistically lands; last resort is px.
+  let exitPrice = order.fill_price;
+  if (!(exitPrice > 0)) {
+    try {
+      const q = await getLatestPrice(trade.symbol);
+      exitPrice = Number(q?.bid) > 0 ? Number(q.bid) : (_saneQuotePrice(q) ?? px);
+    } catch { exitPrice = px; }
+  }
   // NET P&L = gross − estimated round-trip platform charge (2026-06-19). The bot now
   // books costs, so pnl_usd / cumulative / the daily-loss breaker all reflect reality.
   const grossPnl = (exitPrice - entry) * qty;
