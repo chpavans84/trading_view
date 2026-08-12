@@ -135,28 +135,43 @@ export async function getSiblingBotsActivity({
   // 3. Recently-closed legacy trades (cool-down candidates).
   //    Includes own bot — a bot must respect its OWN cool-down too. The
   //    `excludeBotId` only excludes for held-set deconfliction, not cool-down.
+  //
+  //    COOLDOWN TRIGGERS ONLY ON A REAL, DELIBERATE EXIT (2026-08-12). Previously any
+  //    status IN ('closed','failed') cooled a symbol for 4h — so a NEVER-FILLED order
+  //    (no_fill_price / insufficient_capital / live_quote_diverged) or a reconcile PHANTOM
+  //    (alpaca_reconcile_phantom / reconciled_missing_from_broker — an accounting artifact,
+  //    not a position the bot chose to sell) self-inflicted a lockout. Against the ~6-name
+  //    insider universe that repeatedly froze the whole fleet (`skip_sibling_block`). Now:
+  //    only status='closed' from a genuine exit counts; failed orders and phantom/reconcile
+  //    artifacts do not.
+  // A REAL exit = status='closed' from a deliberate sell; excludes phantom/reconcile artifacts
+  // (which are booked 'closed' by drift-detector but are NOT positions the bot chose to exit).
   const cdLegacyP = query(
     `SELECT t.symbol, b.id AS bot_id, b.name AS bot_name, t.closed_at,
             t.exit_reason
        FROM trades t
        JOIN bots b ON b.id = t.bot_id
-      WHERE t.status IN ('closed', 'failed')
+      WHERE t.status = 'closed'
+        AND (t.exit_reason IS NULL OR
+             (t.exit_reason NOT ILIKE '%reconcile%' AND t.exit_reason NOT ILIKE '%phantom%'))
         AND b.user_id = $1 AND b.broker = $2
         AND t.closed_at > NOW() - ($3::int * INTERVAL '1 hour')
         AND t.symbol IS NOT NULL`,
     [userId, broker, cooldownHours]
   );
 
-  // 4. Recently-closed/failed bot-advance trades
+  // 4. Recently-closed bot-advance trades — real deliberate exits only.
   const cdAdvanceP = query(
     `SELECT bat.symbol, ba.id AS bot_id, ba.name AS bot_name,
-            COALESCE(bat.closed_at, bat.opened_at) AS closed_at,
+            bat.closed_at,
             bat.exit_reason
        FROM bot_advance_trades bat
        JOIN bots_advance ba ON ba.id = bat.bot_id
-      WHERE bat.status IN ('closed', 'failed')
+      WHERE bat.status = 'closed'
+        AND (bat.exit_reason IS NULL OR
+             (bat.exit_reason NOT ILIKE '%reconcile%' AND bat.exit_reason NOT ILIKE '%phantom%'))
         AND ba.user_id = $1 AND ba.broker = $2
-        AND COALESCE(bat.closed_at, bat.opened_at) > NOW() - ($3::int * INTERVAL '1 hour')
+        AND bat.closed_at > NOW() - ($3::int * INTERVAL '1 hour')
         AND bat.symbol IS NOT NULL`,
     [userId, broker, cooldownHours]
   );

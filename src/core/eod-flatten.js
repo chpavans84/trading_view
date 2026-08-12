@@ -37,10 +37,26 @@ import { query } from './db.js';
 // not a guardrail. Intraday rules (time_stop_days 0/1) genuinely do want the EOD exit.
 export const SWING_MIN_TIME_STOP_DAYS = 2;
 
+// How far back a swing entry still protects its symbol from the EOD flatten (2026-08-12).
+// Must comfortably exceed the longest hold horizon (insider rule = 20 days). This closes the
+// phantom gap: if a reconcile/phantom marks a still-held position 'failed', the open/pending
+// row disappears, but a recent swing ENTRY keeps the symbol protected for the whole hold.
+export const SWING_PROTECT_LOOKBACK_DAYS = 30;
+
 /**
- * Symbols the EOD flatten must NOT touch: those backing an open swing trade.
- * Fails CLOSED on a DB error — if we cannot prove a position is safe to flatten, we
- * skip flattening rather than risk liquidating a 20-day hold on a transient blip.
+ * Symbols the EOD flatten must NOT touch. A symbol is protected if it has a swing
+ * bot_advance trade (time_stop_days >= 2) that is EITHER currently open/pending OR was
+ * ENTERED within the last SWING_PROTECT_LOOKBACK_DAYS — regardless of the row's current
+ * status. The lookback matters because a phantom/reconcile can mark a still-held position
+ * 'failed', dropping the open/pending row while the broker still holds the shares; without
+ * the entry-window clause the 3:50 PM sweep would then liquidate a live 20-day hold.
+ *
+ * This only ever protects MORE symbols, and the caller (selectFlattenTargets) intersects with
+ * actual broker positions — so the worst case is skipping the flatten of a broker position that
+ * shares a ticker with a recent bot swing. That is the safe direction.
+ *
+ * Fails CLOSED on a DB error — if we cannot prove a position is safe to flatten, we skip
+ * flattening rather than risk liquidating a swing hold on a transient blip.
  *
  * @returns {Promise<{ symbols: Set<string>, ok: boolean }>}
  */
@@ -49,9 +65,10 @@ export async function getProtectedSymbols() {
     const { rows } = await query(
       `SELECT DISTINCT UPPER(symbol) AS symbol
          FROM bot_advance_trades
-        WHERE status IN ('open', 'pending')
-          AND COALESCE(time_stop_days, 0) >= $1`,
-      [SWING_MIN_TIME_STOP_DAYS]
+        WHERE COALESCE(time_stop_days, 0) >= $1
+          AND ( status IN ('open', 'pending')
+                OR opened_at > NOW() - ($2::int * INTERVAL '1 day') )`,
+      [SWING_MIN_TIME_STOP_DAYS, SWING_PROTECT_LOOKBACK_DAYS]
     );
     return { symbols: new Set(rows.map(r => r.symbol)), ok: true };
   } catch (e) {

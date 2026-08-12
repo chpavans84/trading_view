@@ -52,6 +52,23 @@ add a one-line entry here **and** a regression test. A mistake should only be po
   `setInterval` with no gate, so `trading-staging` registered it too and could double-fire on the same
   Alpaca account. If you add a `setInterval`/`cron.schedule` that touches the broker or DB, gate it.
 
+## Bot-advance re-entry cooldown + EOD phantom-detach (2026-08-12)
+- **The 4h re-entry cooldown must count only REAL deliberate exits — not failed/phantom rows.**
+  `getSiblingBotsActivity` (bots-repo.js) cooled a symbol for 4h on any status IN ('closed','failed').
+  A never-filled order (no_fill_price / insufficient_capital / live_quote_diverged) or a reconcile
+  PHANTOM (alpaca_reconcile_phantom / reconciled_missing_from_broker) then self-inflicted a lockout.
+  Against the ~6-name insider universe this repeatedly froze the whole fleet (`skip_sibling_block` was
+  the single most common decision, 477x/30d). Fixed: cooldown = status='closed' AND exit_reason NOT
+  ILIKE '%reconcile%'/'%phantom%'. A failed order never held a position, and a phantom is an
+  accounting artifact, not a sell the bot chose — neither should block re-entry.
+- **EOD-flatten protection must survive a phantom detaching the DB row.** getProtectedSymbols keyed on
+  open/pending rows only; a phantom marking a still-held position 'failed' dropped it from the protected
+  set → the 3:50 PM sweep could liquidate a live 20-day hold. Fixed: also protect any symbol ENTERED
+  within SWING_PROTECT_LOOKBACK_DAYS (30 > the 20d hold), regardless of current row status. Only ever
+  protects MORE symbols, and the caller intersects with real broker positions — safe direction.
+- Note: these were latent (downstream of the trail-bug churn that generated the phantoms). Verify the
+  cooldown set and protected set against the LIVE broker after any change to either path.
+
 ## Bot-advance exits + mark-to-market (2026-08-12)
 - **`trail_pct: 0` did NOT disable the trailing stop — it made it maximally tight.** The exit used
   `currentPnl < peakPnl * (1 - trailFraction)`; with `trailFraction=0` that is `currentPnl < peakPnl`,

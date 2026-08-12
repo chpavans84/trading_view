@@ -18,6 +18,7 @@ import {
   isFlattenEnabled,
   runFlatten,
   SWING_MIN_TIME_STOP_DAYS,
+  SWING_PROTECT_LOOKBACK_DAYS,
 } from '../src/core/eod-flatten.js';
 
 const pos = (symbol, qty = 10) => ({ symbol, qty, unrealized_pl: 0 });
@@ -136,5 +137,27 @@ describe('SWING_MIN_TIME_STOP_DAYS', () => {
   test('a 20-day insider hold qualifies as swing; a 1-day intraday rule does not', () => {
     assert.ok(20 >= SWING_MIN_TIME_STOP_DAYS, 'insider_director_cluster (20d) must be protected');
     assert.ok(!(1 >= SWING_MIN_TIME_STOP_DAYS), 'a 1-day rule should still flatten at EOD');
+  });
+});
+
+/**
+ * Phantom-detach protection (2026-08-12). A reconcile/phantom can mark a still-held swing
+ * position 'failed', dropping its open/pending row while the broker still holds the shares.
+ * getProtectedSymbols now also protects symbols ENTERED within SWING_PROTECT_LOOKBACK_DAYS
+ * (regardless of current row status), so the 3:50 PM sweep can't liquidate a detached hold.
+ */
+describe('phantom-detach: a still-held swing symbol stays protected', () => {
+  test('lookback comfortably exceeds the 20-day insider hold horizon', () => {
+    assert.ok(SWING_PROTECT_LOOKBACK_DAYS > 20, 'must cover the longest hold (insider = 20d)');
+    assert.ok(SWING_PROTECT_LOOKBACK_DAYS >= SWING_MIN_TIME_STOP_DAYS);
+  });
+
+  test('a broker-held symbol in the protected set is not flattened even if its DB row went phantom', () => {
+    // getProtectedSymbols (DB-backed) includes ARTV via the entry-window clause even though a
+    // phantom marked its row failed. selectFlattenTargets must then keep it.
+    const protectedFromDb = new Set(['ARTV']); // includes the phantom-detached but still-held name
+    const r = selectFlattenTargets([pos('ARTV'), pos('TSLA')], protectedFromDb);
+    assert.deepEqual(r.protected.map(p => p.symbol), ['ARTV'], 'detached-but-held swing kept');
+    assert.deepEqual(r.flatten.map(p => p.symbol), ['TSLA'], 'genuine day trade still flattens');
   });
 });
